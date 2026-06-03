@@ -263,9 +263,21 @@ class RiskManager:
         self.circuit_breaker_triggered_at_dd: float = 0.0
         self.circuit_breaker_candle: int = 0
 
-    # IT: Preset di rischio per regime macro (soglie in z-space pre-2026-05-23).
-    # EN: Per-regime risk presets (thresholds in z-space, pre-2026-05-23).
+    # IT: Preset di rischio per i regimi correnti `RegimeMarkovBTC` (Quiet/Trending/Stress,
+    #     implementato 2026-06-03 in quantsys/macro/regime.py). Le vecchie chiavi macro
+    #     restano come legacy fallback per il proxy ATR storico (03_backtest.py pre-fix).
+    # EN: Risk presets for the current `RegimeMarkovBTC` regimes (Quiet/Trending/Stress,
+    #     2026-06-03 in quantsys/macro/regime.py). Legacy macro keys are kept as a fallback
+    #     for the historical ATR-proxy mapping (03_backtest.py pre-fix).
     _REGIME_RISK_PARAMS = {
+        # ── Regimi data-driven BTC (preferiti, sia int che alias stringa) ─────
+        0:          {"prob_threshold": 0.54, "max_risk": 0.008, "sl_mult": 1.5, "tp_rr": 2.5},  # Quiet
+        1:          {"prob_threshold": 0.52, "max_risk": 0.012, "sl_mult": 2.0, "tp_rr": 3.0},  # Trending
+        2:          {"prob_threshold": 0.58, "max_risk": 0.005, "sl_mult": 2.5, "tp_rr": 1.8},  # Stress
+        "Quiet":    {"prob_threshold": 0.54, "max_risk": 0.008, "sl_mult": 1.5, "tp_rr": 2.5},
+        "Trending": {"prob_threshold": 0.52, "max_risk": 0.012, "sl_mult": 2.0, "tp_rr": 3.0},
+        "Stress":   {"prob_threshold": 0.58, "max_risk": 0.005, "sl_mult": 2.5, "tp_rr": 1.8},
+        # ── Chiavi macro legacy (preset pre-2026-05-23, calibrato in z-space) ─
         "expansion":    {"prob_threshold": 0.53, "max_risk": 0.012, "sl_mult": 1.8, "tp_rr": 3.5},
         "overheating":  {"prob_threshold": 0.60, "max_risk": 0.008, "sl_mult": 2.5, "tp_rr": 2.0},
         "stagflation":  {"prob_threshold": 0.65, "max_risk": 0.005, "sl_mult": 3.0, "tp_rr": 1.5},
@@ -273,10 +285,14 @@ class RiskManager:
     }
 
     # IT: Applica il preset di rischio del regime corrente (no-op se ignoto).
+    #     Accetta sia int (ID di RegimeMarkovBTC: 0=Quiet, 1=Trending, 2=Stress)
+    #     sia stringa ("Quiet"/"Trending"/"Stress" o legacy "expansion"/...).
     # EN: Applies the current regime's risk preset (no-op if unknown).
-    def set_regime(self, regime_name: str) -> None:
-        """Adatta i parametri di rischio al regime macro corrente."""
-        params = self._REGIME_RISK_PARAMS.get(regime_name)
+    #     Accepts both int (RegimeMarkovBTC ID: 0=Quiet, 1=Trending, 2=Stress)
+    #     and string ("Quiet"/"Trending"/"Stress" or legacy "expansion"/...).
+    def set_regime(self, regime_id) -> None:
+        """Adatta i parametri di rischio al regime corrente (int o str)."""
+        params = self._REGIME_RISK_PARAMS.get(regime_id)
         if params is None:
             return
         self.max_risk = params["max_risk"]

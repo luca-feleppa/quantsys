@@ -560,6 +560,51 @@ def main():
     regime_trades = {"high_vol": [], "low_vol": []}
     log.info(f"ATR mediana test set: {atr_median:.0f}  (soglia high/low vol)")
 
+    # IT: Carica i regimi BTC `RegimeMarkovBTC` (Quiet/Trending/Stress) allineati a t_test.
+    #     Sostituisce il vecchio proxy ATR-based usato nel loop per `rm.set_regime(...)`.
+    #     Se il file non esiste o l'allineamento fallisce, fallback al proxy ATR storico.
+    # EN: Loads BTC `RegimeMarkovBTC` regimes (Quiet/Trending/Stress) aligned to t_test.
+    #     Replaces the previous ATR-proxy used in the loop for `rm.set_regime(...)`.
+    #     Falls back to the historical ATR proxy if the file is missing or alignment fails.
+    btc_regime_per_step: "np.ndarray | None" = None
+    try:
+        reg_path = Path("data") / "regime_probs.parquet"
+        if reg_path.exists():
+            df_reg = pd.read_parquet(reg_path)
+            if "regime_dominant" in df_reg.columns:
+                # IT: normalizza indice/timestamp a UTC ns-naive per merge_asof.
+                # EN: normalize index/timestamp to UTC ns-naive for merge_asof.
+                if not isinstance(df_reg.index, pd.DatetimeIndex):
+                    tcol = next((c for c in ("open_time", "timestamp", "date")
+                                 if c in df_reg.columns), None)
+                    if tcol is not None:
+                        df_reg = df_reg.set_index(pd.to_datetime(df_reg[tcol])).sort_index()
+                df_reg = df_reg.sort_index()
+                def _to_ns_naive(s):
+                    s = pd.to_datetime(s)
+                    if getattr(s, "tz", None) is not None:
+                        s = s.tz_convert("UTC").tz_localize(None)
+                    return s.astype("datetime64[ns]")
+                df_reg.index = _to_ns_naive(df_reg.index)
+                t_step = _to_ns_naive(pd.Index(pd.to_datetime(t_test)))
+                df_step = pd.DataFrame({"_t": t_step})
+                merged = pd.merge_asof(
+                    df_step.sort_values("_t"),
+                    df_reg[["regime_dominant"]].reset_index().rename(
+                        columns={df_reg.index.name or "index": "_t"}
+                    ),
+                    on="_t", direction="backward",
+                )
+                regimes = merged["regime_dominant"].to_numpy()
+                order = np.argsort(np.argsort(t_step.values))
+                btc_regime_per_step = regimes[order].astype(np.int64)
+                _counts = {int(k): int(v) for k, v in
+                           pd.Series(btc_regime_per_step).value_counts().sort_index().items()}
+                log.info(f"RegimeMarkovBTC allineato a t_test: distribuzione {_counts}")
+    except Exception as _e:
+        log.warning(f"RegimeMarkovBTC alignment fallito ({_e}) — fallback proxy ATR")
+        btc_regime_per_step = None
+
     t0 = time.time()
     for i in tqdm(range(n-1), desc="Backtest", ncols=72):
         if rm.circuit_breaker: break
@@ -569,9 +614,13 @@ def main():
         atr_i = max(atr[i], c_c*0.0005)
 
         mu, sigma, nu    = predict(X[i], i)
-        # IT: Rischio condizionato al regime (proxy: ATR vs mediana).
-        # EN: Regime-conditioned risk (proxy: ATR vs median).
-        if atr_i > atr_median * 1.5:
+        # IT: Rischio condizionato al regime — preferisce RegimeMarkovBTC se disponibile,
+        #     fallback al proxy ATR storico (alta/media/bassa vol).
+        # EN: Regime-conditioned risk — prefers RegimeMarkovBTC when available, falls back
+        #     to the historical ATR proxy (high/mid/low vol).
+        if btc_regime_per_step is not None:
+            rm.set_regime(int(btc_regime_per_step[i]))
+        elif atr_i > atr_median * 1.5:
             rm.set_regime("stagflation")
         elif atr_i > atr_median:
             rm.set_regime("overheating")
