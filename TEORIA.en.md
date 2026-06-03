@@ -110,7 +110,7 @@ Normalization with a **global multi-column RobustScaler**, less sensitive to pri
 
 ### Critical invariant — z-score vs raw space
 
-`target_ret` is scaled by the RobustScaler along with the other features. Scale factor: `target_scale ≈ 0.002707` (IQR of the raw target at h=30). Therefore:
+The `target_ret` is scaled by the RobustScaler along with the other features. The scale factor (`target_scale`) is computed at runtime as the IQR of the raw target on the training set and persisted in `PipelineState`; it varies with dataset and forecast horizon (e.g. ~0.002707 on the 2026-06-02 run with `data.limit=525k`, `forecast_horizon=30`). Therefore:
 - **The model predicts μ, σ, ν in z-score space** (standardized fraction). σ = 1.0 means "one IQR of the target", not "1% of price".
 - **The trading layer (`SignalGenerator`, `RiskManager`) operates in raw space**: thresholds `min_expected_ret`, `max_sigma`, SL/TP math assume direct log-return fractions (`σ × price = USD distance`).
 

@@ -78,7 +78,7 @@ Solo DOPO aver chiuso BLOCKER #1 Stage 4 (integrazione `LiveCandleBuffer` + `Fea
 
 ---
 
-## 🟡 NEW — Sostituire Markov-Switching macro con regime intraday su BTC (Opzione C)
+## 🟢 RESOLVED 2026-06-03 — Markov-Switching su BTC realized vol (Variante 3) implementato
 
 **Stato:** proposta, non implementata. Origine: 2026-06-02, training iTransformer mostra `Stratified val: distribuzione regime: r0=10056 (100%)` su tutte le validation → il detector attuale è degenere (collassa a 1 cluster) e la diagnostica per-regime (`val_nll spread=0.000`) non porta informazione.
 
@@ -134,7 +134,7 @@ Sostituire il Markov-Switching su PC1 delle macro con un detector che osservi **
 | Test | `tests/test_features.py:212-226` | ⊘ skip | Test esistente di `RegimeMarkovSwitching` resta valido (classe non rimossa); test per `RegimeSession` opzionale, non bloccante |
 | Smoke test pipeline reale | `python scripts/01b_download_macro.py` | ✅ done 2026-06-02 22:54 | `data/regime_probs.parquet` rigenerato: 73777 righe orarie 2018-01-01→2026-06-02, distribuzione **33.3% / 33.3% / 33.3%** (24593/24592/24592). Tempo ~129s |
 | Verifica end-to-end Phase 1+1b+2+3+4+5 | fan-out 3 subagent | ✅ done 2026-06-02 22:55 | Tutti gli script lanciati da `run_all.py --distill` verificati: sintassi+import+smoke OK. IC fix sanity check: `ic_mean=0.3728 ≈ spearman=0.3726` su segnale skill 30% (matematicamente coerente) |
-| Retrain iTransformer di verifica | `run_all.py --arch itransformer --skip-update --skip-macro --force-download` | ⏳ **pending** | verificare `Stratified val: r0=X r1=Y r2=Z` distribuito + spread NLL > 0 |
+| Retrain iTransformer di verifica | `run_all.py --arch itransformer --skip-update --skip-macro --force-download` | ✅ done 2026-06-03 | Stratif val **46% / 12% / 41%** (vs precedente collasso 100% r0), spread `val_nll` **0.19-0.30** (>> soglia 0.05 "informativo"), 5/5 modelli ensemble convergono stabilmente |
 
 **Punti di ripresa per la prossima sessione (in caso di out-of-tokens):**
 1. **Step successivo:** lanciare `python scripts/01b_download_macro.py` per rigenerare `data/regime_probs.parquet` (1-2 minuti). NB: scarica anche dati FRED/yFinance — se quelli sono già aggiornati, è OK rifare il download (idempotente).
@@ -143,6 +143,14 @@ Sostituire il Markov-Switching su PC1 delle macro con un detector che osservi **
 4. **Test unitario opzionale:** aggiungere `test_regime_session.py` in `tests/` con verifica determinismo + distribuzione bilanciata (non bloccante per merge).
 
 **Decisione di rollback:** se la nuova `RegimeSession` non migliora lo spread NLL per-regime entro 1 training completo, considerare variante 2 (volatility threshold percentile rolling 4h). La classe `RegimeMarkovSwitching` resta nel codice come fallback (non rimuovere).
+
+**Closure 2026-06-03:**
+
+- ✅ **Variante 3 implementata**: nuova classe `RegimeMarkovBTC` in `quantsys/macro/regime.py` (Markov-Switching Hamilton 1989 su realized volatility BTC oraria + PCA expanding window, ~65-73% varianza spiegata). `scripts/01b_download_macro.py` ora la usa al posto di `RegimeSession`. File output (`data/regime_probs.parquet`) e schema invariati per backward compat con `_load_val_regimes`.
+- ✅ **3 regimi data-driven emersi** su ~9100 ore di BTC (post burn-in 30gg): **R0 Quiet ~42%** (σ²(PC1)=0.56, drift≈0, P(stay)=89%), **R1 Trending ~18%** (σ²=0.12, drift=+0.08, P(stay)=92%), **R2 Stress ~40%** (σ²=3.79, drift=−0.12, P(stay)=79%, high vol + dump bias). Switch tipico 3-8 volte/giorno, coerente con h=30.
+- ✅ **Stratificazione val non più degenere**: retrain iTransformer (5/5 ensemble) mostra distribuzione **46% / 12% / 41%** (vs precedente collasso 100% in r0). Spread `val_nll` per regime **0.19-0.30** stabile (>>0.05 soglia "informativo") → il regime è effettivamente informativo per il modello.
+- ✅ **Doc + memoria aggiornati**: `TEORIA.md` + `TEORIA.en.md` (sezione Markov-Switching riscritta), `README.md` + `README.it.md` (bullet "Rilevamento regimi" aggiornato), memoria sessione `session_2026_06_03_markov_btc.md`.
+- ⊘ **Decisione di rollback non più applicabile**: la validazione è superata (variante 3 produce spread NLL >> 0.05 e stratificazione bilanciata), nessun fallback a varianti 1/2 necessario. `RegimeMarkovSwitching` e `RegimeSession` restano nel codice come classi alternative ma non più nel path di produzione.
 
 ---
 

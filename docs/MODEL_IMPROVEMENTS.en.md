@@ -6,6 +6,12 @@ Everything already done lives in `CHANGELOG.md` and the notes under `~/.claude/p
 
 ---
 
+## 🟢 RESOLVED 2026-06-03 — Markov-Switching on BTC realized vol (Variant 3) implemented
+
+> 🟢 Resolved 2026-06-03: see Italian version for details. `RegimeMarkovBTC` implemented (Hamilton 1989 Markov-Switching on BTC hourly realized volatility + expanding-window PCA), three data-driven regimes (R0 Quiet ~42%, R1 Trending ~18%, R2 Stress ~40%), stratified val 46% / 12% / 41% (vs previous 100% r0 collapse), val_nll spread 0.19-0.30 (well above the 0.05 "informative" threshold). Output file `data/regime_probs.parquet` and schema unchanged for backward compat. Docs (TEORIA.md/.en.md, README.md/.it.md) and session memory `session_2026_06_03_markov_btc.md` updated. Rollback decision no longer applicable (validation passed).
+
+---
+
 ## 🔴 BLOCKER #1 — Live↔training feature alignment (Stage 2-5)
 
 **Status:** Stage 1 done (code), Stages 2-5 pending. Paper-trading **cannot** start until the mismatch is fixed.

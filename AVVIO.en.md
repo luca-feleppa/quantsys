@@ -234,7 +234,6 @@ Inference batch up to 1024 (marginal gain, GPU already saturated).
 | `nhits` | `QuantNHiTS` | `quantsys/model/nhits.py:110` | Hierarchical pure-MLP |
 | `tcnmamba` | `QuantTCNMamba` | `quantsys/model/tcn_mamba.py:341` | Dilated TCN + SSM hybrid |
 | `lstm` | `QuantLSTM` | `quantsys/model/__init__.py:309` | Legacy |
-| `tft` | `QuantTFT` | `quantsys/model/__init__.py:797` | Temporal Fusion Transformer |
 
 ### Adding a new architecture
 1. Class in `quantsys/model/` with `forward(x, x_macro=None) -> (mu, ls2, lnu)`
