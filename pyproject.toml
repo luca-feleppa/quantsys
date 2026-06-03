@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantsys"
+version = "0.1.0"
+description = "Neural forecasting engine for crypto trading — BTC/USDT 1m"
+requires-python = ">=3.11"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "luca-feleppa", email = "237440008+luca-feleppa@users.noreply.github.com"},
+]
+keywords = ["crypto", "trading", "deep-learning", "forecasting", "btc", "binance", "pytorch"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage      = "https://github.com/luca-feleppa/quantsys"
+Repository    = "https://github.com/luca-feleppa/quantsys"
+Issues        = "https://github.com/luca-feleppa/quantsys/issues"
+Documentation = "https://github.com/luca-feleppa/quantsys/blob/main/TEORIA.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["quantsys*"]
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths     = ["tests"]
+python_files  = ["test_*.py"]
+python_classes= ["Test*"]
+python_functions = ["test_*"]
+addopts       = "-v --tb=short"
+timeout       = 120          # secondi — HMM fit può essere lento
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+markers = [
+    "slow: test che richiedono >10s (HMM, VP completo)",
+    "requires_gpu: test che richiedono CUDA",
+]
+
+# ── Coverage (opzionale: pip install pytest-cov) ──────────────────────────────
+[tool.coverage.run]
+source   = ["quantsys"]
+omit     = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

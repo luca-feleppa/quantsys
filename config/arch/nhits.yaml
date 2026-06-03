@@ -1,0 +1,37 @@
+# IT: Override N-HiTS (Challu et al. 2022) — pure-MLP a stack gerarchici.
+# EN: N-HiTS override (Challu et al. 2022) — pure-MLP with hierarchical stacks.
+# IT: Sostituisce LSTM nell'ensemble distillation; ~10min/run vs 25min iTransformer.
+# EN: Replaces LSTM in distillation ensemble; ~10min/run vs 25min iTransformer.
+
+# IT: Modello — 3 stack con kernel di pooling decrescenti (long → short term).
+# EN: Model — 3 stacks with decreasing pool kernels (long → short term).
+model:
+  architecture: "nhits"
+  d_model: 64                     # IT: backcast = T*d_model dominante | EN: backcast = T*d_model dominant
+  nhits_hidden: 128               # IT: 128 (era 192) — capacity ridotta anti-overfit | EN: 128 (was 192) — reduced capacity
+  nhits_stacks: 3
+  nhits_pool_kernels: [8, 4, 1]   # IT: long → mid → short term | EN: long → mid → short term
+  nhits_blocks_per_stack: 1
+  nhits_mlp_layers: 2
+  dropout: 0.1
+  patch_size: 1                   # IT: N-HiTS non usa patching | EN: N-HiTS does not use patching
+  drop_path_rate: 0.0             # IT: N-HiTS non ha DropPath | EN: N-HiTS has no DropPath
+  # IT: quantile + MoE supportati (legacy: t_student + 1 expert).
+  # EN: quantile + MoE supported (legacy: t_student + 1 expert).
+  n_output_experts: 4
+  loss_type: "quantile"
+
+# IT: Training — lr basso per stabilità, weight_decay alto, AMP off (gradient overflow).
+# EN: Training — low lr for stability, high weight_decay, AMP off (gradient overflow).
+training:
+  learning_rate: 1.0e-4           # IT: 1e-4 (era 2e-4) per stabilità numerica | EN: 1e-4 (was 2e-4) for numerical stability
+  weight_decay: 5.0e-3            # IT: 5e-3 (ratio sample/param sfavorevole) | EN: 5e-3 (unfavorable sample/param ratio)
+  asymmetry_alpha: 0.5            # IT: come LSTM, riduce penalty segno | EN: like LSTM, lowers sign penalty
+  grad_clip_norm: 0.5
+  output_dir: "./models/nhits"
+  # IT: AMP fp16 causa overflow gradienti su N-HiTS → fp32 obbligatorio.
+  # EN: AMP fp16 overflows gradients on N-HiTS → fp32 mandatory.
+  use_amp: false
+
+backtest:
+  output_dir: "./results/nhits"

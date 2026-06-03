@@ -1,0 +1,36 @@
+# IT: Override architettura ibrida TCN+Mamba — TCN dilatato + state-space selettivo.
+# EN: TCN+Mamba hybrid arch override — dilated TCN + selective state-space.
+
+# IT: Modello — 6 layer TCN per locale, 3 layer Mamba per dipendenze long-range.
+# EN: Model — 6 TCN layers for local, 3 Mamba layers for long-range deps.
+model:
+  architecture: "tcnmamba"
+  d_model: 128
+  tcn_layers: 6
+  tcn_kernel: 3
+  mamba_layers: 3
+  mamba_d_state: 16             # IT: dim stato SSM | EN: SSM state dim
+  mamba_expand: 2               # IT: fattore espansione Mamba | EN: Mamba expansion factor
+  dropout: 0.25
+  drop_path_rate: 0.1
+
+# IT: Training — plateau scheduler + SWA finale; AMP off per overflow ricorrenti.
+# EN: Training — plateau scheduler + final SWA; AMP off due to recurring overflow.
+training:
+  learning_rate: 1.5e-4
+  weight_decay: 5.0e-4
+  grad_clip_norm: 0.5
+  lr_scheduler: "plateau"
+  lr_scheduler_patience: 8
+  lr_scheduler_factor: 0.5
+  input_noise_std: 0.01         # IT: rumore input regolarizzante | EN: regularizing input noise
+  use_swa: true                 # IT: Stochastic Weight Averaging finale | EN: final Stochastic Weight Averaging
+  swa_start_frac: 0.6
+  swa_lr: 1.0e-5
+  output_dir: "./models/tcnmamba"
+  # IT: AMP fp16 → ‖∇‖=inf su Mamba ogni 2-3 epoche → fp32 obbligatorio (come N-HiTS).
+  # EN: AMP fp16 → ‖∇‖=inf on Mamba every 2-3 epochs → fp32 mandatory (like N-HiTS).
+  use_amp: false
+
+backtest:
+  output_dir: "./results/tcnmamba"

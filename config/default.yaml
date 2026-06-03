@@ -1,0 +1,195 @@
+# IT: Risorse hardware — device, worker DataLoader, ottimizzazioni cuDNN.
+# EN: Hardware resources — device, DataLoader workers, cuDNN optimizations.
+hardware:
+  device: cuda
+  cpu_fraction: 0.5
+  num_workers: 6
+  pin_memory: true
+  cudnn_benchmark: true
+
+# IT: Sorgente dati BTC/USDT 1m da Binance e cache locale parquet.
+# EN: BTC/USDT 1m data source from Binance and local parquet cache.
+data:
+  symbol: BTCUSDT
+  interval: 1m
+  # IT: 'limit' ignorato quando 'start_time' settato; finestra effettiva = start_time → oggi.
+  # EN: 'limit' is ignored when 'start_time' is set; actual window = start_time → today.
+  # IT: 525000 min ≈ 365 giorni: sweet spot per BTC 1m (vedi MODEL_IMPROVEMENTS fix #1).
+  # EN: 525000 min ≈ 365 days: sweet spot for BTC 1m (see MODEL_IMPROVEMENTS fix #1).
+  limit: 525000
+  start_time: '2025-05-19'
+  output_dir: ./data
+  raw_path: ./data/raw_candles.parquet
+
+# IT: Feature macro (FRED) + regime HMM/Markov-Switching su finestra espansibile.
+# EN: Macro features (FRED) + HMM/Markov-Switching regime on expanding window.
+macro:
+  fred_api_key: ''
+  history_start: '2018-01-01'
+  n_regimes: 3              # IT: 3 regimi (bull/bear/range) | EN: 3 regimes (bull/bear/range)
+  embed_dim: 16             # IT: dim embedding regime | EN: regime embedding dim
+  hmm_burn_in_days: 365     # IT: burn-in iniziale | EN: initial burn-in
+  hmm_retrain_days: 90      # IT: refit ogni 90gg | EN: refit every 90d
+
+# IT: Feature engineering — volume profile, lag, fractional diff, orizzonte target.
+# EN: Feature engineering — volume profile, lags, fractional diff, target horizon.
+features:
+  vp_bins: 30               # IT: bin del Volume Profile | EN: Volume Profile bins
+  vp_lookback: 240          # IT: lookback VP (4h) | EN: VP lookback (4h)
+  vp_stride: 5
+  windows:                  # IT: finestre rolling per statistiche | EN: rolling windows for stats
+  - 5
+  - 10
+  - 20
+  - 60
+  lag_periods: 5            # IT: lag autoregressivi | EN: autoregressive lags
+  frac_diff_d: 0.4          # IT: ordine fractional differencing | EN: fractional differencing order
+  forecast_horizon: 30      # IT: h=30 min (MODEL_IMPROVEMENTS fix #2) | EN: h=30 min (fix #2)
+  normalize: true
+
+# IT: Configurazione modello — comune a tutte le arch; gli override stanno in arch/*.yaml.
+# EN: Model config — shared across archs; overrides live in arch/*.yaml.
+model:
+  window_size: 120          # IT: T=120 (2h di context) | EN: T=120 (2h context)
+  window_stride: 5
+  lstm_hidden: 256
+  gru_hidden: 128
+  mlp_hidden: 64
+  lstm_layers: 2
+  dropout: 0.2
+  use_macro: true
+  use_attention: true
+  n_attention_heads: 4
+  architecture: itransformer # IT: default arch | EN: default arch
+  tft_d_model: 128
+  tft_n_heads: 4
+  tft_n_layers: 3
+  tft_dropout: 0.1
+  patch_size: 1
+  drop_path_rate: 0.0
+  use_multitask: true
+  multitask_alpha: 0.7      # IT: peso head direzione | EN: direction head weight
+  multitask_threshold: 0.0001
+  loss_type: quantile       # IT: 'quantile' | 't_student' | EN: 'quantile' | 't_student'
+  n_output_experts: 4       # IT: Mixture-of-Experts heads | EN: Mixture-of-Experts heads
+  # IT: RevIN (Kim ICLR 2022) — normalizzazione reversibile per-istanza.
+  # EN: RevIN (Kim ICLR 2022) — reversible per-instance normalization.
+  # IT: use_revin=true → log_ret/lag_ret_* esclusi dallo scaler globale; denormalize via mean/std finestra.
+  # EN: use_revin=true → log_ret/lag_ret_* excluded from global scaler; denormalize via window mean/std.
+  # IT: use_revin=false → comportamento legacy (return scalati come le altre feature).
+  # EN: use_revin=false → legacy (returns scaled like other features).
+  # IT: revin_target_idx = posizione di log_ret in feat_cols, usata per propagare stats target.
+  # EN: revin_target_idx = position of log_ret in feat_cols, used to propagate target stats.
+  use_revin: false
+  revin_target_idx: 9
+
+# IT: Walk-forward validation — k-fold purgato con embargo anti-leakage.
+# EN: Walk-forward validation — purged k-fold with anti-leakage embargo.
+validation:
+  n_folds: 6                # IT: 6 fold (MODEL_IMPROVEMENTS fix #4) | EN: 6 folds (fix #4)
+  embargo_steps: 1500       # IT: 1500 step embargo tra train e val | EN: 1500-step embargo
+
+# IT: Training loop — ottimizzatore, scheduler, regolarizzazioni anti-overfit.
+# EN: Training loop — optimizer, scheduler, anti-overfit regularizers.
+training:
+  epochs: 200
+  batch_size: 64
+  gradient_accumulation_steps: 2
+  learning_rate: 0.0001
+  weight_decay: 1.0e-03   # IT: 1e-3 (era 1e-5) anti-overfit dataset piccolo | EN: 1e-3 (was 1e-5) anti-overfit small dataset
+  patience: 15            # IT: 15 (era 30) per evitare overfit silenzioso | EN: 15 (was 30) avoids silent overfit
+  # IT: Gap-overfit detector — non attivo nei primi N epoch (train≪val è normale a lr alto).
+  # EN: Gap-overfit detector — disabled for first N epochs (train≪val is normal at high lr).
+  gap_overfit_warmup_epochs: 10
+  gap_overfit_threshold: -0.5
+  gap_overfit_streak: 3
+  val_fraction: 0.1
+  test_fraction: 0.1
+  output_dir: ./models/lstm
+  use_amp: true             # IT: mixed precision fp16 | EN: fp16 mixed precision
+  asymmetry_alpha: 2.0      # IT: penalty errori di segno su large moves | EN: sign-error penalty on large moves
+  asymmetry_threshold: 0.004
+  crps_weight: 0.1          # IT: peso CRPS aux loss | EN: CRPS aux loss weight
+  dv_lambda: 0.3            # IT: peso direction-value loss | EN: direction-value loss weight
+  lr_scheduler: cosine      # IT: cosine warm-restart | EN: cosine warm-restart
+  lr_scheduler_T0: 10
+  lr_scheduler_T_mult: 2
+  n_ensemble: 5             # IT: 5 seed ensemble | EN: 5-seed ensemble
+  grad_clip_norm: 0.5
+  # IT: Mixup temporale (0.0=off). Abilitare solo se train_nll-val_nll < -0.3.
+  # EN: Temporal mixup (0.0=off). Enable only if train_nll-val_nll < -0.3.
+  mixup_alpha: 0.0
+  # IT: Spectral norm solo su mu_head (true) vs su mu/ls2/lnu (false, legacy).
+  # EN: Spectral norm on mu_head only (true) vs on mu/ls2/lnu (false, legacy).
+  # IT: ATTENZIONE: cambia solo se retrain pulito (checkpoint vecchi incompatibili).
+  # EN: WARNING: change only on clean retrain (old checkpoints incompatible).
+  sn_on_mu_only: false
+  # IT: CRPS rimosso in regime distillation (0.0 = off; teacher fornisce σ²/ν calibrati).
+  # EN: CRPS removed during distillation (0.0 = off; teacher provides calibrated σ²/ν).
+  crps_distill_weight: 0.0
+
+# IT: Monte Carlo forecast multi-step + GJR-GARCH per dinamica volatilità.
+# EN: Monte Carlo multi-step forecast + GJR-GARCH for volatility dynamics.
+montecarlo:
+  n_paths: 2000             # IT: percorsi simulati | EN: simulated paths
+  n_steps: 30
+  live_forecast_every: 10   # IT: MC ogni 10 candele in live | EN: MC every 10 candles live
+  gjr_omega: 1.2e-05        # IT: GJR-GARCH(1,1,1) params calibrati su BTC 1m | EN: GJR-GARCH(1,1,1) calibrated on BTC 1m
+  gjr_alpha: 0.05
+  gjr_gamma: 0.065
+  gjr_beta: 0.875
+
+# IT: Risk management — Kelly sizing, ATR-based SL/TP, drawdown stop.
+# EN: Risk management — Kelly sizing, ATR-based SL/TP, drawdown stop.
+risk:
+  initial_capital: 10000.0
+  max_risk_per_trade: 0.01      # IT: 1% rischio per trade | EN: 1% risk per trade
+  sl_atr_mult: 3.0              # IT: SL a 3×ATR | EN: SL at 3×ATR
+  tp_rr_ratio: 2.5              # IT: rapporto RR target | EN: RR target ratio
+  max_position_pct: 0.25        # IT: max 25% equity per posizione | EN: max 25% equity per position
+  max_drawdown_stop: 0.15       # IT: stop totale a -15% DD | EN: kill switch at -15% DD
+  max_hold_candles: 240         # IT: max 4h di holding | EN: max 4h holding
+  use_trailing_stop: false
+  trailing_atr_mult: 3.0
+  correlation_window: 10
+  max_directional_exposure: 0.6 # IT: max esposizione direzionale | EN: max directional exposure
+
+# IT: Backtest — fee model, slippage e soglie SignalGenerator in spazio raw.
+# EN: Backtest — fee model, slippage and SignalGenerator thresholds in raw space.
+backtest:
+  fee_rate: 0.001               # IT: taker fee 10 bps | EN: taker fee 10 bps
+  slippage_rate: 0.0003         # IT: 3 bps base slippage | EN: 3 bps base slippage
+  slippage_model: sqrt          # IT: sqrt-impact model | EN: sqrt-impact model
+  # IT: Soglie trading in SPAZIO RAW (frazione log-return); denormalize avviene a monte.
+  # EN: Trading thresholds in RAW SPACE (log-return fraction); denormalize happens upstream.
+  # IT: NON sovrascrivere da arch/*.yaml senza ricalibrare.
+  # EN: DO NOT override from arch/*.yaml without recalibrating.
+  prob_threshold: 0.52        # IT: P(side) min per aprire | EN: min P(side) to open
+  min_expected_ret: 0.0005    # IT: |μ| min raw (=5 bps) | EN: min raw |μ| (=5 bps)
+  # IT: σ raw test post-denorm: p50=0.0024, p90=0.0040; max 0.015 ≈ p99.
+  # EN: σ raw test post-denorm: p50=0.0024, p90=0.0040; max 0.015 ≈ p99.
+  max_sigma: 0.015            # IT: σ max raw (=150 bps a h=30) | EN: max raw σ (=150 bps at h=30)
+  conviction_alpha: 0.5       # IT: esponente conviction curve | EN: conviction curve exponent
+  output_dir: ./results/lstm
+
+# IT: Distillation — composizione ensemble eterogeneo per teacher soft-labels.
+# EN: Distillation — heterogeneous ensemble composition for teacher soft-labels.
+distillation:
+  # IT: Single source of truth per scegliere i modelli teacher.
+  # EN: Single source of truth to pick teacher models.
+  # IT: Esempi: ["itransformer","nhits","tcnmamba"] (default) | ["itransformer","lstm","tcnmamba"] (rollback).
+  # EN: Examples: ["itransformer","nhits","tcnmamba"] (default) | ["itransformer","lstm","tcnmamba"] (rollback).
+  archs:
+    - itransformer
+    - nhits
+    - tcnmamba
+
+# IT: Dashboard FastAPI/Dash — host locale, timeout subprocess, gzip log streaming.
+# EN: Dashboard FastAPI/Dash — local host, subprocess timeout, gzip log streaming.
+dashboard:
+  host: 127.0.0.1
+  port: 8050
+  auth_token: ''
+  subprocess_timeout_sec: 7200  # IT: 2h per training lunghi | EN: 2h for long training runs
+  enable_gzip: true
+  log_lines_maxlen: 500

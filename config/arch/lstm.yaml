@@ -1,0 +1,30 @@
+# IT: Override architettura LSTM+GRU — merge sopra default.yaml con --arch lstm.
+# EN: LSTM+GRU arch override — merged on top of default.yaml via --arch lstm.
+
+# IT: Modello — stack LSTM ricorrente + GRU + MLP, attention multi-head opzionale.
+# EN: Model — recurrent LSTM stack + GRU + MLP, optional multi-head attention.
+model:
+  architecture: "lstm"
+  lstm_hidden: 256
+  gru_hidden: 128
+  mlp_hidden: 64
+  lstm_layers: 2
+  dropout: 0.2
+  use_attention: true
+  n_attention_heads: 4
+  patch_size: 1             # IT: LSTM non usa patching | EN: LSTM does not use patching
+  drop_path_rate: 0.0       # IT: LSTM non ha DropPath | EN: LSTM has no DropPath
+
+# IT: Training — iperparametri rilassati per uscire dall'underfitting osservato.
+# EN: Training — relaxed hyperparams to escape observed underfitting plateau.
+# IT: Gate: se a 30 epoch val_nll > 3.5 → architettura confermata inadeguata.
+# EN: Gate: if val_nll > 3.5 at epoch 30 → architecture confirmed inadequate.
+training:
+  learning_rate: 4.0e-4         # IT: 4× più alto del default | EN: 4× higher than default
+  asymmetry_alpha: 0.5          # IT: riduce penalty errori segno | EN: lowers sign-error penalty
+  sample_weight_alpha: 0.0      # IT: gradient più pulito senza pesatura |y| | EN: cleaner gradient without |y| weighting
+  grad_clip_norm: 1.0
+  output_dir: "./models/lstm"
+
+backtest:
+  output_dir: "./results/lstm"

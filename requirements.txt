@@ -1,0 +1,61 @@
+# ══════════════════════════════════════════════════════════════
+#  QUANTSYS · requirements.txt
+#  Hardware target: Intel i7-9700K + RTX 2070 Super (CUDA 12.1)
+#
+#  INSTALLAZIONE COMPLETA (copia e incolla nel terminale PyCharm):
+#
+#  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#  pip install -r requirements.txt
+#  pip install -e .
+# ══════════════════════════════════════════════════════════════
+
+# ── PyTorch con CUDA 12.1 (RTX 2070 Super) ───────────────────
+# ATTENZIONE: installa PyTorch PRIMA degli altri pacchetti,
+# con l'indice CUDA corretto. Il comando "pip install torch"
+# senza indice installa la versione CPU.
+#
+#   pip install torch torchvision \
+#       --index-url https://download.pytorch.org/whl/cu121
+#
+torch>=2.2.0,<3.0
+torchvision>=0.17.0,<1.0
+
+# ── Data & Numerical ──────────────────────────────────────────
+numpy>=1.26.0,<3.0
+pandas>=2.1.0,<3.0
+pyarrow>=14.0.0,<22.0    # Parquet I/O
+
+# ── Machine Learning ──────────────────────────────────────────
+scikit-learn>=1.4.0,<2.0
+scipy>=1.12.0,<2.0
+
+# ── Macro data (Fase 1b) ──────────────────────────────────────
+yfinance>=0.2.36,<1.0    # DXY, VIX, Gold, Oil, SPY
+hmmlearn>=0.3.2,<1.0     # Hidden Markov Model per regime detection (legacy)
+statsmodels>=0.14.0,<1.0 # Markov-Switching Regression (Hamilton 1989)
+# fredapi>=0.5.1         # Opzionale: client ufficiale FRED
+#                          Senza key funziona comunque via requests
+
+# ── Networking / API ──────────────────────────────────────────
+requests>=2.31.0,<3.0
+websockets>=12.0,<16.0   # WebSocket Binance live feed
+python-binance>=1.0.19,<2.0  # Client ufficiale Binance: paginazione + rate limit automatici
+
+# ── Utils ─────────────────────────────────────────────────────
+tqdm>=4.66.0,<5.0
+pyyaml>=6.0.1,<7.0
+
+# ── Testing ───────────────────────────────────────────────────
+pytest>=8.0.0,<9.0
+pytest-timeout>=2.3.0,<3.0  # timeout per test lenti (HMM)
+
+# ── Hyperparameter optimization ───────────────────────────────
+optuna>=3.0.0,<5.0       # ricerca bayesiana iperparametri (02c_optuna_search.py)
+
+# ── Opzionale ─────────────────────────────────────────────────
+# matplotlib>=3.8.0      # plot locali Python
+# jupyter>=1.0.0         # notebook esplorativo
+
+# ── Dashboard server ──────────────────────────────────────────
+# Nessuna dipendenza aggiuntiva: usa socketserver.ThreadingMixIn
+# dalla libreria standard Python (già incluso).

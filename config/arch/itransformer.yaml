@@ -1,0 +1,25 @@
+# IT: Override architettura iTransformer — merge sopra default.yaml con --arch itransformer.
+# EN: iTransformer arch override — merged on top of default.yaml via --arch itransformer.
+
+# IT: Modello — inversione asse attenzione (variate-as-token, Liu et al. 2024).
+# EN: Model — attention axis inversion (variate-as-token, Liu et al. 2024).
+model:
+  architecture: "itransformer"
+  tft_d_model: 128
+  tft_n_heads: 4
+  tft_n_layers: 3
+  tft_dropout: 0.1
+  patch_size: 5             # IT: patching 5-min (iTransformer ne beneficia) | EN: 5-min patching (iTransformer benefits)
+  drop_path_rate: 0.1       # IT: stochastic depth leggero | EN: light stochastic depth
+
+# IT: Training — lr più alto (2e-4) per convergenza più rapida su attention pura.
+# EN: Training — higher lr (2e-4) for faster convergence on pure attention.
+training:
+  learning_rate: 2.0e-4
+  grad_clip_norm: 0.5
+  output_dir: "./models/itransformer"
+
+# IT: Output backtest dedicato per arch.
+# EN: Per-arch backtest output dir.
+backtest:
+  output_dir: "./results/itransformer"

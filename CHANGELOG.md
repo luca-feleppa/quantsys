@@ -1,0 +1,310 @@
+# QUANTSYS — Changelog
+
+## Iterazione 9 — Fix denormalizzazione z-score + paper-trading ready (corrente, 2026-05-23)
+
+### Bug strutturale: trading layer in spazio raw vs modello in z-score
+
+Il `RobustScaler` globale scala `target_ret` insieme alle altre feature
+(scale_factor=0.002707). Il modello quindi predice μ, σ, ν in spazio z-score
+standardizzato. Tutto il trading layer (`SignalGenerator`, `RiskManager._sl_tp`,
+`_size`, soglie config) assumeva invece spazio raw (frazioni di log-return).
+
+**Conseguenze pre-fix**:
+- `_sl_tp`: `dist.sigma * price * 1.5` con σ_z≈1 e price=$42k → SL distance $63k
+  (300% del prezzo) → mai colpito. Tutti i trade chiudevano per `MAX_HOLD` invece
+  che SL/TP veri.
+- `_size`: Kelly `mu/sigma²` calcolato in z-score → fattore `target_scale` mancante
+  → sizing sottostimato di ~370× (poi capped dal floor 0.005).
+- Soglie config in scala mista: `max_sigma=2.0` (z-space) era no-op in raw space.
+
+### Fix centralizzato
+
+- **`quantsys/utils/__init__.py`**: nuova property `PipelineState.target_scale`
+  (legge `scaler.scale_` per `target_ret`, fallback 1.0) e metodo
+  `denormalize_predictions(mu, sigma) → (mu_raw, sigma_raw)`. Type-preserving
+  (float / ndarray / Tensor). Single source of truth.
+- **`scripts/03_backtest.py`**: dopo batch inference chiama
+  `state.denormalize_predictions(all_mu, all_sigma)`. Safety assert
+  `assert all_sigma.max() < 0.05` per rilevare regressioni future.
+- **`scripts/04_live_signals.py`**: stessa chiamata in `_predict()` prima del
+  return — critico perché senza fix il paper-trading opererebbe con SL/TP
+  impossibili.
+- **`quantsys/trading/__init__.py`**: warning runtime one-shot in `_sl_tp`
+  se `σ*price*1.5 > 5%*price` (rileva mancata denormalizzazione).
+- **`config/default.yaml` e `config/arch/*.yaml`**: pulite le soglie legacy
+  in z-space (`prob_threshold: 0.52`, `min_expected_ret: 0.0001`, `max_sigma: 2.0`)
+  centralizzando in `default.yaml` con valori in spazio raw + commenti che
+  dichiarano l'invariante.
+
+### Risultati
+
+Backtest h=30 test set 7929 candele (ensemble eterogeneo, identico per i 3 archs):
+
+| Metrica | Pre-fix | Post-fix | Delta |
+|---|---|---|---|
+| Sharpe | -255.9 | **+18.71** | +274 |
+| Win Rate | 11.03% | **64.29%** | +53 pp |
+| Total Return | -15.02% | **+3.67%** | +18.7 pp |
+| Max Drawdown | 15.02% | **0.83%** | -14.2 pp |
+| Fee/Gross ratio | 1010% | **30.3%** | -980 pp |
+| Sharpe CI 95% lower | -48 | **+0.78** | >0 per la prima volta |
+| Circuit breaker | TRIGGERED | False | risolto |
+
+**Stress test passato**: Pessimistic (fee×2, slip×3) Sharpe +7.22, Flash Crash
+(fee×1.5, slip×5) Sharpe +12.30.
+
+**Walkforward 5-fold** conferma DA stat-sig per iTransformer (0.524 ± 0.008,
+CI [0.510, 0.531]) e Spearman 0.070 ± 0.010. WHR borderline (0.504–0.517),
+da migliorare con fix #3 (window_size 240) o paper-trading reale.
+
+4/4 soglie esplicite di promozione a paper-trading raggiunte. Vedi
+`MODEL_IMPROVEMENTS.md` per il piano dei prossimi step.
+
+---
+
+## Iterazione 8 — Horizon 15min + Advanced DL features
+
+### Forecast horizon 5 → 15 → 30 minuti
+Target evoluto progressivamente: 5 → 15 → 30 minuti. A h=15 (Iterazione 8 originale)
+`asymmetry_threshold` era stato riscalato da 0.002 a 0.004 per compensare l'ampiezza
+maggiore dei rendimenti. A h=30 (2026-05-20, parte di Iterazione 9) il movimento
+atteso (~42 bps) supera con margine il costo roundtrip (~26 bps), rendendo il
+trading strutturalmente profittevole. Search space Optuna `forecast_horizon`
+aggiornato a [15,30,60].
+
+### Multi-Teacher Distillation — `quantsys/model/distillation.py`, `run_all.py`, `scripts/02_train.py`
+Tutti e 3 i modelli contribuiscono come teacher con pesi proporzionali allo scoring normalizzato
+(softmax con temperature=2 su score 40% loss, 35% spearman, 25% DA). Sostituisce la selezione
+di un singolo teacher: ogni student riceve soft labels pesate da tutti i candidati.
+CLI: `--multi-teacher` flag, attivato automaticamente da `run_all.py --distill`.
+
+### Fractional Differencing (FFD) — `quantsys/features/__init__.py`, `config/default.yaml`
+Implementazione Fixed-width Fractional Differencing (López de Prado) su log(close) e log(volume+1).
+Genera 2 feature additive: `frac_diff_close` e `frac_diff_volume`. d=0.4 configurabile
+(`features.frac_diff_d`), pesi troncati a |w_k| < 1e-5, convoluzione vettorizzata.
+d=0.0 disabilita le feature (backward compatible).
+
+### Direction-Value Joint Loss — `quantsys/model/__init__.py`, `scripts/02_train.py`
+Nuovo termine di loss che penalizza errori direzionali (sign(mu) != sign(y)) proporzionalmente
+a |y|: le predizioni sbagliate su movimenti ampi costano di più. `dv_lambda=0.3` configurabile,
+0.0 disabilita. Complementare alla asymmetry_penalty (che agisce sulla NLL).
+
+### CPU fraction centralizzata — `config/default.yaml`, tutti gli script
+`hardware.cpu_fraction` in `config/default.yaml` controlla la percentuale di core CPU
+usata da tutti gli script (default 0.5 = 50%). Tutti i 6 script (`run_all.py`,
+`02_train.py`, `02b`, `02c`, `03_backtest.py`, `04_live_signals.py`) leggono il valore
+dal config all'avvio. Non serve più modificare il codice per cambiare il limite CPU.
+
+### GPU VRAM limit rimosso — tutti gli script
+Rimossa la chiamata `torch.cuda.set_per_process_memory_fraction()` da tutti gli script.
+Il modello utilizza ora tutta la VRAM disponibile della GPU. Per limitare il compute GPU
+(non VRAM), usare `nvidia-smi -pl <watt>` prima del training (RTX 2070 Super TDP=215W).
+
+---
+
+## Iterazione 7 — Ottimizzazioni pipeline distillation
+
+### Fix critico: soft labels shuffle-safe — `scripts/02_train.py`
+Le soft labels del teacher erano indicizzate sequenzialmente (`sample_idx`) ma il
+dataloader di training usa `shuffle=True`. Le soft labels finivano associate ai
+campioni sbagliati. Fix: soft labels integrate nel `TensorDataset` cosi' lo shuffle
+le riordina insieme ai dati reali.
+
+### Scoring teacher normalizzato — `run_all.py`
+La formula di `_select_best_teacher()` era dominata dalla val_loss (contribuiva 150-200
+punti vs 0.5-2.5 per spearman). Ora ogni metrica e' normalizzata in scala 0-1 (min-max
+tra le 3 architetture) e pesata: 40% loss, 35% spearman, 25% DA. I valori sono presi
+alla best val_loss epoch, non il picco su tutte le epoche.
+
+### Ensemble output naturale — `quantsys/model/ensemble.py`, `scripts/03_backtest.py`, `scripts/04_live_signals.py`
+`EnsembleModel.__call__()` restituisce direttamente `(mu, sigma, nu)` in spazio naturale
+invece di riconvertire in log-space con `log(expm1(x))` (instabile per valori piccoli).
+Rimossa la doppia softplus: backtest e live non ri-applicano piu' la conversione.
+Aggiunto `torch.amp.autocast` nel forward dell'ensemble per dimezzare la VRAM su GPU.
+
+### Loss distillation scala-normalizzata — `quantsys/model/distillation.py`
+I pesi fissi (1.0 mu + 0.5 sigma + 0.1 nu) non compensavano le scale diverse:
+MSE(nu)~0.1 dominava, MSE(mu)~1e-10 era irrilevante. Ora ogni componente e'
+divisa per la varianza del teacher. Pesi: 0.5 mu + 0.3 sigma + 0.2 nu.
+
+### Teacher caricato una sola volta — `scripts/02_train.py`
+Il teacher veniva caricato 2 volte: una per generare soft labels, una per il transfer
+delle output heads. Ora viene mantenuto in memoria e riusato.
+
+### Stress test con segnali pre-calcolati — `scripts/03_backtest.py`
+`run_stress_scenario()` non ri-esegue piu' le predizioni del modello. I segnali
+`(side, dist)` vengono salvati durante il loop principale e riusati con parametri
+fee/slippage diversi. Elimina ~400k iterazioni Python per 2 scenari.
+
+### Student skip se gia' distillati — `run_all.py`
+`phase_distill()` fase 2c controlla `config.json` di ogni student: se gia' distillato
+dallo stesso teacher, lo salta automaticamente (a meno di `--force-download`).
+
+### QUANTSYS_ARCH ripristinato dopo distillation — `run_all.py`
+Dopo `phase_distill()`, i path arch-specifici (ARCH_MODELS_DIR, ARCH_RESULTS_DIR,
+MODEL_FILE) vengono aggiornati correttamente per backtest e live.
+
+### Feature count da dataset — `scripts/07_verify_teacher.py`
+`n_feat` e `n_dynamic` letti da `data/lstm_dataset.npz` invece di essere hardcoded
+(116, 85). Fallback ai valori precedenti se il dataset non esiste.
+
+### rolling_std vectorizzata — `scripts/03_backtest.py`
+La rolling std per `SimpleSignalModel` era calcolata con list comprehension Python
+(una `pd.Series().rolling().std()` per campione). Sostituita con `np.std` vectorizzato
+sugli ultimi 20 return di ogni finestra.
+
+### Transfer heads warning MoE/Quantile — `quantsys/model/distillation.py`
+`transfer_output_heads()` ora emette warning esplicito e restituisce 0 se il modello
+usa `loss_type="quantile"` o `n_output_experts > 1` (transfer non supportato).
+
+### Cleanup generate_teacher_predictions — `quantsys/model/distillation.py`
+Rimossa allocazione lista `"quantiles"` inutile (usata solo per modelli quantile
+ma allocata per tutti).
+
+---
+
+## Iterazione 6 — Knowledge Distillation + Ensemble Eterogeneo
+
+### Knowledge Distillation pipeline — `scripts/02_train.py`, `quantsys/model/distillation.py`
+Nuova pipeline `--distill` che addestra un teacher (iTransformer) e poi student (LSTM, TCNMamba)
+con transfer dei pesi delle output heads + loss mista (0.7 reale + 0.3 distillazione).
+Gli student convergono in ~60% delle epoche normali grazie alla calibrazione trasferita.
+
+### Ensemble eterogeneo — `quantsys/model/ensemble.py`
+`EnsembleModel.load_heterogeneous()` carica un modello per architettura (iTransformer + LSTM +
+TCNMamba) invece di N checkpoint della stessa. Backtest e live usano automaticamente l'ensemble
+eterogeneo quando almeno 2 architetture hanno un checkpoint disponibile. Diversita' strutturale
+degli errori migliora la robustezza vs ensemble omogeneo (5x stesso seed).
+
+### Script verifica teacher — `scripts/07_verify_teacher.py`
+Analizza parametri, complessita', metriche backtest delle 3 architetture e raccomanda
+quale usare come teacher. Salva risultati in `models/teacher_analysis.json`.
+
+### Orchestrazione distillation — `run_all.py`
+Nuovo flag `--distill` + `--teacher` per `run_all.py`. Automatizza: train teacher →
+train student LSTM con distillation → train student TCNMamba con distillation.
+
+---
+
+## Iterazione 5 — Architetture multiple + ottimizzazioni
+
+### iTransformer (QuantiTransformer) — `quantsys/model/__init__.py`
+Nuova architettura selezionabile con `--arch itransformer`. Multi-scale embedding su
+tre finestre (1min T=120, 5min T=24, 15min T=8), feature type embedding (dynamic/structural),
+macro context token prepended se disponibile. N layer pre-norm attention + FFN, mean pool →
+output heads. Complessità O(F²)=3025 vs O(T²)=14400 del TFT: 4.7× meno operazioni attention.
+
+### Directory arch-specifiche — `run_all.py`, tutti gli script
+`models/lstm/` e `models/itransformer/` per checkpoint separati. `results/lstm/` e
+`results/itransformer/` per backtest e segnali live separati. Env var `QUANTSYS_ARCH`
+propagata a tutti i subprocess. `load_config(path, arch=)` fonde base + override arch.
+
+### Selezione architettura interattiva — `run_all.py`
+Se `--arch` non è passato da CLI, `run_all.py` mostra un prompt con le due opzioni
+e aspetta la scelta dell'utente prima di avviare la pipeline.
+
+### 116 features dual-stream — `quantsys/features/__init__.py`
+Da 55 a 116 feature: 85 dinamiche (stream A) + 31 strutturali (stream B). Aggiunti
+VP multi-scala (short/medium/long), feature di livello assoluto ATH/ATL su 30/90/365g,
+momentum lento 7/30/90g, round level, price_vs_ma200m, session position, funding rate.
+
+### HMM multi-restart — `quantsys/macro/regime.py`
+`_fit_single` prova `n_restarts=5` seed consecutivi, sopprime i warning durante ogni
+tentativo con `warnings.catch_warnings()`, ritorna il modello con log-likelihood massima.
+Early exit se un restart converge prima di esaurire le iterazioni. Elimina i "Model is
+not converging" warning che comparivano su finestre brevi del burn-in.
+
+### Ottimizzazioni feature engineering — `quantsys/features/__init__.py`
+- VP `_fill_interp`: numpy ffill (`maximum.accumulate`) invece di `pd.Series` temporaneo (×12)
+- VP value area: `cumsum + searchsorted` invece di loop Python su 420k iterazioni
+- `_normalize`: bulk write `df[cols] = X_scaled` invece di loop colonna-per-colonna
+- Fix `ChainedAssignmentError` funding rate (pandas 3.x CoW): `inplace` → riassegnazione
+- Fix `PerformanceWarning` VP: `pd.concat` bulk invece di insert colonna per colonna
+
+## Iterazione 4 — Ottimizzazioni training
+
+### Flash Attention — `quantsys/model/__init__.py`
+`F.scaled_dot_product_attention` al posto dell'attention manuale in `TemporalAttention`.
+Abilitato automaticamente su CUDA (kernel fused → ~30% speedup attention).
+
+### Ottimizzazioni DataLoader e eval — `scripts/02_train.py`
+- `prefetch_factor=4`: pre-carica 4 batch in anticipo
+- `torch.from_numpy()` zero-copy nel caricamento dataset
+- `torch.inference_mode()` in `run_eval()` (~5-10% più veloce di no_grad)
+- `non_blocking=True` nei `.to(device)` durante eval
+- Validazione ogni 2 epoche: dimezza il costo eval sul dataset di val
+
+## Iterazione 3 — Fix 5-10 (corrente)
+
+### Fix 5 — Logging su file (`quantsys/utils/__init__.py`)
+`setup_logging()` ora aggiunge un `FileHandler` con timestamp nel nome
+(`logs/quantsys_YYYYMMDD_HHMMSS.log`) oltre al `StreamHandler` su stdout.
+La scrittura su file è idempotente (non duplica handler se chiamata più volte).
+
+### Fix 6 — `PipelineState` unificato (`quantsys/utils/__init__.py`)
+Nuovo oggetto che aggrega in un unico `.pkl` gli scaler delle price features,
+il `MacroNormalizer`, la lista ordinata delle colonne e la config del modello.
+Eliminata la necessità di caricare 3-4 file separati in inference.
+Viene salvato da `01_download_data.py` e aggiornato da `02_train.py`.
+
+### Fix 7 — Spearman ρ e ICIR (`scripts/02_train.py`)
+Sostituita la sola `directional_accuracy` con `prediction_metrics()` che calcola:
+- **Spearman ρ**: correlazione di rango tra μ predetto e log-return reale
+- **Weighted Hit Rate**: DA pesata per la grandezza del movimento
+- **IC medio** e **ICIR**: consistenza del segnale su finestre rolling da 50 step
+Il log per epoch ora mostra `DA=x.xxx  ρ=+x.xxxx`.
+
+### Fix 8 — LR separato per MacroEncoder (`scripts/02_train.py`)
+Il `MacroEncoder` usa `lr = lr_base / 10` per le prime epoche, evitando
+che il suo gradiente rumoroso destabilizzi il branch price della LSTM.
+Implementato con due param groups in `AdamW`. Attivo solo quando `has_macro=True`.
+
+### Fix 9 — Monte Carlo guidato dalla LSTM (`quantsys/model/forecast.py`)
+Nuovo modulo che sostituisce il random walk con volatilità storica.
+Ad ogni step: la LSTM predice `(μ_t, σ_t, ν_t)` sull'intera batch di path
+in un solo forward pass, campiona log-return dalla t-Student parametrica,
+aggiorna la finestra autoregressivamente. `σ_eff = √(σ_lstm × σ_garch)` combina
+la previsione della rete con il clustering GARCH della volatilità.
+
+### Fix 10 — Test unitari (`tests/test_features.py`)
+8 classi di test che coprono i bug silenti più pericolosi:
+- **Log-return stazionari**: media vicina a zero, nessun inf/NaN
+- **Target corretto**: `target_ret[t] == log_ret[t+1]`
+- **VWAP nella banda H-L**: impossibile essere fuori range
+- **Split senza overlap**: `max(t_train) < min(t_val) < min(t_test)`
+- **Dimensioni split corrette**: frazioni rispettate ±2%
+- **HMM probabilità**: ogni riga somma a 1, nessun valore negativo
+- **NLL differenziabile**: gradiente fluisce verso μ, log_σ², log_ν
+- **PipelineState round-trip**: save → load restituisce dati identici
+
+---
+
+## Iterazione 2 — Fix 1-4
+
+### Fix 1 — Release lag FRED (`quantsys/macro/__init__.py`)
+Aggiunto `RELEASE_LAG_DAYS` (D=1, W=4, M=35, Q=35 giorni) e
+`SERIES_LAG_OVERRIDE` per serie specifiche. `fetch_all()` shifta l'indice
+di ogni serie prima del `ffill`. Merge con `pd.merge_asof(direction="backward")`.
+
+### Fix 2 — Volume Profile incrementale (`scripts/04_live_signals.py`)
+`LiveFeatureBuffer` mantiene `_vp_bins` (array) e `_vp_contribs` (deque).
+Ogni `push()` aggiorna in O(1) invece di O(N). Reset completo ogni 60 candele.
+`np.convolve` sostituito con `pd.Series.ewm()` e `rolling(min_periods=1)`.
+
+### Fix 3 — Persistenza stato WS (`scripts/04_live_signals.py`)
+`_save_state()` (write atomica) e `_load_state()` con verifica età (< 5 min).
+`warmup()` prova prima il ripristino da disco, poi colma il gap con REST API.
+Posizione aperta, portfolio e buffer sopravvivono a disconnessioni del WS.
+
+### Fix 4 — SimpleSignalModel (`scripts/03_backtest.py`)
+Rolling statistics pre-calcolate sull'intero test set prima del loop.
+EWM pandas per fast/slow mean, `rolling(min_periods=3).std()` per volatilità.
+ν dinamico: varia con la volatilità osservata (3-12).
+
+---
+
+## Iterazione 1 — Progetto iniziale
+
+Pipeline completa: Binance REST+WS, feature engineering (55 features),
+LSTM→GRU→t-Student NLL, Monte Carlo GARCH, Risk Manager Kelly, Backtest,
+MacroEncoder HMM, Dashboard React Bloomberg-style.

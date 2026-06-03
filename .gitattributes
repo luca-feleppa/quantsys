@@ -1,0 +1,22 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Force LF for source code (consistent across OS)
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.toml text eol=lf
+*.cfg text eol=lf
+*.json text eol=lf
+*.jsx text eol=lf
+
+# Binary files
+*.pt binary
+*.pkl binary
+*.npz binary
+*.parquet binary
+*.png binary
+*.jpg binary
+*.ico binary
