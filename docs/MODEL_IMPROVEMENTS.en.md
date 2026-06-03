@@ -6,17 +6,159 @@ Everything already done lives in `CHANGELOG.md` and the notes under `~/.claude/p
 
 ---
 
+## 🔴 NEXT — Diagnostics on the negative post-distill backtest 2026-06-03
+
+**Context:** the `run_all.py --distill` that finished at 00:11 on 2026-06-03 produced worrying backtests:
+
+| Arch | Sharpe | Win Rate | N trades | Return | Final equity |
+|---|---|---|---|---|---|
+| TCN+Mamba (teacher) | **-21.05** | 38.1% | 21 | -3.3% | $9,670 |
+| iTransformer (student) | **-13.79** | 46.9% | 32 | -3.2% | $9,685 |
+| NHits *(stale file 23-05)* | +18.71 | 64.3% | 42 | +3.7% | $10,367 |
+
+**Diagnosed discrepancy:**
+- Val (best epoch 2): TCN+Mamba DA **0.541**, Spearman **+0.102**
+- Test set: DA **0.516** (-2.5%), Spearman **+0.023** (-77%)
+- Test Spearman p-value = 0.022 → weak but statistically significant signal
+- Backtest → **Sharpe -21** → the sign edge dissolves once translated into P&L
+
+**⚠ ARTIFACT AVAILABILITY (verified 2026-06-03 00:30):** `run_all.py --distill` runs the backtest **only on the selected teacher** (`run_all.py:803-810`: `args.arch = selected_teacher` then `phase_backtest`). So:
+- ✅ `results/tcnmamba/dashboard_results.json` (mtime 00:16) = real backtest of the distill run
+- ❌ `results/itransformer/dashboard_results.json` (mtime 22:55 yesterday) = backtest of the **manual** pre-distillation iTrans training, NOT of tonight's distilled model
+- ❌ `results/nhits/dashboard_results.json` (mtime May 23) = pre C-funding fix, completely stale
+
+**To get valid backtests on the distilled students:**
+```powershell
+$env:QUANTSYS_ARCH = "itransformer"; python scripts/03_backtest.py
+$env:QUANTSYS_ARCH = "nhits";       python scripts/03_backtest.py
+```
+~1 min each. Overwrites `results/{arch}/dashboard_results.json`. Required before drawing any conclusions about distillation performance.
+
+**Hypothesised causes (ordered by likelihood):**
+1. **Strong val→test distribution shift**: the recent-days test set captures a market regime different from the val one. Confirmation: Spearman collapses -77% val→test.
+2. **Edge below fees**: WHR 0.508 vs 0.5 random → edge ~0.8% per trade. Round-trip fee 0.2% + estimated slippage 0.1% = 0.3%. Net residual edge ~0.5% per trade → thin margin.
+3. **Signal generator not tuned for the new 104-feat models**: BUY/SELL/HOLD thresholds inherited from the previous setup (NHits 119 feat with Sharpe +18.7) produce too many trades during signal-less periods.
+4. **Low trade frequency on test**: 21-32 trades over ~10k samples = 0.2-0.3% time in market → each trade weighs heavily, high statistical risk.
+
+### Diagnostic steps (recommended order)
+
+#### Step A — Verify RegimeSession (high priority, ~7 min, independent)
+Confirm that Option C works: the new intraday regime detector produces a 33/33/33 val stratification instead of r0=100%.
+```powershell
+python run_all.py --arch itransformer --skip-update --skip-macro --force-download
+```
+Expected in the logs:
+- `Stratified val: distribuzione regime: r0≈33%, r1≈33%, r2≈33%`
+- `↳ val_nll per regime: r0=+X r1=+Y r2=+Z spread=>0`
+
+Even if the backtest will be ugly (expected), validating the Option C fix is independent from performance and must be closed out.
+
+#### Step B — Distribution-shift investigation (medium priority, ~30 min)
+Load the backup checkpoints `models/*/_bak_119feat_20260528/best_model.pt` and re-run the backtest on the **same current test set** (104 feat). Three possible scenarios:
+
+- **Scenario B1**: old 119-feat models → also negative Sharpe → **market distribution shift**, not a pipeline regression. Decision: accept the new regime, possibly retrain with higher weights on recent samples (recency weighting in `02_train.py`).
+- **Scenario B2**: old 119-feat models → positive Sharpe → **regression caused by C-funding** (the 15 dropped features carried signal that the C-funding score missed). Decision: revisit the 2026-05-28 C-funding decision, consider C-minimal or a sub-set of the 15.
+- **Scenario B3**: old models with shape mismatch (119 != 104) → load fails → retrain a 119-feat model for a controlled comparison.
+
+#### Step C — Signal generator audit (medium priority, ~20 min)
+Search `quantsys/trading/` for BUY/SELL/HOLD thresholds and sizing parameters. Check whether they are hardcoded from a previous setup or adapt to the model's average CI. Possible fixes:
+- Adaptive thresholds based on `σ_pred` (enter only if `μ_pred / σ_pred > threshold`)
+- Min CI lower-bound > 0 filter (enter only if the interval doesn't cross zero)
+- Position sizing inversely proportional to σ_pred
+
+#### Step D — Paper-trading after Stage 4 integration (low priority, ~6-48h)
+Only AFTER closing BLOCKER #1 Stage 4 (`LiveCandleBuffer` + `FeatureAssembler` integration into `LiveEngine`). Run paper-trading for 12-48h, accumulate 50-200 trades, compare live metrics with backtest. If live metrics persistently diverge from backtest → bug in signal generator or live/training matching, NOT in the model.
+
+**Resume point for a new session:**
+- Catastrophic backtest output documented here (numbers from `results/{arch}/dashboard_results.json`)
+- Step A not yet executed (missing `Stratified val: r0≈33%` verification)
+- Step B not yet executed (requires reloading the `_bak_119feat_20260528` backup)
+- Step C not yet executed (requires grep on `quantsys/trading/` for signal thresholds)
+- Operational decision pending: do A (verify) or B (investigate) first?
+
+---
+
 ## 🟢 RESOLVED 2026-06-03 — Markov-Switching on BTC realized vol (Variant 3) implemented
 
-> 🟢 Resolved 2026-06-03: see Italian version for details. `RegimeMarkovBTC` implemented (Hamilton 1989 Markov-Switching on BTC hourly realized volatility + expanding-window PCA), three data-driven regimes (R0 Quiet ~42%, R1 Trending ~18%, R2 Stress ~40%), stratified val 46% / 12% / 41% (vs previous 100% r0 collapse), val_nll spread 0.19-0.30 (well above the 0.05 "informative" threshold). Output file `data/regime_probs.parquet` and schema unchanged for backward compat. Docs (TEORIA.md/.en.md, README.md/.it.md) and session memory `session_2026_06_03_markov_btc.md` updated. Rollback decision no longer applicable (validation passed).
+**Status:** proposal, not implemented. Origin: 2026-06-02, iTransformer training shows `Stratified val: distribuzione regime: r0=10056 (100%)` on every validation → the current detector is degenerate (collapses to 1 cluster) and the per-regime diagnostics (`val_nll spread=0.000`) carry no information.
+
+**Structural problem (not just a detector bug):**
+- Hamilton 1989 on FRED + yFinance daily macro features → regimes change every **months**. Trading runs at 1-min with horizon h=30. A 4-5 order-of-magnitude mismatch between regime-detector scale and the model's operational scale.
+- Verified in `scripts/02_train.py:577-1096`: the regime label is NOT an input feature to the model, it is used only for val stratification + diagnostic logging. So the current "bug" is cosmetic, but even fixing it (n_regimes 3→2) the added value for 1-min trading stays low.
+- The 90 raw macro features + `MacroEncoder` (16-dim) already give the model the implicit "macro regime" — the aggregated label is redundant.
+
+**Decision Option C — intraday regime detector on BTC:**
+
+Replace the Markov-Switching on macro PC1 with a detector that observes **BTC microstructure directly** at a scale consistent with the trading timeframe (switching every ~1-4h, not months). Three candidate variants, ordered by increasing cost:
+
+1. **Session regime (simplest)**: lookup on UTC `hour` → {Asia 00-08, EU 08-16, US 16-24}. Three regimes, deterministic, zero cost, the literature's ground truth for crypto (low-vol Asia, high-vol EU/US).
+2. **Volatility regime via threshold**: rolling 4h percentile of realized volatility → {low / mid / high}. Switches 5-10 times a day, perfect match with h=30. Simple implementation (no EM, no PCA).
+3. **HMM/Markov-Switching on BTC**: the same engine as today but observed on intraday realized volatility (rolling 1h log_ret²) instead of macro PC1. Switches 3-8 times per day. Reuses the existing `RegimeMarkovSwitching` infrastructure, only the input feature changes.
+
+**Rationale for the final choice:** start from variant 1 (session) as the baseline, measure per-regime NLL spread on val. If spread > 0.05 NLL → regime is informative, worth moving to 2/3. If still 0.000 → the model doesn't discriminate between regimes (uniform signal), and the regime detector can simply be removed.
+
+**Advantages vs current:**
+- Switch frequency consistent with h=30 timeframe
+- `val_nll per regime` diagnostic becomes informative again
+- Effective val stratification (no more degenerate r0=100%)
+- Possible future feature: regime label as model input (currently NOT used as feature)
+
+**Files to touch (baseline session implementation):**
+- `quantsys/macro/regime.py` → new `RegimeIntraday` class or `RegimeSession` variant (`session = floor(hour_utc / 8)`)
+- `scripts/01b_download_macro.py` → fit/serialize the new detector (probably trivial, no EM)
+- `scripts/02_train.py:385,577` → load the new regime for `_load_val_regimes` and stratification
+
+**Validation:**
+- After retrain, verify `Stratified val: distribuzione regime` has all regimes with ~25-40% coverage each (no longer 100% in r0)
+- `val_nll per regime` spread > 0 (signal: the model does worse in some regimes)
+- Backtest unchanged or improved (regime detector ≠ regression)
+
+> ⚠ **After implementation, update `AVVIO.md`, `TEORIA.md` (§ "Markov-Switching"), `README.md` (and `.en.md` counterparts)** with the new regime-detector architecture. The current section in `TEORIA.en.md` (`statsmodels.MarkovRegression` on macro PC1) will need to be replaced with the description of the chosen intraday detector.
+
+### 🚧 Implementation status (live tracker — session-updated)
+
+**Chosen approach:** Variant 1 — **session-based regime** (Asia/EU/US via `hour_utc // 8`). Deterministic baseline, zero cost, no EM. If the next training still shows ~0 per-regime NLL spread, consider variant 2 (volatility threshold) or drop the detector entirely.
+
+**2026-06-02 22:35 session — code + docs completed via 3-subagent fan-out:**
+
+| Task | File | Status | Notes |
+|---|---|---|---|
+| New `RegimeSession` class | `quantsys/macro/regime.py:848-1003` | ✅ done | Added as "STAGE 1c", drop-in with `fit_predict_walkforward` / `save` / `load`. Smoke test 9097 rows, distribution 3033/3032/3032 (~33% each). `RegimeMarkovSwitching` and `RegimeHMM` untouched as fallbacks |
+| Pipeline switch | `scripts/01b_download_macro.py:28,89-115,208` | ✅ done | Import + use `RegimeSession(n_regimes=3)`. Output filenames `regime_hmm.pkl` and `regime_probs.parquet` unchanged (backward compat with `_load_val_regimes` consumer) |
+| TEORIA.md (IT) | §4 lines 76-83, §9 line 214, diagram ~277 | ✅ done | Section rewritten from scratch, ASCII diagram separates macro path from regime path |
+| README.it.md (IT) | bullet line 36, diagram 92, tree 144/160 | ✅ done | Bullet "Rilevamento regimi" → session-based + fallback note |
+| TEORIA.en.md (EN) | §"Macro regime detection" lines 76-83, diagram ~277 | ✅ done | Mirror of IT — new UTC-session detector description |
+| README.md (EN) | bullet line 36, diagram 92, tree 144/160 | ✅ done | Mirror of README.it.md |
+| AVVIO.md (IT) | no descriptive regime section | ⊘ skip | File is quickstart launch — does not describe the regime detector, nothing to update |
+| AVVIO.en.md (EN) | no descriptive regime section | ⊘ skip | Same reason as AVVIO.md |
+| Tests | `tests/test_features.py:212-226` | ⊘ skip | Existing `RegimeMarkovSwitching` test stays valid (class not removed); a `RegimeSession` test is optional, non-blocking |
+| Real-pipeline smoke test | `python scripts/01b_download_macro.py` | ✅ done 2026-06-02 22:54 | `data/regime_probs.parquet` regenerated: 73777 hourly rows 2018-01-01→2026-06-02, distribution **33.3% / 33.3% / 33.3%** (24593/24592/24592). Time ~129s |
+| End-to-end verification Phase 1+1b+2+3+4+5 | 3-subagent fan-out | ✅ done 2026-06-02 22:55 | All scripts run by `run_all.py --distill` verified: syntax+imports+smoke OK. IC fix sanity check: `ic_mean=0.3728 ≈ spearman=0.3726` on a 30% skill signal (mathematically consistent) |
+| Verification iTransformer retrain | `run_all.py --arch itransformer --skip-update --skip-macro --force-download` | ✅ done 2026-06-03 | Stratified val **46% / 12% / 41%** (vs previous 100% r0 collapse), `val_nll` spread **0.19-0.30** (>> 0.05 "informative" threshold), 5/5 ensemble models converge stably |
+
+**Resume points for the next session (in case of out-of-tokens):**
+1. **Next step:** run `python scripts/01b_download_macro.py` to regenerate `data/regime_probs.parquet` (1-2 minutes). NB: it also downloads FRED/yFinance data — if those are already up to date, redoing the download is fine (idempotent).
+2. **After step 1:** rerun iTransformer training to verify. Command: `python run_all.py --arch itransformer --skip-update --skip-macro --force-download` (~7 min). Look for `Stratified val: distribuzione regime` in the logs — expected ~33%/33%/33%, NO longer `r0=100%`.
+3. **Final validation:** look for `↳ val_nll per regime: r0=+X r1=+Y r2=+Z spread=Z` every 5 epochs. If `spread > 0.05`, regime is informative and worth keeping. If still `spread ≈ 0`, consider variant 2 (volatility threshold) or full removal.
+4. **Optional unit test:** add `test_regime_session.py` in `tests/` verifying determinism + balanced distribution (non-blocking for merge).
+
+**Rollback decision:** if the new `RegimeSession` does not improve per-regime NLL spread within one full training, consider variant 2 (rolling 4h volatility threshold). The `RegimeMarkovSwitching` class stays in the codebase as fallback (do not remove).
+
+**Closure 2026-06-03:**
+
+- ✅ **Variant 3 implemented**: new `RegimeMarkovBTC` class in `quantsys/macro/regime.py` (Hamilton 1989 Markov-Switching on BTC hourly realized volatility + expanding-window PCA, ~65-73% variance explained). `scripts/01b_download_macro.py` now uses it instead of `RegimeSession`. Output file (`data/regime_probs.parquet`) and schema unchanged for backward compat with `_load_val_regimes`.
+- ✅ **3 data-driven regimes emerged** on ~9100 hours of BTC (post 30d burn-in): **R0 Quiet ~42%** (σ²(PC1)=0.56, drift≈0, P(stay)=89%), **R1 Trending ~18%** (σ²=0.12, drift=+0.08, P(stay)=92%), **R2 Stress ~40%** (σ²=3.79, drift=−0.12, P(stay)=79%, high vol + dump bias). Typical switching 3-8 times/day, consistent with h=30.
+- ✅ **Val stratification no longer degenerate**: iTransformer retrain (5/5 ensemble) shows distribution **46% / 12% / 41%** (vs previous 100% r0 collapse). Per-regime `val_nll` spread **0.19-0.30** stable (>> 0.05 "informative" threshold) → regime is effectively informative for the model.
+- ✅ **Docs + memory updated**: `TEORIA.md` + `TEORIA.en.md` (Markov-Switching section rewritten), `README.md` + `README.it.md` (bullet "Regime detection" updated), session memory `session_2026_06_03_markov_btc.md`.
+- ⊘ **Rollback decision no longer applicable**: validation passed (variant 3 yields NLL spread >> 0.05 and balanced stratification), no fallback to variants 1/2 needed. `RegimeMarkovSwitching` and `RegimeSession` remain in the codebase as alternative classes but no longer on the production path.
 
 ---
 
 ## 🔴 BLOCKER #1 — Live↔training feature alignment (Stage 2-5)
 
-**Status:** Stage 1 done (code), Stages 2-5 pending. Paper-trading **cannot** start until the mismatch is fixed.
+**Status:** Stage 1 done (code), Stages 2-3 done, Stage 4 in progress, Stage 5 pending. Paper-trading **cannot** start until the mismatch is fully resolved.
 
-**Problem (verified 2026-06-02 with `scripts/99_replay_live_vs_training.py`):** the backtest uses the full `FeatureBuilder` (**119 features**); the live engine (`LiveFeatureBuffer._compute_features` in `scripts/04_live_signals.py`) builds **only 39** by hand in a different order, with per-window median/IQR normalization (not the `pipeline_state`'s `RobustScaler`), and `_predict` does blind positional pad/truncate. Three overlapping mismatches (count + order + scale) → live inputs effectively uncorrelated from training. **Current paper-trading signals do NOT reflect the backtest.**
+**Problem (verified 2026-06-02 with `scripts/99_replay_live_vs_training.py`):** the backtest uses the C-funding-filtered `FeatureBuilder` (**104 features** post Stage 2); the live engine (`LiveFeatureBuffer._compute_features` in `scripts/04_live_signals.py`) builds **only 39** by hand in a different order, with per-window median/IQR normalization (not the `pipeline_state`'s `RobustScaler`), and `_predict` does blind positional pad/truncate. Three overlapping mismatches (count + order + scale) → live inputs effectively uncorrelated from training. **Current paper-trading signals do NOT reflect the backtest.**
 
 Root cause: the reduced `LiveFeatureBuffer` exists because the full `FeatureBuilder` requires long history (ATH/ATL 365d, momentum 90d, frac-diff, vp_*_long) not available in the live rolling buffer (260 candles).
 
@@ -27,7 +169,7 @@ Root cause: the reduced `LiveFeatureBuffer` exists because the full `FeatureBuil
 **C-funding set** = single source of truth shared by training/live:
 - Drops 15 live-incompatible features (90d, 365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`).
 - Keeps 30d + funding (positive ROI, computable live via a 30d ring buffer ~170 KB and a Binance funding poll).
-- Target: ~104 total features (vs 119 today).
+- Target: ~104 total features (vs 119 before).
 
 > The "full hybrid" scheme that kept all 30/90/365d features in live was documented as an alternative but **not recommended by the data** (negative ROI on the long tier) — definitively discarded.
 
@@ -35,40 +177,103 @@ Root cause: the reduced `LiveFeatureBuffer` exists because the full `FeatureBuil
 
 `LIVE_DROP_FEATURES` (15 features) in `quantsys/features/__init__.py`, filtered in `scripts/01_download_data.py` (`feat_cols = [c for c in feat_cols if c not in LIVE_DROP_FEATURES]`).
 
-### Stage 2 — Dataset regeneration + nhits smoke ⏳ TO DO
+### Stage 2 — Dataset regeneration at 104 feat ✅ DONE 2026-06-02
 
-```bash
-python run_all.py --arch nhits --skip-backtest --skip-walkfwd --skip-live --no-browser
+Performed automatically inside `run_all.py --distill`: the dataset was regenerated as `(80390, 120, 104)` train + `(10049, 120, 104)` val + `(10049, 120, 104)` test, with the C-funding filter correctly applied (15 features dropped, programmatically verified).
+
+### Stage 3 — Full distill retrain ✅ DONE 2026-06-02
+
+Executed in the same `run_all.py --distill` of 2026-06-02: all 3 models (iTransformer, N-HiTS, TCN+Mamba) retrained from scratch at 104 features. Multi-teacher distillation applied to the students selected by automatic scoring (see `models/{arch}/config.json` for the `distilled: true, teacher_arch: "multi-teacher"` flags).
+
+> Backtest metrics for the 104-feat models: to be re-read from `results/{arch}/dashboard_results.json` after the run completes (may differ from the +18.71 Sharpe of the 119-feat setup).
+
+### Stage 4 — Live engine rewrite 🚧 IN PROGRESS (2026-06-02 23:10 session)
+
+**Architectural decision:** instead of duplicating feature-engineering logic in `LiveFeatureBuffer`, **directly reuse `quantsys/features.FeatureBuilder.build()`** on the live buffer. Automatic single source of truth → parity test guaranteed by design.
+
+**Rationale:**
+- The live↔training feature delta is ~65 features (live has 39, training has 104). Hand-rewriting these 65 to match `FeatureBuilder` carries high silent-drift risk.
+- `FeatureBuilder.build()` on 43200 rows × ~120 columns takes ~1-3s on CPU. Run at every candle close (60s budget) it fits comfortably.
+- Memory: 43200 candles × 104 float32 = 18 MB. Negligible.
+- The 30d features (dist_ath_30d, momentum_30d, price_vs_ma200m) require 43200 candles of history → a "warm" buffer must be bootstrapped from the historical parquet at boot.
+
+**New live engine architecture:**
+
 ```
-
-Pipeline: update data → apply C-funding filter → macro → train only nhits from scratch (~10-15 min).
-
-**Go/no-go gate in the logs:**
-- `Set C-funding: scartate 15 feature live-incompatibili: [...]`
-- `X=(..., 120, 104)` during `01_update` / `create_windows`
-- `val_nll` must land around **~0.28**. If ~8 → loss/config anomaly, stop.
-
-### Stage 3 — Full distill retrain (hours of GPU) ⏳ TO DO
-
-```bash
-python run_all.py --distill --skip-update --skip-macro --skip-live --no-browser
+┌──────────────────────────────────────────────────────────────────────┐
+│ LiveCandleBuffer (50,000 raw OHLCV candles, ring buffer)            │
+│  ├─ bootstrap: reads raw_candles.parquet[-50000:] at boot           │
+│  └─ append(candle): push new, pop old (FIFO maxlen)                  │
+└──────────────────────┬───────────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ FundingRatePoller (deque(maxlen=30d ÷ 8h = 90), poll every 1h)      │
+│  └─ uses quantsys.data.fetch_funding_rate                           │
+└──────────────────────┬───────────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ FeatureAssembler (called at every candle close)                     │
+│  1. df = pd.DataFrame(LiveCandleBuffer.tail(43200))                  │
+│  2. df_with_funding = merge_asof(df, funding_history)                │
+│  3. feat_df = FeatureBuilder.build(df, fit=False, normalize=True)    │
+│  4. Assert feat_df.columns == PipelineState.feature_names (HARD-FAIL)│
+│  5. Filter LIVE_DROP_FEATURES (already in build)                     │
+│  6. Extract window[-120:, :] → (120, 104) np.ndarray                 │
+└──────────────────────────────────────────────────────────────────────┘
 ```
-
-Phase 2a retrains itransformer + tcnmamba from scratch at 104 feat (nhits already done in Stage 2). Phase 2b picks the teacher. Phase 2c distills students multi-teacher. `--skip-live` prevents the old live engine (still 39-feat) from starting mid-pipeline.
-
-**Watch-points:**
-- The walkforward (02b) may still show the nhits anomaly (val~8): it's the P2.1 script-level issue, **non-blocking** for the distilled models (validation separate, `fatal=False`).
-- **Do not** run backtest/live between Stage 2 and Stage 3: the per-arch `pipeline_state` files for itransformer/tcnmamba are absent until retrain (avoids fallback to stale scalers).
-
-### Stage 4 — Live engine rewrite ⏳ TO DO
-
-Reuse `FeatureBuilder` + 30d rolling buffer + funding poll + `pipeline_state` scaler. Remove positional pad/truncate.
 
 **Files to touch:**
-- `quantsys/features/__init__.py` → canonical feature name list (single source of truth).
-- `scripts/04_live_signals.py` → split `LiveFeatureBuffer` into `HotFeatures` + `FeatureAssembler` (assemble by NAME according to `feature_names`, no pad/truncate; hard-fail on missing name).
-- `quantsys/utils` `PipelineState` → expose scaler + feature order to the live engine.
-- Funding poller reusing `quantsys/data.fetch_funding_rate`.
+- `quantsys/features/__init__.py` → expose `get_canonical_feature_names(npz_path)` as single source of truth
+- `quantsys/utils/__init__.py` `PipelineState` → add `feature_names: list[str]` attribute (persisted in pickle)
+- `scripts/04_live_signals.py` → replace `LiveFeatureBuffer` with `LiveCandleBuffer` + `FeatureAssembler` + `FundingRatePoller` integration; remove `_pad_or_truncate` from `_predict`
+- `tests/test_live_training_parity.py` → new: parity test (live output == FeatureBuilder on historical window with 1e-6 tolerance)
+- `scripts/99_replay_live_vs_training.py` → update to use the new engine
+
+### 🚧 Stage 4 implementation tracker (live — updated at every milestone)
+
+**Active session:** 2026-06-02 23:10 (parallel to the ongoing distill, GPU unaffected since live engine is CPU-only)
+
+| Step | File | Status | Resume notes |
+|---|---|---|---|
+| 4.1 — Expose canonical `feature_names` | `quantsys/features/__init__.py:13-58` | ✅ done 2026-06-02 23:25 | `get_canonical_feature_names(npz_path)` added. lru_cache(maxsize=4). Hard-fail on FileNotFoundError/KeyError. Smoke test: 104 correct names, cache active (2nd call <0.001ms), zero overlap with LIVE_DROP_FEATURES. |
+| 4.2 — `PipelineState.feature_names` | `quantsys/utils/__init__.py:152` | ⊘ skip | Verified 2026-06-02 23:20: `PipelineState.feature_cols` has 121 elements (pre-filter, includes `LIVE_DROP_FEATURES` + `target_ret`/`target_dir`), `scale_cols` has 105 (104+target_ret). Not the canonical single source of truth. Do not add a new attribute — the NPZ remains authoritative, PipelineState provides `scaler` + `clip_lo_/hi_` + `n_dynamic_features` + macro state. |
+| 4.3 — `LiveCandleBuffer` | `scripts/04_live_signals.py:97-185` | ✅ done 2026-06-02 23:18 | Smoke test: bootstrap of 50000 candles from parquet, to_dataframe(120) shape (120,9), append FIFO works, default fields=0 for missing fields. Tz-naive UTC as required by FeatureBuilder. |
+| 4.4 — `FundingRatePoller` | `scripts/04_live_signals.py` (new class) | ⏳ pending | Thread/asyncio task calling `quantsys.data.fetch_funding_rate` every 1h. Deque(maxlen=90) for 30d × 3 rates/day. Expose `to_dataframe()` for merge. **Temporary workaround**: read `data/funding_rate.parquet` from disk at boot (already works, see test 4.5). The poller is only needed for real-time refresh. |
+| 4.5 — `FeatureAssembler` | `scripts/04_live_signals.py:188-308` | ✅ done 2026-06-02 23:22 | **End-to-end OK**: compute_window(120) produces (120, 104) float32, no NaN, no Inf. Hard-fail on missing features. Tz-normalization of funding_df inside compute_window. Output stats: mean=-0.05, std=1.73, range [-24.8, +25.8] (consistent with training RobustScaler+clip). |
+| 4.6 — Swap in `LiveEngine.__init__` | `scripts/04_live_signals.py` | ⏳ pending | Remove `self.buffer = LiveFeatureBuffer(...)`, replace with the 3 new components. Update the main loop. **Do NOT delete** the legacy `LiveFeatureBuffer` class (comment "DEPRECATED — legacy 39-feature implementation"). |
+| 4.7 — Remove pad/truncate | `scripts/04_live_signals.py:982-988` | ⏳ pending | In `_predict()`, replace the `if n_live < n_model: pad ...` block with `assert window.shape[1] == n_model, "feature mismatch"`. The window already arrives at 104. |
+| 4.8 — Parity test | `tests/test_live_training_parity.py` | ✅ done 2026-06-02 23:30 | **4/4 tests pass in 12.8s**. (1) Assembler output == direct FeatureBuilder output with `max abs diff < 1e-5`, (2) canonical order stable, (3) zero overlap with LIVE_DROP_FEATURES, (4) hard-fail on funding=None. Parity mathematically verified. |
+| 4.9 — Update replay script | `scripts/99_replay_live_vs_training.py` | ✅ done 2026-06-02 23:33 | Rewritten from scratch to use `LiveCandleBuffer` + `FeatureAssembler`. Run output: **Max diff: 0.000e+00** (bit-perfect parity). Was 3 mismatches, now 0. |
+| 4.10 — Live smoke test | `python scripts/04_live_signals.py` | ⏳ pending | WS connection, full warmup, first signal within 2 min. Verify no "feature mismatch" warnings. |
+| 4.11 — Update doc `MODEL_IMPROVEMENTS.md` | this file | ⏳ pending | Move Stage 4 from pending to done, update `BLOCKER #1` header to `🟢 RESOLVED` if Stage 5 also closed |
+
+**Resume points for session reset:**
+- **If at step 4.1-4.2**: non-destructive work, can resume from anywhere
+- **If at 4.3-4.7**: `scripts/04_live_signals.py` is in an intermediate state — the legacy `LiveFeatureBuffer` class must stay in place until all new components are tested. Before committing, verify the script at least imports (`python -m py_compile`)
+- **If at 4.8-4.10**: testing-only, safe
+- **Final post-implementation verification**: `scripts/99_replay_live_vs_training.py` must produce "✅ 0 mismatches"
+
+**Current state (updated 2026-06-02 23:35):**
+- ✅ Core components implemented: `get_canonical_feature_names`, `LiveCandleBuffer`, `FeatureAssembler`
+- ✅ Parity test mathematically verified: **Max diff 0.000e+00** on 50k-candle replay
+- ✅ 4/4 unit tests in `tests/test_live_training_parity.py` pass in 12.8s
+- ✅ Script `99_replay_live_vs_training.py` updated: previously 3 mismatches → now 0
+- **NEXT STEPS (for new session):**
+  1. **4.6 — Integrate into `LiveEngine.__init__`**: replace `self.buffer = LiveFeatureBuffer(...)` with the 3 new components. The main loop in `LiveEngine._on_candle_close()` (or similarly named) calls `compute_window()` on `FeatureAssembler` instead of `get_window()` on `LiveFeatureBuffer`. Grep `self.buffer` to find all call sites.
+  2. **4.7 — Remove `_pad_or_truncate`**: in `_predict` (lines ~964-988) replace the `if n_live < n_model: pad ...` block with `assert window.shape[1] == 104, "feature mismatch"`. The window already arrives at 104 from the new path.
+  3. **4.4 — `FundingRatePoller`**: implement poller via asyncio task + `quantsys.data.fetch_funding_rate` every 1h. For now workaround: `LiveEngine.__init__` reads `data/funding_rate.parquet` at boot and passes a copy to `FeatureAssembler.compute_window()`.
+  4. **4.10 — Live smoke test**: `python scripts/04_live_signals.py` → WS connection, warmup, first signal within 2 min. Verify no "feature mismatch" warnings.
+  5. **4.11 — Final doc update**: mark `BLOCKER #1 ✅ DONE` and update TEORIA.md/AVVIO.md/README if they still mention "39 mismatched live features".
+
+**Files modified in this session (commit-ready):**
+- `quantsys/features/__init__.py` (+50 lines: `get_canonical_feature_names`)
+- `scripts/04_live_signals.py` (+~220 lines: `LiveCandleBuffer` + `FeatureAssembler`; legacy `LiveFeatureBuffer` intact with DEPRECATED tag)
+- `scripts/99_replay_live_vs_training.py` (rewritten: was pad-trunc check, now parity diff)
+- `tests/test_live_training_parity.py` (new: 4 tests, 12.8s)
+
+---
 
 **Startup seeding:** load the last 30 days of 1m klines (Binance pagination, one-shot, with local cache) or reuse `data/raw_candles.parquet`.
 
@@ -292,7 +497,7 @@ Parallel dataset/models/results: `data/mtf_dataset.npz`, `models/mtf_{arch}/`, `
 
 | Aspect | Single-tf (today) | Multi-tf | Delta |
 |---|---|---|---|
-| Storage `lstm_dataset.npz` | (107480, 120, 119) ~6.1 GB | + (107480, 24, 119)×2 | **+40%** (~8.5 GB) |
+| Storage `lstm_dataset.npz` | (107480, 120, 104) ~6.1 GB | + (107480, 24, 104)×2 | **+40%** (~8.5 GB) |
 | iTrans training 200 epochs | ~6h | ~10-14h | +60-100% |
 | Full distill pipeline | ~2-3h | **~30-50h GPU** | **10-20×** |
 | TCN+Mamba VRAM batch 64 | ~4 GB | ~5-6 GB | ⚠ tight on 8GB |
