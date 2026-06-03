@@ -117,31 +117,37 @@ class SignalGenerator:
         self.max_sigma        = max_sigma         # IT: vol massima | EN: max vol
         self.conviction_alpha = conviction_alpha  # IT: esponente smussamento | EN: smoothing exponent
 
-    # IT: Applica un offset relativo a prob_threshold in base al regime macro.
-    # EN: Applies a relative offset to prob_threshold based on the macro regime.
-    def set_regime_threshold(self, regime_name: str | None) -> None:
-        """Adatta prob_threshold al regime macro applicando un OFFSET al default.
-
-        Le soglie regime in RiskManager._REGIME_RISK_PARAMS (0.53-0.65) erano
-        calibrate in z-space pre-2026-05-23. Dopo il fix denormalizzazione il
-        default è ricalibrato in raw-space (es. 0.52). Per non rompere quel
-        baseline, applichiamo offset relativi sopra il default invece di valori
-        assoluti hardcoded.
-
-        Passa None per resettare al default.
-        """
-        if regime_name is None:
+    # IT: Adatta prob_threshold al regime corrente. Accetta:
+    #     · None  → reset al default
+    #     · float → override assoluto (clip a [0, 0.95]) — usato dai preset BTC
+    #               (RiskManager passa rm._regime_prob_threshold per i regimi
+    #               Quiet 0.54 / Trending 0.52 / Stress 0.58)
+    #     · str   → offset relativo per regimi macro legacy (expansion/.../recession)
+    # EN: Adapts prob_threshold to the current regime. Accepts:
+    #     · None  → reset to default
+    #     · float → absolute override (clipped to [0, 0.95]) — used by BTC presets
+    #               (RiskManager passes rm._regime_prob_threshold for the
+    #               Quiet 0.54 / Trending 0.52 / Stress 0.58 regimes)
+    #     · str   → relative offset for legacy macro regimes (expansion/.../recession)
+    def set_regime_threshold(self, regime) -> None:
+        """Adatta prob_threshold al regime corrente."""
+        if regime is None:
             self.prob_threshold = self._default_prob_threshold
             return
-        # IT: Offset relativi sopra il default (no valori hardcoded).
-        # EN: Relative offsets above the default (no hardcoded values).
+        # IT: Override numerico assoluto (preset BTC RegimeMarkovBTC).
+        # EN: Absolute numeric override (BTC RegimeMarkovBTC preset).
+        if isinstance(regime, (int, float)) and not isinstance(regime, bool):
+            self.prob_threshold = float(min(max(regime, 0.0), 0.95))
+            return
+        # IT: Offset relativi per nomi macro legacy.
+        # EN: Relative offsets for legacy macro names.
         regime_offsets = {
             "expansion":   0.00,   # IT: baseline | EN: baseline
             "overheating": 0.03,   # IT: +3pp più selettivo | EN: +3pp more selective
             "stagflation": 0.05,   # IT: +5pp regime difficile | EN: +5pp tough regime
             "recession":   0.03,
         }
-        off = regime_offsets.get(regime_name)
+        off = regime_offsets.get(regime)
         if off is not None:
             self.prob_threshold = min(self._default_prob_threshold + off, 0.95)
 

@@ -620,22 +620,27 @@ def main():
         #     to the historical ATR proxy (high/mid/low vol).
         if btc_regime_per_step is not None:
             rm.set_regime(int(btc_regime_per_step[i]))
+            # IT: Sync della prob_threshold del SignalGenerator col preset BTC è
+            #     INTENZIONALMENTE disattivato — empiricamente (test 2026-06-03)
+            #     filtra anche segnali validi e peggiora Sharpe da -24.7 a -47.9
+            #     sul setup iTrans-ensemble 104-feat. L'infrastruttura
+            #     (sig_gen.set_regime_threshold accetta float assoluto) resta
+            #     pronta per il giorno in cui i modelli avranno segnali abbastanza
+            #     forti da reggere il filtro per regime.
+            # EN: Sync of SignalGenerator prob_threshold with the BTC preset is
+            #     INTENTIONALLY disabled — empirically (2026-06-03 test) it filters
+            #     out valid signals and worsens Sharpe from -24.7 to -47.9 on the
+            #     iTrans-ensemble 104-feat setup. The infrastructure
+            #     (sig_gen.set_regime_threshold accepts an absolute float) stays
+            #     ready for when the models produce signals strong enough to
+            #     survive per-regime filtering.
+            # sig_gen.set_regime_threshold(rm._regime_prob_threshold)
         elif atr_i > atr_median * 1.5:
             rm.set_regime("stagflation")
         elif atr_i > atr_median:
             rm.set_regime("overheating")
         else:
             rm.set_regime("expansion")
-        # IT: NB fix #5 disabilitato — sig_gen.set_regime_threshold(...) qui faceva
-        #     crollare lo Sharpe da +18.7 a -4.4 (bisect 2026-05-24): le soglie regime
-        #     hardcoded (overheating +3pp, stagflation +5pp sul default 0.52)
-        #     filtravano troppo su ATR>mediana (50% del test set). Il metodo resta
-        #     su SignalGenerator come infrastruttura pronta, ma va calibrato prima.
-        # EN: NB fix #5 disabled — sig_gen.set_regime_threshold(...) here dropped the
-        #     Sharpe from +18.7 to -4.4 (bisect 2026-05-24): the hardcoded regime
-        #     thresholds (overheating +3pp, stagflation +5pp over the 0.52 default)
-        #     filtered too aggressively on ATR>median (50% of the test set). The method
-        #     stays on SignalGenerator as ready infrastructure but must be calibrated first.
         side, dist       = sig_gen.generate(mu, sigma, nu)
         pre_signals.append((side, dist))
 
