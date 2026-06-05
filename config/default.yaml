@@ -50,7 +50,7 @@ features:
 # IT: Configurazione modello — comune a tutte le arch; gli override stanno in arch/*.yaml.
 # EN: Model config — shared across archs; overrides live in arch/*.yaml.
 model:
-  window_size: 120          # IT: T=120 (2h di context) | EN: T=120 (2h context)
+  window_size: 120          # IT: T=120 (2h) — ROLLBACK definitivo 2026-06-04 dopo test C T=180 fallito (Sharpe -19) e Fix #3 T=240 regressivo. Dataset 525k 1m non supporta T>120 | EN: T=120 (2h) — definitive rollback 2026-06-04 after option C T=180 failed (Sharpe -19) and Fix #3 T=240 regressed. 525k 1m dataset cannot support T>120
   window_stride: 5
   lstm_hidden: 256
   gru_hidden: 128
@@ -86,8 +86,18 @@ model:
 # IT: Walk-forward validation — k-fold purgato con embargo anti-leakage.
 # EN: Walk-forward validation — purged k-fold with anti-leakage embargo.
 validation:
-  n_folds: 6                # IT: 6 fold (MODEL_IMPROVEMENTS fix #4) | EN: 6 folds (fix #4)
-  embargo_steps: 1500       # IT: 1500 step embargo tra train e val | EN: 1500-step embargo
+  # IT: n_folds=6 dichiarati → 5 fold effettivi: fold 0 viene scartato perché
+  #     train_end = fold_size − embargo è strutturalmente < fold_size (vedi
+  #     `walk_forward_folds` in quantsys/features/__init__.py:1120). Per ottenere
+  #     K fold effettivi servirebbe n_folds=K+1. Lasciato a 6 per coerenza con
+  #     MODEL_IMPROVEMENTS fix #4 (documentato comportamento).
+  # EN: n_folds=6 declared → 5 effective folds: fold 0 is skipped because
+  #     train_end = fold_size − embargo is structurally < fold_size (see
+  #     `walk_forward_folds` in quantsys/features/__init__.py:1120). To get K
+  #     effective folds you would need n_folds=K+1. Kept at 6 for consistency
+  #     with MODEL_IMPROVEMENTS fix #4 (documented behavior).
+  n_folds: 6                # IT: 6 dichiarati → 5 effettivi (vedi sopra) | EN: 6 declared → 5 effective (see above)
+  embargo_steps: 1500       # IT: 1500 step embargo (rollback T=120 — deve essere ≥ window_size+horizon = 120+30=150, ampio margine) | EN: 1500-step embargo (rollback T=120 — must be ≥ window_size+horizon = 120+30=150, wide margin)
 
 # IT: Training loop — ottimizzatore, scheduler, regolarizzazioni anti-overfit.
 # EN: Training loop — optimizer, scheduler, anti-overfit regularizers.
@@ -164,12 +174,15 @@ backtest:
   # EN: Trading thresholds in RAW SPACE (log-return fraction); denormalize happens upstream.
   # IT: NON sovrascrivere da arch/*.yaml senza ricalibrare.
   # EN: DO NOT override from arch/*.yaml without recalibrating.
-  prob_threshold: 0.52        # IT: P(side) min per aprire | EN: min P(side) to open
+  prob_threshold: 0.52        # IT: ripristino baseline post-bisect / EN: restored baseline post-bisect
   min_expected_ret: 0.0005    # IT: |μ| min raw (=5 bps) | EN: min raw |μ| (=5 bps)
   # IT: σ raw test post-denorm: p50=0.0024, p90=0.0040; max 0.015 ≈ p99.
   # EN: σ raw test post-denorm: p50=0.0024, p90=0.0040; max 0.015 ≈ p99.
   max_sigma: 0.015            # IT: σ max raw (=150 bps a h=30) | EN: max raw σ (=150 bps at h=30)
   conviction_alpha: 0.5       # IT: esponente conviction curve | EN: conviction curve exponent
+  # IT: SNR gate |μ|/σ — quick-win #2 contro entry deboli che passano min_expected_ret.
+  # EN: SNR gate |μ|/σ — quick-win #2 against weak entries that pass min_expected_ret.
+  min_snr: 0.0                # IT: bisect ripristino baseline | EN: bisect baseline restore
   output_dir: ./results/lstm
 
 # IT: Distillation — composizione ensemble eterogeneo per teacher soft-labels.
@@ -183,6 +196,17 @@ distillation:
     - itransformer
     - nhits
     - tcnmamba
+  # IT: Temperatura softmax per pesi ensemble inverse-NLL (più basso = più discriminante).
+  #     LASCIATO a 0.05 (≈ uniforme): test 2026-06-04 mostra che val_nll ANTI-correla
+  #     col backtest (TCN+Mamba ha miglior val_nll ma 2° peggior Sharpe). Sharpare a
+  #     T=0.005 PEGGIORA l'ensemble (Sharpe -20.0 → -23.4). NON abbassare finché il
+  #     distribution shift val→test non è risolto. Per live: preferire iTrans standalone (-1.77%).
+  # EN: Softmax temperature for inverse-NLL ensemble weights (lower = sharper).
+  #     KEPT at 0.05 (≈ uniform): 2026-06-04 test shows val_nll ANTI-correlates with
+  #     backtest (TCN+Mamba has best val_nll but 2nd-worst Sharpe). Sharpening to
+  #     T=0.005 WORSENS the ensemble (Sharpe -20.0 → -23.4). Do NOT lower until the
+  #     val→test distribution shift is fixed. For live: prefer iTrans standalone (-1.77%).
+  ensemble_nll_temperature: 0.05
 
 # IT: Dashboard FastAPI/Dash — host locale, timeout subprocess, gzip log streaming.
 # EN: Dashboard FastAPI/Dash — local host, subprocess timeout, gzip log streaming.

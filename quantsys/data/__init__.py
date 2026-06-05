@@ -45,16 +45,20 @@ def _raw_to_df(all_klines: list) -> pd.DataFrame:
 def _sanitize(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     """Rimuove candele corrotte e logga gap temporali anomali."""
     n_before = len(df)
-    # IT: reference = open (≈ close della candela precedente): robusto a un close corrotto e
-    #     non scarta wick legittimi di flash-crash (un 10×/0.1× è una candela rotta, non un crash reale).
-    # EN: reference = open (≈ previous candle's close): robust to a corrupted close and does not
-    #     drop legit flash-crash wicks (a 10×/0.1× move is a broken candle, not a real crash).
+    # IT: reference = open (≈ close della candela precedente): robusto a un close corrotto.
+    #     Soglia rilassata 10×→50× (audit #23, 2026-06-03): un wick 10×–50× può essere un
+    #     flash-crash legittimo (es. May-2021/COVID-2020), non necessariamente una candela rotta.
+    #     50× resta abbastanza stretto da catturare corruzioni reali (decimal shift, bad tick).
+    # EN: reference = open (≈ previous candle's close): robust to a corrupted close.
+    #     Threshold relaxed 10×→50× (audit #23, 2026-06-03): a 10×–50× wick can be a
+    #     legitimate flash-crash (e.g. May-2021/COVID-2020), not necessarily a broken candle.
+    #     50× is still tight enough to catch real corruption (decimal shift, bad tick).
     ref_ok = df["open"] > 0
     bad = (
         (df["high"]   < df["low"])
         | (df["close"] < 0) | (df["open"] < 0) | (df["volume"] < 0)
-        | (ref_ok & (df["high"] > df["open"] * 10))
-        | (ref_ok & (df["low"]  < df["open"] * 0.1))
+        | (ref_ok & (df["high"] > df["open"] * 50))
+        | (ref_ok & (df["low"]  < df["open"] * 0.02))
         | (df["close"] == 0) | (df["open"] == 0)
         | df["close"].isna()
     )

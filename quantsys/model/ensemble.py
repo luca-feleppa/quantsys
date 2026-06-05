@@ -4,12 +4,18 @@ Modalita':
   - Omogeneo (legacy): N checkpoint best_model_0..N-1.pt della stessa architettura
   - Eterogeneo (distillation): 1 checkpoint per architettura (itransformer, nhits, tcnmamba)
 """
+import json
+import math
 from pathlib import Path
 import logging
 import torch
 import torch.nn.functional as F
 
 log = logging.getLogger("quantsys.model.ensemble")
+
+# IT: Temperatura softmax per pesi inverse-NLL (più bassa = più discriminativa).
+# EN: Softmax temperature for inverse-NLL weights (lower = sharper).
+DEFAULT_NLL_TEMPERATURE = 0.05
 
 # IT: Composizione default ensemble eterogeneo (override via config.yaml).
 # EN: Default heterogeneous ensemble composition (override via config.yaml).
@@ -45,6 +51,85 @@ DEFAULT_ARCH_WEIGHTS = {
     "lstm":         0.5,
     "tft":          1.0,
 }
+
+
+# IT: Pesi data-driven via softmax(-val_nll/T) — Bayesian Model Averaging stile temperature-scaled.
+# EN: Data-driven weights via softmax(-val_nll/T) — temperature-scaled Bayesian Model Averaging.
+def _compute_dynamic_weights(arch_names: list,
+                             models_root: Path = None,
+                             temperature: float = DEFAULT_NLL_TEMPERATURE) -> dict:
+    """Calcola pesi per architettura usando inverse-NLL softmax sui best
+    val_nll letti da `models/{arch}/history.json`.
+
+    Formula (Strategia C, principled BMA):
+      w_i = exp(-(NLL_i - NLL_min) / T) / Z
+
+    La sottrazione di NLL_min serve solo a stabilità numerica (gli esponenziali
+    rimangono in [0,1]); i pesi finali sono identici a exp(-NLL_i/T)/Z.
+
+    Restituisce dict {arch: peso_raw} (NON normalizzato — la normalizzazione
+    finale resta in __init__). Se una history.json manca o è malformata,
+    quell'arch riceve peso 1.0 (fallback uniforme parziale). Se TUTTE
+    mancano, restituisce dict vuoto → caller userà DEFAULT_ARCH_WEIGHTS.
+    """
+    if models_root is None:
+        models_root = Path("models")
+
+    nlls = {}
+    for arch in arch_names:
+        hist_path = models_root / arch / "history.json"
+        if not hist_path.exists():
+            log.warning(f"_compute_dynamic_weights: {hist_path} non trovato, "
+                        f"{arch} userà peso default")
+            continue
+        try:
+            with open(hist_path, "r", encoding="utf-8") as f:
+                hist = json.load(f)
+            vnll = hist.get("val_nll", [])
+            # IT: Filtra NaN/Inf e valori non finiti (early epochs possono divergere).
+            # EN: Filter out NaN/Inf and non-finite values (early epochs may diverge).
+            vnll = [float(v) for v in vnll
+                    if v is not None and isinstance(v, (int, float))
+                    and math.isfinite(float(v))]
+            if not vnll:
+                log.warning(f"_compute_dynamic_weights: history.json di {arch} "
+                            f"non ha val_nll finiti, peso default")
+                continue
+            nlls[arch] = min(vnll)
+        except Exception as e:
+            log.warning(f"_compute_dynamic_weights: errore lettura {hist_path}: {e}")
+            continue
+
+    if not nlls:
+        # IT: Nessuna metrica disponibile → fallback a pesi default uniformi.
+        # EN: No metric available → fallback to default uniform weights.
+        return {}
+
+    # IT: Softmax stabile numericamente: sottraggo il minimo prima di esponenziare.
+    # EN: Numerically stable softmax: subtract min before exponentiating.
+    nll_min = min(nlls.values())
+    T = max(float(temperature), 1e-6)                              # IT: evita div/0 | EN: avoid div/0
+    raw = {a: math.exp(-(v - nll_min) / T) for a, v in nlls.items()}
+    Z   = sum(raw.values())
+    if Z <= 0:
+        return {}
+    weights = {a: r / Z for a, r in raw.items()}
+
+    # IT: Per archi senza history.json assegna la mediana dei pesi calcolati
+    #     (compromesso: non favorisce né penalizza l'arch sconosciuto).
+    # EN: For archs missing history.json assign the median of computed weights
+    #     (compromise: neither favors nor penalizes the unknown arch).
+    if len(weights) < len(arch_names):
+        median_w = sorted(weights.values())[len(weights) // 2]
+        for arch in arch_names:
+            weights.setdefault(arch, median_w)
+
+    log.info(
+        f"_compute_dynamic_weights (inverse-NLL softmax, T={T:g}): "
+        + ", ".join(f"{a}=val_nll {nlls.get(a, float('nan')):.4f}→w {weights[a]:.3f}"
+                    for a in arch_names)
+    )
+    return weights
 
 
 class EnsembleModel:
@@ -110,6 +195,12 @@ class EnsembleModel:
             models = [m]
             log.info(f"EnsembleModel: 1 membro caricato (fallback a {fallback})")
 
+        # IT: arch_names non passato → __init__ usa default ["model_0", ...]. Safe perché
+        #     in ensemble omogeneo (load()) tutti i membri condividono la stessa arch, e
+        #     i pesi DEFAULT_ARCH_WEIGHTS.get(a, 1.0) fallback a 1.0 → media uniforme corretta.
+        # EN: arch_names not passed → __init__ uses default ["model_0", ...]. Safe because
+        #     in homogeneous ensemble (load()) all members share the same arch, and the
+        #     DEFAULT_ARCH_WEIGHTS.get(a, 1.0) fallback to 1.0 → correct uniform average.
         return cls(models, device)
 
     # IT: Carica un checkpoint per architettura da models/{arch}/ (ensemble eterogeneo); salta le mancanti.
@@ -157,7 +248,23 @@ class EnsembleModel:
 
         log.info(f"EnsembleModel eterogeneo: {len(models)} architetture "
                  f"[{', '.join(arch_names)}]")
-        return cls(models, device, arch_names)
+
+        # IT: Strategia C — pesi data-driven via inverse-NLL softmax sui best
+        #     val_nll. Sostituisce il default uniforme (1/n) di DEFAULT_ARCH_WEIGHTS.
+        #     Temperatura opzionale da cfg["distillation"]["ensemble_nll_temperature"].
+        # EN: Strategy C — data-driven weights via inverse-NLL softmax on best
+        #     val_nll. Replaces the uniform default (1/n) from DEFAULT_ARCH_WEIGHTS.
+        #     Optional temperature via cfg["distillation"]["ensemble_nll_temperature"].
+        temperature = DEFAULT_NLL_TEMPERATURE
+        if isinstance(cfg, dict) and isinstance(cfg.get("distillation"), dict):
+            tcfg = cfg["distillation"].get("ensemble_nll_temperature")
+            if isinstance(tcfg, (int, float)) and tcfg > 0:
+                temperature = float(tcfg)
+        dyn_weights = _compute_dynamic_weights(arch_names, temperature=temperature)
+        # IT: Se vuoto → fallback a DEFAULT_ARCH_WEIGHTS (uniforme). Altrimenti override.
+        # EN: If empty → fallback to DEFAULT_ARCH_WEIGHTS (uniform). Otherwise override.
+        return cls(models, device, arch_names,
+                   arch_weights=dyn_weights if dyn_weights else None)
 
     # IT: Forward su tutti i membri + fusione con legge della varianza totale.
     # EN: Forward across all members + total-variance-law fusion.

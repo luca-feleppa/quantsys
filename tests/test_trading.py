@@ -346,17 +346,43 @@ class TestRiskManagerMaxDrawdown:
             "Il circuit breaker deve attivarsi con drawdown > max_drawdown_stop"
         )
 
-    # IT: circuit_breaker=True → open_position ritorna None.
-    # EN: circuit_breaker=True → open_position returns None.
+    # IT: circuit_breaker attivo + DD ancora oltre la soglia di recovery → open_position None.
+    # EN: active circuit_breaker + DD still above the recovery threshold → open_position None.
     def test_circuit_breaker_blocks_new_positions(self):
-        """Con circuit_breaker=True, open_position deve restituire None."""
+        """Con circuit_breaker attivo e drawdown ancora oltre la soglia di recovery
+        (70% di max_dd_stop), open_position deve restituire None."""
         rm = _default_rm(capital=10_000.0)
         rm.circuit_breaker = True
+        # IT: Stato realistico — il breaker scatta a DD>=max_dd_stop; finché il DD resta sopra
+        #     il 70% della soglia (recovery), deve restare attivo. Senza settare il DD,
+        #     `_check_circuit_recovery` (chiamato in open_position) vedrebbe DD=0 e auto-resetterebbe.
+        # EN: Realistic state — the breaker trips at DD>=max_dd_stop; while DD stays above 70% of the
+        #     threshold (recovery) it must stay active. Without setting DD, `_check_circuit_recovery`
+        #     (called inside open_position) would see DD=0 and auto-clear the breaker.
+        rm.portfolio.peak_equity = 10_000.0
+        rm.portfolio.equity      = 10_000.0 * (1.0 - rm.max_dd_stop * 1.2)
+        rm.portfolio.drawdown    = rm.max_dd_stop * 1.2   # DD oltre la soglia di recovery
         dist = _default_dist()
         pos  = rm.open_position(Side.LONG, 50_000.0, 0, 200.0, dist)
         assert pos is None, (
-            "open_position deve restituire None con circuit_breaker attivo"
+            "open_position deve restituire None con circuit_breaker attivo (DD oltre recovery)"
         )
+
+    # IT: recovery — il breaker si auto-disattiva quando il DD rientra sotto il 70% della soglia.
+    # EN: recovery — the breaker auto-clears once DD drops below 70% of the threshold.
+    def test_circuit_breaker_auto_recovers_when_drawdown_recovers(self):
+        """`_check_circuit_recovery` riattiva il trading quando DD < 70%·max_dd_stop."""
+        rm = _default_rm(capital=10_000.0)
+        rm.circuit_breaker = True
+        # IT: DD sotto la soglia di recovery (es. 5% < 70%·15%=10.5%) → recovery deve scattare.
+        # EN: DD below the recovery threshold (e.g. 5% < 70%·15%=10.5%) → recovery must fire.
+        rm.portfolio.peak_equity = 10_000.0
+        rm.portfolio.equity      = 9_500.0
+        rm.portfolio.drawdown    = 0.05
+        dist = _default_dist()
+        pos  = rm.open_position(Side.LONG, 50_000.0, 0, 200.0, dist)
+        assert rm.circuit_breaker is False, "il breaker deve auto-disattivarsi quando il DD rientra"
+        assert pos is not None, "dopo il recovery open_position deve poter aprire una posizione"
 
     # IT: drawdown = (peak - equity) / peak.
     # EN: drawdown = (peak - equity) / peak.

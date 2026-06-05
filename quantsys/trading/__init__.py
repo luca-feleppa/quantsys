@@ -110,46 +110,18 @@ class SignalGenerator:
     def __init__(self, prob_threshold: float = 0.55,
                  min_expected_ret: float = 0.0002,
                  max_sigma: float = 0.006,
-                 conviction_alpha: float = 0.5):
+                 conviction_alpha: float = 0.5,
+                 min_snr: float = 0.2):
         self.prob_threshold   = prob_threshold    # IT: soglia per aprire | EN: open threshold
-        self._default_prob_threshold = prob_threshold  # IT: backup per reset regime | EN: backup for regime reset
         self.min_expected_ret = min_expected_ret  # IT: |μ| minimo | EN: min |μ|
         self.max_sigma        = max_sigma         # IT: vol massima | EN: max vol
         self.conviction_alpha = conviction_alpha  # IT: esponente smussamento | EN: smoothing exponent
+        # IT: SNR minimo |μ|/σ — gate aggiuntivo contro entry indistinguibili dal rumore
+        # EN: Minimum SNR |μ|/σ — extra gate against entries indistinguishable from noise
+        self.min_snr          = min_snr           # IT: rapporto segnale/rumore minimo | EN: minimum signal-to-noise ratio
 
-    # IT: Adatta prob_threshold al regime corrente. Accetta:
-    #     · None  → reset al default
-    #     · float → override assoluto (clip a [0, 0.95]) — usato dai preset BTC
-    #               (RiskManager passa rm._regime_prob_threshold per i regimi
-    #               Quiet 0.54 / Trending 0.52 / Stress 0.58)
-    #     · str   → offset relativo per regimi macro legacy (expansion/.../recession)
-    # EN: Adapts prob_threshold to the current regime. Accepts:
-    #     · None  → reset to default
-    #     · float → absolute override (clipped to [0, 0.95]) — used by BTC presets
-    #               (RiskManager passes rm._regime_prob_threshold for the
-    #               Quiet 0.54 / Trending 0.52 / Stress 0.58 regimes)
-    #     · str   → relative offset for legacy macro regimes (expansion/.../recession)
-    def set_regime_threshold(self, regime) -> None:
-        """Adatta prob_threshold al regime corrente."""
-        if regime is None:
-            self.prob_threshold = self._default_prob_threshold
-            return
-        # IT: Override numerico assoluto (preset BTC RegimeMarkovBTC).
-        # EN: Absolute numeric override (BTC RegimeMarkovBTC preset).
-        if isinstance(regime, (int, float)) and not isinstance(regime, bool):
-            self.prob_threshold = float(min(max(regime, 0.0), 0.95))
-            return
-        # IT: Offset relativi per nomi macro legacy.
-        # EN: Relative offsets for legacy macro names.
-        regime_offsets = {
-            "expansion":   0.00,   # IT: baseline | EN: baseline
-            "overheating": 0.03,   # IT: +3pp più selettivo | EN: +3pp more selective
-            "stagflation": 0.05,   # IT: +5pp regime difficile | EN: +5pp tough regime
-            "recession":   0.03,
-        }
-        off = regime_offsets.get(regime)
-        if off is not None:
-            self.prob_threshold = min(self._default_prob_threshold + off, 0.95)
+    # IT: regime threshold rimosso 2026-06-03 — calibrazione da rifare post-paper-trading
+    # EN: removed — re-calibrate post paper-trading
 
     # IT: P(log_ret > 0) dalla CDF della t-Student parametrica.
     # EN: P(log_ret > 0) from the parametric t-Student CDF.
@@ -194,6 +166,11 @@ class SignalGenerator:
         # IT: No-trade zone: vol troppo alta (rischio non controllabile).
         # EN: No-trade zone: vol too high (uncontrolled risk).
         if sigma > self.max_sigma:
+            return Side.NONE, dist
+
+        # IT: filtro SNR — rifiuta segnali con rapporto |μ|/σ basso (entry indistinguibile da rumore)
+        # EN: SNR filter — reject low |μ|/σ signals (entry indistinguishable from noise)
+        if sigma > 1e-9 and abs(mu) / sigma < self.min_snr:
             return Side.NONE, dist
 
         # IT: Side decision: prob ≥ threshold AND |μ| ≥ min_expected_ret.
@@ -304,7 +281,14 @@ class RiskManager:
         self.max_risk = params["max_risk"]
         self.sl_mult  = params["sl_mult"]
         self.tp_rr    = params["tp_rr"]
-        self._regime_prob_threshold = params["prob_threshold"]
+        # IT: prob_threshold del preset NON applicato — vedi commento rimozione
+        #     set_regime_threshold (SignalGenerator), 2026-06-03. Calibrazione da
+        #     rifare post-paper-trading. Il campo resta nel preset _REGIME_RISK_PARAMS
+        #     per riferimento storico ma non viene letto.
+        # EN: preset prob_threshold NOT applied — see set_regime_threshold removal
+        #     note (SignalGenerator), 2026-06-03. Re-calibrate post paper-trading.
+        #     The field stays in _REGIME_RISK_PARAMS for historical reference but
+        #     is not consumed.
 
     # IT: Esposizione direzionale = |mean(sides)| ∈ [0,1].
     # EN: Directional exposure = |mean(sides)| ∈ [0,1].
@@ -589,12 +573,14 @@ class RiskManager:
     # EN: Opens position: 2-step (pre-size → slippage → exec_p → final size).
     def open_position(self, side, price, candle_idx, atr, dist,
                       adv_1m: float = 0.0) -> Optional[Position]:
-        # IT: Guard NaN espliciti sugli input critici → nessuna apertura su dati corrotti.
-        # EN: Explicit NaN guards on critical inputs → never open on corrupted data.
-        if any(v != v for v in (price, atr, dist.mu, dist.sigma)):
+        # IT: Guard NaN/Inf espliciti sugli input critici (math.isfinite copre entrambi)
+        #     → nessuna apertura su dati corrotti. Sostituisce il vecchio `v != v` criptico.
+        # EN: Explicit NaN/Inf guards on critical inputs (math.isfinite covers both)
+        #     → never open on corrupted data. Replaces the cryptic `v != v` check.
+        _critical = {"price": price, "atr": atr, "mu": dist.mu, "sigma": dist.sigma}
+        if not all(math.isfinite(float(v)) for v in _critical.values()):
             log.warning(
-                f"open_position: input NaN (price={price}, atr={atr}, "
-                f"mu={dist.mu}, sigma={dist.sigma}) → skip"
+                f"open_position: input NaN/Inf rejected ({_critical}) → skip"
             )
             return None
         # IT: Recovery valutato UNA volta sola (evita race tra 2 call a _size).

@@ -901,12 +901,25 @@ class FeatureBuilder:
             )
 
         # IT/EN: interazioni di feature per regime detection | feature interactions for regime detection
-        # IT: accesso colonna sicuro — su dataset corti alcune feature-base possono mancare (no KeyError).
-        # EN: safe column access — on short datasets some base features may be missing (no KeyError).
+        # IT: accesso colonna sicuro — su dataset corti alcune feature-base possono mancare.
+        #     Audit #28 (2026-06-03): aggiunto try/except esterno come safety-net contro
+        #     dtype mismatch / Series×scalar edge cases su dataset molto corti (no KeyError).
+        # EN: safe column access — on short datasets some base features may be missing.
+        #     Audit #28 (2026-06-03): added outer try/except as a safety-net against
+        #     dtype mismatch / Series×scalar edge cases on very short datasets (no KeyError).
         g = lambda c: df[c] if c in df.columns else 0.0
-        df["vol_x_pos"]          = g("vol_ratio_5_20") * g("price_pos_30d")
-        df["momentum_x_funding"] = g("momentum_30d")   * g("funding_rate_dev")
-        df["cvd_x_vol"]          = g("cvd_norm")        * g("vol_std_20")
+        try:
+            df["vol_x_pos"]          = g("vol_ratio_5_20") * g("price_pos_30d")
+            df["momentum_x_funding"] = g("momentum_30d")   * g("funding_rate_dev")
+            df["cvd_x_vol"]          = g("cvd_norm")        * g("vol_std_20")
+        except Exception as _e:
+            log.warning(
+                f"Feature interactions skipped on short dataset ({_e}) — "
+                "vol_x_pos / momentum_x_funding / cvd_x_vol set to 0.0"
+            )
+            for _c in ("vol_x_pos", "momentum_x_funding", "cvd_x_vol"):
+                if _c not in df.columns:
+                    df[_c] = 0.0
 
         exclude = {"open_time","close_time","date_utc","cum_pv","cum_vol","pv",
                    "typical_price","obv","obv_roc_20","obv_roc_60"}
@@ -1106,7 +1119,18 @@ def walk_forward_folds(
         # IT/EN: train = tutto prima del val, meno embargo | train = everything before val, minus embargo
         train_end = val_start - embargo_steps
         if train_end < fold_size:
-            log.warning(f"Fold {k}: training troppo corto ({train_end} campioni), skip.")
+            # IT: nota strutturale — fold 0 ha val_start=fold_size, quindi
+            #     train_end=fold_size-embargo<fold_size sempre che embargo>0.
+            #     Risultato atteso: n_folds dichiarati → n_folds-1 effettivi.
+            #     Per ottenere K fold effettivi usare n_folds=K+1.
+            # EN: structural note — fold 0 has val_start=fold_size, so
+            #     train_end=fold_size-embargo<fold_size whenever embargo>0.
+            #     Expected: declared n_folds → n_folds-1 effective folds.
+            #     To get K effective folds, set n_folds=K+1.
+            log.warning(
+                f"Fold {k}: training troppo corto ({train_end} < fold_size={fold_size}), "
+                f"skip. [embargo={embargo_steps}; per K fold effettivi usa n_folds=K+1]"
+            )
             continue
 
         # IT/EN: val interna = ultime val_frac del train per early stopping | inner val = last val_frac for early stopping
