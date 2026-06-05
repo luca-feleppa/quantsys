@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import os
+import sys
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -127,6 +128,18 @@ class LiveCandleBuffer:
         self._candles: deque = deque(maxlen=maxlen)
 
     # IT: Pre-carica le ultime n_last candele da raw_candles.parquet (warmup boot).
+    # IT: open_time → Timestamp tz-naive UTC. Uniforma le sorgenti: parquet (Timestamp, spesso
+    #     tz-AWARE) e WS/REST (`ts`=epoch-ms int). Senza uniformazione il buffer mischia tz-aware
+    #     e tz-naive → ValueError "Cannot mix tz-aware with tz-naive" nel build (bug smoke 2026-06-05).
+    # EN: open_time → tz-naive UTC Timestamp. Uniforms sources: parquet (Timestamp, often tz-AWARE)
+    #     and WS/REST (`ts`=epoch-ms int). Otherwise the buffer mixes tz-aware/naive → ValueError.
+    @staticmethod
+    def _norm_ts(ot) -> "pd.Timestamp":
+        if isinstance(ot, (int, float)):
+            return pd.Timestamp(ot, unit="ms")                  # epoch-ms → tz-naive UTC
+        t = pd.Timestamp(ot)
+        return t.tz_convert("UTC").tz_localize(None) if t.tz is not None else t
+
     # EN: Pre-loads the last n_last candles from raw_candles.parquet (warmup boot).
     def bootstrap_from_parquet(self, path: str, n_last: int | None = None) -> int:
         """Carica le ultime n_last candele da disco. Ritorna n caricate.
@@ -143,7 +156,7 @@ class LiveCandleBuffer:
         df = df.iloc[-n_last:]
         for _, row in df.iterrows():
             self._candles.append({
-                "open_time":           row["open_time"],
+                "open_time":           self._norm_ts(row["open_time"]),
                 "open":                float(row["open"]),
                 "high":                float(row["high"]),
                 "low":                 float(row["low"]),
@@ -165,8 +178,17 @@ class LiveCandleBuffer:
         Il WS Binance kline-1m ritorna tutti i campi richiesti; il caller deve solo
         estrarli dai k[] del payload (vedi WS handler in LiveEngine).
         """
+        # IT: Normalizza open_time a Timestamp tz-naive UTC. WS/REST passano `ts`=epoch-ms (int);
+        #     il bootstrap da parquet passa già Timestamp. Senza coercizione il buffer mischia
+        #     int e Timestamp → index `object` → `.dt` crasha nel FeatureBuilder (bug smoke 2026-06-05).
+        # EN: Normalize open_time to a tz-naive UTC Timestamp. WS/REST pass `ts`=epoch-ms (int); the
+        #     parquet bootstrap passes Timestamps. Without coercion the buffer mixes int and Timestamp
+        #     → object index → `.dt` accessor crashes in FeatureBuilder (smoke-test bug 2026-06-05).
+        _raw_ot = candle.get("open_time")
+        if _raw_ot is None:
+            _raw_ot = candle.get("ts")
         normalized = {
-            "open_time":           candle.get("open_time") or candle.get("ts"),
+            "open_time":           self._norm_ts(_raw_ot),
             "open":                float(candle["open"]),
             "high":                float(candle["high"]),
             "low":                 float(candle["low"]),
@@ -199,6 +221,12 @@ class LiveCandleBuffer:
         # EN: FeatureBuilder expects open_time as column or index; we set it as index.
         if "open_time" in df.columns:
             df = df.set_index("open_time")
+            # IT: garantisce un DatetimeIndex anche se l'index arriva object (difesa: append
+            #     coercizza già a Timestamp, ma questo protegge ogni altra fonte).
+            # EN: guarantee a DatetimeIndex even if the index arrives as object (append already
+            #     coerces to Timestamp; this protects any other source).
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
             # IT: tz-naive UTC per evitare mismatch con merge_asof di FeatureBuilder.
             # EN: tz-naive UTC to avoid merge_asof mismatch in FeatureBuilder.
             if getattr(df.index, "tz", None) is not None:
@@ -943,7 +971,37 @@ class LiveEngine:
             self.model     = None
             self.use_model = False
 
+        # IT: BLOCKER #1 Stage 4.6 — buffer DEPRECATED solo per ATR + state persistence + sanity di candles.
+        # EN: BLOCKER #1 Stage 4.6 — DEPRECATED buffer kept only for ATR + state persistence + candle sanity.
         self.buf = LiveFeatureBuffer(window=mcfg["window_size"])
+
+        # IT: BLOCKER #1 Stage 4.6 — nuovo buffer raw + assembler che usa FeatureBuilder
+        #     come single source of truth. Produce le 104 feature canoniche col medesimo
+        #     scaler del training (parity garantita da tests/test_live_training_parity.py).
+        # EN: BLOCKER #1 Stage 4.6 — new raw buffer + assembler relying on FeatureBuilder
+        #     as single source of truth. Produces the 104 canonical features with the same
+        #     training scaler (parity guaranteed by tests/test_live_training_parity.py).
+        self.candle_buffer = LiveCandleBuffer(maxlen=50_000)
+        # IT: bootstrap da raw_candles.parquet (~30d storia) per warmup feature 30d-lookback.
+        # EN: bootstrap from raw_candles.parquet (~30d history) for 30d-lookback feature warmup.
+        _raw_path = Path("data/raw_candles.parquet")
+        if _raw_path.exists():
+            self.candle_buffer.bootstrap_from_parquet(str(_raw_path), n_last=50_000)
+        else:
+            log.warning("data/raw_candles.parquet non trovato — LiveCandleBuffer parte vuoto.")
+        # IT: funding_df letto una volta al boot (workaround Stage 4.4: niente Poller).
+        # EN: funding_df read once at boot (Stage 4.4 workaround: no Poller).
+        with self._funding_lock:
+            self.funding_df = self._funding_df[0]
+        # IT: instanzia l'assembler solo se PipelineState disponibile (richiede scaler).
+        # EN: instantiate assembler only if PipelineState is available (requires scaler).
+        if self.pipeline_state is not None:
+            self.feature_assembler = FeatureAssembler(
+                self.candle_buffer, self.pipeline_state, config=cfg
+            )
+        else:
+            self.feature_assembler = None
+            log.warning("PipelineState assente — FeatureAssembler disabilitato (fallback rolling stats).")
         self.sig_gen = SignalGenerator(
             prob_threshold   = bcfg["prob_threshold"],
             min_expected_ret = bcfg["min_expected_ret"],
@@ -1177,6 +1235,9 @@ class LiveEngine:
                 }
                 if _is_valid_candle(candle):
                     self.buf.push(candle)
+                    # IT: Stage 4.6 — mirror warmup REST anche nel buffer raw.
+                    # EN: Stage 4.6 — mirror REST warmup into the raw buffer as well.
+                    self.candle_buffer.append(candle)
                     n_pushed += 1
                 else:
                     n_skipped += 1
@@ -1225,25 +1286,13 @@ class LiveEngine:
         Usa il vero snapshot macro (aggiornato ogni ora) invece di zeros.
         """
         if self.use_model and self.model is not None:
-            n_model = self.pipeline_state.model_config.get(
-                "n_features", window.shape[1]
-            ) if self.pipeline_state else window.shape[1]
-
-            n_live = window.shape[1]
-            if n_live != n_model:
-                log.warning(
-                    f"Feature mismatch: live={n_live} vs training={n_model}. "
-                    f"Il modello riceverà features paddinate/tagliate. "
-                    f"Riesegui 01_download_data.py per sincronizzare."
-                )
-
-            # IT: pad zero / truncate per compatibilita' con training shape
-            # EN: zero-pad / truncate to match training shape
-            if n_live < n_model:
-                pad    = np.zeros((window.shape[0], n_model - n_live), dtype=np.float32)
-                window = np.concatenate([window, pad], axis=1)
-            elif n_live > n_model:
-                window = window[:, :n_model]
+            # IT: Stage 4.7 — strict assertion sostituisce il vecchio _pad_or_truncate.
+            #     FeatureAssembler garantisce 104 feature canoniche o solleva.
+            # EN: Stage 4.7 — strict assertion replaces the old _pad_or_truncate shim.
+            #     FeatureAssembler guarantees 104 canonical features or raises.
+            assert window.shape[-1] == 104, (
+                f"feature mismatch: window has {window.shape[-1]} features, expected 104"
+            )
 
             xb = torch.tensor(window[None], dtype=torch.float32).to(self.device)
 
@@ -1263,8 +1312,14 @@ class LiveEngine:
                     n_macro = len(self.pipeline_state.macro_feature_cols)
                     xm = torch.zeros(1, n_macro, dtype=torch.float32).to(self.device)
 
-            # IT: MC Dropout n=10 — uncertainty epistemica con latenza accettabile
-            # EN: MC Dropout n=10 — epistemic uncertainty within latency budget
+            # IT: MC Dropout n=10 — uncertainty epistemica, SOLO per modelli singoli che la
+            #     espongono. NB: l'EnsembleModel di produzione NON ha predict_with_uncertainty
+            #     → il path live cade sempre sul ramo DETERMINISTICO sotto, bit-identico al
+            #     backtest offline (questa è la base della parity Stage 5).
+            # EN: MC Dropout n=10 — epistemic uncertainty, ONLY for single models exposing it.
+            #     The production EnsembleModel lacks predict_with_uncertainty → the live path
+            #     always takes the DETERMINISTIC branch below, bit-identical to the offline
+            #     backtest (this is what the Stage-5 parity relies on).
             if hasattr(self.model, "predict_with_uncertainty"):
                 result = self.model.predict_with_uncertainty(xb, xm, n_samples=10)
                 # IT: atleast_1d protegge da scalar 0-dim quando batch=1
@@ -1277,19 +1332,18 @@ class LiveEngine:
                 # EN: boost sigma when confidence is low — penalises uncertain signals
                 if conf < 0.3:
                     sigma *= (1.0 + (0.3 - conf) * 2)
-            else:
-                with torch.no_grad():
-                    out   = self.model(xb, xm) if xm is not None else self.model(xb)
-                    mu    = float(out[0].item())
-                    sigma = float(out[1].item())
-                    nu    = float(out[2].item())
+                # IT: denormalizza z-score -> spazio raw (centralizzato in PipelineState)
+                # EN: denormalize z-score -> raw space (centralized in PipelineState)
+                if self.pipeline_state is not None:
+                    mu, sigma = self.pipeline_state.denormalize_predictions(mu, sigma)
+                return mu, sigma, nu
 
-            # IT: denormalizza z-score -> spazio raw (logica centralizzata in PipelineState)
-            # EN: denormalize z-score -> raw space (logic centralized in PipelineState)
-            if self.pipeline_state is not None:
-                mu, sigma = self.pipeline_state.denormalize_predictions(mu, sigma)
-
-            return mu, sigma, nu
+            # IT: Path DETERMINISTICO (ensemble di produzione) — nucleo condiviso col parity
+            #     test Stage 5 (vedi _deterministic_predict) → il test esercita il path reale.
+            # EN: DETERMINISTIC path (production ensemble) — shared core with the Stage-5 parity
+            #     test (see _deterministic_predict) → the test exercises the real path.
+            return self._deterministic_predict(self.model, window, xm,
+                                               self.pipeline_state, self.device)
 
         # IT: fallback senza modello — usa rolling stats sui returns
         # EN: no-model fallback — use rolling stats on returns
@@ -1297,6 +1351,24 @@ class LiveEngine:
         mu    = float(rets[-5:].mean() * 0.5 + rets[-20:].mean() * 0.5)
         sigma = float(max(rets[-20:].std(), 1e-5))
         return mu, sigma, 5.0
+
+    # IT: Nucleo di inferenza DETERMINISTICO (no MC Dropout) + denormalizzazione z→raw.
+    #     Condiviso da _predict (ramo ensemble) e dal parity test Stage 5: garantisce che il
+    #     test eserciti ESATTAMENTE il path di produzione, senza re-implementarlo (zero drift).
+    #     window: (T,104) np.ndarray → ritorna (μ,σ,ν) in spazio RAW.
+    # EN: DETERMINISTIC inference core (no MC dropout) + z→raw denorm. Shared by _predict
+    #     (ensemble branch) and the Stage-5 parity test so the test exercises the exact
+    #     production path without re-implementing it. Returns raw (μ,σ,ν).
+    @staticmethod
+    def _deterministic_predict(model, window: np.ndarray, xm,
+                               pipeline_state, device) -> tuple[float, float, float]:
+        xb = torch.tensor(window[None], dtype=torch.float32).to(device)
+        with torch.no_grad():
+            out = model(xb, xm) if xm is not None else model(xb)
+        mu, sigma, nu = float(out[0].item()), float(out[1].item()), float(out[2].item())
+        if pipeline_state is not None:
+            mu, sigma = pipeline_state.denormalize_predictions(mu, sigma)
+        return mu, sigma, nu
 
     # IT: Monte Carlo forecast con dinamica GJR-GARCH (chiamato ogni N candele)
     # EN: Monte Carlo forecast with GJR-GARCH dynamics (called every N candles)
@@ -1361,12 +1433,30 @@ class LiveEngine:
         if self.rm.position:
             self.rm.update_trailing(price, atr)
 
-        # IT: skip se buffer ancora insufficiente per features stabili
-        # EN: skip if buffer is not yet sufficient for stable features
-        window = self.buf.get_window()
-        if window is None:
-            log.debug(f"Buffer insufficiente ({len(self.buf.candles)} candele)")
-            return
+        # IT: Stage 4.6 — calcola finestra via FeatureAssembler (parity col training).
+        #     funding_df letto dallo stato cross-thread (aggiornato ogni 8h dal daemon).
+        # EN: Stage 4.6 — compute window via FeatureAssembler (training parity).
+        #     funding_df read from the cross-thread state (refreshed every 8h by daemon).
+        if self.feature_assembler is None:
+            # IT: fallback rolling stats (no PipelineState/modello) -> path legacy.
+            # EN: fallback rolling stats (no PipelineState/model) -> legacy path.
+            window = self.buf.get_window()
+            if window is None:
+                log.debug(f"Buffer insufficiente ({len(self.buf.candles)} candele)")
+                return
+        else:
+            try:
+                with self._funding_lock:
+                    _fd = self._funding_df[0]
+                window = self.feature_assembler.compute_window(
+                    window_size=self.cfg["model"]["window_size"],
+                    funding_df=_fd,
+                )
+            except RuntimeError as e:
+                # IT: warmup ancora incompleto (buffer/feature 30d) -> skip silenzioso.
+                # EN: warmup still incomplete (buffer/30d features) -> silent skip.
+                log.debug(f"FeatureAssembler non pronto: {e}")
+                return
 
         # IT: inferenza modello + generazione segnale BUY/SELL/HOLD
         # EN: model inference + BUY/SELL/HOLD signal generation
@@ -1508,6 +1598,9 @@ class LiveEngine:
                         # EN: CLOSED candle -> push buffer + emit signal
                         self._pending_candle = None
                         self.buf.push(candle)
+                        # IT: Stage 4.6 — mirror append nel nuovo LiveCandleBuffer (raw OHLCV).
+                        # EN: Stage 4.6 — mirror append to the new LiveCandleBuffer (raw OHLCV).
+                        self.candle_buffer.append(candle)
                         self.on_closed_candle(candle)
                     else:
                         # IT: candela in formazione -> tenuta separata dal buffer chiuse
@@ -1623,6 +1716,16 @@ class LiveEngine:
 # IT: entry point — config + SN policy + event loop dedicato
 # EN: entry point — config + SN policy + dedicated event loop
 def main():
+    # IT: Forza UTF-8 su stdout/stderr — evita UnicodeEncodeError (cp1252 di Windows) sui banner
+    #     con box-drawing/emoji quando l'output è rediretto su file/pipe. Bug trovato dallo smoke
+    #     test 2026-06-05 (crash in run() riga ~1628). Stesso pattern di 99_replay_live_vs_training.
+    # EN: Force UTF-8 on stdout/stderr — avoids Windows cp1252 UnicodeEncodeError on Unicode
+    #     banners when output is redirected (found by the 2026-06-05 smoke test).
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     cfg    = load_config("config/default.yaml")
     # IT: SN-policy deve matchare quella di training (coerenza load_model)
     # EN: SN policy must match the training one (load_model consistency)

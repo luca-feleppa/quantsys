@@ -255,15 +255,14 @@ In live mode the system (`LiveEngine` in `scripts/04_live_signals.py`) connects 
 
 Every hour, the macro variables snapshot is refreshed in the background to keep the macro context up to date without blocking the live feed.
 
-### ⚠ Current status: BLOCKER #1 (paper-only, not operational)
+### ✅ Current status: BLOCKER #1 RESOLVED (2026-06-05) — live↔training parity closed
 
-The `LiveEngine` has a known mismatch with the trained model:
-- **Live** produces **39 features** via `LiveFeatureBuffer._compute_features` (rebuilt by hand to avoid the heavy warmup of the training pipeline).
-- **Training** trained the model on **104 features** (post C-funding filter) with a fixed order and a global RobustScaler.
+The live production path is now aligned to training **by-design** (single source of truth `FeatureBuilder`):
+`LiveCandleBuffer`(50k raw-OHLCV ring) → `FeatureAssembler` → `FeatureBuilder.build(fit=False, normalize=True)` (**104 canonical features**, same order, global scaler from `PipelineState`) → `LiveEngine._deterministic_predict` (deterministic forward + `denormalize_predictions`) → `SignalGenerator`. The production `EnsembleModel` lacks `predict_with_uncertainty`, so the MC-dropout branch never fires live and the forward is bit-identical to the backtest.
 
-Three overlapping mismatches: (1) count 39 vs 104, (2) order/semantics (live starts at `log_ret`, training at `open`), (3) normalization (live uses per-window median+IQR, training uses the `pipeline_state`'s global RobustScaler). Stage 2 (104-feat dataset regeneration) and Stage 3 (distill retrain) were completed on 2026-06-02; **Stage 4** (live engine rewrite using `FeatureBuilder` + 30d buffer + funding poll) and **Stage 5** (parity test) remain to fully close BLOCKER #1.
+**Validation (both go/no-go gates green):** Gate 1 FEATURE parity (`tests/test_live_training_parity.py` + `scripts/99_replay_live_vs_training.py`) → max|Δ|=0; Gate 2 SIGNAL parity → Δμ=Δσ=0, identical side. The old `LiveFeatureBuffer` (39 features) is deprecated, kept only as an ATR/sanity helper.
 
-`scripts/99_replay_live_vs_training.py` verifies this programmatically. Paper-trading signals do **NOT** reflect the backtest until the feature space is aligned (decision 2026-05-28: option C-minimal or C-funding documented in `MODEL_IMPROVEMENTS.md` §"Allineamento feature live↔training"). Mandatory validation before operational live: parity test (live vector == FeatureBuilder on a historical window) + replay backtest.
+Operational remainder (not code): real Binance WS smoke test + paper-trading start. ⚠ Paper signals now reflect the backtest, but the backtest is negative OOS (threshold/rank edge exhausted): paper-trading is for accumulating real trades, with no a-priori expectation of Sharpe>0.
 
 ### 24/7 operational robustness
 

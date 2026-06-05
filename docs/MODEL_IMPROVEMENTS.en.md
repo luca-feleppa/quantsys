@@ -154,9 +154,9 @@ Replace the Markov-Switching on macro PC1 with a detector that observes **BTC mi
 
 ---
 
-## 🔴 BLOCKER #1 — Live↔training feature alignment (Stage 2-5)
+## ✅ BLOCKER #1 — Live↔training feature alignment (Stage 2-5) — RESOLVED 2026-06-05
 
-**Status:** Stage 1 done (code), Stages 2-3 done, Stage 4 in progress, Stage 5 pending. Paper-trading **cannot** start until the mismatch is fully resolved.
+**Status:** Stages 1-5 **DONE**. Code parity (feature **and** signal) verified bit-perfect — see "Stage 5" below. Only operational remainder: real WS smoke test + paper-trading start. ⚠ Paper signals now reflect the backtest, but the backtest is negative OOS (threshold/rank edge exhausted): paper-trading is to accumulate real OOS trades, with no a-priori expectation of Sharpe>0.
 
 **Problem (verified 2026-06-02 with `scripts/99_replay_live_vs_training.py`):** the backtest uses the C-funding-filtered `FeatureBuilder` (**104 features** post Stage 2); the live engine (`LiveFeatureBuffer._compute_features` in `scripts/04_live_signals.py`) builds **only 39** by hand in a different order, with per-window median/IQR normalization (not the `pipeline_state`'s `RobustScaler`), and `_predict` does blind positional pad/truncate. Three overlapping mismatches (count + order + scale) → live inputs effectively uncorrelated from training. **Current paper-trading signals do NOT reflect the backtest.**
 
@@ -277,11 +277,13 @@ Executed in the same `run_all.py --distill` of 2026-06-02: all 3 models (iTransf
 
 **Startup seeding:** load the last 30 days of 1m klines (Binance pagination, one-shot, with local cache) or reuse `data/raw_candles.parquet`.
 
-### Stage 5 — Parity test + replay backtest (go/no-go gate) ⏳ TO DO
+### Stage 5 — Parity test + replay backtest (go/no-go gate) ✅ DONE 2026-06-05
 
-1. **Parity test:** live vector vs `FeatureBuilder` on the same historical window, `max|Δ| < tol` per feature.
-2. **Replay backtest:** historical candles through the live pipeline → signals/PnL must match the offline backtest.
-3. Only after both gates green: **start paper-trading** (2-4 weeks with live Sharpe > 0.5 before considering mainnet).
+1. **Gate 1 — FEATURE parity:** live vector (`FeatureAssembler`) vs direct `FeatureBuilder` on the same historical window → **max|Δ| = 0.000e+00** (`tests/test_live_training_parity.py::test_assembler_matches_direct_featurebuilder` + `scripts/99_replay_live_vs_training.py`).
+2. **Gate 2 — SIGNAL parity (replay):** both feature routes through the production deterministic inference core (`LiveEngine._deterministic_predict` — the `EnsembleModel` lacks `predict_with_uncertainty`, so MC-dropout never fires live) + `SignalGenerator` → **Δμ=0, Δσ=0, identical side** (`test_signal_parity_live_vs_offline` + Gate 2 section of the replay script). Parity suite 5/5, recent-fixes suite 16/16.
+3. **Operational remainder (not code):** real Binance WS smoke test (Stage 4.10) + paper-trading to accumulate OOS trades.
+
+> Note: Stages 4.6/4.7 (LiveEngine.__init__ integration + `_pad_or_truncate` removal) were **already in the code** (tracker stale); confirmed while closing Stage 5. New refactor: `LiveEngine._deterministic_predict` as the shared core between live and the parity test (zero drift).
 
 ---
 

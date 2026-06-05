@@ -6,6 +6,51 @@ Tutto il "già fatto" è stato spostato in `CHANGELOG.md` e nelle note `~/.claud
 
 ---
 
+## 🔴 RESUME 2026-06-04 — Fix #3 (T=240) regressione confermata: scegliere tra 4 opzioni
+
+**Stato pipeline al termine sessione 2026-06-03 → 2026-06-04 ~01:00:**
+
+- ✅ **Stage 4.6 + 4.7 (live engine)** completati: `LiveCandleBuffer + FeatureAssembler` wired in `LiveEngine.__init__` (`scripts/04_live_signals.py:946-975`), `_pad_or_truncate` rimosso da `_predict()` (`:1259-1268`), 4/4 parity test ancora verdi. **BLOCKER #1 Stage 4 sostanzialmente chiuso** (pending solo 4.10 smoke test live + 4.11 doc closure).
+- ✅ **Quick Wins SNR + prob_threshold testati e ROLLED BACK**: bisection mostra che alzare prob_threshold 0.52→0.58 azzera trade (μ_pred troppo piccoli), 0.53 peggiora (WR 33%→18%), SNR≥0.10 filtra solo i loser (Sharpe -277). Config ripristinata a `prob_threshold: 0.52`, `min_snr: 0.0`. Wiring `min_snr` in `scripts/03_backtest.py:542-550` MANTENUTO per future calibrazioni.
+- ✅ **Option B fresh data retrain** (~40 min): Sharpe -3.37%→**-1.81%**, Spearman walkforward +0.040→**+0.065** (+62%). Beneficio reale ma WHR ancora 0.517 < 0.53.
+- 🔴 **Fix #3 (T=240) applicato + retrain completo + walkforward** = REGRESSIONE:
+  - Walkforward Spearman crollato **+0.065 → +0.034** (-48%)
+  - WHR mean **0.504 ± 0.011** (sotto random 0.50, era 0.517)
+  - Backtest single-arch (ensemble eterogeneo rotto per shape mismatch N-HiTS+TCN+Mamba ancora a T=120): solo 3 trade, statisticamente non significativo
+  - Smoke test 1-ensemble aveva anticipato: test DA 0.497, Spearman +0.0016 (p=0.870)
+  - **Causa diagnosticata**: T=240 collassa la varianza di μ_pred → modello troppo conservativo (3 trade vs 12), dataset 525k 1m probabilmente non ha abbastanza profondità per i parametri aggiuntivi (overfitting al noise temporale, plateau letteratura 192-384 non raggiunto su BTC 1m con questa quantità di dati)
+
+**Stato config attuale** (`config/default.yaml`): `window_size: 240`, `embargo_steps: 3000`, `n_folds: 6` (MA il walkforward script gira solo 5 fold — bug da investigare). Dataset npz a T=240 (10 GB). Modelli iTrans a T=240 sovrascritti su T=120 precedenti (no backup).
+
+**Decisione da prendere domani — scegliere tra:**
+
+| # | Opzione | Effort | Probabilità successo | Pro/Contro |
+|---|---|---|---|---|
+| **A** | **Rollback completo a T=120** (revert config + rebuild npz + retrain iTrans/N-HiTS/TCN+Mamba) | ~40 min iTrans + 50-70 min full distill se vuoi anche N-HiTS+TCN+Mamba | ✅ alta — ripristina baseline noto (Sharpe -1.81% post-Option B) | Sicuro ma "torna indietro"; nessun guadagno di edge ulteriore |
+| **B** | **Mantieni T=240 e retrain anche N-HiTS + TCN+Mamba a T=240** per riattivare ensemble eterogeneo + distillation | ~2-3h (3 archs × ~40 min ciascuno + distillation) | media — distillation potrebbe stabilizzare il segnale collassato di iTrans T=240 | Costoso ma scopre se l'ensemble è la chiave di T=240; rischio: regressione conferma anche con ensemble |
+| **C** | **T intermedio = 180** (config window_size: 180, embargo_steps: 2400) | ~50 min retrain singolo arch | bassa — la cliff Spearman 0.065→0.034 a T=240 è netta, 180 è geometricamente vicino | Possibile sweet spot ma improbabile dato il pattern |
+| **D** | **Investigare bug `n_folds` config not respected** + rollback T=120 + Step B3 (retrain 119-feat reference) | ~30 min audit + 40 min rollback + 2h Step B3 | n/a — diagnostico | Non migliora edge direttamente ma chiude due loose ends (Fix #4 wiring + B1/B2/B3 verdict su distribution shift) |
+
+**Raccomandazione preferita: A (rollback) + parallel D Step B3** se vuoi sfruttare le 2h notturne. Il rollback A è veloce e ripristina lo stato funzionante; D Step B3 risponde alla domanda di fondo "il distribution shift val→test è transitorio (mercato) o strutturale (C-funding)?", informando la prossima sessione.
+
+**Punti di ripresa per la prossima sessione:**
+1. **Prima cosa**: scegliere fra A/B/C/D
+2. **Se A**: editare `config/default.yaml` lines 53,89,90 (window_size 240→120, embargo_steps 3000→1500; n_folds tienilo a 6 — è Fix #4 valido) → `python scripts/01_download_data.py` → `python run_all.py --arch itransformer --skip-update --skip-macro --skip-walkfwd --no-browser` → walkforward + backtest comparativi con baseline post-Option B (Sharpe -1.81%, Spearman wf +0.065)
+3. **Se B**: due retrain aggiuntivi `$env:QUANTSYS_ARCH="nhits"; python run_all.py ...` e `$env:QUANTSYS_ARCH="tcnmamba"; python run_all.py ...` poi backtest senza `QUANTSYS_BACKTEST_SINGLE_ARCH=1`
+4. **Se D**: audit `scripts/02b_walkforward_validate.py` per `n_folds` hardcoded vs config-read; poi rollback A; poi Step B3 (richiede prima ricostruire 119-feat dataset, vedi Step B feasibility report nella sessione precedente)
+5. **In tutti i casi**: completare Stage 4.10 smoke test live (`python scripts/04_live_signals.py`) e Stage 4.11 doc closure (marcare BLOCKER #1 ✅ DONE in questo file e aggiornare TEORIA.md/AVVIO.md se citano "39 feature live mismatched")
+
+**Files modificati nella sessione non committati** (verifica con `git status`):
+- `quantsys/trading/__init__.py` (5 audit fixes: #21 NaN guard, #5 dead code regime threshold rimosso, SNR filter aggiunto a SignalGenerator)
+- `quantsys/data/__init__.py` (audit #23: threshold flash crash 10×→50×)
+- `quantsys/model/ensemble.py` (audit #27: commento documentale)
+- `quantsys/features/__init__.py` (audit #28: try/except vol_x_pos)
+- `scripts/03_backtest.py` (#5 dead code rimosso + wiring `min_snr` da config)
+- `scripts/04_live_signals.py` (Stage 4.6+4.7 LiveEngine wiring + assert shape 104)
+- `config/default.yaml` (window_size 240, embargo_steps 3000, n_folds 6, prob_threshold 0.52, min_snr 0.0)
+
+---
+
 ## 🔴 NEXT — Diagnostica backtest negativo post-distill 2026-06-03
 
 **Contesto:** il `run_all.py --distill` terminato alle 00:11 del 2026-06-03 ha prodotto backtest preoccupanti:
@@ -154,9 +199,9 @@ Sostituire il Markov-Switching su PC1 delle macro con un detector che osservi **
 
 ---
 
-## 🔴 BLOCKER #1 — Allineamento feature live↔training (Stage 2-5)
+## ✅ BLOCKER #1 — Allineamento feature live↔training (Stage 2-5) — RISOLTO 2026-06-05
 
-**Stato:** Stage 1 done (codice), Stage 2-5 pending. Il paper-trading **non** è eseguibile finché il mismatch non è risolto.
+**Stato:** Stage 1-5 **DONE**. Parity di codice (feature **e** segnale) verificata bit-perfect — vedi "Stage 5" in fondo. Residuo solo OPERATIVO: smoke test WS reale + avvio paper-trading. ⚠ I segnali paper ora riflettono il backtest, ma il backtest è negativo OOS (edge soglia/rank esaurito): il paper-trading serve ad accumulare trade reali, senza aspettativa di Sharpe>0 a priori.
 
 **Problema (verificato 2026-06-02 con `scripts/99_replay_live_vs_training.py`):** il backtest usa il `FeatureBuilder` filtrato C-funding (**104 feature** post Stage 2); il live engine (`LiveFeatureBuffer._compute_features` in `scripts/04_live_signals.py`) ne costruisce a mano **solo 39** in ordine diverso, con normalizzazione median/IQR per-window (non il `RobustScaler` del `pipeline_state`), e `_predict` fa pad/truncate posizionale cieco. Tre disallineamenti sovrapposti (conteggio + ordine + scala) → input live di fatto scorrelati dal training. **I segnali del paper-trading attuale NON riflettono il backtest.**
 
@@ -277,11 +322,13 @@ Eseguito nello stesso `run_all.py --distill` del 2026-06-02: tutti e 3 i modelli
 
 **Seeding all'avvio:** caricare gli ultimi 30g di klines 1m (paginazione Binance, una-tantum, cache locale) o riusare `data/raw_candles.parquet`.
 
-### Stage 5 — Parity test + replay backtest (gate go/no-go) ⏳ DA FARE
+### Stage 5 — Parity test + replay backtest (gate go/no-go) ✅ DONE 2026-06-05
 
-1. **Parity test:** vettore live vs `FeatureBuilder` sulla stessa finestra storica, `max|Δ| < tol` per ogni feature.
-2. **Replay backtest:** candele storiche attraverso la pipeline live → segnali/PnL devono combaciare col backtest offline.
-3. Solo dopo entrambi i gate verdi: **avviare paper-trading** (2-4 settimane Sharpe live > 0.5 prima di considerare il mainnet).
+1. **Gate 1 — Parity FEATURE:** vettore live (`FeatureAssembler`) vs `FeatureBuilder` diretto sulla stessa finestra storica → **max|Δ| = 0.000e+00** (`tests/test_live_training_parity.py::test_assembler_matches_direct_featurebuilder` + `scripts/99_replay_live_vs_training.py`).
+2. **Gate 2 — Parity SEGNALE (replay):** gli stessi due percorsi feature attraversano il nucleo di inferenza deterministico di produzione (`LiveEngine._deterministic_predict` — l'`EnsembleModel` non espone `predict_with_uncertainty`, quindi MC-dropout non scatta in live) + `SignalGenerator` → **Δμ=0, Δσ=0, side identico** (`test_signal_parity_live_vs_offline` + sezione Gate 2 dello script di replay). Suite parity 5/5, suite recent-fixes 16/16.
+3. **Residuo operativo (non di codice):** smoke test WS Binance reale (Stage 4.10) + paper-trading per accumulare trade OOS.
+
+> Nota: Stage 4.6/4.7 (integrazione `LiveEngine.__init__` + rimozione `_pad_or_truncate`) risultavano **già nel codice** (tracker disallineato); confermati durante la chiusura di Stage 5. Refactor introdotto: `LiveEngine._deterministic_predict` come nucleo condiviso live↔parity-test (zero drift).
 
 ---
 

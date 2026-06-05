@@ -245,29 +245,35 @@ class TestLiveFeatureBufferGolden:
 
 class TestBlocker1Documentation:
     """
-    REGRESSION TEST per BLOCKER #1: documenta il mismatch live-training.
-    Se uno di questi test va GREEN (mismatch risolto), va aggiornato come
-    indicatore di fix completato.
+    IT: BLOCKER #1 RISOLTO (2026-06-05, Stage 5). Il path di produzione live è ora
+        `FeatureAssembler` → `FeatureBuilder.build()` (104 feature canoniche, stesso scaler),
+        con parity feature E segnale verificata in `tests/test_live_training_parity.py`
+        (Gate 1 + Gate 2, bit-perfect). Il vecchio `LiveFeatureBuffer` resta SOLO come
+        utility ATR/sanity, NON è più il percorso di feature: questi test lo documentano.
+    EN: BLOCKER #1 RESOLVED (2026-06-05, Stage 5). Production live path is now
+        FeatureAssembler → FeatureBuilder.build() (104 canonical features, same scaler), with
+        feature AND signal parity verified in tests/test_live_training_parity.py. The old
+        LiveFeatureBuffer survives ONLY as an ATR/sanity helper, no longer the feature path.
     """
 
-    def test_count_mismatch_is_still_present(self, live_buffer_cls, training_feature_names):
-        # IT: gate che documenta lo stato attuale del bug. Se il live arriva
-        #     a 119 feature, il fix di BLOCKER #1 e' completo e questo test
-        #     va aggiornato a `==`.
-        # EN: gate documenting current bug state. When live reaches 119 features,
-        #     the fix is complete and this test should be updated to `==`.
+    def test_legacy_buffer_is_deprecated_not_feature_path(self, live_buffer_cls, training_feature_names):
+        # IT: Il buffer LEGACY produce ancora un set ridotto (≠104): è deprecato e NON usato
+        #     per le feature. La parità di produzione è coperta da test_live_training_parity.py.
+        # EN: The LEGACY buffer still yields a reduced set (≠104): deprecated, NOT the feature
+        #     path. Production parity is covered by test_live_training_parity.py.
         buf = live_buffer_cls(window=60)
         for c in _synthetic_candles(200):
             buf.push(c)
         win = buf.get_window()
         assert win.shape[1] != len(training_feature_names), (
-            f"BLOCKER #1 risolto? live={win.shape[1]} == training={len(training_feature_names)}. "
-            f"Aggiornare il test e rimuovere la memoria live-feature-mismatch."
+            f"Il buffer legacy ora produce {win.shape[1]} == {len(training_feature_names)} feature: "
+            f"se è diventato il path di produzione, consolidare su FeatureAssembler e rimuovere il legacy."
         )
 
-    def test_training_includes_raw_ohlcv_unsupported_by_live(self, live_buffer_cls, training_feature_names):
-        # IT: il training si aspetta open/high/low/close/volume come prime feature,
-        #     il live non le include
-        # EN: training expects raw OHLCV as first features, live does not include them
+    def test_training_canonical_starts_with_raw_ohlcv(self, training_feature_names):
+        # IT: Le 104 canoniche iniziano con open/high/low/close/volume — ora FORNITE in live dal
+        #     FeatureAssembler (a differenza del legacy buffer). Sanity sull'ordine canonico.
+        # EN: The 104 canonical features start with raw OHLCV — now SUPPLIED live by the
+        #     FeatureAssembler (unlike the legacy buffer). Canonical-order sanity check.
         first_five = set(training_feature_names[:5])
         assert {"open", "high", "low", "close", "volume"}.issubset(first_five)

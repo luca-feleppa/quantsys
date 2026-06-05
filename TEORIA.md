@@ -104,7 +104,9 @@ Il `RiskManager` continua ad applicare profili di rischio per regime (§10): ora
 
 Le feature vengono organizzate in **finestre temporali**: ogni esempio è una matrice `120×104` (ultimi 120 minuti = 2 ore di context, 104 feature). Il target è il log-return cumulativo sulle prossime 30 candele.
 
-Sul dataset corrente (525k candele, 1 anno) con `window_stride: 5` si ottengono **~80.000 esempi train + ~10.000 val + ~10.000 test** (conteggio esatto sul npz 2026-06-02: 80390 / 10049 / 10049).
+Sul dataset corrente (549k candele) con `window_stride: 5` si ottengono **~80.000 esempi train + ~10.000 val + ~10.000 test** (conteggio sul npz 2026-06-04: 80824 / 10103 / 10104).
+
+**Perché T=120 e non di più.** La finestra di 120 minuti è uno sweet spot empirico verificato il 2026-06-04: esperimenti a **T=180 e T=240 hanno prodotto regressioni** (degrado monotono di Spearman walkforward e backtest, μ_pred collassata, sotto-random WHR). Il dataset 1m ~525k non ha profondità informativa per sostenere context più lunghi (over-fitting al noise temporale; il plateau di letteratura 192-384 vale su dataset multi-anno multi-asset, non su BTC singolo 1 anno). **Non aumentare `model.window_size` finché il dataset resta ~525k.**
 
 Normalizzazione con **RobustScaler globale multi-colonna**, meno sensibile a spike di prezzo rispetto allo standard scaler. I parametri sono persistiti in `PipelineState` (`models/{arch}/pipeline_state.pkl`) per riapplicare la stessa trasformazione in inferenza.
 
@@ -255,15 +257,14 @@ In modalità live il sistema (`LiveEngine` in `scripts/04_live_signals.py`) si c
 
 Ogni ora aggiorna in background lo snapshot delle macro per mantenere il contesto aggiornato senza bloccare il feed.
 
-### ⚠ Stato attuale: BLOCKER #1 (paper-only, non operativo)
+### ✅ Stato attuale: BLOCKER #1 RISOLTO (2026-06-05) — parity live↔training chiusa
 
-Il `LiveEngine` ha un mismatch noto con il modello addestrato:
-- **Live** produce **39 feature** via `LiveFeatureBuffer._compute_features` (ricostruite a mano per evitare il warmup pesante della pipeline training).
-- **Training** ha addestrato il modello su **104 feature** (post filtro C-funding) con ordine fisso e RobustScaler globale.
+Il path di produzione live è ora allineato al training **by-design** (single source of truth `FeatureBuilder`):
+`LiveCandleBuffer`(ring 50k OHLCV grezze) → `FeatureAssembler` → `FeatureBuilder.build(fit=False, normalize=True)` (**104 feature canoniche**, stesso ordine, scaler globale dal `PipelineState`) → `LiveEngine._deterministic_predict` (forward deterministico + `denormalize_predictions`) → `SignalGenerator`. L'`EnsembleModel` di produzione non espone `predict_with_uncertainty`, quindi il ramo MC-dropout non scatta in live e il forward è bit-identico al backtest.
 
-Tre disallineamenti sovrapposti: (1) conteggio 39 vs 104, (2) ordine/semantica (live parte da `log_ret`, training da `open`), (3) normalizzazione (live usa median+IQR per-window, training usa RobustScaler globale del `pipeline_state`). Lo Stage 2 (rigenerazione dataset a 104 feat) e Stage 3 (retrain distill) sono completati il 2026-06-02; restano **Stage 4** (riscrittura live engine via `FeatureBuilder` + buffer 30d + funding poll) e **Stage 5** (parity test) per chiudere completamente BLOCKER #1.
+**Validazione (gate go/no-go entrambi verdi):** Gate 1 parity FEATURE (`tests/test_live_training_parity.py` + `scripts/99_replay_live_vs_training.py`) → max|Δ|=0; Gate 2 parity SEGNALE → Δμ=Δσ=0, side identico. Il vecchio `LiveFeatureBuffer` (39 feature) è deprecato, resta solo come utility ATR/sanity.
 
-`scripts/99_replay_live_vs_training.py` esegue la verifica programmaticamente. I segnali del paper-trading **NON** riflettono il backtest finché il feature space non viene allineato (decisione 2026-05-28: opzione C-minimal o C-funding documentata in `MODEL_IMPROVEMENTS.md` §"Allineamento feature live↔training"). Validazione obbligatoria prima del live operativo: parity test (vettore live == FeatureBuilder su finestra storica) + replay backtest.
+Residuo **operativo** (non di codice): smoke test WS Binance reale + avvio paper-trading. ⚠ I segnali paper ora riflettono il backtest, ma il backtest è negativo OOS (edge a soglia/rank esaurito): il paper-trading serve ad accumulare trade reali, senza aspettativa di Sharpe>0 a priori.
 
 ### Robustezza operativa 24/7
 

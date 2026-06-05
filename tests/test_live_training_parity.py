@@ -48,11 +48,13 @@ def env():
     return {"raw": raw, "ps": ps_path, "funding": funding, "npz": npz}
 
 
-# IT: Test 1 — la window prodotta dal FeatureAssembler matcha la stessa
-#     window prodotta direttamente da FeatureBuilder con stesso scaler.
-# EN: Test 1 — the window produced by FeatureAssembler matches the same
-#     window produced directly by FeatureBuilder with the same scaler.
-def test_assembler_matches_direct_featurebuilder(env):
+# IT: Fixture condivisa — costruisce UNA sola volta win_a (assembler live) e win_b
+#     (FeatureBuilder diretto, equivalente training) sulla stessa finestra storica.
+#     Riusata da Gate 1 (parity feature) e Gate 2 (parity segnale) per non ricostruire le feature.
+# EN: Shared fixture — builds win_a (live assembler) and win_b (direct FeatureBuilder, training
+#     equivalent) ONCE on the same historical window. Reused by Gate 1 (feature) and Gate 2 (signal).
+@pytest.fixture(scope="module")
+def parity_windows(env):
     from quantsys.features import FeatureBuilder, get_canonical_feature_names
     from quantsys.utils import PipelineState, load_config
 
@@ -71,10 +73,6 @@ def test_assembler_matches_direct_featurebuilder(env):
     # EN: Path A — FeatureAssembler (new live component).
     asm = FeatureAssembler(buf, ps)
     win_a = asm.compute_window(window_size=120, funding_df=funding_df)
-    assert win_a.shape == (120, 104)
-    assert win_a.dtype == np.float32
-    assert not np.isnan(win_a).any()
-    assert not np.isinf(win_a).any()
 
     # IT: Path B — FeatureBuilder diretto (equivalente training, con scaler iniettato).
     # EN: Path B — direct FeatureBuilder (training equivalent, scaler injected).
@@ -111,7 +109,17 @@ def test_assembler_matches_direct_featurebuilder(env):
     canonical = get_canonical_feature_names()
     feat_df = feat_df[list(canonical)].dropna()
     win_b = feat_df.iloc[-120:].values.astype(np.float32)
+    return {"win_a": win_a, "win_b": win_b, "ps": ps, "cfg": cfg, "live_mod": live_mod}
 
+
+# IT: Test 1 (Gate 1) — la window del FeatureAssembler matcha quella del FeatureBuilder diretto.
+# EN: Test 1 (Gate 1) — the FeatureAssembler window matches the direct FeatureBuilder window.
+def test_assembler_matches_direct_featurebuilder(parity_windows):
+    win_a, win_b = parity_windows["win_a"], parity_windows["win_b"]
+    assert win_a.shape == (120, 104)
+    assert win_a.dtype == np.float32
+    assert not np.isnan(win_a).any()
+    assert not np.isinf(win_a).any()
     assert win_a.shape == win_b.shape
     diff = np.abs(win_a - win_b)
     max_diff = float(diff.max())
@@ -120,6 +128,50 @@ def test_assembler_matches_direct_featurebuilder(env):
         f"Parity violation: max diff {max_diff:.4e} > 1e-5. "
         f"Le pipeline live e training NON producono output identici."
     )
+
+
+# IT: Test 5 (Gate 2, Stage 5) — PARITY DEL SEGNALE. I due percorsi feature, attraverso il
+#     nucleo di inferenza DETERMINISTICO di produzione (LiveEngine._deterministic_predict, lo
+#     stesso usato dall'ensemble live) + SignalGenerator, devono produrre lo STESSO (μ,σ,side).
+#     Cattura i flip di side su soglia che la sola parity-feature non vedrebbe. Chiude BLOCKER #1.
+# EN: Test 5 (Gate 2, Stage 5) — SIGNAL PARITY. Both feature routes, through the production
+#     DETERMINISTIC inference core (LiveEngine._deterministic_predict, the same the live ensemble
+#     uses) + SignalGenerator, must yield the SAME (μ,σ,side). Catches threshold side-flips.
+def test_signal_parity_live_vs_offline(parity_windows):
+    import torch
+    from quantsys.model.ensemble import EnsembleModel
+    from quantsys.trading import SignalGenerator
+
+    win_a, win_b = parity_windows["win_a"], parity_windows["win_b"]
+    ps, cfg = parity_windows["ps"], parity_windows["cfg"]
+    LiveEngine = parity_windows["live_mod"].LiveEngine
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # IT: stesso ensemble eterogeneo del backtest e del live engine.
+    # EN: same heterogeneous ensemble used by both the backtest and the live engine.
+    model = EnsembleModel.load_heterogeneous(device, cfg=cfg)
+    model.eval()
+    bcfg = cfg["backtest"]
+    sig_gen = SignalGenerator(
+        prob_threshold   = bcfg["prob_threshold"],
+        min_expected_ret = bcfg["min_expected_ret"],
+        max_sigma        = bcfg["max_sigma"],
+        conviction_alpha = bcfg.get("conviction_alpha", 0.5),
+        min_snr          = bcfg.get("min_snr", 0.0),
+    )
+
+    # IT: μ/σ/ν RAW via il nucleo deterministico condiviso col live engine (no MC dropout).
+    # EN: raw μ/σ/ν via the deterministic core shared with the live engine (no MC dropout).
+    mu_l, sig_l, nu_l = LiveEngine._deterministic_predict(model, win_a, None, ps, device)
+    mu_t, sig_t, nu_t = LiveEngine._deterministic_predict(model, win_b, None, ps, device)
+    side_l, _ = sig_gen.generate(mu_l, sig_l, nu_l)
+    side_t, _ = sig_gen.generate(mu_t, sig_t, nu_t)
+
+    print(f"live μ={mu_l:+.6e} σ={sig_l:.6e} side={side_l.value} | "
+          f"offline μ={mu_t:+.6e} σ={sig_t:.6e} side={side_t.value}")
+    assert abs(mu_l - mu_t) < 1e-5, f"μ diverge: {mu_l} vs {mu_t}"
+    assert abs(sig_l - sig_t) < 1e-5, f"σ diverge: {sig_l} vs {sig_t}"
+    assert side_l == side_t, f"side diverge: {side_l} vs {side_t}"
 
 
 # IT: Test 2 — i 104 nomi di feature_names sono nell'ordine atteso (no permutazioni).

@@ -4,24 +4,26 @@ Sistema di trading algoritmico BTC/USDT 1m con ensemble eterogeneo (iTransformer
 
 > Una versione inglese di questo documento è in [AVVIO.en.md](AVVIO.en.md).
 
-## Stato del sistema (backtest h=30 dopo fix denormalizzazione z-score del 2026-05-23)
+## Stato del sistema (aggiornato 2026-06-04 — rollback T=120)
 
-Test set 7929 candele, metriche centralizzate in `config/default.yaml`:
+Dopo gli esperimenti su window-size (T=180 e T=240 **regressivi**) il sistema è stato riportato a **T=120** (sweet spot empirico su ~525k candele 1m; finestre più lunghe over-fittano il noise temporale). Dataset corrente 549k candele → test set **10.104** finestre. Retrain 5-seed dei 3 archi su questa configurazione.
 
-| Metrica | Valore | Soglia paper-trading |
-|---|---|---|
-| Sharpe | **+18.71** | > 0 ✓ |
-| Sharpe CI 95% lower bound | **+0.78** | > 0 ✓ |
-| Win Rate | **64.3%** | > 50% ✓ |
-| Total Return | **+3.67%** | > 0 ✓ |
-| Max Drawdown | **0.83%** | < 15% ✓ |
-| Fee/Gross ratio | **30.3%** | < 30% ⚠ al limite |
-| Stress test (fee×2, slip×3) | Sharpe +7.22 | break-even ✓ |
-| Stress test flash crash (fee×1.5, slip×5) | Sharpe +12.30 | break-even ✓ |
+**Stato corrente del backtest grezzo (test set, single-arch):**
+
+| Config | Sharpe | Total Return | Note |
+|---|---|---|---|
+| iTransformer (miglior arch) | ≈ −14.6 (1-seed) | −1.77% | il meno-peggio |
+| Ensemble eterogeneo (3 arch) | ≈ −19.6 | −5.5% | non batte il singolo (errori cross-arch ≈0.995) |
+
+**Il backtest grezzo è attualmente negativo** — nessuna config supera le soglie paper-trading. Le metriche del 2026-05-23 (Sharpe +18.71) erano relative a un modello/feature-space precedente, ormai superato.
+
+**Edge reale identificato (2026-06-04): è regime-condizionato.** In regime **R0 Quiet** il modello ha Spearman **+0.13÷0.19**, stabile in **tutti** i sotto-periodi OOS (val+test). È edge di *rango*: l'entry a soglia |μ| non lo cattura (Quiet = bassa vol → μ piccole). Un entry **rank-based regime-specifico** (sperimentale, env-gated in `03_backtest.py`: `QUANTSYS_QUIET_RANK_Q` + `QUANTSYS_QUIET_MIN_SIGMA`) recuperava parzialmente sul test (best −0.74% return, MDD 1.5%). ⚠ **Validazione su val FALLITA (2026-06-05):** sullo split held-out (`QUANTSYS_BACKTEST_SPLIT=val`) la stessa config dà return **−0.22%**, PF 0.84, solo 13 trade (val è 71% Stress, 14% Quiet → sotto-campione) → l'edge **non regge fuori campione**, non promosso nel `SignalGenerator`; resta env-flag inerte. Produzione = ensemble eterogeneo pulito / iTrans standalone. L'inversione del regime Trending **non è robusta** (validazione OOS la smonta) → non deployata. ⚠ **Le metriche in-sample (val_nll, Spearman walkforward) anti-correlano col backtest** (distribution shift strutturale): non usarle per ottimizzare. Dettaglio completo in `docs/MODEL_IMPROVEMENTS.md` e `STATUS.md`.
+
+**Harvest dell'edge ordinale — 2 leve sperimentali (2026-06-05): validate su val e FALLITE.** Aggiunti due flag env in `03_backtest.py` (inerti di default, reversibili): **Fix ① cadenza decisionale** `QUANTSYS_DECISION_CADENCE=h` (entry solo ogni ≥`forecast_horizon` candele; exit ogni candela) e **Fix ② esposizione continua rank-based** `QUANTSYS_RANK_EXPOSURE=1` (direzione+`conviction` dal percentile causale di μ, regime-gated su R0 Quiet, no-trade band `QUANTSYS_RANK_BAND` = isteresi). ⚠ **Esito val (`QUANTSYS_BACKTEST_SPLIT=val`):** baseline pulito **+4.03%/PF 1.88/WR 61%** → con Fix ①② **−2.24%/PF 0.22/WR 25.7%**. Il segnale rank come entry direzionale è **anti-predittivo OOS**; l'esposizione continua flippa (27/35 chiusure SIGNAL) → la PnL è dominata dal path SL/TP, non dal rendimento a orizzonte su cui vive lo Spearman. **NON promossi**, restano flag inerti. (Baseline val +4% è il lato favorevole dello shift val→test; il baseline su test resta negativo.)
 
 Le 3 architetture caricano lo stesso ensemble eterogeneo via `EnsembleModel.load_heterogeneous()` quindi producono lo stesso backtest.
 
-**Live engine — stato attuale**: in modalità paper-only (nessun ordine reale). Il `LiveEngine` ha un mismatch di feature noto (BLOCKER #1: 39 feature live vs **104** training post C-funding) — vedi `TEORIA.md` §11. Stage 2-3 del piano di allineamento ✅ completati (2026-06-02); Stage 4-5 (riscrittura live engine + parity test) pending. Da risolvere prima di usare le predizioni live operativamente.
+**Live engine — stato attuale**: paper-only (nessun ordine reale), ma **BLOCKER #1 RISOLTO (2026-06-05)**: il path live usa ora `LiveCandleBuffer`→`FeatureAssembler`→`FeatureBuilder.build` (104 canoniche, stesso scaler) → `_deterministic_predict` → `SignalGenerator`, con **parity feature E segnale bit-perfect** (`tests/test_live_training_parity.py` 5/5; `99_replay_live_vs_training.py` Δ=0). I segnali paper ora riflettono il backtest — vedi `TEORIA.md` §11. Residuo operativo: smoke test WS reale + paper-trading. ⚠ Il backtest è negativo OOS: il paper-trading serve ad accumulare trade reali.
 
 **Per nuovi entry point al modello**: usare sempre `PipelineState.denormalize_predictions(mu, sigma)` prima di passare le predizioni a `SignalGenerator`. Il modello predice in spazio z-score (RobustScaler); il trading layer opera in spazio raw. Vedi `TEORIA.md` §5 per l'invariante completo.
 

@@ -129,16 +129,66 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
     print(f"  Mean diff:  {mean_diff:.3e}")
     print(f"  Worst col:  {canonical[worst_idx]} (idx={worst_idx}, max_diff={per_col_max[worst_idx]:.3e})")
 
-    if max_diff < 1e-5:
-        print(f"\n  ✅ PARITY OK — live engine matcha training a tolleranza 1e-5")
-        print(f"     BLOCKER #1 Stage 4: nuovo engine produce vettore allineato al training.")
-        return 0
+    feat_ok = max_diff < 1e-5
+    if feat_ok:
+        print(f"\n  ✅ GATE 1 (feature parity) OK — tolleranza 1e-5")
     else:
         cols_over_threshold = np.where(per_col_max > 1e-5)[0]
-        print(f"\n  ❌ PARITY VIOLATION — {len(cols_over_threshold)} colonne con diff > 1e-5")
+        print(f"\n  ❌ GATE 1 VIOLATION — {len(cols_over_threshold)} colonne con diff > 1e-5")
         for idx in cols_over_threshold[:10]:
             print(f"       - {canonical[idx]}: max_diff={per_col_max[idx]:.3e}")
-        return 1
+
+    # IT: ── GATE 2 (Stage 5) — PARITY DEL SEGNALE: i due percorsi feature (assembler live vs
+    #     FeatureBuilder diretto) devono produrre lo STESSO (μ,σ,side) attraverso il nucleo di
+    #     inferenza deterministico di produzione + SignalGenutore. Se le feature sono bit-identiche
+    #     ma una micro-differenza < tol flippa il side su soglia → la parity feature non basta.
+    # EN: ── GATE 2 (Stage 5) — SIGNAL PARITY: the two feature routes (live assembler vs direct
+    #     FeatureBuilder) must yield the SAME (μ,σ,side) through the production deterministic
+    #     inference core + SignalGenerator. Catches threshold-flips that feature parity alone misses.
+    print("\n" + "-" * 70)
+    print("GATE 2 — PARITY SEGNALE (Stage 5: live↔offline)")
+    print("-" * 70)
+
+    import torch
+    from quantsys.model.ensemble import EnsembleModel
+    from quantsys.trading import SignalGenerator
+    LiveEngine = live_mod.LiveEngine
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = EnsembleModel.load_heterogeneous(device, cfg=cfg)   # IT: stesso modello di backtest+live
+    model.eval()
+    bcfg = cfg["backtest"]
+    sig_gen = SignalGenerator(
+        prob_threshold   = bcfg["prob_threshold"],
+        min_expected_ret = bcfg["min_expected_ret"],
+        max_sigma        = bcfg["max_sigma"],
+        conviction_alpha = bcfg.get("conviction_alpha", 0.5),
+        min_snr          = bcfg.get("min_snr", 0.0),
+    )
+    # IT: nucleo deterministico CONDIVISO col live engine (no MC dropout: l'ensemble non lo espone).
+    # EN: deterministic core SHARED with the live engine (no MC dropout: the ensemble lacks it).
+    mu_l, sig_l, nu_l = LiveEngine._deterministic_predict(model, win_live,  None, ps, device)
+    mu_t, sig_t, nu_t = LiveEngine._deterministic_predict(model, win_train, None, ps, device)
+    side_l, _ = sig_gen.generate(mu_l, sig_l, nu_l)
+    side_t, _ = sig_gen.generate(mu_t, sig_t, nu_t)
+
+    d_mu, d_sig = abs(mu_l - mu_t), abs(sig_l - sig_t)
+    print(f"\n  LIVE   (assembler): μ={mu_l:+.6e}  σ={sig_l:.6e}  side={side_l.value}")
+    print(f"  OFFLINE(builder)  : μ={mu_t:+.6e}  σ={sig_t:.6e}  side={side_t.value}")
+    print(f"  Δμ={d_mu:.3e}  Δσ={d_sig:.3e}  side_match={side_l == side_t}")
+
+    sig_ok = (d_mu < 1e-5) and (d_sig < 1e-5) and (side_l == side_t)
+    if sig_ok:
+        print(f"\n  ✅ GATE 2 (signal parity) OK — μ/σ entro 1e-5 e side identico")
+    else:
+        print(f"\n  ❌ GATE 2 VIOLATION — il segnale live diverge dall'offline")
+
+    print("\n" + "=" * 70)
+    if feat_ok and sig_ok:
+        print("✅ BLOCKER #1 Stage 5 — ENTRAMBI I GATE VERDI: live engine allineato al backtest.")
+        return 0
+    print("❌ BLOCKER #1 Stage 5 — almeno un gate fallito (vedi sopra).")
+    return 1
 
 
 if __name__ == "__main__":

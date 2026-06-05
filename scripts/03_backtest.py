@@ -206,10 +206,34 @@ def main():
     ensure_dirs(bcfg["output_dir"])
     results_out.mkdir(parents=True, exist_ok=True)
 
-    # IT: Test set serializzato — input al backtest e all'inferenza batch.
-    # EN: Serialized test set — feeds both backtest loop and batch inference.
+    # IT: Split di valutazione — QUANTSYS_BACKTEST_SPLIT=val|test (default test).
+    #     'val' valida una config (es. Quiet rank-entry) su un periodo HELD-OUT senza
+    #     tararla sul test set; 'test' è lo stato production. Tutti i tensori (X/y/t e
+    #     macro) e l'allineamento OHLCV/regimi seguono lo split scelto.
+    # EN: Evaluation split — QUANTSYS_BACKTEST_SPLIT=val|test (default test).
+    #     'val' validates a config (e.g. Quiet rank-entry) on a HELD-OUT period without
+    #     tuning on the test set; 'test' is the production state. All tensors (X/y/t and
+    #     macro) and the OHLCV/regime alignment follow the chosen split.
+    _split = os.environ.get("QUANTSYS_BACKTEST_SPLIT", "test").strip().lower()
+    if _split not in ("val", "test"):
+        raise ValueError(
+            f"QUANTSYS_BACKTEST_SPLIT='{_split}' non valido — usa 'val' o 'test'."
+        )
+    # IT: Suffisso output — solo 'test' scrive i file production-clean
+    #     (metrics.json/dashboard_results.json); 'val' va su *_val per non clobberarli.
+    # EN: Output suffix — only 'test' writes the production-clean files; 'val' goes to
+    #     *_val so a validation run never clobbers the production state.
+    _out_suffix = "" if _split == "test" else f"_{_split}"
+
+    # IT: Dataset serializzato (split scelto) — input al backtest e all'inferenza batch.
+    # EN: Serialized dataset (chosen split) — feeds both backtest loop and batch inference.
     data = np.load("data/lstm_dataset.npz", allow_pickle=True)
-    X, y = data["X_test"], data["y_test"]
+    X, y = data[f"X_{_split}"], data[f"y_{_split}"]
+    if _split != "test":
+        log.warning(
+            f"BACKTEST SPLIT = '{_split.upper()}' (held-out validation, NON production). "
+            "I file metrics.json/dashboard_results.json riflettono il VAL, non il test."
+        )
 
     # IT: ETA pessimistica per-sample; il batch reale è ~10-20x più veloce.
     # EN: Pessimistic per-sample ETA; actual batch path is ~10-20x faster.
@@ -218,7 +242,7 @@ def main():
     ms_per_sam = 0.15 if device.type == "cuda" else 2.0
     eta_sec    = n_samples * ms_per_sam / 1000
     log.info(
-        f"Test set: {n_samples:,} campioni  |  {X.shape[1]}w × {X.shape[2]}f  |  "
+        f"{_split.upper()} set: {n_samples:,} campioni  |  {X.shape[1]}w × {X.shape[2]}f  |  "
         f"device={dev_name}  |  ETA stimata ≤ {eta_sec:.0f}s "
         f"({'GPU batch' if device.type == 'cuda' else 'CPU batch'})"
     )
@@ -228,7 +252,7 @@ def main():
     # EN: Use raw_candles.parquet (raw USD) for OHLCV. Never features.parquet: those
     #     prices are RobustScaler-scaled and SL/TP would trigger on fictional bars.
     parquet_path = Path("data/raw_candles.parquet")
-    t_test       = pd.to_datetime(data["t_test"])   # IT: timestamp test | EN: test timestamps
+    t_eval       = pd.to_datetime(data[f"t_{_split}"])   # IT: timestamp split | EN: split timestamps
 
     if parquet_path.exists():
         log.info("Caricamento OHLCV reali da raw_candles.parquet ...")
@@ -238,11 +262,11 @@ def main():
 
         # IT: merge_asof tollera piccoli scarti (tz, arrotondamenti) entro 2 min.
         # EN: merge_asof absorbs small skew (tz, rounding) up to a 2-min tolerance.
-        t_test_df = pd.DataFrame({"open_time": pd.to_datetime(t_test, utc=True)})
-        t_test_df = t_test_df.sort_values("open_time")
-        n_test_orig = len(t_test_df)   # IT: lunghezza test set PRIMA del merge | EN: test-set length BEFORE the merge
+        t_eval_df = pd.DataFrame({"open_time": pd.to_datetime(t_eval, utc=True)})
+        t_eval_df = t_eval_df.sort_values("open_time")
+        n_eval_orig = len(t_eval_df)   # IT: lunghezza split PRIMA del merge | EN: split length BEFORE the merge
         merged    = pd.merge_asof(
-            t_test_df,
+            t_eval_df,
             df_feat.sort_values("open_time"),
             on="open_time",
             direction="nearest",
@@ -253,10 +277,10 @@ def main():
         #     e disallineare gli indici posizionali del loop. RuntimeError (no assert).
         # EN: Fix #1 — Binance gaps can dupe/skip rows in merge_asof and break the
         #     positional indexing of the main loop. RuntimeError (not assert).
-        if len(merged) != n_test_orig:
+        if len(merged) != n_eval_orig:
             raise RuntimeError(
-                f"merge_asof ha alterato il numero di righe ({len(merged)} != {n_test_orig}). "
-                f"Possibile gap Binance nel test set — verifica raw_candles.parquet."
+                f"merge_asof ha alterato il numero di righe ({len(merged)} != {n_eval_orig}). "
+                f"Possibile gap Binance nello split '{_split}' — verifica raw_candles.parquet."
             )
 
         # IT: Verifica copertura — sotto 80% fallback su prezzi ricostruiti.
@@ -269,7 +293,7 @@ def main():
         if coverage < 0.80:
             log.warning(
                 f"Copertura OHLCV bassa ({coverage:.1%}). "
-                "Verifica che raw_candles.parquet copra il periodo del test set. "
+                f"Verifica che raw_candles.parquet copra il periodo dello split '{_split}'. "
                 "Fallback: prezzi ricostruiti dai log-return."
             )
 
@@ -363,13 +387,13 @@ def main():
         use_model = True
         log.info(f"Modello caricato: {model_cfg.get('model_type','?')}  has_macro={has_macro}")
 
-        # IT: Carica X_macro_test se il modello ha branch macro; altrimenti zeros.
-        # EN: Load X_macro_test when the model has a macro branch; zeros otherwise.
-        if has_macro and "X_macro_test" in data.files:
-            Xm_test = torch.tensor(data["X_macro_test"], dtype=torch.float32)
-            log.info(f"X_macro_test caricato: {tuple(Xm_test.shape)}")
+        # IT: Carica X_macro_{split} se il modello ha branch macro; altrimenti zeros.
+        # EN: Load X_macro_{split} when the model has a macro branch; zeros otherwise.
+        if has_macro and f"X_macro_{_split}" in data.files:
+            Xm_test = torch.tensor(data[f"X_macro_{_split}"], dtype=torch.float32)
+            log.info(f"X_macro_{_split} caricato: {tuple(Xm_test.shape)}")
         elif has_macro:
-            log.warning("Modello macro ma X_macro_test non trovato nel dataset — "
+            log.warning(f"Modello macro ma X_macro_{_split} non trovato nel dataset — "
                         "usa zeros come fallback.")
             n_macro = model_cfg.get("n_macro", 1)
             Xm_test = torch.zeros(len(X), n_macro, dtype=torch.float32)
@@ -544,6 +568,9 @@ def main():
         min_expected_ret = bcfg["min_expected_ret"],
         max_sigma        = bcfg["max_sigma"],
         conviction_alpha = bcfg.get("conviction_alpha", 0.5),
+        # IT: SNR gate da config (default 0.0 = disattivato) — quick-win #2
+        # EN: SNR gate from config (default 0.0 = disabled) — quick-win #2
+        min_snr          = bcfg.get("min_snr", 0.0),
     )
 
     # ── Backtest loop ────────────────────────────────────────────────────────
@@ -558,12 +585,12 @@ def main():
     #     "high vol" = ATR > test-set median ATR (proxy for a hard regime).
     atr_median = np.median(atr)
     regime_trades = {"high_vol": [], "low_vol": []}
-    log.info(f"ATR mediana test set: {atr_median:.0f}  (soglia high/low vol)")
+    log.info(f"ATR mediana split '{_split}': {atr_median:.0f}  (soglia high/low vol)")
 
-    # IT: Carica i regimi BTC `RegimeMarkovBTC` (Quiet/Trending/Stress) allineati a t_test.
+    # IT: Carica i regimi BTC `RegimeMarkovBTC` (Quiet/Trending/Stress) allineati a t_eval.
     #     Sostituisce il vecchio proxy ATR-based usato nel loop per `rm.set_regime(...)`.
     #     Se il file non esiste o l'allineamento fallisce, fallback al proxy ATR storico.
-    # EN: Loads BTC `RegimeMarkovBTC` regimes (Quiet/Trending/Stress) aligned to t_test.
+    # EN: Loads BTC `RegimeMarkovBTC` regimes (Quiet/Trending/Stress) aligned to t_eval.
     #     Replaces the previous ATR-proxy used in the loop for `rm.set_regime(...)`.
     #     Falls back to the historical ATR proxy if the file is missing or alignment fails.
     btc_regime_per_step: "np.ndarray | None" = None
@@ -586,7 +613,7 @@ def main():
                         s = s.tz_convert("UTC").tz_localize(None)
                     return s.astype("datetime64[ns]")
                 df_reg.index = _to_ns_naive(df_reg.index)
-                t_step = _to_ns_naive(pd.Index(pd.to_datetime(t_test)))
+                t_step = _to_ns_naive(pd.Index(pd.to_datetime(t_eval)))
                 df_step = pd.DataFrame({"_t": t_step})
                 merged = pd.merge_asof(
                     df_step.sort_values("_t"),
@@ -600,10 +627,113 @@ def main():
                 btc_regime_per_step = regimes[order].astype(np.int64)
                 _counts = {int(k): int(v) for k, v in
                            pd.Series(btc_regime_per_step).value_counts().sort_index().items()}
-                log.info(f"RegimeMarkovBTC allineato a t_test: distribuzione {_counts}")
+                log.info(f"RegimeMarkovBTC allineato a t_{_split}: distribuzione {_counts}")
     except Exception as _e:
         log.warning(f"RegimeMarkovBTC alignment fallito ({_e}) — fallback proxy ATR")
         btc_regime_per_step = None
+
+    # IT: Regime-gating sperimentale (2026-06-04) — env-controlled, reversibile.
+    #     QUANTSYS_REGIME_ALLOW="0,2"  → entra SOLO in questi regimi (altrove side=NONE).
+    #     QUANTSYS_REGIME_INVERT="1"   → inverte il side in questi regimi (anti-edge → edge).
+    #     Basato su edge per-regime: Quiet(0)=+0.13, Trending(1)=-0.13, Stress(2)=+0.04.
+    # EN: Experimental regime-gating (2026-06-04) — env-controlled, reversible.
+    #     QUANTSYS_REGIME_ALLOW="0,2"  → enter ONLY in these regimes (NONE elsewhere).
+    #     QUANTSYS_REGIME_INVERT="1"   → flip the side in these regimes (anti-edge → edge).
+    _rg_allow  = os.environ.get("QUANTSYS_REGIME_ALLOW")
+    _rg_invert = os.environ.get("QUANTSYS_REGIME_INVERT")
+    _regime_allow  = {int(x) for x in _rg_allow.split(",")  if x.strip() != ""} if _rg_allow  else None
+    _regime_invert = {int(x) for x in _rg_invert.split(",") if x.strip() != ""} if _rg_invert else set()
+    if (_regime_allow is not None or _regime_invert) and btc_regime_per_step is not None:
+        log.info(f"Regime-gating ATTIVO: allow={_regime_allow}, invert={_regime_invert}")
+
+    # IT: Entry RANK-based per regime Quiet (2026-06-04) — sfrutta l'edge di RANGO
+    #     (Spearman +0.13÷0.19, stabile in tutti i sotto-periodi OOS) che l'entry a
+    #     soglia |μ| non cattura (in Quiet μ piccole → 0 trade). Gate a quantile
+    #     causale: LONG se μ nel top-q / SHORT se bottom-q della distribuzione recente
+    #     di μ osservata in Quiet; NONE negli altri regimi (isola l'edge robusto).
+    # EN: RANK-based entry for the Quiet regime — harvests the RANK edge (Spearman
+    #     +0.13÷0.19, stable across all OOS sub-periods) that |μ|-threshold entry misses.
+    #     Causal rolling-quantile gate; trades only the Quiet regime.
+    _quiet_q       = float(os.environ.get("QUANTSYS_QUIET_RANK_Q", "0") or "0")
+    _quiet_reg     = int(os.environ.get("QUANTSYS_QUIET_REGIME", "0"))
+    _quiet_conv    = float(os.environ.get("QUANTSYS_QUIET_CONVICTION", "0.5") or "0.5")
+    # IT: Floor di σ (raw) — salta i trade Quiet con movimento atteso troppo piccolo per
+    #     coprire le fee (~26bps round-trip). 0 = off. Cost-derived, NON tuned sul test.
+    # EN: σ floor (raw) — skips Quiet trades whose expected move is too small to cover
+    #     fees (~26bps round-trip). 0 = off. Cost-derived, NOT tuned on test.
+    _quiet_min_sig = float(os.environ.get("QUANTSYS_QUIET_MIN_SIGMA", "0") or "0")
+    _quiet_buf_max = 1000   # IT: finestra causale μ-Quiet | EN: causal Quiet-μ window
+    _quiet_min_buf = 200    # IT: min sample prima di tradare | EN: min samples before trading
+    _quiet_mu_buf: "list[float]" = []
+    _quiet_active  = _quiet_q > 0 and btc_regime_per_step is not None
+    if _quiet_active:
+        log.info(f"Quiet rank-entry ATTIVO: regime={_quiet_reg}, q={_quiet_q} "
+                 f"(LONG top-{_quiet_q:.0%} / SHORT bottom-{_quiet_q:.0%}), "
+                 f"buffer={_quiet_buf_max}, conviction={_quiet_conv}")
+
+    # IT: ── Fix ① — CADENZA DECISIONALE = ORIZZONTE (sperimentale, reversibile, default off) ──
+    #     Un segnale a orizzonte h tradato ogni candela genera h bet sovrapposti e
+    #     autocorrelati: stesso costo fee, informazione incrementale ≈0 (breadth effettiva
+    #     ≪ nominale, legge fondamentale IR≈IC·√breadth). Gate causale: una NUOVA entry apre
+    #     solo se sono passate ≥cadence candele dall'ultima → bet quasi-indipendenti, fee drag
+    #     tagliato. Gli EXIT (SL/TP/trailing/circuit-breaker) restano ogni candela.
+    #     0=off (ogni candela); "h"=usa forecast_horizon (cadenza allineata all'orizzonte).
+    # EN: Fix ① — decision cadence = horizon (experimental, reversible, default off). A horizon-h
+    #     signal traded every candle yields h overlapping, autocorrelated bets: same fee cost,
+    #     ~0 incremental info (effective breadth ≪ nominal). Causal gate: a NEW entry opens only
+    #     if ≥cadence candles passed since the last one. Exits run every candle. 0=off; "h"=horizon.
+    _cad_raw = os.environ.get("QUANTSYS_DECISION_CADENCE", "0").strip().lower()
+    _fh = int(cfg.get("features", {}).get("forecast_horizon",
+              cfg.get("data", {}).get("forecast_horizon", 30)))
+    _decision_cadence = _fh if _cad_raw == "h" else int(float(_cad_raw or "0"))
+    _last_entry_i = -10**9   # IT: indice ultima entry (causale) | EN: last-entry index (causal)
+    if _decision_cadence > 0:
+        log.info(f"Decision-cadence ATTIVA: nuove entry ogni ≥{_decision_cadence} candele (h={_fh})")
+
+    # IT: ── Fix ② — ESPOSIZIONE CONTINUA RANK-BASED, REGIME-GATED (sperimentale, reversibile) ──
+    #     L'edge reale è ordinale (Spearman Quiet +0.13÷0.19), non μ calibrato: l'entry a soglia
+    #     |μ| e il rank-entry DISCRETO (QUANTSYS_QUIET_RANK_Q) lo distruggono. Qui il segnale è
+    #     CONTINUO: r = percentile causale di μ nel buffer ∈[0,1]; s = 2r−1 ∈[−1,+1] (segno=
+    #     direzione, |s|=forza). No-trade band |s|<band = deadzone/isteresi (niente flip su rank
+    #     debole → throttling naturale dei flip-flop). conviction = (|s|−band)/(1−band) ∈(0,1]
+    #     scala il Kelly con continuità (dist.conviction → RiskManager._size). Attivo SOLO nel
+    #     regime target (Quiet di default), NONE altrove → isola l'unico edge stabile OOS.
+    # EN: Fix ② — continuous rank-proportional, regime-gated exposure (experimental, reversible).
+    #     The real edge is ordinal (Quiet Spearman), not calibrated μ: |μ|-threshold and DISCRETE
+    #     rank-entry destroy it. Continuous signal: r=causal percentile of μ ∈[0,1]; s=2r−1
+    #     ∈[−1,+1] (sign=direction, |s|=strength). No-trade band |s|<band = deadzone/hysteresis.
+    #     conviction=(|s|−band)/(1−band) scales Kelly continuously. Active ONLY in target regime.
+    _rank_active  = os.environ.get("QUANTSYS_RANK_EXPOSURE", "0").strip() == "1" and btc_regime_per_step is not None
+    _rank_reg     = int(os.environ.get("QUANTSYS_RANK_REGIME", "0"))
+    _rank_band    = float(os.environ.get("QUANTSYS_RANK_BAND", "0.5") or "0.5")
+    # IT: Floor di σ (raw) — salta i trade con movimento atteso < fee (~26bps round-trip). 0=off.
+    # EN: σ floor (raw) — skips trades whose expected move can't cover fees. 0=off.
+    _rank_min_sig = float(os.environ.get("QUANTSYS_RANK_MIN_SIGMA", "0") or "0")
+    _rank_buf_max = int(os.environ.get("QUANTSYS_RANK_WIN", "1000") or "1000")
+    _rank_min_buf = 200      # IT: min sample prima di tradare | EN: min samples before trading
+    _rank_mu_buf: "list[float]" = []
+    if _rank_active:
+        log.info(f"Rank-exposure ATTIVO: regime={_rank_reg}, band={_rank_band} "
+                 f"(trade solo |percentile−0.5|≥{_rank_band/2:.2f}), σ_floor={_rank_min_sig}, "
+                 f"buffer={_rank_buf_max}")
+
+    # IT: ── EXIT ORIZZONTE-LOCKED (test di isolamento, sperimentale, reversibile, default off) ──
+    #     Chiusura puramente TEMPORALE a esattamente h candele, bypassando SL/TP/SIGNAL/trailing.
+    #     Scopo: isolare l'edge di RANGO dal path di realizzazione del trade — così la PnL del
+    #     trade coincide col rendimento cumulato a orizzonte-h su cui è misurato lo Spearman
+    #     (altrimenti SL/TP/flip dominano la PnL e mascherano l'edge ordinale, cfr. esito 2026-06-05).
+    #     0=off (exit normale SL/TP/SIGNAL); "h"=usa forecast_horizon. Il circuit-breaker resta
+    #     attivo (DD realizzato in close_position). Diagnostico, NON una regola di produzione.
+    # EN: ── HORIZON-LOCKED EXIT (isolation test, experimental, reversible, default off) ──
+    #     Pure TIME close at exactly h candles, bypassing SL/TP/SIGNAL/trailing, so a trade's PnL
+    #     equals the horizon-h cumulative return the Spearman is measured on (otherwise SL/TP/flip
+    #     dominate PnL and mask the ordinal edge). 0=off; "h"=forecast_horizon. Circuit-breaker
+    #     stays active. Diagnostic, NOT a production rule.
+    _hx_raw = os.environ.get("QUANTSYS_HORIZON_EXIT", "0").strip().lower()
+    _horizon_exit = _fh if _hx_raw == "h" else int(float(_hx_raw or "0"))
+    if _horizon_exit > 0:
+        log.info(f"Horizon-locked exit ATTIVO: chiusura temporale a {_horizon_exit} candele "
+                 f"(bypassa SL/TP/SIGNAL/trailing; h={_fh})")
 
     t0 = time.time()
     for i in tqdm(range(n-1), desc="Backtest", ncols=72):
@@ -620,21 +750,8 @@ def main():
         #     to the historical ATR proxy (high/mid/low vol).
         if btc_regime_per_step is not None:
             rm.set_regime(int(btc_regime_per_step[i]))
-            # IT: Sync della prob_threshold del SignalGenerator col preset BTC è
-            #     INTENZIONALMENTE disattivato — empiricamente (test 2026-06-03)
-            #     filtra anche segnali validi e peggiora Sharpe da -24.7 a -47.9
-            #     sul setup iTrans-ensemble 104-feat. L'infrastruttura
-            #     (sig_gen.set_regime_threshold accetta float assoluto) resta
-            #     pronta per il giorno in cui i modelli avranno segnali abbastanza
-            #     forti da reggere il filtro per regime.
-            # EN: Sync of SignalGenerator prob_threshold with the BTC preset is
-            #     INTENTIONALLY disabled — empirically (2026-06-03 test) it filters
-            #     out valid signals and worsens Sharpe from -24.7 to -47.9 on the
-            #     iTrans-ensemble 104-feat setup. The infrastructure
-            #     (sig_gen.set_regime_threshold accepts an absolute float) stays
-            #     ready for when the models produce signals strong enough to
-            #     survive per-regime filtering.
-            # sig_gen.set_regime_threshold(rm._regime_prob_threshold)
+            # IT: regime threshold rimosso 2026-06-03 — calibrazione da rifare post-paper-trading
+            # EN: removed — re-calibrate post paper-trading
         elif atr_i > atr_median * 1.5:
             rm.set_regime("stagflation")
         elif atr_i > atr_median:
@@ -642,24 +759,86 @@ def main():
         else:
             rm.set_regime("expansion")
         side, dist       = sig_gen.generate(mu, sigma, nu)
+        # IT: Fix ② — esposizione continua rank-based (priorità) — direzione+conviction dal
+        #     percentile causale di μ; no-trade band = deadzone/isteresi; NONE fuori regime.
+        # EN: Fix ② — continuous rank exposure (priority) — direction+conviction from the causal
+        #     μ-percentile; no-trade band = deadzone/hysteresis; NONE outside the target regime.
+        if _rank_active:
+            _reg = int(btc_regime_per_step[i])
+            _new_side = Side.NONE
+            if _reg == _rank_reg:
+                if len(_rank_mu_buf) >= _rank_min_buf and sigma <= sig_gen.max_sigma and sigma >= _rank_min_sig:
+                    _arr = np.asarray(_rank_mu_buf)
+                    _r   = float(np.mean(_arr < mu))        # IT: percentile causale di μ ∈[0,1]
+                    _s   = 2.0 * _r - 1.0                    # IT: rango centrato ∈[−1,+1]
+                    if abs(_s) > _rank_band:                 # IT: fuori dalla deadzone (= isteresi)
+                        _new_side = Side.LONG if _s > 0 else Side.SHORT
+                        # IT: conviction continua → scala il Kelly proporzionalmente al rango
+                        # EN: continuous conviction → scales Kelly proportionally to rank distance
+                        dist.conviction = float(np.clip((abs(_s) - _rank_band) / (1.0 - _rank_band), 0.0, 1.0))
+                _rank_mu_buf.append(float(mu))               # IT: update DOPO la decisione (causale)
+                if len(_rank_mu_buf) > _rank_buf_max:
+                    _rank_mu_buf.pop(0)
+            side = _new_side                                 # IT: NONE fuori regime → isola l'edge
+        # IT: Quiet rank-entry (priorità) — override il side via quantile causale di μ.
+        # EN: Quiet rank-entry (priority) — override side via causal μ-quantile.
+        elif _quiet_active:
+            _reg = int(btc_regime_per_step[i])
+            if _reg == _quiet_reg:
+                _new_side = Side.NONE
+                if len(_quiet_mu_buf) >= _quiet_min_buf and sigma <= sig_gen.max_sigma and sigma >= _quiet_min_sig:
+                    _arr = np.asarray(_quiet_mu_buf)
+                    _hi  = float(np.quantile(_arr, 1.0 - _quiet_q))
+                    _lo  = float(np.quantile(_arr, _quiet_q))
+                    if   mu >= _hi: _new_side = Side.LONG
+                    elif mu <= _lo: _new_side = Side.SHORT
+                _quiet_mu_buf.append(float(mu))             # IT: update DOPO la decisione (causale)
+                if len(_quiet_mu_buf) > _quiet_buf_max:
+                    _quiet_mu_buf.pop(0)
+                if _new_side != Side.NONE:
+                    dist.conviction = _quiet_conv           # IT: size fissa (prob_up non affidabile in Quiet)
+                side = _new_side
+            else:
+                side = Side.NONE                            # IT: isola l'edge Quiet — niente trade fuori regime
+        # IT: Regime-gating sperimentale — inverte o azzera il side per regime.
+        # EN: Experimental regime-gating — invert or null the side per regime.
+        elif side != Side.NONE and btc_regime_per_step is not None and (_regime_allow is not None or _regime_invert):
+            _reg = int(btc_regime_per_step[i])
+            if _reg in _regime_invert:
+                side = Side.SHORT if side == Side.LONG else Side.LONG
+            elif _regime_allow is not None and _reg not in _regime_allow:
+                side = Side.NONE
         pre_signals.append((side, dist))
 
         if rm.position:
             rm.update_trailing(c_c, atr_i)
 
         if rm.position:
-            reason = rm.check_exit(h_n, l_n, c_n, i+1, side)
-            if reason:
-                ep = rm.position.stop_loss if reason==CloseReason.STOP_LOSS else \
-                     rm.position.take_profit if reason==CloseReason.TAKE_PROFIT else c_n
-                trade = rm.close_position(reason, ep, i+1, adv_1m=adv_1m[i])
-                if trade:
-                    # IT: Assegna il trade al regime corrente. | EN: Assign the trade to the current regime.
-                    regime_key = "high_vol" if atr_i > atr_median else "low_vol"
-                    regime_trades[regime_key].append(trade.net_pnl)
+            if _horizon_exit > 0:
+                # IT: exit orizzonte-locked — chiusura TEMPORALE pura al close, bypassa SL/TP/SIGNAL.
+                # EN: horizon-locked exit — pure TIME close at the close price, bypasses SL/TP/SIGNAL.
+                trade = None
+                if (i + 1) - rm.position.entry_candle >= _horizon_exit:
+                    trade = rm.close_position(CloseReason.MAX_HOLD, c_n, i+1, adv_1m=adv_1m[i])
+            else:
+                reason = rm.check_exit(h_n, l_n, c_n, i+1, side)
+                trade = None
+                if reason:
+                    ep = rm.position.stop_loss if reason==CloseReason.STOP_LOSS else \
+                         rm.position.take_profit if reason==CloseReason.TAKE_PROFIT else c_n
+                    trade = rm.close_position(reason, ep, i+1, adv_1m=adv_1m[i])
+            if trade:
+                # IT: Assegna il trade al regime corrente. | EN: Assign the trade to the current regime.
+                regime_key = "high_vol" if atr_i > atr_median else "low_vol"
+                regime_trades[regime_key].append(trade.net_pnl)
 
-        if side != Side.NONE and not rm.position:
+        # IT: Fix ① — gate cadenza: la NUOVA entry apre solo se sono passate ≥cadence candele
+        #     dall'ultima (bet quasi-indipendenti). cadence=0 → condizione sempre vera (baseline).
+        # EN: Fix ① — cadence gate: a NEW entry opens only if ≥cadence candles passed since the
+        #     last one (quasi-independent bets). cadence=0 → always true (baseline, inert).
+        if side != Side.NONE and not rm.position and (i - _last_entry_i) >= _decision_cadence:
             rm.open_position(side, o_n, i+1, atr_i, dist, adv_1m=adv_1m[i])
+            _last_entry_i = i
 
         mtm = rm.portfolio.cash + (rm.position.unrealized_pnl(c_n)+rm.position.size_usd if rm.position else 0)
         equity_ts.append(mtm)
@@ -747,9 +926,9 @@ def main():
     # IT: Risultati stress test. | EN: Stress-test results.
     m_save["stress_scenarios"] = stress_results
 
-    with open(out/"metrics.json","w", encoding="utf-8") as f: json.dump(m_save,f,indent=2)
+    with open(out/f"metrics{_out_suffix}.json","w", encoding="utf-8") as f: json.dump(m_save,f,indent=2)
 
-    np.savez_compressed(out/"equity_curve.npz",
+    np.savez_compressed(out/f"equity_curve{_out_suffix}.npz",
                         equity=np.array(equity_ts), drawdown=np.array(dd_ts))
 
     # IT: CSV dei trade. | EN: trades CSV.
@@ -757,7 +936,7 @@ def main():
              "size_usd":t.size_usd,"hold_candles":t.hold_candles,
              "close_reason":t.close_reason.value,"gross_pnl":t.gross_pnl,
              "fees":t.fees,"net_pnl":t.net_pnl,"pnl_pct":t.pnl_pct} for t in rm.trades]
-    pd.DataFrame(rows).to_csv(out/"trades.csv",index=False)
+    pd.DataFrame(rows).to_csv(out/f"trades{_out_suffix}.csv",index=False)
 
     # IT: JSON dashboard (pronto per la React app).
     # EN: dashboard JSON (ready for the React app).
@@ -782,7 +961,7 @@ def main():
         "stress_scenarios": stress_results,
         "close_reason_breakdown": close_reason_breakdown,
     }
-    with open(results_out/"dashboard_results.json","w", encoding="utf-8") as f:
+    with open(results_out/f"dashboard_results{_out_suffix}.json","w", encoding="utf-8") as f:
         json.dump(dashboard, f, separators=(",",":"))
 
     # ── Print finale / Final print ─────────────────────────────────────────────
@@ -864,12 +1043,13 @@ def main():
   Durata: {mdd_dur} candele  Recovery: {mdd_rec_str} candele (recuperato: {mdd_recov})""")
 
     print(f"""
+  Split valutato  -> {_split.upper()}
   Output modello -> {out}/
-    metrics.json
-    equity_curve.npz
-    trades.csv
+    metrics{_out_suffix}.json
+    equity_curve{_out_suffix}.npz
+    trades{_out_suffix}.csv
   Output dashboard -> {results_out}/
-    dashboard_results.json
+    dashboard_results{_out_suffix}.json
 """)
 
 
