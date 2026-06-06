@@ -78,3 +78,6 @@ dashboard/.vite/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# IT: file temporaneo messaggi di commit / EN: temp commit-message file
+.commit_msg.tmp
