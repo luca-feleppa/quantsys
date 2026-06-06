@@ -1,35 +1,58 @@
-# QUANTSYS — Guida all'avvio
+# QUANTSYS — Guida all'avvio · QUANTSYS — Quick start guide
 
-Sistema di trading algoritmico BTC/USDT 1m con ensemble eterogeneo (iTransformer + N-HiTS + TCN+Mamba) e Knowledge Distillation multi-teacher.
+🇮🇹 Sistema di trading algoritmico BTC/USDT 1m con ensemble eterogeneo (iTransformer + N-HiTS + TCN+Mamba) e Knowledge Distillation multi-teacher.
 
-> Una versione inglese di questo documento è in [AVVIO.en.md](AVVIO.en.md).
+**EN** Algorithmic trading system for BTC/USDT 1m with a heterogeneous ensemble (iTransformer + N-HiTS + TCN+Mamba) and multi-teacher Knowledge Distillation.
 
-## Stato del sistema (aggiornato 2026-06-04 — rollback T=120)
+## Stato del sistema (aggiornato 2026-06-04 — rollback T=120) · System status (updated 2026-06-04 — T=120 rollback)
 
-Dopo gli esperimenti su window-size (T=180 e T=240 **regressivi**) il sistema è stato riportato a **T=120** (sweet spot empirico su ~525k candele 1m; finestre più lunghe over-fittano il noise temporale). Dataset corrente 549k candele → test set **10.104** finestre. Retrain 5-seed dei 3 archi su questa configurazione.
+🇮🇹 Dopo gli esperimenti su window-size (T=180 e T=240 **regressivi**) il sistema è stato riportato a **T=120** (sweet spot empirico su ~525k candele 1m; finestre più lunghe over-fittano il noise temporale). Dataset corrente 549k candele → test set **10.104** finestre. Retrain 5-seed dei 3 archi su questa configurazione.
 
-**Stato corrente del backtest grezzo (test set, single-arch):**
+**EN** After the window-size experiments (T=180 and T=240 both **regressive**) the system was rolled back to **T=120** (empirical sweet spot on ~525k 1m candles; longer windows overfit temporal noise). Current dataset 549k candles → test set **10,104** windows. 5-seed retrain of the 3 archs on this configuration.
 
+🇮🇹 **Stato corrente del backtest grezzo (test set, single-arch):**
+
+**EN** **Current raw-backtest status (test set, single-arch):**
+
+🇮🇹
 | Config | Sharpe | Total Return | Note |
 |---|---|---|---|
 | iTransformer (miglior arch) | ≈ −14.6 (1-seed) | −1.77% | il meno-peggio |
 | Ensemble eterogeneo (3 arch) | ≈ −19.6 | −5.5% | non batte il singolo (errori cross-arch ≈0.995) |
 
-**Il backtest grezzo è attualmente negativo** — nessuna config supera le soglie paper-trading. Le metriche del 2026-05-23 (Sharpe +18.71) erano relative a un modello/feature-space precedente, ormai superato.
+**EN**
+| Config | Sharpe | Total Return | Note |
+|---|---|---|---|
+| iTransformer (best arch) | ≈ −14.6 (1-seed) | −1.77% | the least-bad |
+| Heterogeneous ensemble (3 archs) | ≈ −19.6 | −5.5% | does not beat the single (cross-arch error ≈0.995) |
 
-**Edge reale identificato (2026-06-04): è regime-condizionato.** In regime **R0 Quiet** il modello ha Spearman **+0.13÷0.19**, stabile in **tutti** i sotto-periodi OOS (val+test). È edge di *rango*: l'entry a soglia |μ| non lo cattura (Quiet = bassa vol → μ piccole). Un entry **rank-based regime-specifico** (sperimentale, env-gated in `03_backtest.py`: `QUANTSYS_QUIET_RANK_Q` + `QUANTSYS_QUIET_MIN_SIGMA`) recuperava parzialmente sul test (best −0.74% return, MDD 1.5%). ⚠ **Validazione su val FALLITA (2026-06-05):** sullo split held-out (`QUANTSYS_BACKTEST_SPLIT=val`) la stessa config dà return **−0.22%**, PF 0.84, solo 13 trade (val è 71% Stress, 14% Quiet → sotto-campione) → l'edge **non regge fuori campione**, non promosso nel `SignalGenerator`; resta env-flag inerte. Produzione = ensemble eterogeneo pulito / iTrans standalone. L'inversione del regime Trending **non è robusta** (validazione OOS la smonta) → non deployata. ⚠ **Le metriche in-sample (val_nll, Spearman walkforward) anti-correlano col backtest** (distribution shift strutturale): non usarle per ottimizzare. Dettaglio completo in `docs/MODEL_IMPROVEMENTS.md` e `STATUS.md`.
+🇮🇹 **Il backtest grezzo è attualmente negativo** — nessuna config supera le soglie paper-trading. Le metriche del 2026-05-23 (Sharpe +18.71) erano relative a un modello/feature-space precedente, ormai superato.
 
-**Harvest dell'edge ordinale — 2 leve sperimentali (2026-06-05): validate su val e FALLITE.** Aggiunti due flag env in `03_backtest.py` (inerti di default, reversibili): **Fix ① cadenza decisionale** `QUANTSYS_DECISION_CADENCE=h` (entry solo ogni ≥`forecast_horizon` candele; exit ogni candela) e **Fix ② esposizione continua rank-based** `QUANTSYS_RANK_EXPOSURE=1` (direzione+`conviction` dal percentile causale di μ, regime-gated su R0 Quiet, no-trade band `QUANTSYS_RANK_BAND` = isteresi). ⚠ **Esito val (`QUANTSYS_BACKTEST_SPLIT=val`):** baseline pulito **+4.03%/PF 1.88/WR 61%** → con Fix ①② **−2.24%/PF 0.22/WR 25.7%**. Il segnale rank come entry direzionale è **anti-predittivo OOS**; l'esposizione continua flippa (27/35 chiusure SIGNAL) → la PnL è dominata dal path SL/TP, non dal rendimento a orizzonte su cui vive lo Spearman. **NON promossi**, restano flag inerti. (Baseline val +4% è il lato favorevole dello shift val→test; il baseline su test resta negativo.)
+**EN** **The raw backtest is currently negative** — no config clears the paper-trading thresholds. The 2026-05-23 metrics (Sharpe +18.71) referred to a prior model/feature-space, now superseded.
 
-Le 3 architetture caricano lo stesso ensemble eterogeneo via `EnsembleModel.load_heterogeneous()` quindi producono lo stesso backtest.
+🇮🇹 **Edge reale identificato (2026-06-04): è regime-condizionato.** In regime **R0 Quiet** il modello ha Spearman **+0.13÷0.19**, stabile in **tutti** i sotto-periodi OOS (val+test). È edge di *rango*: l'entry a soglia |μ| non lo cattura (Quiet = bassa vol → μ piccole). Un entry **rank-based regime-specifico** (sperimentale, env-gated in `03_backtest.py`: `QUANTSYS_QUIET_RANK_Q` + `QUANTSYS_QUIET_MIN_SIGMA`) recuperava parzialmente sul test (best −0.74% return, MDD 1.5%). ⚠ **Validazione su val FALLITA (2026-06-05):** sullo split held-out (`QUANTSYS_BACKTEST_SPLIT=val`) la stessa config dà return **−0.22%**, PF 0.84, solo 13 trade (val è 71% Stress, 14% Quiet → sotto-campione) → l'edge **non regge fuori campione**, non promosso nel `SignalGenerator`; resta env-flag inerte. Produzione = ensemble eterogeneo pulito / iTrans standalone. L'inversione del regime Trending **non è robusta** (validazione OOS la smonta) → non deployata. ⚠ **Le metriche in-sample (val_nll, Spearman walkforward) anti-correlano col backtest** (distribution shift strutturale): non usarle per ottimizzare. Dettaglio completo in `docs/MODEL_IMPROVEMENTS.md` e `STATUS.md`.
 
-**Live engine — stato attuale**: paper-only (nessun ordine reale), ma **BLOCKER #1 RISOLTO (2026-06-05)**: il path live usa ora `LiveCandleBuffer`→`FeatureAssembler`→`FeatureBuilder.build` (104 canoniche, stesso scaler) → `_deterministic_predict` → `SignalGenerator`, con **parity feature E segnale bit-perfect** (`tests/test_live_training_parity.py` 5/5; `99_replay_live_vs_training.py` Δ=0). I segnali paper ora riflettono il backtest — vedi `TEORIA.md` §11. Residuo operativo: smoke test WS reale + paper-trading. ⚠ Il backtest è negativo OOS: il paper-trading serve ad accumulare trade reali.
+**EN** **Real edge identified (2026-06-04): it is regime-conditional.** In regime **R0 Quiet** the model has Spearman **+0.13÷0.19**, stable across **all** OOS sub-periods (val+test). It is a *rank* edge: the |μ|-threshold entry misses it (Quiet = low vol → small μ). A **regime-specific rank-based entry** (experimental, env-gated in `03_backtest.py`: `QUANTSYS_QUIET_RANK_Q` + `QUANTSYS_QUIET_MIN_SIGMA`) partially recovered it on the test set (best −0.74% return, MDD 1.5%). ⚠ **Validation on val FAILED (2026-06-05):** on the held-out split (`QUANTSYS_BACKTEST_SPLIT=val`) the same config returns **−0.22%**, PF 0.84, only 13 trades (val is 71% Stress, 14% Quiet → underpowered) → the edge **does not hold out-of-sample**, not promoted into `SignalGenerator`; it stays an inert env-flag. Production = clean heterogeneous ensemble / iTrans standalone. The Trending-regime inversion is **not robust** (OOS validation breaks it) → not deployed. ⚠ **In-sample metrics (val_nll, walkforward Spearman) anti-correlate with the backtest** (structural distribution shift): do not use them to optimize. Full detail in `docs/MODEL_IMPROVEMENTS.md` and `STATUS.md`.
 
-**Per nuovi entry point al modello**: usare sempre `PipelineState.denormalize_predictions(mu, sigma)` prima di passare le predizioni a `SignalGenerator`. Il modello predice in spazio z-score (RobustScaler); il trading layer opera in spazio raw. Vedi `TEORIA.md` §5 per l'invariante completo.
+🇮🇹 **Harvest dell'edge ordinale — 2 leve sperimentali (2026-06-05): validate su val e FALLITE.** Aggiunti due flag env in `03_backtest.py` (inerti di default, reversibili): **Fix ① cadenza decisionale** `QUANTSYS_DECISION_CADENCE=h` (entry solo ogni ≥`forecast_horizon` candele; exit ogni candela) e **Fix ② esposizione continua rank-based** `QUANTSYS_RANK_EXPOSURE=1` (direzione+`conviction` dal percentile causale di μ, regime-gated su R0 Quiet, no-trade band `QUANTSYS_RANK_BAND` = isteresi). ⚠ **Esito val (`QUANTSYS_BACKTEST_SPLIT=val`):** baseline pulito **+4.03%/PF 1.88/WR 61%** → con Fix ①② **−2.24%/PF 0.22/WR 25.7%**. Il segnale rank come entry direzionale è **anti-predittivo OOS**; l'esposizione continua flippa (27/35 chiusure SIGNAL) → la PnL è dominata dal path SL/TP, non dal rendimento a orizzonte su cui vive lo Spearman. **NON promossi**, restano flag inerti. (Baseline val +4% è il lato favorevole dello shift val→test; il baseline su test resta negativo.)
+
+**EN** **Harvesting the ordinal edge — 2 experimental levers (2026-06-05): validated on val and FAILED.** Two env flags were added to `03_backtest.py` (inert by default, reversible): **Fix ① decision cadence** `QUANTSYS_DECISION_CADENCE=h` (entries only every ≥`forecast_horizon` candles; exits every candle) and **Fix ② continuous rank-based exposure** `QUANTSYS_RANK_EXPOSURE=1` (direction+`conviction` from the causal μ-percentile, regime-gated on R0 Quiet, no-trade band `QUANTSYS_RANK_BAND` = hysteresis). ⚠ **Val outcome (`QUANTSYS_BACKTEST_SPLIT=val`):** clean baseline **+4.03%/PF 1.88/WR 61%** → with Fix ①② **−2.24%/PF 0.22/WR 25.7%**. The rank signal as a directional entry is **anti-predictive OOS**; continuous exposure flips (27/35 SIGNAL exits) → PnL is dominated by the SL/TP path, not the horizon return the Spearman lives on. **Not promoted**, flags stay inert. (The +4% val baseline is the favorable side of the val→test shift; the test baseline stays negative.)
+
+🇮🇹 Le 3 architetture caricano lo stesso ensemble eterogeneo via `EnsembleModel.load_heterogeneous()` quindi producono lo stesso backtest.
+
+**EN** All 3 architectures load the same heterogeneous ensemble via `EnsembleModel.load_heterogeneous()`, so they produce the same backtest.
+
+🇮🇹 **Live engine — stato attuale**: paper-only (nessun ordine reale), ma **BLOCKER #1 RISOLTO (2026-06-05)**: il path live usa ora `LiveCandleBuffer`→`FeatureAssembler`→`FeatureBuilder.build` (104 canoniche, stesso scaler) → `_deterministic_predict` → `SignalGenerator`, con **parity feature E segnale bit-perfect** (`tests/test_live_training_parity.py` 5/5; `99_replay_live_vs_training.py` Δ=0). I segnali paper ora riflettono il backtest — vedi `TEORIA.md` §11. Residuo operativo: smoke test WS reale + paper-trading. ⚠ Il backtest è negativo OOS: il paper-trading serve ad accumulare trade reali.
+
+**EN** **Live engine — current status**: paper-only mode (no real orders), but **BLOCKER #1 RESOLVED (2026-06-05)**: the live path now uses `LiveCandleBuffer`→`FeatureAssembler`→`FeatureBuilder.build` (104 canonical, same scaler) → `_deterministic_predict` → `SignalGenerator`, with **bit-perfect feature AND signal parity** (`tests/test_live_training_parity.py` 5/5; `99_replay_live_vs_training.py` Δ=0). Paper signals now reflect the backtest — see `TEORIA.md` §11. Operational remainder: real WS smoke test + paper-trading. ⚠ The backtest is negative OOS: paper-trading is for accumulating real trades.
+
+🇮🇹 **Per nuovi entry point al modello**: usare sempre `PipelineState.denormalize_predictions(mu, sigma)` prima di passare le predizioni a `SignalGenerator`. Il modello predice in spazio z-score (RobustScaler); il trading layer opera in spazio raw. Vedi `TEORIA.md` §5 per l'invariante completo.
+
+**EN** **For any new model entry point**: always call `PipelineState.denormalize_predictions(mu, sigma)` before passing predictions to `SignalGenerator`. The model predicts in z-score space (RobustScaler); the trading layer operates in raw space. See `TEORIA.md` §5 for the full invariant.
 
 ---
 
-## Comandi rapidi
+## Comandi rapidi · Quick commands
 
 ```bash
 python run_all.py                                    # menu interattivo
@@ -48,28 +71,35 @@ python scripts/02c_optuna_search.py --n-trials 50    # Optuna (solo LSTM)
 
 ---
 
-## Primo avvio
+## Primo avvio · First run
 
-### 1. Prerequisiti
+### 1. Prerequisiti · 1. Prerequisites
+
 ```bash
 python scripts/00_check_setup.py
 ```
 Controlla dipendenze, CUDA, Binance, FRED. Risolvi errori prima di proseguire.
 
-### 2. Pipeline completa
+### 2. Pipeline completa · 2. Full pipeline
+
 ```bash
 python run_all.py
 ```
 Senza flag mostra menu con checkbox (↑↓ naviga, SPAZIO seleziona, A toggle all, INVIO conferma). Apre dashboard su `http://localhost:8050`.
 
-Modalità diretta: `python run_all.py --arch nhits --force-download`.
+🇮🇹 Modalità diretta: `python run_all.py --arch nhits --force-download`.
+
+**EN** Direct mode: `python run_all.py --arch nhits --force-download`.
 
 ---
 
-## Training singola arch
+## Training singola arch · Training a single architecture
 
-Ogni architettura ha config in `config/arch/{arch}.yaml` e output isolati in `models/{arch}/` e `results/{arch}/`. Nessuna interferenza tra run.
+🇮🇹 Ogni architettura ha config in `config/arch/{arch}.yaml` e output isolati in `models/{arch}/` e `results/{arch}/`. Nessuna interferenza tra run.
 
+**EN** Each architecture has its own config in `config/arch/{arch}.yaml` and isolated outputs in `models/{arch}/` and `results/{arch}/`. No cross-run interference.
+
+🇮🇹
 | Arch | Comando | Tempo (RTX 2070 Super) | Note |
 |---|---|---|---|
 | iTransformer | `python run_all.py --arch itransformer --skip-update --skip-macro` | ~25 min | Attention sulle feature, baseline (ICIR 0.795) |
@@ -77,9 +107,20 @@ Ogni architettura ha config in `config/arch/{arch}.yaml` e output isolati in `mo
 | TCN+Mamba | `python run_all.py --arch tcnmamba --skip-update --skip-macro` | ~20 min | Conv dilatate + SSM, ottimo per pattern locali |
 | LSTM | `python run_all.py --arch lstm --skip-update --skip-macro` | ~30 min | Legacy backward compat (sotto-performante) |
 
-`--skip-update --skip-macro`: usa dati su disco senza ridownload. Prima volta: ometti.
+**EN**
+| Arch | Command | Time (RTX 2070 Super) | Notes |
+|---|---|---|---|
+| iTransformer | `python run_all.py --arch itransformer --skip-update --skip-macro` | ~25 min | Attention over features, baseline (ICIR 0.795) |
+| N-HiTS | `python run_all.py --arch nhits --skip-update --skip-macro` | ~10–15 min | Hierarchical pure-MLP, replaces LSTM since 2026-05-14 |
+| TCN+Mamba | `python run_all.py --arch tcnmamba --skip-update --skip-macro` | ~20 min | Dilated conv + SSM, great for local patterns |
+| LSTM | `python run_all.py --arch lstm --skip-update --skip-macro` | ~30 min | Legacy backward compat (under-performing) |
 
-### Verifica risultati
+🇮🇹 `--skip-update --skip-macro`: usa dati su disco senza ridownload. Prima volta: ometti.
+
+**EN** `--skip-update --skip-macro`: use on-disk data without redownload. First run: omit them.
+
+### Verifica risultati · Inspecting results
+
 ```bash
 python scripts/07_verify_teacher.py
 ```
@@ -88,15 +129,19 @@ Tabella comparativa: param count, forward time, Sharpe, WR, n trade, max DD, tot
 - `models/{arch}/history.json` — curva loss
 - `results/{arch}/dashboard_results.json` — metriche backtest
 
-Oppure dalla dashboard: `python run_all.py --only-dashboard` poi dropdown arch nel browser (`/api/archs` rileva quelle con `dashboard_results.json`).
+🇮🇹 Oppure dalla dashboard: `python run_all.py --only-dashboard` poi dropdown arch nel browser (`/api/archs` rileva quelle con `dashboard_results.json`).
+
+**EN** Or from the dashboard: `python run_all.py --only-dashboard` then arch dropdown (`/api/archs` auto-detects archs with `dashboard_results.json`).
 
 ---
 
-## Distillation con più modelli
+## Distillation con più modelli · Distillation with multiple models
 
-### Composizione default
+### Composizione default · Default composition
 
-Ensemble eterogeneo: **iTransformer + N-HiTS + TCN+Mamba**. LSTM rimosso il 2026-05-14 (val_NLL 5.28 vs iTransformer 0.18 → underfitting strutturale). Codice LSTM intatto, ricaricabile per rollback.
+🇮🇹 Ensemble eterogeneo: **iTransformer + N-HiTS + TCN+Mamba**. LSTM rimosso il 2026-05-14 (val_NLL 5.28 vs iTransformer 0.18 → underfitting strutturale). Codice LSTM intatto, ricaricabile per rollback.
+
+**EN** Heterogeneous ensemble: **iTransformer + N-HiTS + TCN+Mamba**. LSTM was removed on 2026-05-14 (val_NLL 5.28 vs iTransformer 0.18 → structural underfitting). LSTM code is intact and reloadable for rollback.
 
 ### Pipeline
 
@@ -104,21 +149,33 @@ Ensemble eterogeneo: **iTransformer + N-HiTS + TCN+Mamba**. LSTM rimosso il 2026
 python run_all.py --distill --skip-update --skip-macro
 ```
 
-**Fase 2a — Training candidati**: ogni arch in `distillation.archs` addestrata con `n_ensemble=1`. Se `models/{arch}/best_model.pt` esiste, skippata. Per forzare retrain: `--force-download`.
+🇮🇹 **Fase 2a — Training candidati**: ogni arch in `distillation.archs` addestrata con `n_ensemble=1`. Se `models/{arch}/best_model.pt` esiste, skippata. Per forzare retrain: `--force-download`.
 
-**Fase 2b — Multi-Teacher Scoring**: ogni candidato valutato alla best epoch con score normalizzato (40% val_loss + 35% spearman + 25% directional accuracy). Pesi softmax con temperature=2 calcolati per tutti. Lo score massimo diventa *primary teacher*; gli altri restano nel pool come teacher pesati.
+**EN** **Phase 2a — Candidate training**: each arch in `distillation.archs` is trained normally with `n_ensemble=1`. If `models/{arch}/best_model.pt` exists, it is skipped. To force retrain: `--force-download`.
 
-**Fase 2c — Multi-Teacher Distillation**: ogni student riceve soft labels combinate (media pesata da scoring). Loss mista `(1-α)·NLL_reale + α·loss_distillazione` con α=0.3. Loss distillazione scala-normalizzata per μ/σ/ν. Soft labels integrate nel TensorDataset (shuffle-safe). Epoche ridotte al 60%. Student già distillati skippati automaticamente.
+🇮🇹 **Fase 2b — Multi-Teacher Scoring**: ogni candidato valutato alla best epoch con score normalizzato (40% val_loss + 35% spearman + 25% directional accuracy). Pesi softmax con temperature=2 calcolati per tutti. Lo score massimo diventa *primary teacher*; gli altri restano nel pool come teacher pesati.
 
-**Ensemble eterogeneo (inferenza)**: tutti i modelli predicono insieme, output combinato con legge della varianza totale:
+**EN** **Phase 2b — Multi-Teacher Scoring**: every candidate is evaluated at its best epoch with normalized scoring (40% val_loss + 35% Spearman + 25% directional accuracy). Softmax weights with temperature=2 are computed for all of them. The top score becomes the *primary teacher*; the others stay in the pool as weighted teachers.
+
+🇮🇹 **Fase 2c — Multi-Teacher Distillation**: ogni student riceve soft labels combinate (media pesata da scoring). Loss mista `(1-α)·NLL_reale + α·loss_distillazione` con α=0.3. Loss distillazione scala-normalizzata per μ/σ/ν. Soft labels integrate nel TensorDataset (shuffle-safe). Epoche ridotte al 60%. Student già distillati skippati automaticamente.
+
+**EN** **Phase 2c — Multi-Teacher Distillation**: each student receives soft labels combined as a weighted mean from scoring. Mixed loss `(1−α)·NLL_real + α·distill_loss` with α=0.3. Distillation loss is scale-normalized for μ/σ/ν. Soft labels are integrated into the TensorDataset (shuffle-safe). Epochs are cut to 60%. Students already distilled are skipped automatically.
+
+🇮🇹 **Ensemble eterogeneo (inferenza)**: tutti i modelli predicono insieme, output combinato con legge della varianza totale:
 - `mu_ens = Σ w_i · mu_i`
 - `sigma_ens = sqrt(Σ w_i · sigma_i² + Σ w_i · (mu_i - mu_ens)²)`
 
-Pesi default in `DEFAULT_ARCH_WEIGHTS` (`quantsys/model/ensemble.py`): iTransformer/N-HiTS/TCNMamba/TFT = 1.0, LSTM = 0.5.
+**EN** **Heterogeneous ensemble (inference)**: all models predict together, the output is combined using the law of total variance:
+- `mu_ens = Σ w_i · mu_i`
+- `sigma_ens = sqrt(Σ w_i · sigma_i² + Σ w_i · (mu_i − mu_ens)²)`
 
-### Cambiare composizione
+🇮🇹 Pesi default in `DEFAULT_ARCH_WEIGHTS` (`quantsys/model/ensemble.py`): iTransformer/N-HiTS/TCNMamba/TFT = 1.0, LSTM = 0.5.
 
-**Un solo posto**: `config/default.yaml` → `distillation.archs`:
+**EN** Default weights in `DEFAULT_ARCH_WEIGHTS` (`quantsys/model/ensemble.py`): iTransformer/N-HiTS/TCNMamba/TFT = 1.0, LSTM = 0.5.
+
+### Cambiare composizione · Changing the composition
+
+🇮🇹 **Un solo posto**: `config/default.yaml` → `distillation.archs`:
 ```yaml
 distillation:
   archs:
@@ -128,25 +185,44 @@ distillation:
 ```
 Esempi: `["itransformer", "lstm", "tcnmamba"]` rollback legacy; `["itransformer", "nhits", "tcnmamba", "lstm"]` ensemble a 4; `["itransformer", "tcnmamba"]` solo 2.
 
-Dopo la modifica, `python run_all.py --distill`: addestra mancanti, scoring, distill student, backtest/live usano automaticamente la nuova composizione.
+**EN** **One spot only**: `config/default.yaml` → `distillation.archs`:
+```yaml
+distillation:
+  archs:
+    - itransformer
+    - nhits
+    - tcnmamba
+```
+Examples: `["itransformer", "lstm", "tcnmamba"]` legacy rollback; `["itransformer", "nhits", "tcnmamba", "lstm"]` 4-model ensemble; `["itransformer", "tcnmamba"]` just 2.
 
-### Forzare un teacher specifico
+🇮🇹 Dopo la modifica, `python run_all.py --distill`: addestra mancanti, scoring, distill student, backtest/live usano automaticamente la nuova composizione.
+
+**EN** After editing, `python run_all.py --distill` trains the missing models, scores, distills students; backtest/live automatically pick up the new composition.
+
+### Forzare un teacher specifico · Forcing a specific teacher
+
 ```bash
 python run_all.py --distill --teacher itransformer
 ```
 Salta lo scoring automatico. Gli altri restano nel pool pesato.
 
-### Verificare la distillation
+### Verificare la distillation · Verifying distillation
 
-In `models/{arch}/config.json`:
+🇮🇹 In `models/{arch}/config.json`:
 - `distilled: true`
 - `teacher_arch: "multi-teacher"`
 
-Arch già distillata viene skippata in Fase 2c. Per forzare ri-distillation: cancella `best_model.pt` o usa `--force-download`.
+**EN** In `models/{arch}/config.json`:
+- `distilled: true`
+- `teacher_arch: "multi-teacher"`
+
+🇮🇹 Arch già distillata viene skippata in Fase 2c. Per forzare ri-distillation: cancella `best_model.pt` o usa `--force-download`.
+
+**EN** An already-distilled arch is skipped in Phase 2c. To force re-distillation: delete `best_model.pt` or use `--force-download`.
 
 ---
 
-## Avvii successivi
+## Avvii successivi · Subsequent runs
 
 ```bash
 python scripts/06_dashboard.py            # solo dashboard
@@ -158,8 +234,9 @@ python run_all.py --distill                # full + distillation
 
 ---
 
-## Flag utili
+## Flag utili · Useful flags
 
+🇮🇹
 | Flag | Effetto |
 |------|---------|
 | `--skip-update` | Usa dataset esistente, no download |
@@ -176,26 +253,53 @@ python run_all.py --distill                # full + distillation
 | `--distill` | Pipeline multi-teacher |
 | `--teacher ARCH` | Forza primary teacher |
 
+**EN**
+| Flag | Effect |
+|------|--------|
+| `--skip-update` | Use existing dataset, no download |
+| `--skip-macro` | Skip FRED/yFinance download |
+| `--skip-train` | Use existing model, no retrain |
+| `--skip-walkfwd` | Skip walk-forward validation |
+| `--skip-backtest` | Skip backtest |
+| `--skip-live` | No live WebSocket feed |
+| `--skip-analyze` | Skip `05_analyze_signals.py` |
+| `--only-dashboard` | Dashboard + live only, no ML |
+| `--no-browser` | Do not auto-open browser |
+| `--force-download` | Redownload + force retrain |
+| `--max-model-age-days N` | Retrain if model older than N days |
+| `--distill` | Multi-teacher distillation pipeline |
+| `--teacher ARCH` | Force primary teacher |
+
 ---
 
 ## Hardware
 
 ### CPU
-`config/default.yaml`:
+
+🇮🇹 `config/default.yaml`:
 ```yaml
 hardware:
   cpu_fraction: 0.5   # 0.3=30%, 0.5=50%, 0.8=80%
 ```
 Default 0.5 (4 thread su 8 core). Letto da tutti gli script all'avvio.
 
+**EN** `config/default.yaml`:
+```yaml
+hardware:
+  cpu_fraction: 0.5   # 0.3=30%, 0.5=50%, 0.8=80%
+```
+Default 0.5 (4 threads on 8 cores). Read by every script at startup.
+
 ### GPU compute
+
 ```powershell
 nvidia-smi -pl 125    # limita (RTX 2070 Super min=125 max=215W)
 nvidia-smi -pl 215    # ripristina
 ```
 
-### Setup di riferimento (RTX 2070 Super 8GB)
+### Setup di riferimento (RTX 2070 Super 8GB) · Reference setup (RTX 2070 Super 8GB)
 
+🇮🇹
 | Componente | Valore |
 |---|---|
 | CUDA, AMP fp16 training | sì (via `setup_device`) |
@@ -203,24 +307,50 @@ nvidia-smi -pl 215    # ripristina
 | Batch inference backtest | 256 (`scripts/03_backtest.py`) |
 | Batch training | 64 (default `config/arch/<arch>.yaml`) |
 
-### Solo CPU
-Il codice fa fallback automatico via `setup_device` (`quantsys/utils/__init__.py`). Su `quantsys/model/__init__.py:67`, `autocast(device_type="cuda")` è no-op silenzioso su CPU. Tempi:
+**EN**
+| Component | Value |
+|---|---|
+| CUDA, AMP fp16 training | yes (via `setup_device`) |
+| AMP inference | **off** hardcoded in `ensemble.py:170` (avoids NaN from spectral_norm + Mamba scan) |
+| Backtest inference batch | 256 (`scripts/03_backtest.py`) |
+| Training batch | 64 (default `config/arch/<arch>.yaml`) |
+
+### Solo CPU · CPU only
+
+🇮🇹 Il codice fa fallback automatico via `setup_device` (`quantsys/utils/__init__.py`). Su `quantsys/model/__init__.py:67`, `autocast(device_type="cuda")` è no-op silenzioso su CPU. Tempi:
 - Training: 20-50× più lento (tcnmamba ~3h GPU → 2-3 giorni CPU). Sconsigliato.
 - Backtest: ~5s GPU → 30-60s CPU. Tollerabile.
 - Live: ~50-100ms vs ~20ms GPU. Pienamente utilizzabile (latency WS Binance domina).
 
-### Apple Silicon / AMD / Intel Arc
-Non testato. Codice usa `torch.cuda.*`. Per MPS servono modifiche a `setup_device` e probabilmente kernel custom per Mamba/SSM.
+**EN** The code falls back automatically via `setup_device` (`quantsys/utils/__init__.py`). In `quantsys/model/__init__.py:67`, `autocast(device_type="cuda")` is a silent no-op on CPU. Times:
+- Training: 20–50× slower (tcnmamba ~3h GPU → 2–3 days CPU). Not recommended.
+- Backtest: ~5s GPU → 30–60s CPU. Tolerable.
+- Live: ~50–100ms vs ~20ms GPU. Fully usable (Binance WS latency dominates).
 
-### Poca VRAM (4GB)
-`config/arch/<arch>.yaml`:
+### Apple Silicon / AMD / Intel Arc
+
+🇮🇹 Non testato. Codice usa `torch.cuda.*`. Per MPS servono modifiche a `setup_device` e probabilmente kernel custom per Mamba/SSM.
+
+**EN** Untested. Code uses `torch.cuda.*`. MPS support would require changes to `setup_device` and likely custom kernels for Mamba/SSM.
+
+### Poca VRAM (4GB) · Low VRAM (4GB)
+
+🇮🇹 `config/arch/<arch>.yaml`:
 ```yaml
 batch_size: 32
 gradient_accumulation_steps: 2   # mantiene effective batch=64
 ```
 Inference batch in `scripts/03_backtest.py` da 256 → 128.
 
-### Molta VRAM (≥16GB)
+**EN** `config/arch/<arch>.yaml`:
+```yaml
+batch_size: 32
+gradient_accumulation_steps: 2   # keeps effective batch=64
+```
+Inference batch in `scripts/03_backtest.py` from 256 → 128.
+
+### Molta VRAM (≥16GB) · High VRAM (≥16GB)
+
 ```yaml
 batch_size: 128
 ```
@@ -228,8 +358,9 @@ Inference batch fino a 1024 (guadagno marginale, GPU già satura).
 
 ---
 
-## Architetture
+## Architetture · Architectures
 
+🇮🇹
 | Arch | Classe | File | Note |
 |---|---|---|---|
 | `itransformer` | `QuantiTransformer` | `quantsys/model/__init__.py:1025` | Attention sulle feature, baseline |
@@ -237,7 +368,17 @@ Inference batch fino a 1024 (guadagno marginale, GPU già satura).
 | `tcnmamba` | `QuantTCNMamba` | `quantsys/model/tcn_mamba.py:341` | TCN dilatate + SSM ibrido |
 | `lstm` | `QuantLSTM` | `quantsys/model/__init__.py:309` | Legacy |
 
-### Aggiungere una nuova arch
+**EN**
+| Arch | Class | File | Notes |
+|---|---|---|---|
+| `itransformer` | `QuantiTransformer` | `quantsys/model/__init__.py:1025` | Attention over features, baseline |
+| `nhits` | `QuantNHiTS` | `quantsys/model/nhits.py:110` | Hierarchical pure-MLP |
+| `tcnmamba` | `QuantTCNMamba` | `quantsys/model/tcn_mamba.py:341` | Dilated TCN + SSM hybrid |
+| `lstm` | `QuantLSTM` | `quantsys/model/__init__.py:309` | Legacy |
+
+### Aggiungere una nuova arch · Adding a new architecture
+
+🇮🇹
 1. Classe in `quantsys/model/` con `forward(x, x_macro=None) -> (mu, ls2, lnu)`
 2. Dispatcher in `quantsys/model/__init__.py:load_model`
 3. Branch in `scripts/02_train.py` (`architecture == "X"`)
@@ -245,6 +386,15 @@ Inference batch fino a 1024 (guadagno marginale, GPU già satura).
 5. `choices` in `run_all.py` (parser `--arch` e `--teacher`)
 6. Whitelist in `06_dashboard.py`, `05_analyze_signals.py`
 7. (Opzionale) `distillation.archs` in `config/default.yaml`
+
+**EN**
+1. Class in `quantsys/model/` with `forward(x, x_macro=None) -> (mu, ls2, lnu)`
+2. Dispatcher in `quantsys/model/__init__.py:load_model`
+3. Branch in `scripts/02_train.py` (`architecture == "X"`)
+4. `config/arch/X.yaml`
+5. `choices` in `run_all.py` (parser `--arch` and `--teacher`)
+6. Whitelists in `06_dashboard.py`, `05_analyze_signals.py`
+7. (Optional) `distillation.archs` in `config/default.yaml`
 
 ---
 
@@ -256,18 +406,27 @@ python scripts/02c_optuna_search.py --n-trials 50 --study-name quantsys
 ```
 **Limiti**: hardcoded su `QuantLSTM`. `best_params.json` salvato in `models/lstm/` NON applicato automaticamente al training successivo — copia manuale in `config/arch/lstm.yaml`.
 
-Studio persistente su SQLite (`models/lstm/optuna_quantsys.db`), ripristinabile.
+🇮🇹 Studio persistente su SQLite (`models/lstm/optuna_quantsys.db`), ripristinabile.
+
+**EN** Study persists on SQLite (`models/lstm/optuna_quantsys.db`), resumable any time.
 
 ---
 
-## Ensemble omogeneo (5× stessa arch, legacy)
+## Ensemble omogeneo (5× stessa arch, legacy) · Homogeneous ensemble (5× same arch, legacy)
 
-`config/default.yaml`:
+🇮🇹 `config/default.yaml`:
 ```yaml
 training:
   n_ensemble: 5   # default attuale = 5 (override automatico a 1 in --distill)
 ```
 Output: `models/{arch}/best_model_0..4.pt`. Backtest/live li caricano via `EnsembleModel.load`. Indipendente dalla distillation (modalità non si escludono).
+
+**EN** `config/default.yaml`:
+```yaml
+training:
+  n_ensemble: 5   # current default = 5 (auto-overridden to 1 when --distill)
+```
+Output: `models/{arch}/best_model_0..4.pt`. Backtest/live load them via `EnsembleModel.load`. Independent from distillation (modes are not mutually exclusive).
 
 ---
 
@@ -303,18 +462,30 @@ quantsys_project/
 
 ---
 
-## Dashboard — pulsante "Aggiorna"
+## Dashboard — pulsante "Aggiorna" · Dashboard — "Update" button
 
+🇮🇹
 1. **Aggiorna** in alto a destra
 2. Seleziona step da eseguire
 3. **Avvia** → barra di progresso
 4. Al termine dashboard si aggiorna automaticamente
 5. **Annulla** per fermare un job
 
-Switch arch: dropdown in alto (rileva arch con `dashboard_results.json`).
+**EN**
+1. Click **Update** top right
+2. Select the steps to run
+3. Click **Start** → progress bar
+4. When done the dashboard refreshes automatically
+5. **Cancel** to stop a job
+
+🇮🇹 Switch arch: dropdown in alto (rileva arch con `dashboard_results.json`).
+
+**EN** Switching arch: top dropdown (detects archs with `dashboard_results.json`).
 
 ---
 
-## Fermare tutto
+## Fermare tutto · Stopping everything
 
-`Ctrl+C` nel terminale di `run_all.py`. Termina dashboard + live feed.
+🇮🇹 `Ctrl+C` nel terminale di `run_all.py`. Termina dashboard + live feed.
+
+**EN** `Ctrl+C` in the `run_all.py` terminal. Terminates dashboard + live feed.
