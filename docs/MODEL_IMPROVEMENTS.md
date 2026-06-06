@@ -6,6 +6,34 @@
 
 ---
 
+## 🧭 PIVOT ROADMAP 2026-06-06 — esauriti i lever model-side, 4 assi studiati · 4 axes studied after model-side levers exhausted
+
+🇮🇹 Dopo che tutti i lever model/backtest-side su BTC-1m sono risultati negativi OOS (distill≡baseline, ensemble corr 0.995, rank-harvest fallito, mixture/σ-recal inutili), è stata avviata la **Strada A (paper-trading live)** e studiato il pivot via fan-out di 4 subagent. Dettaglio in memoria `pivot_fanout_2026_06_06`.
+
+**EN** After all model/backtest-side levers on BTC-1m proved negative OOS (distill≡baseline, ensemble corr 0.995, rank-harvest failed, mixture/σ-recal worthless), **Path A (live paper-trading)** was launched and the pivot studied via a 4-subagent fan-out. Full detail in memory note `pivot_fanout_2026_06_06`.
+
+🇮🇹
+| Asse | Prior edge tradabile | Test più economico | Effort | Rischio chiave |
+|---|---|---|---|---|
+| **Cross-sectional** multi-asset | **il più alto** | Spearman cross-sezionale di μ (ore) | M | edge BTC-idiosincratico / liquid∩costi |
+| **Timeframe → 1h** | plausibile (cost/σ 0.25-0.42 vs 1.9-3.3) | nessuno (serve re-download+re-tune) | M | cost-fragile; anti-corr val→test è del metodo |
+| **Target → volatilità** | **predicibile ma NON tradabile** | one-line target + QLIKE vs HAR-RV (S) | S esp. / L+ prodotto | nessuno strumento per monetizzare |
+| **Asset class → ES 1m** | modesto (session-mechanical) | nessuno (rewrite data-layer) | M | già HFT-arbitraggiato; leakage roll |
+
+**EN**
+| Axis | Tradable-edge prior | Cheapest test | Effort | Key risk |
+|---|---|---|---|---|
+| **Cross-sectional** multi-asset | **highest** | cross-sectional Spearman of μ (hours) | M | BTC-idiosyncratic edge / liquid∩costs |
+| **Timeframe → 1h** | plausible (cost/σ 0.25-0.42 vs 1.9-3.3) | none (needs re-download+re-tune) | M | cost-fragile; val→test anti-corr is method-level |
+| **Target → volatility** | **predictable but NOT tradable** | one-line target + QLIKE vs HAR-RV (S) | S exp. / L+ product | no instrument to monetize |
+| **Asset class → ES 1m** | modest (session-mechanical) | none (data-layer rewrite) | M | already HFT-arbitraged; roll leakage |
+
+🇮🇹 **Sequenza raccomandata:** (1) **probe cross-sectional IC** (Spearman cross-sezionale di μ; kill pre-registrato se ≈0); (2) in parallelo **vol vs HAR-RV** (chiude B2 + jump/no-trade gate per il paper-trading A); differiti 1h poi ES. **B1 order-book L2** resta l'asse informazione-nuova ortogonale.
+
+**EN** **Recommended sequence:** (1) **cross-sectional IC probe** (cross-sectional Spearman of μ; pre-registered kill if ≈0); (2) in parallel **vol vs HAR-RV** (closes B2 + jump/no-trade gate for paper-trading A); 1h then ES deferred. **B1 order-book L2** stays the orthogonal new-information axis.
+
+---
+
 ## 🔴 RESUME 2026-06-04 — Fix #3 (T=240) regressione confermata: scegliere tra 4 opzioni
 
 🇮🇹 **Stato pipeline al termine sessione 2026-06-03 → 2026-06-04 ~01:00:**
