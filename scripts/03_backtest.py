@@ -505,6 +505,17 @@ def main():
                     f"Il TP/SL potrebbe non avere tempo di triggerare prima del MAX_HOLD."
                 )
             all_mu, all_sigma = _state.denormalize_predictions(all_mu, all_sigma)
+            # IT: Step 0.5 — ricalibrazione σ sperimentale (env, default 1.0 = INERTE). Lo Step 0
+            #     (scripts/dev_step0_regime_sigma.py) ha mostrato σ ~3× troppo grande (std(z)≈0.4)
+            #     → SL/TP (σ·price·1.5) ~3× troppo larghi. Scala σ post-denorm per misurare l'impatto
+            #     su SL/TP, Kelly (f*=μ/σ²) e gate SNR (|μ|/σ). Reversibile; se promosso va bakato in
+            #     PipelineState.denormalize_predictions (parity-safe: identico backtest↔live).
+            # EN: Step 0.5 — experimental σ recalibration (env, default 1.0 = INERT). Step 0 showed
+            #     σ is ~3× too large → SL/TP too wide. Scales σ post-denorm to measure trading impact.
+            _sigma_scale = float(os.environ.get("QUANTSYS_SIGMA_SCALE", "1") or "1")
+            if _sigma_scale != 1.0:
+                all_sigma = all_sigma * _sigma_scale
+                log.info(f"σ RICALIBRATA sperimentale: ×{_sigma_scale} (QUANTSYS_SIGMA_SCALE)")
             log.info(
                 f"μ/σ denormalizzate (target_scale={_state.target_scale:.6f}) → "
                 f"μ range [{all_mu.min():.5f}, {all_mu.max():.5f}], "
