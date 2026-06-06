@@ -504,6 +504,18 @@ def _parse_distill_args():
 # EN: entrypoint — setup, data, ensemble loop, training, test eval, artifact export
 def main():
     global _GRAD_CLIP
+    # IT: Forza UTF-8 su stdout/stderr — evita UnicodeEncodeError cp1252 sui banner Unicode quando
+    #     l'output è rediretto/in pipe su Windows (es. `02_train.py *> file.log`, o background).
+    #     Bug osservato 2026-06-06 (distill in background → exit 1 sul print finale, modello già
+    #     salvato). Stesso fix di 04_live_signals.py / run_all.py / 99_replay_live_vs_training.py.
+    # EN: Force UTF-8 on stdout/stderr — avoids cp1252 UnicodeEncodeError on Unicode banners when
+    #     output is redirected/piped on Windows. The model is saved before the crashing banner.
+    import sys as _sys
+    for _stream in (_sys.stdout, _sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     cfg   = load_config("config/default.yaml")
     _GRAD_CLIP = cfg.get("training", {}).get("grad_clip_norm", 1.0)
     # 2026-05-15: opt-in SN solo su mu_head (anti-overfit). Default False = legacy

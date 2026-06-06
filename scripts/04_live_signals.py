@@ -1212,6 +1212,53 @@ class LiveEngine:
                 f"(window_size={window_size} + lookback=60 + margine=10) ..."
             )
 
+        # IT: ── A1 — CATCH-UP CONTIGUO del candle_buffer (sorgente del FeatureAssembler) ──
+        #     Il bootstrap da raw_candles.parquet può essere vecchio di giorni; senza colmare
+        #     il gap fino a "ora" le feature a lookback lungo (ma200m, vp, 30d) attraversano un
+        #     buco temporale (bug osservato nello smoke test 2026-06-05). Scarica via REST le
+        #     candele mancanti dall'ultima del buffer fino a ora (paginazione in fetch_klines) e
+        #     le appende in modo CONTIGUO. Dedup su open_time. Best-effort: se fallisce, il WS
+        #     colmerà gradualmente (col mirror dedup-safe sotto come fallback).
+        # EN: A1 — CONTIGUOUS catch-up of candle_buffer (the FeatureAssembler source). The parquet
+        #     bootstrap can be days old; without bridging the gap to "now", long-lookback features
+        #     span a temporal hole (smoke-test bug 2026-06-05). Fetch the missing range via REST
+        #     and append contiguously. Dedup on open_time. Best-effort.
+        try:
+            from quantsys.data import fetch_klines
+            _cb_last = self.candle_buffer.latest
+            if _cb_last is not None:
+                _last_ts = self.candle_buffer._norm_ts(_cb_last["open_time"])
+                _df_cb = fetch_klines(self.symbol, self.interval, 0,
+                                      start_time=_last_ts.strftime("%Y-%m-%d %H:%M:%S"))
+            else:
+                _last_ts = None
+                _df_cb = fetch_klines(self.symbol, self.interval, min_candles)
+            _n_cb = 0
+            for _, _row in _df_cb.iterrows():
+                _ot = self.candle_buffer._norm_ts(_row["open_time"])
+                if _last_ts is not None and _ot <= _last_ts:
+                    continue                                   # IT: dedup — già in buffer
+                self.candle_buffer.append({
+                    "open_time":           _ot,
+                    "open":                float(_row["open"]),
+                    "high":                float(_row["high"]),
+                    "low":                 float(_row["low"]),
+                    "close":               float(_row["close"]),
+                    "volume":              float(_row["volume"]),
+                    "quote_vol":           float(_row.get("quote_vol", 0.0)),
+                    "trades":              int(_row.get("trades", 0)),
+                    "taker_buy_vol":       float(_row.get("taker_buy_vol", 0.0)),
+                    "taker_buy_quote_vol": float(_row.get("taker_buy_quote_vol", 0.0)),
+                })
+                _n_cb += 1
+            if self.candle_buffer.latest is not None:
+                log.info(
+                    f"Catch-up candle_buffer (A1): +{_n_cb} candele REST → "
+                    f"{len(self.candle_buffer)} candele, ultima {self.candle_buffer.latest['open_time']}"
+                )
+        except Exception as e:
+            log.warning(f"Catch-up candle_buffer (A1) fallito: {e} — il WS colmerà gradualmente")
+
         try:
             r = requests.get(
                 "https://api.binance.com/api/v3/klines",
@@ -1235,9 +1282,15 @@ class LiveEngine:
                 }
                 if _is_valid_candle(candle):
                     self.buf.push(candle)
-                    # IT: Stage 4.6 — mirror warmup REST anche nel buffer raw.
-                    # EN: Stage 4.6 — mirror REST warmup into the raw buffer as well.
-                    self.candle_buffer.append(candle)
+                    # IT: mirror nel candle_buffer SOLO se più recente dell'ultima — evita
+                    #     duplicati col catch-up A1 sopra; resta fallback se il catch-up è fallito.
+                    # EN: mirror into candle_buffer ONLY if newer than the last one — avoids dupes
+                    #     with the A1 catch-up above; stays a fallback if the catch-up failed.
+                    _cb_last = self.candle_buffer.latest
+                    if (_cb_last is None or
+                            self.candle_buffer._norm_ts(k[0]) >
+                            self.candle_buffer._norm_ts(_cb_last["open_time"])):
+                        self.candle_buffer.append(candle)
                     n_pushed += 1
                 else:
                     n_skipped += 1
