@@ -11,6 +11,8 @@ architettura e fasi della pipeline (↑↓ naviga, SPAZIO seleziona, INVIO confe
 
 Flag disponibili (modalità diretta, salta il menu):
   --arch            architettura modello: lstm | itransformer | tcnmamba
+  --n-ensemble N    seed nell'ensemble per il training single-arch (--arch), default 5;
+                    il path --distill resta SEMPRE a n_ensemble=1 (teacher+student)
   --skip-update     salta aggiornamento dati (usa dataset esistente)
   --skip-macro      salta download macro FRED/yFinance
   --skip-train      salta riaddestramento (usa modello esistente)
@@ -387,7 +389,13 @@ def phase_train(args) -> None:
         step_warn(f"Modello esistente: {MODEL_FILE.name}  (ultimo salvataggio: {mtime})")
         step_warn("Riaddestro su nuovo dataset ...")
 
-    run_script("02_train.py")
+    # IT: training single-arch (--arch) → ensemble multi-seed (default 5, override via --n-ensemble).
+    #     Il path --distill NON passa di qui: usa phase_distill con n_ensemble=1.
+    # EN: single-arch training (--arch) → multi-seed ensemble (default 5, override via --n-ensemble).
+    #     The --distill path does NOT go through here: it uses phase_distill with n_ensemble=1.
+    _n_ens = getattr(args, "n_ensemble", 5)
+    print(f"  •  Ensemble single-arch: n_ensemble={_n_ens} seed")
+    run_script("02_train.py", extra_args=["--n-ensemble", str(_n_ens)])
     step_ok(f"Training completato in {elapsed(t0)}")
 
 
@@ -673,6 +681,17 @@ def parse_args():
         choices=["lstm", "itransformer", "tcnmamba", "nhits"],
         help="Architettura modello (default: valore in config/default.yaml)",
     )
+    # IT: n_ensemble per il training single-arch (--arch). Default 5 (ensemble multi-seed).
+    #     Il path --distill resta a 1 (vedi phase_distill: teacher e student a n_ensemble=1).
+    # EN: n_ensemble for single-arch training (--arch). Default 5 (multi-seed ensemble).
+    #     The --distill path stays at 1 (see phase_distill: teacher and student at n_ensemble=1).
+    p.add_argument(
+        "--n-ensemble",
+        type=int,
+        default=5,
+        metavar="N",
+        help="seed nell'ensemble per il training single-arch (--arch); default 5. --distill resta a 1",
+    )
     p.add_argument("--skip-update",    action="store_true", help="salta aggiornamento dati")
     p.add_argument("--skip-macro",     action="store_true", help="salta download macro")
     p.add_argument("--skip-train",     action="store_true", help="salta riaddestramento")
@@ -708,6 +727,18 @@ def parse_args():
 # IT: orchestratore: menu/flag → propaga arch via env → esegue le fasi in ordine.
 # EN: orchestrator: menu/flags → propagate arch via env → run phases in order.
 def main():
+    # IT: Forza UTF-8 su stdout/stderr PRIMA di parse_args — l'help/usage e i banner contengono
+    #     Unicode (frecce, accenti, icone) che sotto Windows cp1252 crashano con UnicodeEncodeError
+    #     quando l'output è rediretto/in pipe (es. `run_all.py --help | ...`). Stesso pattern di
+    #     04_live_signals.py / 99_replay_live_vs_training.py.
+    # EN: Force UTF-8 on stdout/stderr BEFORE parse_args — help/usage and banners contain Unicode
+    #     that crashes under Windows cp1252 when output is redirected/piped. Same pattern as the
+    #     live engine and the replay script.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     args = parse_args()
 
     # ── Modalità interattiva: nessun flag CLI → mostra menu ─────────────────
