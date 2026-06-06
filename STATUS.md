@@ -93,13 +93,14 @@ Confronto su `QUANTSYS_BACKTEST_SPLIT=val`, ensemble eterogeneo 3 archi, `cadenc
 
 ## ▶️ Azione esatta da cui ripartire
 
-**Fix ①② validati su val e FALLITI (vedi sopra) → archiviati come flag inerti.** L'unica iterazione *principled* rimasta sul meccanismo, se la si vuole esaurire prima di mollare:
-- **Test di isolamento orizzonte-locked:** chiusura puramente TEMPORALE a esattamente `h=30` candele (disabilitare SL/TP/trailing/flip-SIGNAL per i trade rank), così la PnL realizzata coincide col rendimento a orizzonte su cui vive lo Spearman. È l'unico modo di testare *davvero* l'edge di rango isolato dalla macchina di realizzazione. **Prior basso** (WR val 26% suggerisce che la traduzione direzionale del rango è debole/negativa OOS) — non inseguire l'inversione di segno (= overfit del val; l'inversione regime non è robusta, vedi storia).
+**STATO al 2026-06-06: TUTTI i lever model/backtest-side esauriti e dimostrati negativi OOS** (distill≡baseline, ensemble corr 0.995, pesi dinamici anti-correlano, rank-harvest fallito, mixture-of-universes non vale, ricalibrazione σ peggiora). L'infrastruttura è SOLIDA: BLOCKER #1 chiuso (parity bit-perfect), live engine robusto (catch-up A1.1, smoke test superato, 3 cp1252 fixati), `run_all.py` aggiornato (`--arch`→5 / `--distill`→1). **Non restano tweak di modello con prior non-nullo.**
 
-**BLOCKER #1 parity CHIUSO (vedi sopra).** Prossimi passi possibili, in ordine:
-1. **Smoke test live reale (Stage 4.10):** `$env:QUANTSYS_ARCH="itransformer"; python scripts/04_live_signals.py` — verificare connessione WS Binance, warmup buffer, primo segnale entro ~2 min, nessun warning "feature mismatch". (Richiede rete; non eseguito qui.)
-2. **Avvio paper-trading** per accumulare trade reali OOS (unico canale di verità non contaminato). Solo dopo, decidere se valgono i 2 fix proposti (AFD / DILATE) — vedi analisi in chat: prima eventualmente riattivare FFD fisso `d=0.4` (parity-safe ora che il buffer è 50k), non l'AFD adattivo.
-3. Filone rank/soglia: **chiuso** (3ª conferma OOS). Flag `QUANTSYS_RANK_EXPOSURE`/`QUANTSYS_DECISION_CADENCE`/`QUANTSYS_HORIZON_EXIT` restano inerti/reversibili.
+**▶️ DECISIONE STRATEGICA APERTA (rimandata, da prendere alla ripresa) — 3 strade:**
+1. **A — Paper-trading** (PRONTO ORA, costo ~zero, verità forward): `$env:QUANTSYS_ARCH="itransformer"; python scripts/04_live_signals.py` (persistente; segnali in `results/itransformer/live_signals.jsonl`). Opz. prima: A1.2 FundingRatePoller (miglioria minore). Aspettativa onesta: piatto/negativo, ma è l'unico validatore non contaminato.
+2. **B1 — Order-book L2** (informazione NUOVA, unica non spremuta): progetto-dati a sé (feed WS depth, storage, feature L2 OFI/imbalance/microprice, backfill storico difficile). Memoria: `future_orderbook_l2`.
+3. **Accetta/pivot:** BTC 1m directional (OHLCV+funding) non ha edge tradabile OOS — dimostrato rigorosamente. Valore = infrastruttura + prova. Eventuale pivot strumento/timeframe/mercato.
 
-Comando per stato **test production-clean** (da rilanciare prima di chiudere se servono i file di test aggiornati):
-`Remove-Item Env:\QUANTSYS_QUIET_RANK_Q,Env:\QUANTSYS_QUIET_MIN_SIGMA,Env:\QUANTSYS_BACKTEST_SPLIT,Env:\QUANTSYS_BACKTEST_SINGLE_ARCH -EA SilentlyContinue; $env:QUANTSYS_ARCH="itransformer"; python scripts/03_backtest.py`
+Memorie di riferimento per riprendere: `roadmap_post_blocker1_2026_06`, `mixture_of_universes_design`, `future_orderbook_l2`.
+
+Comando stato **test production-clean** (azzera TUTTI gli env sperimentali prima di un backtest "production"):
+`Remove-Item Env:\QUANTSYS_RANK_EXPOSURE,Env:\QUANTSYS_DECISION_CADENCE,Env:\QUANTSYS_HORIZON_EXIT,Env:\QUANTSYS_SIGMA_SCALE,Env:\QUANTSYS_QUIET_RANK_Q,Env:\QUANTSYS_QUIET_MIN_SIGMA,Env:\QUANTSYS_BACKTEST_SPLIT,Env:\QUANTSYS_BACKTEST_SINGLE_ARCH -EA SilentlyContinue; $env:QUANTSYS_ARCH="itransformer"; python scripts/03_backtest.py`

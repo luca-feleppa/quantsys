@@ -231,9 +231,11 @@ Executed in the same `run_all.py --distill` of 2026-06-02: all 3 models (iTransf
 - `tests/test_live_training_parity.py` → new: parity test (live output == FeatureBuilder on historical window with 1e-6 tolerance)
 - `scripts/99_replay_live_vs_training.py` → update to use the new engine
 
-### 🚧 Stage 4 implementation tracker (live — updated at every milestone)
+### 📋 Stage 4 implementation tracker (historical snapshot 2026-06-02 — superseded, see banner below)
 
 **Active session:** 2026-06-02 23:10 (parallel to the ongoing distill, GPU unaffected since live engine is CPU-only)
+
+> ⚠ **This tracker is a 2026-06-02 historical snapshot.** Superseded 2026-06-05/06: steps **4.6, 4.7, 4.10 are DONE** and **Stage 5 (feature+signal parity) is DONE → BLOCKER #1 RESOLVED** (see the "✅ BLOCKER #1 ... RESOLVED" header above and the Stage 5 section below). The live smoke test passed; an A1.1 contiguous candle catch-up was added. Only **4.4 FundingRatePoller** remains, as a *minor* improvement (funding changes every 8h, ffilled → the disk workaround is adequate).
 
 | Step | File | Status | Resume notes |
 |---|---|---|---|

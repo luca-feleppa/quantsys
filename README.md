@@ -6,7 +6,7 @@ End-to-end algorithmic trading system that combines **deep learning forecasting*
 
 > Documentation is bilingual. Italian: [README.it.md](README.it.md) · [AVVIO.md](AVVIO.md) · [TEORIA.md](TEORIA.md) · [MODEL_IMPROVEMENTS.md](docs/MODEL_IMPROVEMENTS.md). English: [AVVIO.en.md](AVVIO.en.md) · [TEORIA.en.md](TEORIA.en.md) · [MODEL_IMPROVEMENTS.en.md](docs/MODEL_IMPROVEMENTS.en.md).
 
-> ⚠ **Live engine status:** paper-only (no real orders). A known feature mismatch (BLOCKER #1: 39 live features vs 104 training features, see `TEORIA.en.md` §11) currently makes live predictions uncorrelated with the backtest. Stage 2-3 of the alignment plan done (2026-06-02); Stage 4-5 (live engine rewrite + parity test) pending — see `MODEL_IMPROVEMENTS.en.md`.
+> ✅ **Live engine status:** paper-only (no real orders), but **BLOCKER #1 RESOLVED (2026-06-05)**. The live path now builds the **104 canonical features** via `FeatureBuilder` (single source of truth) with the training scaler, plus a contiguous REST catch-up at boot — achieving **bit-perfect feature *and* signal parity** vs the backtest (`tests/test_live_training_parity.py`, replay Δ=0). Live signals now reflect the backtest; the live smoke test passes. See `TEORIA.en.md` §11. ⚠ Note: the backtest itself is negative out-of-sample — paper-trading is for accumulating real forward trades, with no a-priori expectation of Sharpe>0.
 
 ---
 

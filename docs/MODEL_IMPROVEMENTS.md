@@ -10,7 +10,7 @@ Tutto il "già fatto" è stato spostato in `CHANGELOG.md` e nelle note `~/.claud
 
 **Stato pipeline al termine sessione 2026-06-03 → 2026-06-04 ~01:00:**
 
-- ✅ **Stage 4.6 + 4.7 (live engine)** completati: `LiveCandleBuffer + FeatureAssembler` wired in `LiveEngine.__init__` (`scripts/04_live_signals.py:946-975`), `_pad_or_truncate` rimosso da `_predict()` (`:1259-1268`), 4/4 parity test ancora verdi. **BLOCKER #1 Stage 4 sostanzialmente chiuso** (pending solo 4.10 smoke test live + 4.11 doc closure).
+- ✅ **Stage 4.6 + 4.7 (live engine)** completati: `LiveCandleBuffer + FeatureAssembler` wired in `LiveEngine.__init__`, `_pad_or_truncate` rimosso da `_predict()`, parity test verdi. → **Superato il 2026-06-05/06: Stage 5 (parity feature+segnale) e smoke test 4.10 COMPLETATI → BLOCKER #1 RISOLTO** (vedi header dedicato "✅ BLOCKER #1 ... RISOLTO" sotto). + catch-up contiguo `candle_buffer` (A1.1).
 - ✅ **Quick Wins SNR + prob_threshold testati e ROLLED BACK**: bisection mostra che alzare prob_threshold 0.52→0.58 azzera trade (μ_pred troppo piccoli), 0.53 peggiora (WR 33%→18%), SNR≥0.10 filtra solo i loser (Sharpe -277). Config ripristinata a `prob_threshold: 0.52`, `min_snr: 0.0`. Wiring `min_snr` in `scripts/03_backtest.py:542-550` MANTENUTO per future calibrazioni.
 - ✅ **Option B fresh data retrain** (~40 min): Sharpe -3.37%→**-1.81%**, Spearman walkforward +0.040→**+0.065** (+62%). Beneficio reale ma WHR ancora 0.517 < 0.53.
 - 🔴 **Fix #3 (T=240) applicato + retrain completo + walkforward** = REGRESSIONE:
@@ -232,7 +232,7 @@ Eseguito nello stesso `run_all.py --distill` del 2026-06-02: tutti e 3 i modelli
 
 > Metriche di backtest dei modelli a 104 feat: da rileggere in `results/{arch}/dashboard_results.json` dopo la conclusione del run (potrebbero essere diverse dal +18.71 Sharpe del setup a 119 feat).
 
-### Stage 4 — Riscrittura live engine 🚧 IN CORSO (sessione 2026-06-02 23:10)
+### Stage 4 — Riscrittura live engine ✅ COMPLETATO (2026-06-05/06; tracker storico 2026-06-02 sotto)
 
 **Decisione architetturale:** invece di duplicare la logica feature engineering in `LiveFeatureBuffer`, **riusare direttamente `quantsys/features.FeatureBuilder.build()`** sul buffer live. Single source of truth automatica → parity test garantito by-design.
 
@@ -276,9 +276,11 @@ Eseguito nello stesso `run_all.py --distill` del 2026-06-02: tutti e 3 i modelli
 - `tests/test_live_training_parity.py` → nuovo: parity test (live output == FeatureBuilder su finestra storica con tolleranza 1e-6)
 - `scripts/99_replay_live_vs_training.py` → aggiornare per usare nuovo engine
 
-### 🚧 Stage 4 implementation tracker (live — aggiornato a ogni milestone)
+### 📋 Stage 4 implementation tracker (snapshot storico 2026-06-02 — superato, vedi banner sotto)
 
 **Sessione attiva:** 2026-06-02 23:10 (parallela al distill in corso, GPU non interferita perché live engine è solo CPU)
+
+> ⚠ **Questo tracker è uno snapshot storico del 2026-06-02.** Superato il 2026-06-05/06: gli step **4.6, 4.7, 4.10 sono DONE** e lo **Stage 5 (parity feature+segnale) è DONE → BLOCKER #1 RISOLTO** (vedi header "✅ BLOCKER #1 ... RISOLTO" sopra e la sezione Stage 5 sotto). Lo smoke test live è passato; aggiunto catch-up contiguo candele (A1.1). Resta solo **4.4 FundingRatePoller**, come miglioria *minore* (funding cambia ogni 8h, ffill'd → workaround da disco adeguato).
 
 | Step | File | Stato | Note di ripresa |
 |---|---|---|---|
