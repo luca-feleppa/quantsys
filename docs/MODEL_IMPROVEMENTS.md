@@ -1260,6 +1260,14 @@ mtf/                    # NUOVO package, isolato
 
 ---
 
+## ⚫ 2026-06-11 — Probe semivarianza (log_rs_ratio) FAIL · ⚫ 2026-06-11 — Semivariance probe (log_rs_ratio) FAIL
+
+🇮🇹 **Probe pre-registrato: il "segno della varianza"** — target `log_rs_ratio` = `log(RS⁺_fwd/RS⁻_fwd)` a h=30 barre 1h (semivarianza realizzata firmata; traduzione econometrica dell'idea historical-decomposition). Stessa pipeline/hyperparam del vol-S; giudice `scripts/dev_vols_rs_judge.py` (HAR-RS Patton–Sheppard OLS train-only + naive + train-mean, metrica MSE — il QLIKE non si applica a un target non positivo-definito). **Esito test: FAIL** (NN/HAR-RS MSE 0.9952 > 0.95; NN batte la costante di 0.02%; signDA 0.459 < 0.55; ρ val +0.078 → test −0.038). Il punto scientifico: **nessuno** predice l'asimmetria (HAR-RS fa peggio della costante su test) → l'informazione in price/volume riguarda i **momenti pari** (livello RV: −30% QLIKE) e non quelli **dispari** (direzione, signed jump variation). Filone chiuso senza appello come pre-registrato.
+
+**EN** **Pre-registered probe: the "sign of variance"** — target `log_rs_ratio` = `log(RS⁺_fwd/RS⁻_fwd)` at h=30 1h-bars (signed realized semivariance; the econometric translation of the historical-decomposition idea). Same pipeline/hyperparams as vol-S; judge `scripts/dev_vols_rs_judge.py` (HAR-RS Patton–Sheppard OLS train-only + naive + train-mean, MSE metric — QLIKE does not apply to a non-positive-definite target). **Test outcome: FAIL** (NN/HAR-RS MSE 0.9952 > 0.95; NN beats the constant by 0.02%; signDA 0.459 < 0.55; ρ val +0.078 → test −0.038). The scientific point: **nobody** predicts the asymmetry (HAR-RS is worse than the constant on test) → the information in price/volume concerns **even moments** (RV level: −30% QLIKE) and not **odd ones** (direction, signed jump variation). Thread closed without appeal as pre-registered.
+
+---
+
 ## 💡 Insights consolidati (validi long-term) · 💡 Consolidated insights (long-term valid)
 
 🇮🇹

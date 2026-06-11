@@ -5,7 +5,44 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-11 (verifica 1m log_rv ESEGUITA → **FAIL su val**; esito registrato a posteriori — la sessione del 10 si è chiusa alle 21:44 senza aggiornare questo file)
+## 🕒 Ultimo aggiornamento: 2026-06-11 sera (PROBE SEMIVARIANZA eseguito → **FAIL su test**, filone HD-firmato CHIUSO)
+
+## ⚫ PROBE SEMIVARIANZA 1h — ESEGUITO → **FAIL** (primario E secondario, su test; chiuso senza appello come pre-registrato)
+
+**Run (2026-06-11, ~30 min totali):** rebuild 1h con restore `backup_1h_vols/{raw_candles,regime_probs}` (evitate ~3h di walk-forward Markov — NB: la stima "3 min" per `01b` vale solo sul span 381gg; su 7 anni è ~3h), dataset 65.191 candele → train iTrans 5-seed (~25 min, best val_nll 0.1925) → giudice `dev_vols_rs_judge.py`. Sanity val-first `MSE_NN ≤ MSE_HAR-RS` superata per un soffio (ratio 0.9959) → test valutato UNA volta:
+
+| Modello | MSE val | MSE test | ρ test | signDA test |
+|---|---|---|---|---|
+| NN (iTrans 5-seed) | 0.82489 | **0.99366** | **−0.038** | **0.459** |
+| HAR-RS (Patton–Sheppard OLS) | 0.82829 | 0.99843 | −0.053 | 0.465 |
+| Naive (lratio trailing 30h) | 1.64712 | 1.89025 | +0.048 | 0.525 |
+| Train-mean (costante) | 0.83036 | 0.99387 | 0 | 0.472 |
+
+- **Gate primario:** NN/HAR-RS = 0.9952 > 0.95 ✗ (e batte la train-mean di appena 0.02%). **Gate secondario:** signDA 0.459 < 0.55 ✗ (sotto il caso!). **FAIL/FAIL.**
+- **Lettura scientifica (il risultato vero del probe):** l'asimmetria RS⁺/RS⁻ futura è **impredicibile per TUTTI** — su test HAR-RS fa *peggio* della costante (0.99843 vs 0.99387) e il NN la pareggia. In più il pattern val→test si ripete (ρ +0.078 → −0.038): **gli oggetti a momento DISPARI (direzione, signed jump variation) non generalizzano OOS; il momento PARI (livello RV) sì** (−30% QLIKE). La dicotomia pari/dispari è la sintesi più netta dell'intero progetto — e rafforza la tesi del paper "price+volume enough?": l'informazione in candele price/volume riguarda solo i momenti pari.
+- **Filone semivarianza/HD-firmato CHIUSO senza appello** (pre-registrazione: zero iterazioni). Il ramo SVAR/historical-decomposition con identificazione via regimi eredita lo stesso verdetto: era la stessa scommessa con più ipotesi.
+- **Stato disco post-probe:** `models/itransformer/` = modelli **rs-ratio 1h (FAIL)**; vol-1h PASS in `models/backup_1h_vols/`; vol-1m FAIL in `models/backup_1m_vols/`; direzionale 1m in `models/backup_1m/`+`data/backup_1m/`. Config `target_type: log_rs_ratio`. Report: `results/vols/rs_report_1h_{val,test}.json`; log `logs/rs_{01,macro_append,02_train,judge_val,judge_test}.log`.
+
+**▶️ AZIONE ESATTA ALLA RIPRESA:** restano DUE filoni attivi + uno editoriale: (1) **monetizzazione edge vol 1h** — smoke chain IBIT su Alpaca (1 call autenticata `/v2/options/contracts?underlying_symbols=IBIT`) + avvio **poller IV Deribit** (`get_book_summary_by_currency`, 1 req/5-15min non auth, raccolta forward indispensabile: storico short-tenor solo a pagamento) → gate economico futuro: NN-RV vs IV implicita; (2) **B1 order-book L2** (alpha direzionale, informazione nuova); (3) **paper** "Are price and volume enough?" (memoria `paper-idea-price-volume-enough`) — la dicotomia momenti pari/dispari di oggi è il risultato centrale. Per tornare a un setting operativo: restore modelli da backup appropriato + `target_type` coerente (il guard interval/horizon protegge dai mix).
+
+## 📋 PRE-REGISTRAZIONE PROBE SEMIVARIANZA 1h (scritta PRIMA di girare, 2026-06-11)
+
+**Domanda:** la pipeline NN (identica al run vol-S 1h PASS) predice il **segno della varianza** — cioè l'asimmetria upside/downside della realized semivariance futura (Barndorff-Nielsen–Kinnebrock–Shephard 2010; Patton–Sheppard 2015 "good/bad volatility") — meglio delle baseline econometriche? È la traduzione econometrica dell'idea historical-decomposition: attribuire la varianza a shock firmati. NON è il direzionale travestito: il target è un momento di vol (famiglia che ha generalizzato val→test), non la media.
+
+**Design (tutto identico al run vol-S 1h tranne il target):**
+- **Dati:** 1h, 2019-01-01→oggi (restore da `models/backup_1h_vols/{raw_candles_1h,regime_probs_1h}.parquet`), stesso split, `window_stride: 1`.
+- **Target:** `features.target_type: log_rs_ratio` → `target_ret = log((RS⁺_fwd+ε)/(RS⁻_fwd+ε))`, ε=1e-12, con `RS±_fwd = Σᵢ₌₁..ₕ r²ₜ₊ᵢ·1[rₜ₊ᵢ≷0]`, h=30 barre 1h; `target_dir = 1[RS⁺_fwd > RS⁻_fwd]` (causale).
+- **Modello:** iTrans 5-seed, hyperparam INVARIATI (lr 3e-5, dropout 0.3, drop_path 0.2, wd 3e-3). Zero tuning.
+- **Baseline (giudice `scripts/dev_vols_rs_judge.py`, OLS train-only):** (a) **HAR-RS** stile Patton–Sheppard: regressori `[1, lratio_h, lratio_7d, lratio_30d, log_rv_h]` trailing; (b) **naive persistence** = lratio trailing h; (c) **train-mean** (null di non-informatività del segno).
+- **Metrica primaria: MSE sul log-ratio** (il QLIKE non si applica: il log-ratio non è positivo-definito). Secondarie descrittive: Spearman, sign-DA su `target_dir`.
+- **Inversione z→raw:** completa, `μ·IQR + centro` dal RobustScaler persistito (lezione log_rv); sanity sul centro: |c| < 2 (il log-ratio è quasi-centrato, ≠ log-RV c≈−7.2).
+- **Protocollo:** val-first (sanity: MSE_NN ≤ MSE_HAR-RS su val), test toccato UNA volta. **Zero iterazioni** in caso di fallimento. NO backtest trading.
+
+**GATE PRIMARIO (test 1h):** `MSE_NN ≤ 0.95·MSE_HAR-RS` **E** `MSE_NN < MSE_naive` **E** `MSE_NN < MSE_train-mean`.
+**GATE SECONDARIO (economico, per promuovere il follow-up risk-reversal):** `sign-DA_NN ≥ 0.55 su test` **E** `sign-DA_NN > sign-DA_HAR-RS`. Primario PASS + secondario FAIL ⇒ "asimmetria predicibile in magnitudine ma segno non tradabile": riportato com'è, nessun follow-up di esecuzione.
+**FAIL primario ⇒ filone semivarianza CHIUSO** (e con esso il ramo HD-firmato), senza appello.
+
+## 🕒 2026-06-11 (registrazione esito verifica 1m, eseguita ieri notte)
 
 ## 🔴 VERIFICA log_rv su 1m — ESEGUITA 2026-06-10 notte → **FAIL sanity val** (test 1m MAI toccato, niente iterazioni, come pre-registrato)
 

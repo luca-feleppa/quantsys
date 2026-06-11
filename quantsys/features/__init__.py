@@ -101,8 +101,8 @@ class FeatureBuilder:
         # EN: Target type — "ret" (sum of log-returns, directional, legacy) or
         #     "log_rv" (log realized variance Σr² over h bars — vol-S experiment 2026-06-10).
         #     Default "ret": the directional path stays bit-invariant.
-        if target_type not in ("ret", "log_rv"):
-            raise ValueError(f"target_type '{target_type}' non riconosciuto / unknown (ret|log_rv)")
+        if target_type not in ("ret", "log_rv", "log_rs_ratio"):
+            raise ValueError(f"target_type '{target_type}' non riconosciuto / unknown (ret|log_rv|log_rs_ratio)")
         self.target_type         = target_type
         self.vp_stride           = vp_stride          # IT: VP subsample stride | EN: VP subsample stride (O(n)→O(n/stride))
         self.frac_diff_d         = frac_diff_d         # IT: ordine FFD (0=skip) | EN: FFD order (0=skip)
@@ -185,6 +185,23 @@ class FeatureBuilder:
             rv_trail = sq.rolling(h).sum()
             df["target_ret"] = np.log(rv_fwd + _eps)
             df["target_dir"] = (rv_fwd > rv_trail).astype(int)
+        elif getattr(self, "target_type", "ret") == "log_rs_ratio":
+            # IT: Probe semivarianza (pre-reg 2026-06-11) — target = asimmetria firmata della
+            #     semivarianza realizzata futura (Barndorff-Nielsen et al. 2010, Patton-Sheppard 2015):
+            #     log((RS⁺+ε)/(RS⁻+ε)) con RS± = Σᵢ₌₁..ₕ r²ₜ₊ᵢ·1[rₜ₊ᵢ≷0]. È un momento di vol
+            #     (NON il direzionale): "il segno della varianza" via signed jump variation.
+            #     target_dir = 1[RS⁺_fwd > RS⁻_fwd] (asimmetria up-side, causale a t).
+            # EN: Semivariance probe (pre-reg 2026-06-11) — target = signed asymmetry of future
+            #     realized semivariance: log((RS⁺+ε)/(RS⁻+ε)) with RS± = Σᵢ₌₁..ₕ r²ₜ₊ᵢ·1[rₜ₊ᵢ≷0].
+            #     A vol moment (NOT direction): the "sign of variance" via signed jump variation.
+            #     target_dir = 1[RS⁺_fwd > RS⁻_fwd] (upside asymmetry, causal at t).
+            _eps = 1e-12
+            sq_pos = (df["log_ret"].clip(lower=0.0)) ** 2
+            sq_neg = (df["log_ret"].clip(upper=0.0)) ** 2
+            rs_pos_fwd = sq_pos.rolling(h).sum().shift(-h)
+            rs_neg_fwd = sq_neg.rolling(h).sum().shift(-h)
+            df["target_ret"] = np.log(rs_pos_fwd + _eps) - np.log(rs_neg_fwd + _eps)
+            df["target_dir"] = (rs_pos_fwd > rs_neg_fwd).astype(int)
         else:
             # IT: Target legacy = somma dei log-return delle prossime h candele (rolling+shift).
             # EN: Legacy target = sum of next h log-returns (rolling+shift, no temp Series loop).

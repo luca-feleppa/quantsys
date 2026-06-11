@@ -61,15 +61,21 @@ features:
   lag_periods: 5            # IT: lag autoregressivi | EN: autoregressive lags
   frac_diff_d: 0.4          # IT: ordine fractional differencing | EN: fractional differencing order
   forecast_horizon: 30      # IT: h=30 BARRE (=30h a 1h; era 30 min a 1m, fix #2) | EN: h=30 BARS (=30h at 1h; was 30 min at 1m, fix #2)
-  # IT: ESPERIMENTO VOL-S (2026-06-10, pre-registrato in STATUS.md): target = log-RV
-  #     (log Σr² su h barre) invece della somma direzionale dei log-return.
-  #     "ret" = path direzionale legacy (bit-invariato). NO backtest trading su modelli
-  #     trainati con log_rv (giudice = QLIKE vs HAR-RV, scripts/dev_vols_qlike.py).
-  # EN: VOL-S EXPERIMENT (2026-06-10, pre-registered in STATUS.md): target = log-RV
-  #     (log Σr² over h bars) instead of the directional sum of log-returns.
-  #     "ret" = legacy directional path (bit-invariant). NO trading backtest on models
-  #     trained with log_rv (judge = QLIKE vs HAR-RV, scripts/dev_vols_qlike.py).
-  target_type: log_rv
+  # IT: TARGET SPERIMENTALI famiglia vol (pre-registrati in STATUS.md):
+  #     "ret"          = path direzionale legacy (bit-invariato, default codice)
+  #     "log_rv"       = log realized variance Σr² su h barre (vol-S 2026-06-10:
+  #                      PASS a 1h, FAIL a 1m — giudice scripts/dev_vols_qlike.py)
+  #     "log_rs_ratio" = asimmetria semivarianza log(RS⁺/RS⁻) su h barre (probe
+  #                      2026-06-11 — giudice scripts/dev_vols_rs_judge.py).
+  #     NO backtest trading sui modelli vol.
+  # EN: EXPERIMENTAL vol-family targets (pre-registered in STATUS.md):
+  #     "ret"          = legacy directional path (bit-invariant, code default)
+  #     "log_rv"       = log realized variance Σr² over h bars (vol-S 2026-06-10:
+  #                      PASS at 1h, FAIL at 1m — judge scripts/dev_vols_qlike.py)
+  #     "log_rs_ratio" = semivariance asymmetry log(RS⁺/RS⁻) over h bars (probe
+  #                      2026-06-11 — judge scripts/dev_vols_rs_judge.py).
+  #     NO trading backtest on vol models.
+  target_type: log_rs_ratio
   normalize: true
 
 # IT: Configurazione modello — comune a tutte le arch; gli override stanno in arch/*.yaml.
