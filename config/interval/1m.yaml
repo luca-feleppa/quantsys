@@ -1,0 +1,39 @@
+# IT: Override risoluzione candela 1m (era legacy pre-pivot 2026-06-09) — mergiato
+#     sopra default.yaml (shallow, sezione per sezione) via QUANTSYS_INTERVAL=1m o
+#     run_all.py --interval 1m. Applicato DOPO secrets e PRIMA dell'overlay arch
+#     (l'arch resta il più specifico). Include SOLO le chiavi interval-dipendenti:
+#     tutto il resto della sezione viene preservato dal merge shallow.
+#     Rollback completo 1m richiede anche restore di data/backup_1m/raw_candles.parquet.
+# EN: 1m candle-resolution override (pre-pivot legacy era, 2026-06-09) — merged on
+#     top of default.yaml (shallow, per-section) via QUANTSYS_INTERVAL=1m or
+#     run_all.py --interval 1m. Applied AFTER secrets and BEFORE the arch overlay
+#     (arch stays the most specific). Contains ONLY interval-dependent keys:
+#     everything else in the section is preserved by the shallow merge.
+#     Full 1m rollback also requires restoring data/backup_1m/raw_candles.parquet.
+
+# IT: Dati — candele 1m: ~525k barre = 365 giorni dalla start_time.
+# EN: Data — 1m candles: ~525k bars = 365 days from start_time.
+data:
+  interval: 1m
+  start_time: '2025-05-19'   # IT: 365 giorni → ~525k barre 1m (dataset 1m-era) | EN: 365 days → ~525k 1m bars (1m-era dataset)
+
+# IT: Modello — stride finestre: 5 a 1m (525k barre → decimazione anti-ridondanza).
+# EN: Model — window stride: 5 at 1m (525k bars → anti-redundancy decimation).
+model:
+  window_stride: 5
+
+# IT: Walk-forward — embargo anti-leakage in barre.
+# EN: Walk-forward — anti-leakage embargo in bars.
+validation:
+  embargo_steps: 1500        # IT: 1500 barre ≈ 25h a 1m (≥ window_size+horizon, margine ampio) | EN: 1500 bars ≈ 25h at 1m (≥ window_size+horizon, wide margin)
+
+# IT: Risk — durata massima posizione in barre.
+# EN: Risk — max position holding time in bars.
+risk:
+  max_hold_candles: 240      # IT: 240 barre = 4h a 1m (= 8×forecast_horizon di 30 min) | EN: 240 bars = 4h at 1m (= 8×30-min forecast_horizon)
+
+# IT: Backtest — soglie SignalGenerator in SPAZIO RAW, scalano con l'orizzonte temporale.
+# EN: Backtest — SignalGenerator thresholds in RAW SPACE, scale with the time horizon.
+backtest:
+  min_expected_ret: 0.0005   # IT: |μ| min = 5 bps su orizzonte 30 min (valore 1m-era) | EN: min |μ| = 5 bps over the 30-min horizon (1m-era value)
+  max_sigma: 0.015           # IT: σ max raw a h=30 min (safety net σ_max ≥ 0.05 resta a valle) | EN: max raw σ at h=30 min (σ_max ≥ 0.05 safety net stays downstream)

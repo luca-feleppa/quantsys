@@ -12,9 +12,10 @@ import torch
 import yaml
 
 
-# IT: Carica YAML config con merge selettivo di secrets + override per-arch.
-# EN: Loads YAML config with selective merge of secrets + per-arch override.
-def load_config(path: str = "config/default.yaml", arch: str = None) -> dict:
+# IT: Carica YAML config con merge selettivo di secrets + override per-interval + per-arch.
+# EN: Loads YAML config with selective merge of secrets + per-interval + per-arch override.
+def load_config(path: str = "config/default.yaml", arch: str = None,
+                interval: str = None) -> dict:
     """
     Carica il file YAML di configurazione.
 
@@ -22,18 +23,26 @@ def load_config(path: str = "config/default.yaml", arch: str = None) -> dict:
     vengono fuse sopra il default (override selettivo, sezione per sezione).
     Il file secrets.yaml è gitignored e non finisce mai su GitHub.
 
-    Se `arch` non è None, carica config/arch/{arch}.yaml (se esiste) e lo
-    fonde sezione per sezione sopra il default + secrets, in modo che ogni
-    architettura abbia i propri parametri isolati senza influenzare le altre.
-    Chiamata senza `arch` è identica al comportamento precedente.
+    Se `interval` non è None, carica config/interval/{interval}.yaml (se esiste)
+    e lo fonde sezione per sezione sopra default + secrets: contiene SOLO le
+    chiavi dipendenti dalla risoluzione candela (stride, embargo, soglie raw).
 
-    Se `arch` è None, legge dall'env var QUANTSYS_ARCH (impostata da run_all.py).
+    Se `arch` non è None, carica config/arch/{arch}.yaml (se esiste) e lo
+    fonde sezione per sezione sopra default + secrets + interval, in modo che
+    ogni architettura abbia i propri parametri isolati senza influenzare le
+    altre. L'arch resta l'override PIÙ specifico (applicato per ultimo).
+    Chiamata senza `arch`/`interval` è identica al comportamento precedente.
+
+    Se `arch`/`interval` sono None, legge dalle env var QUANTSYS_ARCH /
+    QUANTSYS_INTERVAL (impostate da run_all.py).
     """
-    # IT: Risolve `arch` da env var (run_all.py la setta per pipeline multi-arch).
-    # EN: Resolve `arch` from env var (run_all.py sets it for multi-arch pipeline).
+    # IT: Risolve `arch`/`interval` da env var (run_all.py le setta per i subprocess).
+    # EN: Resolve `arch`/`interval` from env vars (run_all.py sets them for subprocesses).
     import os as _os
     if arch is None:
         arch = _os.environ.get("QUANTSYS_ARCH")  # IT: None → no override | EN: None → no override
+    if interval is None:
+        interval = _os.environ.get("QUANTSYS_INTERVAL")  # IT: None → no override | EN: None → no override
 
     with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -49,6 +58,30 @@ def load_config(path: str = "config/default.yaml", arch: str = None) -> dict:
                 cfg[section] = {**cfg[section], **values}
             else:
                 cfg[section] = values
+
+    # IT: Overlay interval (risoluzione candela) — DOPO secrets, PRIMA dell'arch:
+    #     l'arch resta l'override più specifico. Merge shallow per-sezione,
+    #     identico all'overlay arch. File mancante → warning, si prosegue.
+    # EN: Interval overlay (candle resolution) — AFTER secrets, BEFORE arch:
+    #     arch stays the most specific override. Per-section shallow merge,
+    #     identical to the arch overlay. Missing file → warning, continue.
+    if interval is not None:
+        interval_path = Path(path).parent / "interval" / f"{interval}.yaml"
+        if interval_path.exists():
+            with open(interval_path, encoding="utf-8") as f:
+                interval_cfg = yaml.safe_load(f) or {}
+            for section, values in interval_cfg.items():
+                if isinstance(values, dict) and isinstance(cfg.get(section), dict):
+                    cfg[section] = {**cfg[section], **values}
+                else:
+                    cfg[section] = values
+            logging.getLogger("quantsys").info(
+                f"Interval override caricato: {interval_path}"
+            )
+        else:
+            logging.getLogger("quantsys").warning(
+                f"Interval override non trovato: {interval_path} — uso solo default.yaml"
+            )
 
     if arch is not None:
         arch_path = Path(path).parent / "arch" / f"{arch}.yaml"
@@ -69,6 +102,29 @@ def load_config(path: str = "config/default.yaml", arch: str = None) -> dict:
             )
 
     return cfg
+
+
+# IT: Mappa intervallo candela Binance → minuti. Single source of truth per il
+#     pivot timeframe: TUTTE le finestre temporali del codice derivano da qui.
+# EN: Maps Binance candle interval → minutes. Single source of truth for the
+#     timeframe pivot: ALL temporal windows in the code derive from this.
+_INTERVAL_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+                     "1h": 60, "2h": 120, "4h": 240, "6h": 360,
+                     "8h": 480, "12h": 720, "1d": 1440}
+
+
+# IT: Estrae interval_minutes da cfg["data"]["interval"] (default 1 = legacy 1m).
+#     ValueError su intervalli sconosciuti: meglio fail-fast che finestre silenti errate.
+# EN: Extracts interval_minutes from cfg["data"]["interval"] (default 1 = legacy 1m).
+#     ValueError on unknown intervals: fail-fast beats silently wrong windows.
+def interval_minutes_from_cfg(cfg: dict) -> int:
+    interval = str(cfg.get("data", {}).get("interval", "1m"))
+    if interval not in _INTERVAL_MINUTES:
+        raise ValueError(
+            f"data.interval '{interval}' non riconosciuto / unknown — "
+            f"validi/valid: {sorted(_INTERVAL_MINUTES)}"
+        )
+    return _INTERVAL_MINUTES[interval]
 
 
 # IT: Sceglie CUDA o CPU in base a config/hardware e abilita cudnn.benchmark.
@@ -272,6 +328,21 @@ class PipelineState:
                 f"set_dataset_info: impossibile salvare i metadati del dataset ({e})"
             )
         return self
+
+    # IT: Intervallo candela del TRAINING in minuti — parte del contratto train↔inference.
+    #     I consumer (live/replay/backtest) devono usare QUESTO, non la config corrente:
+    #     un modello addestrato a 1m con config a 1h è una combinazione invalida
+    #     (finestre TIME-semantic divergono). Fallback 1 = legacy pkl pre-pivot (1m).
+    # EN: TRAINING candle interval in minutes — part of the train↔inference contract.
+    #     Consumers (live/replay/backtest) must use THIS, not the current config:
+    #     a 1m-trained model with a 1h config is an invalid combination
+    #     (TIME-semantic windows diverge). Fallback 1 = legacy pre-pivot pkl (1m).
+    @property
+    def interval_minutes(self) -> int:
+        interval = getattr(self, "interval", None)
+        if interval is None:
+            return 1
+        return _INTERVAL_MINUTES.get(str(interval), 1)
 
     # IT: Fattore di scala RobustScaler per denormalizzare μ/σ (raw ↔ z-score).
     # EN: RobustScaler scale factor to denormalize μ/σ (raw ↔ z-score).

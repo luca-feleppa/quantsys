@@ -11,6 +11,9 @@ architettura e fasi della pipeline (↑↓ naviga, SPAZIO seleziona, INVIO confe
 
 Flag disponibili (modalità diretta, salta il menu):
   --arch            architettura modello: lstm | itransformer | tcnmamba
+  --interval        risoluzione candela (es. 1m | 1h): applica l'overlay
+                    config/interval/{interval}.yaml e propaga QUANTSYS_INTERVAL
+                    a tutti i subprocess (default: config as-is, nessun overlay)
   --n-ensemble N    seed nell'ensemble per il training single-arch (--arch), default 5;
                     il path --distill resta SEMPRE a n_ensemble=1 (teacher+student)
   --skip-update     salta aggiornamento dati (usa dataset esistente)
@@ -75,6 +78,19 @@ def _default_arch() -> str:
     except Exception:
         pass
     return "lstm"
+
+
+# IT: enumera gli overlay interval disponibili da config/interval/*.yaml (fallback statico).
+# EN: enumerates available interval overlays from config/interval/*.yaml (static fallback).
+def _interval_choices() -> list[str]:
+    """Choices per --interval: i file presenti in config/interval/, fallback ['1m','1h']."""
+    try:
+        files = sorted((ROOT / "config" / "interval").glob("*.yaml"))
+        if files:
+            return [f.stem for f in files]
+    except Exception:
+        pass
+    return ["1m", "1h"]
 
 
 # IT: costruisce l'etichetta leggibile dell'arch per i banner (con iperparametri).
@@ -681,6 +697,17 @@ def parse_args():
         choices=["lstm", "itransformer", "tcnmamba", "nhits"],
         help="Architettura modello (default: valore in config/default.yaml)",
     )
+    # IT: Overlay risoluzione candela: choices derivate dai file config/interval/*.yaml
+    #     (fallback statico se la cartella manca). Default None = config as-is, nessun overlay.
+    # EN: Candle-resolution overlay: choices derived from config/interval/*.yaml files
+    #     (static fallback if the folder is missing). Default None = config as-is, no overlay.
+    p.add_argument(
+        "--interval",
+        default=None,
+        choices=_interval_choices(),
+        help="Risoluzione candela: applica config/interval/{interval}.yaml sopra default.yaml "
+             "(propagato ai subprocess via QUANTSYS_INTERVAL; default: config as-is)",
+    )
     # IT: n_ensemble per il training single-arch (--arch). Default 5 (ensemble multi-seed).
     #     Il path --distill resta a 1 (vedi phase_distill: teacher e student a n_ensemble=1).
     # EN: n_ensemble for single-arch training (--arch). Default 5 (multi-seed ensemble).
@@ -754,9 +781,17 @@ def main():
     elif "--arch" not in sys.argv:
         args.arch = _ask_arch()
 
-    # ── Propaga arch e encoding a tutti i subprocess tramite env var ─────────
+    # ── Propaga arch, interval e encoding a tutti i subprocess tramite env var ─
     os.environ["QUANTSYS_ARCH"]      = args.arch
     os.environ["PYTHONIOENCODING"]   = "utf-8"
+    # IT: --interval → QUANTSYS_INTERVAL: ereditata da TUTTI i subprocess (run_script/
+    #     start_background), inclusi i loop --distill che riassegnano solo QUANTSYS_ARCH.
+    #     None = nessun overlay, config as-is.
+    # EN: --interval → QUANTSYS_INTERVAL: inherited by ALL subprocesses (run_script/
+    #     start_background), including --distill loops which only reassign QUANTSYS_ARCH.
+    #     None = no overlay, config as-is.
+    if args.interval:
+        os.environ["QUANTSYS_INTERVAL"] = args.interval
 
     # ── Imposta path arch-dipendenti ─────────────────────────────────────────
     global ARCH, ARCH_MODELS_DIR, ARCH_RESULTS_DIR, MODEL_FILE
@@ -773,10 +808,27 @@ def main():
 
     t_start = time.time()
 
+    # IT: Interval effettivo per il banner: --interval se passato, altrimenti
+    #     data.interval di config/default.yaml (regex, no import pesanti).
+    # EN: Effective interval for the banner: --interval if passed, otherwise
+    #     data.interval from config/default.yaml (regex, no heavy imports).
+    _iv = args.interval
+    if not _iv:
+        try:
+            import re as _re
+            _m = _re.search(r"^\s*interval:\s*[\"']?(\w+)[\"']?",
+                            (ROOT / "config" / "default.yaml").read_text(encoding="utf-8"),
+                            _re.MULTILINE)
+            _iv = _m.group(1) if _m else "?"
+        except Exception:
+            _iv = "?"
+
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║   QUANTSYS  ·  BTC/USDT 1m  ·  {ARCH:<10}  ·  t-Student NLL  ║
+║   QUANTSYS  ·  BTC/USDT {_iv:<3} ·  {ARCH:<10}  ·  t-Student NLL  ║
 ╚══════════════════════════════════════════════════════════════╝""")
+    if args.interval:
+        step_ok(f"Interval overlay attivo: config/interval/{args.interval}.yaml (QUANTSYS_INTERVAL={args.interval})")
 
     if args.only_dashboard:
         live_proc = None

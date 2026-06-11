@@ -206,7 +206,8 @@ class RiskManager:
                  correlation_window: int = 10,
                  max_directional_exposure: float = 0.6,
                  slippage_model: str = "fixed",
-                 autocorr_window: int = 50):
+                 autocorr_window: int = 50,
+                 bars_per_year: int = 525_600):
         """
         correlation_window:         quanti trade recenti considerare per autocorrelazione
         max_directional_exposure:   massima esposizione direzionale cumulata [0,1]
@@ -216,6 +217,9 @@ class RiskManager:
         autocorr_window:            quanti trade recenti usare per stima autocorrelazione
                                     Kelly (Fix 11). Default 50. Se < 10 trade disponibili
                                     la correzione non viene applicata.
+        bars_per_year:              barre per anno per l'annualizzazione Sharpe/Sortino.
+                                    Default 525_600 (timeframe 1m → identità col passato);
+                                    a 1h passare 8_760.
         """
         self.icap             = initial_capital
         self.max_risk         = max_risk_per_trade
@@ -238,6 +242,9 @@ class RiskManager:
         # EN: Kelly corrected for trade-return autocorrelation (Vince 1992).
         self.autocorr_window  = autocorr_window
         self._recent_trade_returns: list[float] = []
+        # IT: Barre/anno per annualizzare Sharpe/Sortino (525_600 a 1m, 8_760 a 1h).
+        # EN: Bars/year used to annualize Sharpe/Sortino (525_600 at 1m, 8_760 at 1h).
+        self.bars_per_year    = bars_per_year
         self.portfolio        = Portfolio(equity=initial_capital, cash=initial_capital,
                                           peak_equity=initial_capital)
         self.position: Optional[Position] = None
@@ -711,10 +718,13 @@ class RiskManager:
         avg_hold = holds.mean() if len(holds) else 1
         # IT: Annualizzazione su tempo TOTALE in posizione (no assunzione iid).
         # EN: Annualization on TOTAL time in position (no iid assumption).
-        # IT: 525_600 = minuti in un anno | EN: 525_600 = minutes per year
-        total_minutes_exposed = sum(t.hold_candles for t in self.trades) if self.trades else 0
-        if total_minutes_exposed > 0:
-            tpy = 525_600 / max(total_minutes_exposed / max(len(self.trades), 1), 1.0)
+        # IT: hold_candles è un conteggio di BARRE; self.bars_per_year (default
+        #     525_600 = barre 1m/anno) converte le barre in frazione d'anno.
+        # EN: hold_candles is a count of BARS; self.bars_per_year (default
+        #     525_600 = 1m bars/year) converts bars into a fraction of a year.
+        total_bars_exposed = sum(t.hold_candles for t in self.trades) if self.trades else 0
+        if total_bars_exposed > 0:
+            tpy = self.bars_per_year / max(total_bars_exposed / max(len(self.trades), 1), 1.0)
         else:
             tpy = 1.0
         sharpe = float((pcts.mean()/(pcts.std()+1e-9)) * math.sqrt(tpy)) if len(pcts)>1 else 0.0

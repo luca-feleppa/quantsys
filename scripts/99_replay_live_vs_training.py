@@ -75,6 +75,12 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
     cfg = load_config()
     fcfg = cfg.get("features", {})
     mcfg = cfg.get("model", {})
+    # IT: interval_minutes dal PIPELINE STATE (contratto train↔inference), come fa
+    #     il FeatureAssembler live — il replay deve replicare il TRAINING del modello
+    #     caricato, non la config corrente (che può essere già pivotata a 1h).
+    # EN: interval_minutes from the PIPELINE STATE (train↔inference contract), as the
+    #     live FeatureAssembler does — the replay must replicate the loaded model's
+    #     TRAINING, not the current config (which may already be pivoted to 1h).
     fb = FeatureBuilder(
         vp_bins          = fcfg.get("vp_bins", 30),
         vp_lookback      = fcfg.get("vp_lookback", 240),
@@ -84,6 +90,7 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
         vp_stride        = fcfg.get("vp_stride", 1),
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         use_revin        = bool(mcfg.get("use_revin", False)),
+        interval_minutes = getattr(ps, "interval_minutes", 1),
     )
     fb.scaler             = ps.scaler
     fb._scale_cols        = list(ps.scale_cols)

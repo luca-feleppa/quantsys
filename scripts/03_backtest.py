@@ -34,7 +34,8 @@ from tqdm import tqdm
 
 torch.set_num_threads(int(_cpu_limit))
 
-from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs, PipelineState
+from quantsys.utils import (load_config, setup_logging, setup_device, ensure_dirs,
+                            PipelineState, interval_minutes_from_cfg)
 from quantsys.model import load_model
 from quantsys.model.ensemble import EnsembleModel
 from quantsys.trading import RiskManager, SignalGenerator, Side, CloseReason
@@ -51,10 +52,14 @@ def _downsample(arr, n=500):
     return [arr[i] for i in idx]
 
 
-# IT: Intervalli bootstrap su Sharpe/Sortino — annualizzati a 1-minuto (525600).
-# EN: Bootstrap CI for Sharpe/Sortino — annualised at 1-minute basis (525600).
+# IT: Intervalli bootstrap su Sharpe/Sortino — `annualize` = barre/anno del timeframe
+#     corrente (525600 a 1m, 8760 a 1h). Il default 525600 resta per retro-compatibilità,
+#     ma ogni call site DEVE passare annualize=bars_per_year.
+# EN: Bootstrap CI for Sharpe/Sortino — `annualize` = bars/year of the current timeframe
+#     (525600 at 1m, 8760 at 1h). Default 525600 kept for backwards compatibility, but
+#     every call site MUST pass annualize=bars_per_year.
 def bootstrap_sharpe_ci(pnl_list, n_boot=5000, confidence=0.95, annualize=525600):
-    """Bootstrap confidence interval per Sharpe e Sortino (annualizzati 1m)."""
+    """Bootstrap confidence interval per Sharpe e Sortino (annualizzati a barre/anno)."""
     if len(pnl_list) < 30:
         return {"sharpe_ci_low": None, "sharpe_ci_high": None,
                 "sortino_ci_low": None, "sortino_ci_high": None}
@@ -117,13 +122,18 @@ def mdd_stats(equity_arr):
 # IT: Riesegue il backtest con fee/slippage stressati su segnali pre-calcolati.
 # EN: Re-runs the backtest with stressed fee/slippage on pre-computed signals.
 def run_stress_scenario(scenario_name, fee_mult, slip_mult, cfg_backtest, cfg_risk,
-                        ohlcv, atr, pre_signals, adv_1m=None, seed_rm=None):
+                        ohlcv, atr, pre_signals, adv_1m=None, seed_rm=None,
+                        bars_per_year=525_600):
     """Replica il backtest con parametri di stress usando segnali pre-calcolati.
 
     pre_signals: lista di (side, dist) gia' calcolati dal loop principale.
-    adv_1m: array di average daily volume 1m in USD (per slippage sqrt).
+    adv_1m: array del volume USD medio per barra (MA20, timeframe corrente) per lo
+      slippage sqrt — nome legacy mantenuto per l'API RiskManager. | per-bar USD
+      volume MA20 (current timeframe); legacy name kept for the RiskManager API.
     seed_rm: RiskManager principale di cui ereditare lo storico (fix #16). Senza
       questo, autocorr_kelly_factor parte da 1.0 sottostimando rischio direzionale.
+    bars_per_year: barre/anno per annualizzare Sharpe/Sortino (525_600 a 1m = identità,
+      8_760 a 1h). | bars/year for Sharpe/Sortino annualization.
     """
     # IT: Stress scenario riusa i segnali già emessi dal loop principale; cambia
     #     solo fee/slippage e si reinizializza un RiskManager dedicato.
@@ -144,6 +154,9 @@ def run_stress_scenario(scenario_name, fee_mult, slip_mult, cfg_backtest, cfg_ri
         slippage_model     = cfg_backtest.get("slippage_model", "fixed"),
         correlation_window = cfg_risk.get("correlation_window", 10),
         max_directional_exposure = cfg_risk.get("max_directional_exposure", 0.6),
+        # IT: barre/anno coerenti col backtest principale (annualizzazione Sharpe).
+        # EN: bars/year consistent with the main backtest (Sharpe annualization).
+        bars_per_year      = bars_per_year,
     )
     # IT: Fix #16 — eredita storico direzionale/return dal RM principale, altrimenti
     #     autocorr_kelly_factor parte a 1.0 e sottostima il rischio direzionale.
@@ -194,6 +207,12 @@ def main():
     bcfg = cfg["backtest"]
     rcfg = cfg["risk"]
     mcfg = cfg["model"]
+    # IT: Timeframe → minuti per barra e barre/anno per le annualizzazioni (Sharpe/Sortino,
+    #     bootstrap CI). A 1m: 525600 (identità col comportamento storico); a 1h: 8760.
+    # EN: Timeframe → minutes per bar and bars/year for annualizations (Sharpe/Sortino,
+    #     bootstrap CI). At 1m: 525600 (identical to historical behaviour); at 1h: 8760.
+    interval_minutes = interval_minutes_from_cfg(cfg)
+    bars_per_year    = 525_600 // interval_minutes
     # IT: La policy Spectral Norm deve matchare il training per caricare i checkpoint.
     # EN: Spectral-norm policy must match training to load checkpoints correctly.
     from quantsys.model import set_sn_on_mu_only
@@ -341,8 +360,12 @@ def main():
     )
     atr = pd.Series(tr).rolling(14, min_periods=1).mean().values
 
-    # IT: ADV_1m — MA20 del volume USD; input al modello di slippage Almgren-Chriss.
-    # EN: ADV_1m — 20-bar MA of USD volume; feeds the Almgren-Chriss slippage model.
+    # IT: ADV — MA20 (in BARRE del timeframe corrente) del volume USD per barra;
+    #     input al modello di slippage Almgren-Chriss. Il nome `adv_1m` resta per
+    #     compatibilità con l'API di RiskManager (kwarg condiviso col path live).
+    # EN: ADV — 20-bar MA (bars of the current timeframe) of per-bar USD volume;
+    #     feeds the Almgren-Chriss slippage model. The `adv_1m` name is kept for
+    #     RiskManager API compatibility (kwarg shared with the live path).
     vol_usd = volumes * closes
     adv_1m  = pd.Series(vol_usd).rolling(20, min_periods=1).mean().values
 
@@ -496,6 +519,19 @@ def main():
                     f"Il modello è stato addestrato per orizzonte {_state_h}; backtest a {_cfg_h} "
                     f"produce metriche invalide. Allinea config/default.yaml o rigenera il modello."
                 )
+            # IT: Pivot 1m→1h — blocca la combinazione invalida modello-X-minuti ↔
+            #     config-Y-minuti: dataset, scaler e finestre TIME-semantic divergono
+            #     (stesso pattern del guard forecast_horizon). Legacy pkl → 1 (=1m).
+            # EN: 1m→1h pivot — block the invalid combo model-at-X-minutes ↔
+            #     config-at-Y-minutes: dataset, scalers and TIME-semantic windows
+            #     diverge (same pattern as the forecast_horizon guard). Legacy pkl → 1 (=1m).
+            _state_im = getattr(_state, "interval_minutes", 1)
+            if _state_im != interval_minutes:
+                raise RuntimeError(
+                    f"interval mismatch: config={interval_minutes}min, training={_state_im}min. "
+                    f"Il modello è stato addestrato su candele {_state_im}m; backtest a {interval_minutes}m "
+                    f"produce metriche invalide. Allinea config/default.yaml o ri-addestra."
+                )
             # IT: max_hold_candles ≥ forecast_horizon (non chiudere prima dell'orizzonte).
             # EN: max_hold_candles ≥ forecast_horizon (don't close before the horizon is covered).
             _max_hold = rcfg.get("max_hold_candles", 0)
@@ -521,15 +557,21 @@ def main():
                 f"μ range [{all_mu.min():.5f}, {all_mu.max():.5f}], "
                 f"σ range [{all_sigma.min():.5f}, {all_sigma.max():.5f}]"
             )
-            # IT: Safety check — σ raw > 5%/min su BTC è fisicamente impossibile: se scatta
-            #     la denormalizzazione è mancata o lo scaler è rotto. RuntimeError (non
-            #     assert) perché `python -O` rimuove gli assert anche in produzione.
-            # EN: Safety check — raw σ > 5%/min on BTC is physically impossible: if it fires
-            #     denormalization was skipped or the scaler is broken. RuntimeError (not
-            #     assert) since `python -O` strips asserts even in production builds.
-            if all_sigma.max() >= 0.05:
+            # IT: Safety check — il safety net cattura il bug di denormalizzazione z→raw
+            #     (σ gonfiata ~30-100×), NON la crescita legittima ~√60 della σ a orizzonte
+            #     30 barre orarie — la soglia scala con √interval per preservare l'intento
+            #     (0.05 a 1m, ≈0.387 a 1h). RuntimeError (non assert) perché `python -O`
+            #     rimuove gli assert anche in produzione.
+            # EN: Safety check — the safety net catches the z→raw denormalization bug
+            #     (σ inflated ~30-100×), NOT the legitimate ~√60 growth of σ over a
+            #     30-hourly-bar horizon — the threshold scales with √interval to preserve
+            #     the intent (0.05 at 1m, ≈0.387 at 1h). RuntimeError (not assert) since
+            #     `python -O` strips asserts even in production builds.
+            _sigma_cap = 0.05 * math.sqrt(interval_minutes)
+            if all_sigma.max() >= _sigma_cap:
                 raise RuntimeError(
-                    f"σ post-denorm = {all_sigma.max():.4f} >= 0.05. "
+                    f"σ post-denorm = {all_sigma.max():.4f} >= {_sigma_cap:.4f} "
+                    f"(soglia = 0.05·√{interval_minutes}, timeframe-scaled). "
                     "Probabile mancata denormalizzazione (target_scale = 1.0?) "
                     "o scaler corrotto."
                 )
@@ -573,10 +615,23 @@ def main():
         slippage_model     = bcfg.get("slippage_model", "fixed"),
         correlation_window       = rcfg.get("correlation_window", 10),
         max_directional_exposure  = rcfg.get("max_directional_exposure", 0.6),
+        # IT: barre/anno dal timeframe (annualizzazione Sharpe/Sortino in metrics()).
+        # EN: bars/year from the timeframe (Sharpe/Sortino annualization in metrics()).
+        bars_per_year      = bars_per_year,
     )
+    # IT: QUANTSYS_MIN_EXPECTED_RET — override env del gate |μ| (inerte se assente).
+    #     Serve allo sweep cost-aware pre-registrato (es. 13 vs 23 bps) senza toccare
+    #     la config production. Pattern standard dei flag sperimentali.
+    # EN: QUANTSYS_MIN_EXPECTED_RET — env override of the |μ| gate (inert if unset).
+    #     Enables the pre-registered cost-aware sweep (e.g. 13 vs 23 bps) without
+    #     touching the production config. Standard experimental-flag pattern.
+    _min_exp_ret = float(os.environ.get("QUANTSYS_MIN_EXPECTED_RET",
+                                        bcfg["min_expected_ret"]))
+    if _min_exp_ret != bcfg["min_expected_ret"]:
+        log.warning(f"QUANTSYS_MIN_EXPECTED_RET override: {bcfg['min_expected_ret']} → {_min_exp_ret}")
     sig_gen = SignalGenerator(
         prob_threshold   = bcfg["prob_threshold"],
-        min_expected_ret = bcfg["min_expected_ret"],
+        min_expected_ret = _min_exp_ret,
         max_sigma        = bcfg["max_sigma"],
         conviction_alpha = bcfg.get("conviction_alpha", 0.5),
         # IT: SNR gate da config (default 0.0 = disattivato) — quick-win #2
@@ -866,7 +921,9 @@ def main():
 
     # ── Bootstrap CI su Sharpe e Sortino ─────────────────────────────────────
     pnl_arr = [t.net_pnl for t in rm.trades]
-    boot_ci = bootstrap_sharpe_ci(pnl_arr)
+    # IT: annualize = barre/anno del timeframe corrente (525600 a 1m, 8760 a 1h).
+    # EN: annualize = bars/year of the current timeframe (525600 at 1m, 8760 at 1h).
+    boot_ci = bootstrap_sharpe_ci(pnl_arr, annualize=bars_per_year)
 
     # ── Stress testing ────────────────────────────────────────────────────────
     log.info("Avvio stress test scenari ...")
@@ -887,6 +944,7 @@ def main():
             pre_signals=pre_signals,
             adv_1m=adv_1m,
             seed_rm=rm,
+            bars_per_year=bars_per_year,
         )
         stress_results.append(sr)
         log.info(f"    Sharpe={sr['sharpe']}  MDD={sr['max_drawdown']}  "

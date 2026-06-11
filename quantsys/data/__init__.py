@@ -246,12 +246,18 @@ def fetch_klines_incremental(raw_path: str, symbol: str, interval: str) -> pd.Da
     df_existing = pd.read_parquet(raw_path)
     last_ts = df_existing["open_time"].max()
 
-    # IT: Riparti dal minuto successivo all'ultimo disponibile.
-    # EN: Resume from the minute after the last available candle.
-    next_ts = last_ts + pd.Timedelta("1min")
+    # IT: Passo temporale derivato dall'intervallo (interval-agnostic: "1m"→60s, "1h"→3600s).
+    #     A 1m il comportamento è identico al legacy (Timedelta("1min")).
+    # EN: Time step derived from the interval (interval-agnostic: "1m"→60s, "1h"→3600s).
+    #     At 1m the behavior is identical to legacy (Timedelta("1min")).
+    step = pd.Timedelta(seconds=_INTERVAL_SECS.get(interval, 60))
+
+    # IT: Riparti dalla candela successiva all'ultima disponibile.
+    # EN: Resume from the candle after the last available one.
+    next_ts = last_ts + step
     # IT: Scarta la candela corrente (non ancora chiusa → potrebbe essere parziale).
     # EN: Drop the in-progress candle (not yet closed → could be partial).
-    now_floored = pd.Timestamp.utcnow().floor("1min") - pd.Timedelta("1min")
+    now_floored = pd.Timestamp.utcnow().floor(step) - step
 
     if next_ts >= now_floored:
         log.info(f"Dataset già aggiornato fino a {last_ts} — nessun delta da scaricare.")

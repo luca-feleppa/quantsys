@@ -1,8 +1,8 @@
 # QUANTSYS — Motore neurale di forecasting per BTC/USDT · QUANTSYS — Neural Forecasting Engine for BTC/USDT
 
-🇮🇹 Sistema di trading algoritmico end-to-end che combina **deep learning forecasting**, **gestione probabilistica del rischio** e **knowledge distillation multi-teacher** per generare segnali direzionali su candele BTC/USDT 1 minuto.
+🇮🇹 Sistema di trading algoritmico end-to-end che combina **deep learning forecasting**, **gestione probabilistica del rischio** e **knowledge distillation multi-teacher** per generare segnali direzionali su candele BTC/USDT. **Timeframe corrente: 1 ora** (design interval-agnostic; perimetro 1m in backup). Stato 2026-06-10: il filone direzionale è negativo OOS su 1m E 1h (pivot 1h killed); la config corrente è l'esperimento **vol-S** (`features.target_type: log_rv`), che ha battuto HAR-RV del 30% in QLIKE su test — vedi `docs/MODEL_IMPROVEMENTS.md`.
 
-**EN** End-to-end algorithmic trading system that combines **deep learning forecasting**, **probabilistic risk management**, and **multi-teacher knowledge distillation** to generate directional signals on BTC/USDT 1-minute candles.
+**EN** End-to-end algorithmic trading system that combines **deep learning forecasting**, **probabilistic risk management**, and **multi-teacher knowledge distillation** to generate directional signals on BTC/USDT candles. **Current timeframe: 1 hour** (interval-agnostic design; the 1m perimeter is backed up). Status 2026-06-10: the directional axis is OOS-negative at both 1m AND 1h (1h pivot killed); the current config is the **vol-S** experiment (`features.target_type: log_rv`), which beat HAR-RV by 30% in test QLIKE — see `docs/MODEL_IMPROVEMENTS.md`.
 
 🇮🇹 **Stack:** Python 3.12 | PyTorch (CUDA) | NumPy/Pandas | Binance REST+WebSocket | FRED API
 
@@ -22,14 +22,14 @@
 
 🇮🇹
 - **Ensemble eterogeneo a 3 architetture** (default post 2026-05-14):
-  - **iTransformer** — attention sulle feature (non sul tempo), embedding multi-scala (1m/5m/15m), O(F²)
+  - **iTransformer** — attention sulle feature (non sul tempo), embedding multi-scala (pooling ×1/×5/×15 barre), O(F²)
   - **N-HiTS** — interpolazione gerarchica pure-MLP, stack pooling multi-scala (sostituisce LSTM)
   - **TCN+Mamba** ibrido — convoluzioni causali dilatate (campo recettivo 127) + State Space Model con parametri input-dipendenti e fusion gated
   - **LSTM+GRU** — dual-stream con attention temporale (legacy, backward compat; sotto-performante, vedi `CHANGELOG.md`)
 
 **EN**
 - **3-architecture heterogeneous ensemble** (default post 2026-05-14):
-  - **iTransformer** — attention over features (not time), multi-scale embedding (1m/5m/15m), O(F²)
+  - **iTransformer** — attention over features (not time), multi-scale embedding (×1/×5/×15-bar pooling), O(F²)
   - **N-HiTS** — pure-MLP hierarchical interpolation, multi-scale pooling stacks (replaces LSTM)
   - **TCN+Mamba** hybrid — dilated causal convolutions (receptive field 127) + State Space Model with input-dependent parameters and gated fusion
   - **LSTM+GRU** — dual-stream with temporal attention (legacy, kept for backward compat; under-performing, see `CHANGELOG.md`)
@@ -65,10 +65,10 @@
 - **Probabilistic output** — t-Student NLL with asymmetric penalty + CRPS calibration + Direction-Value joint loss (`dv_lambda=0.3`): each prediction is a full distribution (μ, σ, ν), not a point estimate. Output is in **z-score space** (RobustScaler-normalized target_ret); the trading layer operates in **raw space** — denormalization is centralized via `PipelineState.denormalize_predictions()` (see `TEORIA.md` §5).
 
 🇮🇹
-- **Simulazione Monte Carlo** — 2000 scenari GJR-GARCH(1,1) guidati, orizzonte 30 min (params `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875`).
+- **Simulazione Monte Carlo** — 2000 scenari GJR-GARCH(1,1) guidati, orizzonte 30 barre (30h a 1h; params `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875`, da ri-stimare su rendimenti 1h — non sul critical path del backtest).
 
 **EN**
-- **Monte Carlo simulation** — 2000 GJR-GARCH(1,1) guided scenarios, 30-min horizon (params `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875`).
+- **Monte Carlo simulation** — 2000 GJR-GARCH(1,1) guided scenarios, 30-bar horizon (30h at 1h; params `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875`, to be re-estimated on 1h returns — not on the backtest critical path).
 
 🇮🇹
 - **Gestione del rischio** — Kelly frazionario, stop-loss ATR dinamico, trailing stop, circuit breaker drawdown mark-to-market 15% (intra-trade).
@@ -132,9 +132,9 @@ python scripts/07_verify_teacher.py             # confronto architetture
 python scripts/99_replay_live_vs_training.py    # diagnostica BLOCKER #1
 ```
 
-🇮🇹 La pipeline scarica lo storico BTC/USDT da Binance (default: 1 anno dal 2025-05-19, ~525k candele), costruisce 104 feature, addestra il modello selezionato, esegue il backtest con stress test, avvia il feed live WebSocket, apre la dashboard su `http://localhost:8050`.
+🇮🇹 La pipeline scarica lo storico BTC/USDT da Binance (default: candele **1h** multi-anno dal 2019-01-01, ~65k barre — pivot 2026-06-09), costruisce 104 feature, addestra il modello selezionato, esegue il backtest con stress test, avvia il feed live WebSocket, apre la dashboard su `http://localhost:8050`.
 
-**EN** The pipeline downloads BTC/USDT history from Binance (default: 1 year from 2025-05-19, ~525k candles), engineers 104 features, trains the selected model, runs backtest with stress tests, starts the live WebSocket feed, and opens the dashboard at `http://localhost:8050`.
+**EN** The pipeline downloads BTC/USDT history from Binance (default: multi-year **1h** candles from 2019-01-01, ~65k bars — 2026-06-09 pivot), engineers 104 features, trains the selected model, runs backtest with stress tests, starts the live WebSocket feed, and opens the dashboard at `http://localhost:8050`.
 
 ---
 
@@ -144,23 +144,23 @@ python scripts/99_replay_live_vs_training.py    # diagnostica BLOCKER #1
 Binance REST/WS
       │
       ▼
-Candele OHLCV 1m (default: 2025-05-19 → oggi, ~525k righe)
+Candele OHLCV 1h (default: 2019-01-01 → oggi, ~65k barre — pivot 2026-06-09)
       │
       ▼
 Feature Engineering: 104 feature (VWAP, VP short/mid, CVD, microstructure,
                                    funding, tempo, lag, interactions)
       │
       ├─── Macro data (FRED + yFinance) → MacroEncoder 16-dim
-      ├─── BTC 1m → realized vol oraria → RegimeMarkovBTC (Markov-Switching,
-      │                                                    3 regimi: Quiet / Trending / Stress)
+      ├─── BTC → realized vol oraria → RegimeMarkovBTC (Markov-Switching,
+      │                                                 3 regimi: Quiet / Trending / Stress)
       │
       ▼
-Sliding windows 120×104 (contesto 2h) → dataset normalizzato (RobustScaler)
+Sliding windows 120×104 (contesto 120 barre = 5 giorni a 1h) → dataset normalizzato (RobustScaler)
       │
       ▼
 Architettura (selezionabile):
       │
-      ├─ itransformer → attention sulle feature, multi-scala (1m/5m/15m)
+      ├─ itransformer → attention sulle feature, multi-scala (×1/×5/×15 barre)
       ├─ nhits        → pure-MLP gerarchico (stack 8/4/1)
       ├─ tcnmamba     → TCN dilatate (RF=127) + Mamba SSM, gated fusion
       ├─ lstm         → LSTM+GRU dual-stream + attention temporale (legacy)
@@ -175,7 +175,7 @@ Output: μ (direzione) + σ (incertezza) + ν (code pesanti)   in z-score
 PipelineState.denormalize_predictions(μ, σ)   →   spazio raw
       │
       ▼
-Monte Carlo: 2000 scenari GJR-GARCH(1,1) × 30 min
+Monte Carlo: 2000 scenari GJR-GARCH(1,1) × 30 barre (30h a 1h)
       │
       ▼
 Conviction score (direzione × ampiezza × calibrazione × regime)
@@ -196,6 +196,9 @@ quantsys_project/
 ├── config/
 │   ├── default.yaml              parametri condivisi (data, features, model, training, risk, distillation)
 │   ├── secrets.yaml.example      template per API keys (copia in secrets.yaml)
+│   ├── interval/                 override risoluzione candela (QUANTSYS_INTERVAL / --interval)
+│   │   ├── 1m.yaml               chiavi interval-dipendenti era 1m (stride 5, embargo 1500, ...)
+│   │   └── 1h.yaml               chiavi interval-dipendenti pivot 1h (stride 1, embargo 168, ...)
 │   └── arch/
 │       ├── lstm.yaml             override LSTM
 │       ├── itransformer.yaml     override iTransformer

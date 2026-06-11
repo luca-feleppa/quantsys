@@ -44,7 +44,8 @@ torch.set_num_threads(int(_cpu_limit))
 
 import threading
 
-from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs
+from quantsys.utils import (load_config, setup_logging, setup_device, ensure_dirs,
+                            interval_minutes_from_cfg)
 from quantsys.model.ensemble import EnsembleModel
 from quantsys.trading import SignalGenerator, RiskManager, Side, CloseReason
 
@@ -109,9 +110,15 @@ class LiveCandleBuffer:
     componente mantiene solo le candele grezze. FeatureAssembler (step 4.5) le
     consumerà chiamando FeatureBuilder.build() — garantisce parity esatta col training.
 
-    Capacità default 50000 ≈ 35 giorni: sufficiente per warmup completo di tutte le
-    feature 30d (dist_ath_30d, momentum_30d, price_vs_ma200m a 43200 candele).
-    Memoria: ~5 MB con dict-of-floats, trascurabile.
+    Capacità: il default 50000 equivale a ≈35 giorni SOLO a intervallo 1m; il chiamante
+    (LiveEngine) calcola la capacity interval-aware da config: 35 giorni × barre/giorno
+    + margine (a 1m ≈ 51900, a 1h = 2340) — sufficiente per warmup completo di tutte le
+    feature 30d (dist_ath_30d, momentum_30d, price_vs_ma200m).
+    Memoria: ~5 MB con dict-of-floats a 1m, trascurabile.
+
+    EN — Capacity: the 50000 default equals ≈35 days ONLY at 1m interval; the caller
+    (LiveEngine) computes an interval-aware capacity from config: 35 days × bars/day
+    + margin (≈51900 at 1m, 2340 at 1h) — enough for full warmup of all 30d features.
     """
 
     # IT: Campi richiesti per essere compatibili col FeatureBuilder (training schema).
@@ -175,7 +182,7 @@ class LiveCandleBuffer:
     def append(self, candle: dict) -> None:
         """Append una candela. Campi mancanti → default 0 (quote_vol/trades/taker_buy_quote_vol).
 
-        Il WS Binance kline-1m ritorna tutti i campi richiesti; il caller deve solo
+        Il WS Binance kline (intervallo da config) ritorna tutti i campi richiesti; il caller deve solo
         estrarli dai k[] del payload (vedi WS handler in LiveEngine).
         """
         # IT: Normalizza open_time a Timestamp tz-naive UTC. WS/REST passano `ts`=epoch-ms (int);
@@ -279,7 +286,13 @@ class FeatureAssembler:
         mcfg = config.get("model", {})
 
         # IT: FeatureBuilder con stessi parametri usati in training (da config).
+        #     interval_minutes dal PIPELINE STATE (contratto train↔inference), NON dalla
+        #     config corrente: le finestre TIME-semantic devono replicare il training.
+        #     Mismatch config↔state viene bloccato a monte (guard in LiveEngine/main).
         # EN: FeatureBuilder with same params used at training (from config).
+        #     interval_minutes from the PIPELINE STATE (train↔inference contract), NOT
+        #     from the current config: TIME-semantic windows must replicate training.
+        #     Config↔state mismatch is blocked upstream (guard in LiveEngine/main).
         self.fb = FeatureBuilder(
             vp_bins          = fcfg.get("vp_bins", 30),
             vp_lookback      = fcfg.get("vp_lookback", 240),
@@ -289,6 +302,7 @@ class FeatureAssembler:
             vp_stride        = fcfg.get("vp_stride", 1),
             frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
             use_revin        = bool(mcfg.get("use_revin", False)),
+            interval_minutes = getattr(pipeline_state, "interval_minutes", 1),
         )
         # IT: Inietta stato scaler pre-fittato → build(fit=False) lo riusa senza re-fittare.
         # EN: Inject pre-fitted scaler state → build(fit=False) reuses it without re-fitting.
@@ -397,8 +411,13 @@ class LiveFeatureBuffer:
 
     VP_BINS = 30  # IT: bin Volume Profile | EN: Volume Profile bins
 
-    def __init__(self, window: int = 60):
+    def __init__(self, window: int = 60, interval_minutes: int = 1):
         self.window      = window
+        # IT: barre/giorno derivate dall'interval — rende interval-agnostiche le finestre
+        #     "1 giorno" (ATH/ATL); default 1 = legacy 1m (1440 barre/giorno).
+        # EN: bars/day derived from the interval — makes the "1 day" windows (ATH/ATL)
+        #     interval-agnostic; default 1 = legacy 1m (1440 bars/day).
+        self.bars_per_day = max(1, 1440 // max(1, int(interval_minutes)))
         # IT: n_features rilevato dinamicamente al primo compute (no hardcoding)
         # EN: n_features detected dynamically on first compute (no hardcoding)
         self.n_features  = 0
@@ -730,10 +749,12 @@ class LiveFeatureBuffer:
                 if wvar > 1e-12:
                     vwap_skew[i] = ((dev**3) * v).sum() / (vs * wvar**1.5)
 
-        # IT: feature strutturali (ATH/ATL su finestra giornaliera 1440 candele)
-        # EN: structural features (ATH/ATL on daily window of 1440 bars)
-        ath_buf     = pd.Series(highs).rolling(min(len(c_arr), 1440), min_periods=1).max().values
-        atl_buf     = pd.Series(lows).rolling(min(len(c_arr), 1440),  min_periods=1).min().values
+        # IT: feature strutturali (ATH/ATL su finestra giornaliera = bars_per_day barre,
+        #     interval-agnostico: 1440 a 1m, 24 a 1h)
+        # EN: structural features (ATH/ATL on a daily window = bars_per_day bars,
+        #     interval-agnostic: 1440 at 1m, 24 at 1h)
+        ath_buf     = pd.Series(highs).rolling(min(len(c_arr), self.bars_per_day), min_periods=1).max().values
+        atl_buf     = pd.Series(lows).rolling(min(len(c_arr), self.bars_per_day),  min_periods=1).min().values
         pr_range    = np.maximum(ath_buf - atl_buf, 1e-9)
         dist_ath    = (closes - ath_buf) / np.maximum(ath_buf, 1e-9)
         dist_atl    = (closes - atl_buf) / np.maximum(atl_buf, 1e-9)
@@ -880,6 +901,20 @@ class LiveEngine:
                     f"Il modello è stato addestrato per orizzonte {_state_h}; live signals a {_cfg_h} "
                     f"produce segnali invalidi. Allinea config/default.yaml o rigenera il modello."
                 )
+            # IT: hard-fail se intervallo candela config != training (pivot 1m→1h):
+            #     il WS streamma candele a cfg.interval ma scaler/finestre TIME-semantic
+            #     sono del training → feature fuori distribuzione, segnali invalidi.
+            # EN: hard-fail if candle interval config != training (1m→1h pivot):
+            #     the WS streams candles at cfg.interval but scalers/TIME-semantic
+            #     windows belong to training → out-of-distribution features, invalid signals.
+            _cfg_im = interval_minutes_from_cfg(cfg)
+            _state_im = getattr(self.pipeline_state, "interval_minutes", 1)
+            if _cfg_im != _state_im:
+                raise RuntimeError(
+                    f"interval mismatch: config={_cfg_im}min, training={_state_im}min. "
+                    f"Il modello è stato addestrato su candele {_state_im}m; il live a {_cfg_im}m "
+                    f"è una combinazione invalida. Allinea config/default.yaml o ri-addestra."
+                )
             # IT: max_hold_candles deve >= forecast_horizon (altrimenti TP/SL e' rumore)
             # EN: max_hold_candles must >= forecast_horizon (otherwise TP/SL is noise)
             _max_hold = rcfg.get("max_hold_candles", 0)
@@ -971,9 +1006,30 @@ class LiveEngine:
             self.model     = None
             self.use_model = False
 
-        # IT: BLOCKER #1 Stage 4.6 — buffer DEPRECATED solo per ATR + state persistence + sanity di candles.
-        # EN: BLOCKER #1 Stage 4.6 — DEPRECATED buffer kept only for ATR + state persistence + candle sanity.
-        self.buf = LiveFeatureBuffer(window=mcfg["window_size"])
+        # IT: interval del run — dal PipelineState se disponibile (contratto train↔inference,
+        #     convenzione inference-side), fallback alla config; i due sono già stati
+        #     validati identici sopra (hard-fail su mismatch).
+        # EN: run interval — from PipelineState when available (train↔inference contract,
+        #     inference-side convention), config fallback; the two were already
+        #     validated identical above (hard-fail on mismatch).
+        # IT: interval del run — dal PipelineState se disponibile (contratto train↔inference,
+        #     convenzione inference-side), fallback alla config; i due sono già stati
+        #     validati identici sopra (hard-fail su mismatch).
+        # EN: run interval — from PipelineState when available (train↔inference contract,
+        #     inference-side convention), config fallback; the two were already
+        #     validated identical above (hard-fail on mismatch).
+        _interval_minutes = (
+            getattr(self.pipeline_state, "interval_minutes", 1)
+            if self.pipeline_state is not None
+            else interval_minutes_from_cfg(cfg)
+        )
+        _bars_per_day = 1440 // _interval_minutes
+
+        # IT: BLOCKER #1 Stage 4.6 — buffer DEPRECATED solo per ATR + state persistence + sanity di candles
+        #     (interval_minutes wired: finestre ATH/ATL "1 giorno" interval-agnostiche).
+        # EN: BLOCKER #1 Stage 4.6 — DEPRECATED buffer kept only for ATR + state persistence + candle sanity
+        #     (interval_minutes wired: "1 day" ATH/ATL windows are interval-agnostic).
+        self.buf = LiveFeatureBuffer(window=mcfg["window_size"], interval_minutes=_interval_minutes)
 
         # IT: BLOCKER #1 Stage 4.6 — nuovo buffer raw + assembler che usa FeatureBuilder
         #     come single source of truth. Produce le 104 feature canoniche col medesimo
@@ -981,12 +1037,21 @@ class LiveEngine:
         # EN: BLOCKER #1 Stage 4.6 — new raw buffer + assembler relying on FeatureBuilder
         #     as single source of truth. Produces the 104 canonical features with the same
         #     training scaler (parity guaranteed by tests/test_live_training_parity.py).
-        self.candle_buffer = LiveCandleBuffer(maxlen=50_000)
-        # IT: bootstrap da raw_candles.parquet (~30d storia) per warmup feature 30d-lookback.
-        # EN: bootstrap from raw_candles.parquet (~30d history) for 30d-lookback feature warmup.
+        # IT: capacity interval-aware (pivot 1m→1h): 35 giorni di barre + margine 1500.
+        #     A 1m → 35×1440+1500 = 51900 (≈ equivalente al legacy 50000); a 1h → 2340.
+        #     È solo CAPACITY, non semantica: l'identità a 1m è preservata.
+        # EN: interval-aware capacity (1m→1h pivot): 35 days of bars + 1500 margin.
+        #     At 1m → 35×1440+1500 = 51900 (≈ legacy 50000 equivalent); at 1h → 2340.
+        #     CAPACITY only, not semantics: 1m identity is preserved.
+        #     (_interval_minutes/_bars_per_day calcolati sopra, PipelineState-first
+        #      | computed above, PipelineState-first.)
+        _cb_maxlen = 35 * _bars_per_day + 1500
+        self.candle_buffer = LiveCandleBuffer(maxlen=_cb_maxlen)
+        # IT: bootstrap da raw_candles.parquet (~35d storia) per warmup feature 30d-lookback.
+        # EN: bootstrap from raw_candles.parquet (~35d history) for 30d-lookback feature warmup.
         _raw_path = Path("data/raw_candles.parquet")
         if _raw_path.exists():
-            self.candle_buffer.bootstrap_from_parquet(str(_raw_path), n_last=50_000)
+            self.candle_buffer.bootstrap_from_parquet(str(_raw_path), n_last=_cb_maxlen)
         else:
             log.warning("data/raw_candles.parquet non trovato — LiveCandleBuffer parte vuoto.")
         # IT: funding_df letto una volta al boot (workaround Stage 4.4: niente Poller).
@@ -1186,8 +1251,12 @@ class LiveEngine:
         Con window_size=60 → necessarie 120 candele minimo.
         La REST API Binance restituisce al massimo 1000 candele per chiamata.
         """
-        # IT: min candele = window + 60 lookback rolling + 10 margine scarti
-        # EN: min candles = window + 60 rolling lookback + 10 discard margin
+        # IT: min candele = window + 60 + 10. Le quantità sono in BARRE (bar-semantic),
+        #     NON in minuti: 60 = max finestra rolling delle feature (windows=[5,10,20,60]
+        #     in barre), 10 = margine scarti. Invariante rispetto all'intervallo (1m o 1h).
+        # EN: min candles = window + 60 + 10. Quantities are in BARS (bar-semantic),
+        #     NOT minutes: 60 = max rolling feature window (windows=[5,10,20,60] in bars),
+        #     10 = discard margin. Interval-invariant (1m or 1h).
         window_size  = self.cfg["model"]["window_size"]
         min_candles  = window_size + 60 + 10
 
@@ -1471,10 +1540,10 @@ class LiveEngine:
             log.debug(f"Forecast fallito (non critico): {e}")
             return None
 
-    # IT: callback principale — eseguito ad ogni candela 1m chiusa
-    # EN: main callback — runs on every closed 1m candle
+    # IT: callback principale — eseguito ad ogni candela chiusa (intervallo da config)
+    # EN: main callback — runs on every closed candle (interval from config)
     def on_closed_candle(self, k: dict):
-        """Chiamato ogni volta che una candela 1m si chiude."""
+        """Chiamato ogni volta che una candela (intervallo da config) si chiude."""
         self.candle_idx += 1
         price = k["close"]
         # IT: ATR floor a 5 bps per evitare SL troppo stretto in mercati calmi

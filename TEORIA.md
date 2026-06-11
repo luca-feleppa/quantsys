@@ -8,13 +8,13 @@
 
 ## 1. Raccolta dati di prezzo · 1. Price data collection
 
-🇮🇹 Il punto di partenza è Binance: candele OHLCV (Open, High, Low, Close, Volume) BTC/USDT su timeframe 1 minuto. La finestra storica corrente è **dal 2025-05-19 a oggi** (~1 anno, 525.000 candele) — configurata in `config/default.yaml` (`data.start_time` + `data.limit`).
+🇮🇹 Il punto di partenza è Binance: candele OHLCV (Open, High, Low, Close, Volume) BTC/USDT. **Dal pivot 2026-06-09 il timeframe è 1 ora** (`data.interval: 1h` in `config/default.yaml`); la finestra storica corrente è **dal 2019-01-01 a oggi** (multi-anno, 65.145 barre) — configurata via `data.start_time`. Il precedente perimetro 1m (2025-05-19 → oggi, ~525k candele, scelto empiricamente perché una storia 1m multi-ciclo peggiorava la generalizzazione) è conservato in `data/backup_1m/` e `models/backup_1m/` per rollback.
 
-**EN** Starting point: Binance, OHLCV (Open, High, Low, Close, Volume) candles on BTC/USDT, 1-minute timeframe. The current history window is **from 2025-05-19 to today** (~1 year, 525,000 candles) — configured in `config/default.yaml` (`data.start_time` + `data.limit`).
+**EN** Starting point: Binance, OHLCV (Open, High, Low, Close, Volume) candles on BTC/USDT. **Since the 2026-06-09 pivot the timeframe is 1 hour** (`data.interval: 1h` in `config/default.yaml`); the current history window is **from 2019-01-01 to today** (multi-year, 65,145 bars) — configured via `data.start_time`. The previous 1m perimeter (2025-05-19 → today, ~525k candles, chosen empirically because a multi-cycle 1m history hurt generalization) is preserved in `data/backup_1m/` and `models/backup_1m/` for rollback.
 
-🇮🇹 La scelta di un singolo anno recente nasce da test empirici: una storia molto più lunga (es. dal 2021) include cicli di mercato profondamente diversi (bear 2022, recovery 2023, halving 2024) che il modello fatica a riconciliare in un'unica distribuzione, peggiorando la generalizzazione sul presente. Il dataset corrente è bilanciato tra fasi di trend e fasi laterali.
+🇮🇹 **Razionale econometrico del pivot 1m→1h.** Il costo roundtrip (fee + slippage, ~26 bps) è **fisso** per trade, mentre la deviazione standard del movimento di una barra cresce **∝ √Δt**: il rapporto costo/σ scala quindi come 1/√Δt. A 1m era ~1.9–3.3× (il probe cross-sectional del 2026-06-06 ha dato KILL con diagnosi "il muro è la magnitudine, non il segno": effetto ~1.5 bps contro ~26 bps di costo); a 1h scende a **~0.25–0.42×**. A parità di motore predittivo, a 1h l'edge deve battere una frizione di un ordine di grandezza minore. Lo storico multi-anno (2019→oggi) è la contropartita necessaria: a 1h un solo anno fornirebbe ~8.7k barre, insufficienti per il training.
 
-**EN** A single recent year was chosen based on empirical tests: a much longer history (e.g. since 2021) covers deeply different market cycles (2022 bear, 2023 recovery, 2024 halving) that the model struggles to reconcile into a single distribution, hurting generalization to the present. The current dataset is balanced between trending and ranging phases.
+**EN** **Econometric rationale of the 1m→1h pivot.** The roundtrip cost (fee + slippage, ~26 bps) is **fixed** per trade, while the standard deviation of a bar's move grows **∝ √Δt**: the cost/σ ratio therefore scales as 1/√Δt. At 1m it was ~1.9–3.3× (the 2026-06-06 cross-sectional probe returned KILL with diagnosis "the wall is magnitude, not sign": ~1.5 bps effect vs ~26 bps cost); at 1h it drops to **~0.25–0.42×**. With the same predictive engine, at 1h the edge must beat an order-of-magnitude smaller friction. The multi-year history (2019→today) is the necessary counterpart: at 1h a single year would yield only ~8.7k bars, insufficient for training.
 
 🇮🇹 Lo storico è salvato in Parquet (colonnare, compresso). Negli avvii successivi viene scaricato solo il delta dall'ultima candela locale (aggiornamento in secondi).
 
@@ -32,9 +32,13 @@
 - Stationary (no rising trend).
 - Symmetric (a +10% and a −10% have the same absolute weight).
 
-🇮🇹 Il **target** è la somma dei log rendimenti delle prossime **30 candele** (`forecast_horizon: 30` in `config/default.yaml`). L'orizzonte è stato portato da 15 a 30 minuti il 2026-05-20: a 15 minuti il rapporto edge/costo era strutturalmente sfavorevole (movimento medio ~25 bps vs costo roundtrip ~26 bps); a 30 minuti il movimento atteso raddoppia (~42 bps) mentre il costo resta costante.
+🇮🇹 Il **target** è la somma dei log rendimenti delle prossime **30 barre** (`forecast_horizon: 30` in `config/default.yaml`). L'orizzonte è definito in **barre**, quindi la durata in tempo dipende dal timeframe: **30 ore al timeframe corrente 1h** (erano 30 minuti a 1m). Nota storica: a 1m l'orizzonte fu portato da 15 a 30 candele il 2026-05-20 perché a 15 minuti il rapporto edge/costo era strutturalmente sfavorevole (movimento medio ~25 bps vs costo roundtrip ~26 bps) — lo stesso argomento costo/σ (∝ 1/√Δt) che il 2026-06-09 ha motivato il pivot a 1h (§1).
 
-**EN** The **target** is the sum of log returns over the next **30 candles** (`forecast_horizon: 30` in `config/default.yaml`). The horizon was bumped from 15 to 30 minutes on 2026-05-20: at 15 minutes the edge/cost ratio was structurally unfavourable (avg move ~25 bps vs ~26 bps roundtrip cost); at 30 minutes the expected move roughly doubles (~42 bps) while cost stays constant.
+**EN** The **target** is the sum of log returns over the next **30 bars** (`forecast_horizon: 30` in `config/default.yaml`). The horizon is defined in **bars**, so its duration in time depends on the timeframe: **30 hours at the current 1h timeframe** (it was 30 minutes at 1m). Historical note: at 1m the horizon was bumped from 15 to 30 candles on 2026-05-20 because at 15 minutes the edge/cost ratio was structurally unfavourable (avg move ~25 bps vs ~26 bps roundtrip cost) — the same cost/σ argument (∝ 1/√Δt) that on 2026-06-09 motivated the 1h pivot (§1).
+
+🇮🇹 **Tipo di target (`features.target_type`, dal 2026-06-10):** `ret` (default, somma direzionale dei log-return — path bit-invariato) oppure `log_rv` (esperimento vol-S: target = `log(Σr² + 10⁻¹²)` sulle h barre future, con `target_dir` = RV futura > RV trailing h barre, causale). Il log rende la distribuzione ≈ gaussiana → RobustScaler/NLL/denormalizzazione funzionano invariati. ⚠ Con `log_rv` la mediana del target è ≈ −7.2 (non ≈ 0): l'inversione z→raw richiede `μ·IQR + centro` (vedi `scripts/dev_vols_qlike.py`), `denormalize_predictions` da sola non basta. Esito 2026-06-10: il NN batte HAR-RV del 30% in QLIKE su test — la vol è prevedibile, ma non tradabile sul perimetro spot/perp; nessun backtest trading sui modelli vol.
+
+**EN** **Target type (`features.target_type`, since 2026-06-10):** `ret` (default, directional sum of log-returns — bit-invariant path) or `log_rv` (vol-S experiment: target = `log(Σr² + 10⁻¹²)` over the next h bars, with `target_dir` = future RV > trailing h-bar RV, causal). The log makes the distribution ≈ Gaussian → RobustScaler/NLL/denormalization work unchanged. ⚠ With `log_rv` the target median is ≈ −7.2 (not ≈ 0): the z→raw inversion requires `μ·IQR + center` (see `scripts/dev_vols_qlike.py`); `denormalize_predictions` alone is not enough. Outcome 2026-06-10: the NN beats HAR-RV by 30% in test QLIKE — vol is predictable, but not tradable on the spot/perp perimeter; no trading backtest on vol models.
 
 ---
 
@@ -44,21 +48,39 @@
 
 **EN** **104 features** per candle (**86 dynamic + 18 structural**, verified on the current dataset 2026-06-02), designed to give the model the same tools an experienced trader would use. The count is after the **C-funding** filter (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decision 2026-05-28): 15 live-incompatible features with ROI ≤ 0 were removed (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — see `MODEL_IMPROVEMENTS.md` for the full rationale.
 
+### Contratto timeframe — finestre TIME-semantic vs BAR-semantic · Timeframe contract — TIME-semantic vs BAR-semantic windows
+
+🇮🇹 Dal pivot 2026-06-09 il `FeatureBuilder` è **interval-agnostic**: riceve `interval_minutes` (derivato da `data.interval` via `interval_minutes_from_cfg` in `quantsys/utils`, `ValueError` fail-fast su intervalli sconosciuti), calcola `bars_per_day = 1440 // interval_minutes` e converte i minuti in barre con l'helper `_tbars(minutes)` (floor anti-degenerazione a 2 barre). Le finestre si dividono in due classi:
+- **TIME-semantic** — mantengono il significato in **tempo di calendario**, convertite in barre: strutturali ATH/ATL 30d/90d/365d e momentum 7d/30d/90d (`days × bars_per_day`), `funding_rate_1d` (24h = `bars_per_day` barre), `session_position` (240 minuti), `price_vs_ma200m` (200 minuti).
+- **BAR-semantic** — deliberatamente **invariate in numero di barre** (si traslano col timeframe): rolling windows [5, 10, 20, 60], CVD, VWAP, Volume Profile a 60/240/1440 **barre** (a 1m = 1h/4h/1 giorno; a 1h = 60h/10 giorni/60 giorni), lag returns.
+
+A `interval_minutes=1` tutte le conversioni sono **identità** → il comportamento legacy 1m è preservato esattamente.
+
+**EN** Since the 2026-06-09 pivot the `FeatureBuilder` is **interval-agnostic**: it receives `interval_minutes` (derived from `data.interval` via `interval_minutes_from_cfg` in `quantsys/utils`, fail-fast `ValueError` on unknown intervals), computes `bars_per_day = 1440 // interval_minutes` and converts minutes to bars with the `_tbars(minutes)` helper (anti-degeneration floor of 2 bars). Windows fall into two classes:
+- **TIME-semantic** — keep their meaning in **calendar time**, converted to bars: structural ATH/ATL 30d/90d/365d and momentum 7d/30d/90d (`days × bars_per_day`), `funding_rate_1d` (24h = `bars_per_day` bars), `session_position` (240 minutes), `price_vs_ma200m` (200 minutes).
+- **BAR-semantic** — deliberately **unchanged in bar counts** (they shift with the timeframe): rolling windows [5, 10, 20, 60], CVD, VWAP, Volume Profile at 60/240/1440 **bars** (at 1m = 1h/4h/1 day; at 1h = 60h/10 days/60 days), lag returns.
+
+At `interval_minutes=1` every conversion is an **identity** → the legacy 1m behavior is preserved exactly.
+
+🇮🇹 **Overlay di config per interval (2026-06-10).** Le chiavi interval-dipendenti (`data.interval`/`start_time`, `model.window_stride`, `validation.embargo_steps`, `risk.max_hold_candles`, `backtest.min_expected_ret`/`max_sigma`) sono fattorizzate in `config/interval/{1m,1h}.yaml`. `load_config` le mergia per-sezione (shallow) **dopo secrets e prima dell'overlay arch** — gerarchia: default → secrets → interval → arch. Attivazione via env `QUANTSYS_INTERVAL` o `run_all.py --interval`.
+
+**EN** **Per-interval config overlay (2026-06-10).** The interval-dependent keys (`data.interval`/`start_time`, `model.window_stride`, `validation.embargo_steps`, `risk.max_hold_candles`, `backtest.min_expected_ret`/`max_sigma`) are factored into `config/interval/{1m,1h}.yaml`. `load_config` merges them per-section (shallow) **after secrets and before the arch overlay** — hierarchy: default → secrets → interval → arch. Activated via the `QUANTSYS_INTERVAL` env var or `run_all.py --interval`.
+
 ### Tendenza e momentum · Trend and momentum
 
 🇮🇹
-- **Medie mobili** rolling su 5/10/20/60 minuti — trend su orizzonti diversi.
+- **Medie mobili** rolling su 5/10/20/60 barre (BAR-semantic) — trend su orizzonti diversi.
 - **Momentum derivato** — rapporti tra medie mobili a scale diverse, ratio momentum/volatilità. RSI/MACD classici rimossi: l'informazione è già catturata dal mix `vol_std` + `lag_ret` + microstructure.
 
 **EN**
-- **Rolling moving averages** over 5/10/20/60 minutes — trend at multiple horizons.
+- **Rolling moving averages** over 5/10/20/60 bars (BAR-semantic) — trend at multiple horizons.
 - **Derived momentum** — ratios between MAs at different scales, momentum/volatility ratios. Classic RSI/MACD were removed: the same information is already captured by the `vol_std` + `lag_ret` + microstructure mix.
 
 ### Volatilità · Volatility
 
-🇮🇹 Rolling std dei log rendimenti su 5/10/20/60 min. ATR classico rimosso dall'input perché ridondante con `vol_std`; resta calcolato dal `RiskManager` per il sizing dinamico degli stop (§10).
+🇮🇹 Rolling std dei log rendimenti su 5/10/20/60 barre (BAR-semantic). ATR classico rimosso dall'input perché ridondante con `vol_std`; resta calcolato dal `RiskManager` per il sizing dinamico degli stop (§10).
 
-**EN** Rolling std of log returns over 5/10/20/60 min. Classic ATR removed from the inputs (redundant with `vol_std`); still computed by the `RiskManager` for dynamic stop sizing (§10).
+**EN** Rolling std of log returns over 5/10/20/60 bars (BAR-semantic). Classic ATR removed from the inputs (redundant with `vol_std`); still computed by the `RiskManager` for dynamic stop sizing (§10).
 
 ### VWAP
 
@@ -68,9 +90,9 @@
 
 ### Volume Profile (multi-scala) · Volume Profile (multi-scale)
 
-🇮🇹 Distribuzione del volume per livello di prezzo: i livelli con molto volume diventano supporti/resistenze. Calcolato su **tre finestre** (1h, 4h, 1 giorno). Ogni finestra produce 4 feature: distanza dal POC, dalla Value Area High, dalla Value Area Low, concentrazione del volume al POC. In alta volatilità domina il VP breve; in bassa volatilità il giornaliero è più stabile.
+🇮🇹 Distribuzione del volume per livello di prezzo: i livelli con molto volume diventano supporti/resistenze. Calcolato su **tre finestre di 60/240/1440 barre** (BAR-semantic: a 1m = 1h/4h/1 giorno; al timeframe corrente 1h = 60h/10 giorni/60 giorni). Ogni finestra produce 4 feature: distanza dal POC, dalla Value Area High, dalla Value Area Low, concentrazione del volume al POC. In alta volatilità domina il VP breve; in bassa volatilità quello lungo è più stabile.
 
-**EN** Volume distribution per price level: high-volume levels become strong supports/resistances. Computed on **three windows** (1h, 4h, 1 day). Each window produces 4 features: distance from POC, from Value Area High, from Value Area Low, volume concentration at the POC. In high volatility the short VP dominates; in low volatility the daily VP is more stable.
+**EN** Volume distribution per price level: high-volume levels become strong supports/resistances. Computed on **three windows of 60/240/1440 bars** (BAR-semantic: at 1m = 1h/4h/1 day; at the current 1h timeframe = 60h/10 days/60 days). Each window produces 4 features: distance from POC, from Value Area High, from Value Area Low, volume concentration at the POC. In high volatility the short VP dominates; in low volatility the long one is more stable.
 
 ### CVD — Cumulative Volume Delta
 
@@ -134,13 +156,13 @@
 
 **EN** Since **2026-06-03** the regime detector runs **directly on BTC data**, no longer on US macros. The active class is `RegimeMarkovBTC` in `quantsys/macro/regime.py` — Markov-Switching (Hamilton 1989) on intraday BTC realized volatility aggregated hourly. It supersedes both the legacy `RegimeMarkovSwitching` on PC1 of daily macros (regimes switching every months — incompatible with h=30) and the transitional `RegimeSession` baseline (deterministic Asia/EU/US, ~33% by construction but informationally empty: temporal clusters, not market clusters).
 
-🇮🇹 **Pipeline di feature.** Da `data/raw_candles.parquet` (1-min BTC) il detector aggrega ogni ora:
-- `log_ret_h` — somma dei log-return 1m sull'ora (return orario);
-- `log_rv` — `log(Σ log_ret_1m²)` clippato a 1e-12 (log della realized variance; la rv grezza è fortemente right-skewed, il log la stabilizza per la MarkovRegression).
+🇮🇹 **Pipeline di feature.** Da `data/raw_candles.parquet` (candele BTC a qualunque intervallo **≤1h**: il clock del regime è ORARIO by design, indipendente dal timeframe di trading; input >1h → `ValueError` fail-fast) il detector aggrega ogni ora:
+- `log_ret_h` — somma dei log-return per barra sull'ora (return orario; con input 1h il resample è un'identità);
+- `log_rv` — `log(Σ log_ret²)` clippato a 1e-12 (log della realized variance; la rv grezza è fortemente right-skewed, il log la stabilizza per la MarkovRegression). Con input 1h ogni bucket contiene una sola osservazione → rv = log_ret² della barra (proxy povera ma valida della RV oraria).
 
-**EN** **Feature pipeline.** From `data/raw_candles.parquet` (1-min BTC) the detector aggregates per hour:
-- `log_ret_h` — sum of 1m log-returns over the hour (hourly return);
-- `log_rv` — `log(Σ log_ret_1m²)` clipped at 1e-12 (log realized variance; raw rv is heavily right-skewed, the log stabilizes it for MarkovRegression).
+**EN** **Feature pipeline.** From `data/raw_candles.parquet` (BTC candles at any interval **≤1h**: the regime clock is HOURLY by design, independent of the trading timeframe; >1h input → fail-fast `ValueError`) the detector aggregates per hour:
+- `log_ret_h` — sum of per-bar log-returns over the hour (hourly return; with 1h input the resample is an identity);
+- `log_rv` — `log(Σ log_ret²)` clipped at 1e-12 (log realized variance; raw rv is heavily right-skewed, the log stabilizes it for MarkovRegression). With 1h input each bucket holds a single observation → rv = the bar's log_ret² (a poor but valid proxy of hourly RV).
 
 🇮🇹 **Pipeline statistica.** RobustScaler globale (mediana/IQR, look-ahead trascurabile) → PCA expanding window con `n_pca=1` (combina `log_ret_h` + `log_rv` in un singolo segnale di intensità del moto) → `MarkovRegression` su PC1 con switching mean **+** switching variance → Hamilton filter manuale O(1) per i passi orari fra un retrain e l'altro. Walk-forward: burn-in 30 giorni (720h), retrain ogni 30 giorni (720h).
 
@@ -182,15 +204,17 @@
 
 ## 5. Dataset per il training · 5. Training dataset
 
-🇮🇹 Le feature vengono organizzate in **finestre temporali**: ogni esempio è una matrice `120×104` (ultimi 120 minuti = 2 ore di context, 104 feature). Il target è il log-return cumulativo sulle prossime 30 candele.
+🇮🇹 Le feature vengono organizzate in **finestre temporali**: ogni esempio è una matrice `120×104` (ultime 120 **barre** di contesto = **5 giorni** al timeframe corrente 1h; erano 2 ore a 1m, 104 feature). Il target è il log-return cumulativo sulle prossime 30 barre (§2).
 
-**EN** Features are organized into **temporal windows**: every example is a `120×104` matrix (last 120 minutes = 2 hours of context, 104 features). The target is the cumulative log-return over the next 30 candles.
+**EN** Features are organized into **temporal windows**: every example is a `120×104` matrix (last 120 **bars** of context = **5 days** at the current 1h timeframe; it was 2 hours at 1m, 104 features). The target is the cumulative log-return over the next 30 bars (§2).
 
-🇮🇹 Sul dataset corrente (549k candele) con `window_stride: 5` si ottengono **~80.000 esempi train + ~10.000 val + ~10.000 test** (conteggio sul npz 2026-06-04: 80824 / 10103 / 10104).
+🇮🇹 Sul dataset corrente 1h (65.145 barre, 2019→oggi) con `window_stride: 1` si ottengono **51.120 esempi train** (`X_train (51120, 120, 104)`) più gli split val/test. (Il precedente dataset 1m 549k con stride 5 dava 80824 / 10103 / 10104.)
 
-**EN** On the current dataset (525k candles, 1 year) with `window_stride: 5` we get **~80,000 train + ~10,000 val + ~10,000 test examples** (exact npz counts 2026-06-02: 80,390 / 10,049 / 10,049).
+**EN** On the current 1h dataset (65,145 bars, 2019→today) with `window_stride: 1` we get **51,120 train examples** (`X_train (51120, 120, 104)`) plus the val/test splits. (The previous 549k 1m dataset with stride 5 yielded 80,824 / 10,103 / 10,104.)
 
-🇮🇹 **Perché T=120 e non di più.** La finestra di 120 minuti è uno sweet spot empirico verificato il 2026-06-04: esperimenti a **T=180 e T=240 hanno prodotto regressioni** (degrado monotono di Spearman walkforward e backtest, μ_pred collassata, sotto-random WHR). Il dataset 1m ~525k non ha profondità informativa per sostenere context più lunghi (over-fitting al noise temporale; il plateau di letteratura 192-384 vale su dataset multi-anno multi-asset, non su BTC singolo 1 anno). **Non aumentare `model.window_size` finché il dataset resta ~525k.**
+🇮🇹 **Perché T=120 e non di più.** La finestra di 120 barre è uno sweet spot empirico verificato il 2026-06-04 **sul perimetro 1m**: esperimenti a **T=180 e T=240 hanno prodotto regressioni** (degrado monotono di Spearman walkforward e backtest, μ_pred collassata, sotto-random WHR). Il dataset 1m ~525k non aveva profondità informativa per sostenere context più lunghi (over-fitting al noise temporale; il plateau di letteratura 192-384 vale su dataset multi-anno multi-asset). T=120 è stato **mantenuto invariato** nel pivot 1h (ora = 5 giorni di contesto): non aumentarlo senza nuova evidenza empirica.
+
+**EN** **Why T=120 and not more.** The 120-bar window is an empirical sweet spot verified on 2026-06-04 **on the 1m perimeter**: experiments at **T=180 and T=240 both regressed** (monotone degradation of walkforward Spearman and backtest, collapsed μ_pred, below-random WHR). The ~525k 1m dataset lacked the informational depth for longer contexts (overfitting to temporal noise; the 192-384 literature plateau holds for multi-year multi-asset datasets). T=120 was **kept unchanged** in the 1h pivot (now = 5 days of context): do not increase it without new empirical evidence.
 
 🇮🇹 Normalizzazione con **RobustScaler globale multi-colonna**, meno sensibile a spike di prezzo rispetto allo standard scaler. I parametri sono persistiti in `PipelineState` (`models/{arch}/pipeline_state.pkl`) per riapplicare la stessa trasformazione in inferenza.
 
@@ -211,17 +235,19 @@
 **EN** Reconciliation via `PipelineState.denormalize_predictions(mu, sigma) -> (mu_raw, sigma_raw)` which multiplies by `target_scale`. **Both `03_backtest.py` and `04_live_signals.py` apply it right after the forward pass**, before handing predictions to the `SignalGenerator`. Without denormalization, SL/TP `σ × price × multiplier` become macroscopic (σ_z=1 × $42k × 1.5 = $63k) — structural bug identified and fixed on 2026-05-23 (Sharpe −256 → +18.7).
 
 🇮🇹 **Per nuovi entry point**: usare sempre `denormalize_predictions` prima di interpretare μ/σ. Safety net contro regressioni:
-- `RuntimeError` in `03_backtest.py` se `σ_max ≥ 0.05` (impossibile in spazio raw su BTC 1m; `raise` invece di `assert` sopravvive a `python -O`).
+- `RuntimeError` in `03_backtest.py` se `σ_max ≥ 0.05·√interval_minutes` (0.05 a 1m, ≈0.387 a 1h; `raise` invece di `assert` sopravvive a `python -O`). Lo scaling √Δt preserva l'intento del guard: cattura il bug di denormalizzazione z→raw (~30–100×), non la crescita √60 legittima della σ a orizzonte 30 barre orarie.
 - Warning runtime in `_sl_tp` se `σ × price × 1.5 > 5% × price`.
 - `PipelineState.forecast_horizon` validato in backtest + live: se `cfg.data.forecast_horizon != state.forecast_horizon` → `RuntimeError` (impedisce di usare un modello h=30 con backtest h=15).
+- `PipelineState.interval_minutes` (property, fallback 1 per pkl legacy) validato in backtest + live con lo stesso pattern: modello addestrato a 1m + config 1h → `RuntimeError` "interval mismatch". I consumer live/replay derivano l'interval dal `PipelineState`, non dalla config.
 - `merge_asof` tra test set e raw_candles validato con `len(merged) == n_test_orig`, altrimenti `RuntimeError` (previene SL/TP su candele sbagliate per gap/halt Binance).
 - `update_trailing` aggiorna `portfolio.equity` mark-to-market ad ogni candela (cash + size_usd + unrealized_pnl): il circuit breaker scatta su DD intra-trade anche in live.
 - Floor `sl_d = max(sl_d, price × 1e-4)` in `_sl_tp` per evitare SL=TP=entry silenzioso quando ATR=0 (mercato halt).
 
 **EN** **For any new entry point**: always call `denormalize_predictions` before interpreting μ/σ. Safety nets against regressions:
-- `RuntimeError` in `03_backtest.py` if `σ_max ≥ 0.05` (impossible in raw space on BTC 1m; `raise` instead of `assert` survives `python -O`).
+- `RuntimeError` in `03_backtest.py` if `σ_max ≥ 0.05·√interval_minutes` (0.05 at 1m, ≈0.387 at 1h; `raise` instead of `assert` survives `python -O`). The √Δt scaling preserves the guard's intent: it catches the z→raw denormalization bug (~30–100×), not the legitimate √60 growth of σ at a 30-hourly-bar horizon.
 - Runtime warning in `_sl_tp` if `σ × price × 1.5 > 5% × price`.
 - `PipelineState.forecast_horizon` validated in backtest + live: if `cfg.data.forecast_horizon != state.forecast_horizon` → `RuntimeError` (prevents using a h=30 model with a h=15 backtest).
+- `PipelineState.interval_minutes` (property, fallback 1 for legacy pkl) validated in backtest + live with the same pattern: a 1m-trained model + 1h config → `RuntimeError` "interval mismatch". Live/replay consumers derive the interval from the `PipelineState`, not from the config.
 - `merge_asof` between test set and raw_candles validated with `len(merged) == n_test_orig`, otherwise `RuntimeError` (prevents SL/TP triggered on wrong candles due to Binance gaps/halts).
 - `update_trailing` updates `portfolio.equity` mark-to-market every candle (cash + size_usd + unrealized_pnl): the circuit breaker fires on intra-trade DD in live too.
 - Floor `sl_d = max(sl_d, price × 1e-4)` in `_sl_tp` to avoid silent SL=TP=entry when ATR=0 (market halt).
@@ -254,9 +280,9 @@
 
 **EN** **Inverted** Transformer: instead of attention on timesteps, attention on **features** (each feature becomes a "token"). With 104 features, complexity O(104²)≈10,800 vs O(120²)=14,400 of the classic Transformer — better suited to tabular data because it explicitly models inter-feature correlations.
 
-🇮🇹 Embedding **multi-scala**: la finestra da 120 min condensata in 3 viste (1m, 5m, 15m) con average pooling, per catturare strutture rapide e lente senza raddoppiare i parametri.
+🇮🇹 Embedding **multi-scala**: la finestra da 120 barre condensata in 3 viste con average pooling ×1/×5/×15 barre (BAR-semantic: a 1m = 1m/5m/15m, a 1h = 1h/5h/15h), per catturare strutture rapide e lente senza raddoppiare i parametri.
 
-**EN** **Multi-scale** embedding: the 120-min window is compressed into 3 views (1m, 5m, 15m) via average pooling, capturing both fast and slow structures without doubling parameters.
+**EN** **Multi-scale** embedding: the 120-bar window is compressed into 3 views via ×1/×5/×15-bar average pooling (BAR-semantic: at 1m = 1m/5m/15m, at 1h = 1h/5h/15h), capturing both fast and slow structures without doubling parameters.
 
 ### TCN+Mamba ibrido (`--arch tcnmamba`) · TCN+Mamba hybrid (`--arch tcnmamba`)
 
@@ -380,20 +406,20 @@
 
 ## 8. Monte Carlo
 
-🇮🇹 Per ogni nuova candela, il sistema genera **2000 scenari di prezzo alternativi** (`mc.n_paths` in config) per i prossimi 30 minuti, usando le predizioni dell'ensemble come guida e aggiungendo variabilità stocastica calibrata sulla volatilità corrente.
+🇮🇹 Per ogni nuova candela, il sistema genera **2000 scenari di prezzo alternativi** (`mc.n_paths` in config) per le prossime 30 barre (= 30 ore al timeframe corrente 1h), usando le predizioni dell'ensemble come guida e aggiungendo variabilità stocastica calibrata sulla volatilità corrente.
 
-**EN** For every new candle, the system generates **2000 alternative price scenarios** (`mc.n_paths` in config) over the next 30 minutes, using the ensemble's predictions as a guide and adding stochastic variability calibrated on current volatility.
+**EN** For every new candle, the system generates **2000 alternative price scenarios** (`mc.n_paths` in config) over the next 30 bars (= 30 hours at the current 1h timeframe), using the ensemble's predictions as a guide and adding stochastic variability calibrated on current volatility.
 
-🇮🇹 La volatilità è stimata con **GJR-GARCH(1,1)** (params di default `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875` in `quantsys/model/forecast.py`): la variante GJR aggiunge un termine di asimmetria che amplifica l'update di volatilità in risposta a shock negativi (leverage effect), tipico dei mercati finanziari.
+🇮🇹 La volatilità è stimata con **GJR-GARCH(1,1)** (params di default `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875` in `quantsys/model/forecast.py`): la variante GJR aggiunge un termine di asimmetria che amplifica l'update di volatilità in risposta a shock negativi (leverage effect), tipico dei mercati finanziari. ⚠ TODO post-pivot 1h: i parametri (in particolare ω, varianza unconditional per barra) furono stimati su rendimenti 1m e vanno **ri-stimati su rendimenti 1h** — il forecast MC non è sul critical path del backtest, quindi non blocca il gate del pivot.
 
-**EN** Volatility is estimated with a **GJR-GARCH(1,1)** model (default params `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875` in `quantsys/model/forecast.py`): the GJR variant adds an asymmetry term that amplifies the volatility update in response to negative shocks (leverage effect), typical of financial markets.
+**EN** Volatility is estimated with a **GJR-GARCH(1,1)** model (default params `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875` in `quantsys/model/forecast.py`): the GJR variant adds an asymmetry term that amplifies the volatility update in response to negative shocks (leverage effect), typical of financial markets. ⚠ Post-1h-pivot TODO: the parameters (notably ω, per-bar unconditional variance) were estimated on 1m returns and must be **re-estimated on 1h returns** — the MC forecast is not on the backtest critical path, so it does not block the pivot gate.
 
 🇮🇹 Risultato: "ventola" di scenari con intervalli di confidenza. Permette di rispondere a domande come:
-- Con quale probabilità il prezzo è sopra X$ tra 30 minuti?
+- Con quale probabilità il prezzo è sopra X$ a orizzonte 30 barre?
 - Qual è il peggior scenario nel 5% dei casi?
 
 **EN** The result is a "fan" of scenarios with confidence intervals. It lets the system answer questions like:
-- What's the probability that price is above $X in 30 minutes?
+- What's the probability that price is above $X at the 30-bar horizon?
 - What's the worst case in the bottom 5%?
 
 ---
@@ -444,7 +470,7 @@
 
 🇮🇹 In modalità live il sistema (`LiveEngine` in `scripts/04_live_signals.py`) si connette a Binance via WebSocket e riceve ogni candela chiusa in tempo reale. Per ogni candela:
 1. Aggiorna le feature con la normalizzazione del training.
-2. Passa la sequenza degli ultimi 120 minuti al modello.
+2. Passa la sequenza delle ultime 120 barre al modello.
 3. Genera le simulazioni Monte Carlo.
 4. Calcola il conviction score.
 5. Se il segnale supera i filtri, apre/chiude una posizione (**paper trading**, nessun ordine reale).
@@ -452,7 +478,7 @@
 
 **EN** In live mode the system (`LiveEngine` in `scripts/04_live_signals.py`) connects to Binance via WebSocket and receives every closed candle in real time. For each candle:
 1. Updates features with the training-time normalization.
-2. Passes the last 120-minute sequence to the model.
+2. Passes the last 120-bar sequence to the model.
 3. Generates the Monte Carlo simulations.
 4. Computes the conviction score.
 5. If the signal passes filters, opens/closes a position (**paper trading**, no real orders).
@@ -489,7 +515,7 @@
 - **Separazione candela in formazione vs buffer chiuso**: solo le candele con `k.x == True` (kline chiusa) entrano nel buffer; le parziali stanno in `_pending_candle` separato e vengono scartate al reconnect WS. Previene corruzione del warmup post-disconnessione.
 - **Thread safety funding**: il thread daemon che aggiorna il funding ogni 8h scrive `_funding_df` sotto `threading.Lock()`. Primo update eseguito immediatamente all'avvio (no attesa 8h con parquet vecchio).
 - **Log rotation tollerante a file lock Windows**: rotazione a 50 MB wrappata in `try/except` per `OSError, PermissionError` — prosegue senza ruotare se il file è temporaneamente lockato.
-- **Mismatch forecast_horizon**: `LiveEngine.__init__` solleva `RuntimeError` se `cfg.data.forecast_horizon != PipelineState.forecast_horizon`, impedendo di avviare il live con un modello addestrato per un orizzonte diverso.
+- **Mismatch forecast_horizon e interval**: `LiveEngine.__init__` solleva `RuntimeError` se `cfg.data.forecast_horizon != PipelineState.forecast_horizon` oppure se l'interval della config differisce da `PipelineState.interval_minutes` (pivot 2026-06-09), impedendo di avviare il live con un modello addestrato per un orizzonte o un timeframe diverso.
 - **Checkpoint atomici**: `EarlyStopping` salva i pesi su `.tmp` + `os.replace()` (rename atomico cross-platform), evita checkpoint corrotti se il processo è killato durante un save.
 
 **EN**
@@ -497,7 +523,7 @@
 - **Forming vs closed candle separation**: only candles with `k.x == True` (closed kline) enter the buffer; partial ones live in a separate `_pending_candle` and are dropped on WS reconnect. Prevents warmup corruption after disconnections.
 - **Funding thread safety**: the daemon thread refreshing funding every 8h writes `_funding_df` under `threading.Lock()`. First update executed immediately at startup (no 8h wait on possibly stale parquet).
 - **Windows-tolerant log rotation**: rotation at 50 MB wrapped in `try/except` for `OSError, PermissionError` — proceeds without rotating if the file is temporarily locked.
-- **forecast_horizon mismatch**: `LiveEngine.__init__` raises `RuntimeError` if `cfg.data.forecast_horizon != PipelineState.forecast_horizon`, preventing live startup with a model trained for a different horizon.
+- **forecast_horizon and interval mismatch**: `LiveEngine.__init__` raises `RuntimeError` if `cfg.data.forecast_horizon != PipelineState.forecast_horizon` or if the config interval differs from `PipelineState.interval_minutes` (2026-06-09 pivot), preventing live startup with a model trained for a different horizon or timeframe.
 - **Atomic checkpoints**: `EarlyStopping` saves weights to `.tmp` + `os.replace()` (cross-platform atomic rename), avoiding corrupted checkpoints if the process is killed during a save.
 
 ---
@@ -508,14 +534,14 @@
 Binance REST/WS
       │
       ▼
-Candele OHLCV 1m (storico 2025-05-19 → oggi, ~1 anno, 525k candele)
+Candele OHLCV 1h (storico 2019-01-01 → oggi, ~65k barre — pivot 2026-06-09)
       │
       ▼
 Log rendimenti + 104 feature (VWAP, VP short/mid, CVD, momentum,
                                 microstructure, funding, interactions, tempo, lag)
       │
       ├─── Feature macro (FRED + yFinance, 90 feature → MacroEncoder 16-dim)
-      ├─── BTC 1m → realized vol oraria → RegimeMarkovBTC (Markov-Switching,
+      ├─── BTC → realized vol oraria → RegimeMarkovBTC (Markov-Switching,
       │                                                    3 regimi data-driven:
       │                                                    Quiet / Trending / Stress)
       │
@@ -526,7 +552,7 @@ Finestre 120×104 normalizzate (RobustScaler globale) → dataset NPZ
 Architettura selezionata con --arch (o --distill per ensemble):
       │
       ├─ lstm         → LSTM dual-stream (din. + strutt.) + attention   (legacy)
-      ├─ itransformer → attention sulle feature (multi-scala 1m/5m/15m)
+      ├─ itransformer → attention sulle feature (multi-scala ×1/×5/×15 barre)
       ├─ tcnmamba     → TCN (dil. 1-32, RF=127) + Mamba SSM (contesto 120)
       │                  └─ gated fusion → rappresentazione unificata
       ├─ nhits        → Neural Hierarchical Interpolation (pure-MLP, stack 8/4/1)
@@ -542,7 +568,7 @@ Output: μ (direzione) + σ (incertezza) + ν (code pesanti)  in z-score
 PipelineState.denormalize_predictions(μ, σ)  →  spazio raw
       │
       ▼
-Monte Carlo 2000 scenari × 30 min (GJR-GARCH per volatilità)
+Monte Carlo 2000 scenari × 30 barre (30h a 1h; GJR-GARCH per volatilità)
       │
       ▼
 Conviction score (direzione × ampiezza × calibrazione × regime)

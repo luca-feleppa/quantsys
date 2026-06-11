@@ -1314,10 +1314,41 @@ def main():
     try:
         from quantsys.utils import PipelineState
         state = PipelineState.load(str(_ps_path))
+    except Exception as e:
+        log.warning(f"PipelineState load fallito (non critico): {e}")
+        state = None
+    if state is not None:
+        # IT: guard anti-stale — se l'interval del pkl arch-locale non coincide con la
+        #     config corrente, il pkl è di un dataset precedente (es. 1m sotto pivot 1h):
+        #     prova la copia canonica di 01_download_data, altrimenti fail-fast. Salvarlo
+        #     stale propagherebbe target_scale/scaler errati alla denormalizzazione.
+        # EN: anti-stale guard — if the arch-local pkl interval mismatches the current
+        #     config, the pkl belongs to a previous dataset (e.g. 1m under the 1h pivot):
+        #     try 01_download_data's canonical copy, else fail fast. Saving it stale would
+        #     propagate wrong target_scale/scalers into denormalization.
+        from quantsys.utils import interval_minutes_from_cfg
+        _cfg_im = interval_minutes_from_cfg(cfg)
+        if state.interval_minutes != _cfg_im:
+            _stale_im = state.interval_minutes
+            _canon = Path("models/pipeline_state.pkl")
+            _fixed = False
+            if _canon.exists():
+                _cs = PipelineState.load(str(_canon))
+                if _cs.interval_minutes == _cfg_im:
+                    state = _cs
+                    _fixed = True
+                    log.warning(
+                        f"PipelineState arch-locale stale ({_stale_im}min): "
+                        f"sostituito con la copia canonica {_canon} ({_cfg_im}min)."
+                    )
+            if not _fixed:
+                raise RuntimeError(
+                    f"PipelineState stale: {_ps_path} è a {_stale_im}min ma la config "
+                    f"è a {_cfg_im}min, e nessuna copia canonica valida in models/pipeline_state.pkl. "
+                    f"Rilancia scripts/01_download_data.py per rigenerarlo."
+                )
         state.set_model_config(cfg_out)
         state.save(str(_ps_path))
-    except Exception as e:
-        log.warning(f"PipelineState update fallito (non critico): {e}")
 
     # IT: copia best_model + PipelineState nella exp dir (senza scaler il ckpt è inutile)
     # EN: copy best_model + PipelineState into the exp dir (no scalers = unusable ckpt)

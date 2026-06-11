@@ -607,7 +607,16 @@ def merge_macro_with_candles(
         # Avvisa se il macro non copre l'intero periodo price
         if macro_start > price_start:
             gap_days = (macro_start - price_start).days
-            n_candles_gap = gap_days * 1440  # 1440 candele 1m per giorno
+            # IT: barre/giorno inferite dal passo MEDIANO dei dati (interval-agnostic,
+            #     nessuna config richiesta): 1m → 1440, 1h → 24. Fallback 1440 (= legacy 1m)
+            #     se il passo è NaN/non-positivo (es. <2 candele o timestamp degeneri).
+            # EN: bars/day inferred from the MEDIAN data step (interval-agnostic, no config
+            #     needed): 1m → 1440, 1h → 24. Fallback 1440 (= legacy 1m) if the step is
+            #     NaN/non-positive (e.g. <2 candles or degenerate timestamps).
+            _step_med = df_candles["open_time"].diff().median()
+            _step_sec = _step_med.total_seconds() if pd.notna(_step_med) else 0.0
+            bars_per_day = max(1, round(86400 / _step_sec)) if _step_sec > 0 else 1440
+            n_candles_gap = gap_days * bars_per_day
             pct_gap       = n_candles_gap / max(len(df_candles), 1) * 100
             log.warning(
                 f"Macro inizia {gap_days} giorni DOPO le candele price "

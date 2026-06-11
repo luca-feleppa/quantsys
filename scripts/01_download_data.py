@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from quantsys.utils import load_config, setup_logging, ensure_dirs, PipelineState
+from quantsys.utils import load_config, setup_logging, ensure_dirs, PipelineState, interval_minutes_from_cfg
 from quantsys.utils.atomic_save import atomic_save_npz, atomic_save_parquet
 from quantsys.data import fetch_klines, fetch_funding_rate
 from quantsys.features import FeatureBuilder, create_windows, temporal_split, LIVE_DROP_FEATURES
@@ -25,6 +25,16 @@ log = logging.getLogger("quantsys.script.01")
 # IT: pipeline completa: download → feature → split → windows → PipelineState.
 # EN: full pipeline: download → features → split → windows → PipelineState.
 def main():
+    # IT: Console Windows default cp1252 — i caratteri unicode del banner finale
+    #     crashano il print (5ª occorrenza del bug). Reconfigure UTF-8 come 02/04.
+    # EN: Windows console defaults to cp1252 — unicode chars in the final banner
+    #     crash the print (5th occurrence of this bug). Reconfigure UTF-8 like 02/04.
+    import sys as _sys
+    for _stream in (_sys.stdout, _sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     cfg  = load_config("config/default.yaml")
     dcfg = cfg["data"]
     fcfg = cfg["features"]
@@ -92,6 +102,10 @@ def main():
     # EN: with use_revin=True raw return columns are excluded from the global RobustScaler
     #     so RevIN normalizes raw features and mu/log_var stay aligned with the target
     _use_revin = bool(mcfg.get("use_revin", False))
+    # IT: interval_minutes da data.interval — le finestre TIME-semantic del
+    #     FeatureBuilder vengono convertite in barre (identità a 1m).
+    # EN: interval_minutes from data.interval — the FeatureBuilder's TIME-semantic
+    #     windows are converted to bars (identity at 1m).
     builder = FeatureBuilder(
         vp_bins          = fcfg["vp_bins"],
         vp_lookback      = fcfg["vp_lookback"],
@@ -101,6 +115,10 @@ def main():
         vp_stride        = fcfg.get("vp_stride", 1),
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         use_revin        = _use_revin,
+        interval_minutes = interval_minutes_from_cfg(cfg),
+        # IT: target_type da config (default "ret" = direzionale legacy; "log_rv" = vol-S).
+        # EN: target_type from config (default "ret" = legacy directional; "log_rv" = vol-S).
+        target_type      = fcfg.get("target_type", "ret"),
     )
     df_feat = builder.build(df_raw, normalize=False, fit=False, funding_df=funding_df)
     log.info(f"Fase 2 completata in {time.time()-t0:.1f}s — {len(df_feat):,} righe valide")
@@ -256,6 +274,17 @@ def main():
     _ps_file = str(_ps_dir / "pipeline_state.pkl")
     state.save(_ps_file)
     log.info(f"PipelineState salvato → {_ps_file}")
+    # IT: copia CANONICA in models/pipeline_state.pkl — il dataset (scaler/feature/interval)
+    #     è arch-independent; senza questa copia un 02_train con QUANTSYS_ARCH diversa
+    #     troverebbe solo il pkl stale della sua arch dir (bug 2026-06-10: state 1m
+    #     ri-salvato sotto dataset 1h → guard interval scattato in backtest).
+    # EN: CANONICAL copy at models/pipeline_state.pkl — the dataset (scaler/features/interval)
+    #     is arch-independent; without it a 02_train run with a different QUANTSYS_ARCH
+    #     would only find its arch dir's stale pkl (2026-06-10 bug: 1m state re-saved
+    #     under a 1h dataset → interval guard tripped in backtest).
+    _ps_canon = str(Path("models") / "pipeline_state.pkl")
+    state.save(_ps_canon)
+    log.info(f"PipelineState canonico → {_ps_canon}")
 
     print(f"""
 ═══════════════════════════════════════════
@@ -265,7 +294,7 @@ def main():
   Candele raw   : {len(df_raw):,}
   Candele valide: {len(df_feat):,}
   Features      : {len(feat_cols)}
-  Window        : {mcfg['window_size']} minuti
+  Window        : {mcfg['window_size']} barre ({mcfg['window_size'] * interval_minutes_from_cfg(cfg)} min)
   Train samples : {len(splits['X_train']):,}
   Val samples   : {len(splits['X_val']):,}
   Test samples  : {len(splits['X_test']):,}

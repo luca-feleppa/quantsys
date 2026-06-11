@@ -6,6 +6,100 @@
 
 ---
 
+## 🔵 2026-06-09 — Pivot timeframe 1m→1h (Strada 1 post-KILL cross-sectional) · 🔵 2026-06-09 — 1m→1h timeframe pivot (Path 1 after the cross-sectional KILL)
+
+### Razionale · Rationale
+
+🇮🇹 Il probe cross-sectional (2026-06-06) ha dato **KILL** con diagnosi "il muro è la **magnitudine**, non il segno" (~1.5 bps di effetto vs ~26 bps di costo roundtrip). Il costo è fisso, il movimento di barra cresce ∝ √Δt → il rapporto costo/σ scala come 1/√Δt: a 1m era ~1.9–3.3×, **a 1h scende a ~0.25–0.42×**. Pivot = **stesso motore, candele 1h**, storico multi-anno 2019→oggi (~65k barre).
+
+**EN** The cross-sectional probe (2026-06-06) returned **KILL** with diagnosis "the wall is **magnitude**, not sign" (~1.5 bps effect vs ~26 bps roundtrip cost). The cost is fixed, the bar move grows ∝ √Δt → the cost/σ ratio scales as 1/√Δt: at 1m it was ~1.9–3.3×, **at 1h it drops to ~0.25–0.42×**. Pivot = **same engine, 1h candles**, multi-year history 2019→today (~65k bars).
+
+### Design interval-agnostic (invariante: identità a 1m) · Interval-agnostic design (invariant: identity at 1m)
+
+🇮🇹
+- Nuovo helper `interval_minutes_from_cfg` in `quantsys/utils` (mappa `data.interval` → minuti, `ValueError` fail-fast su intervalli sconosciuti).
+- `FeatureBuilder(interval_minutes=...)` con `bars_per_day = 1440 // interval_minutes` e helper `_tbars(minutes)` (floor anti-degenerazione 2 barre).
+- **Finestre TIME-semantic convertite** (mantengono il significato in TEMPO): strutturali 30d/90d/365d (`days × bars_per_day`), momentum 7d/30d/90d, `funding_rate_1d` (`bars_per_day`), `session_position` (240 min), `price_vs_ma200m` (200 min).
+- **Finestre BAR-semantic deliberatamente invariate** (si traslano col timeframe): windows [5, 10, 20, 60], CVD, vwap, VP scales 60/240/1440 **BARRE** (a 1m = 1h/4h/1d; a 1h = 60h/10d/60d), lags.
+- A `interval_minutes=1` tutte le conversioni sono identità → comportamento legacy preservato.
+
+**EN**
+- New `interval_minutes_from_cfg` helper in `quantsys/utils` (maps `data.interval` → minutes, fail-fast `ValueError` on unknown intervals).
+- `FeatureBuilder(interval_minutes=...)` with `bars_per_day = 1440 // interval_minutes` and the `_tbars(minutes)` helper (anti-degeneration floor of 2 bars).
+- **TIME-semantic windows converted** (keep their meaning in TIME): structural 30d/90d/365d (`days × bars_per_day`), momentum 7d/30d/90d, `funding_rate_1d` (`bars_per_day`), `session_position` (240 min), `price_vs_ma200m` (200 min).
+- **BAR-semantic windows deliberately unchanged** (they shift with the timeframe): windows [5, 10, 20, 60], CVD, vwap, VP scales 60/240/1440 **BARS** (at 1m = 1h/4h/1d; at 1h = 60h/10d/60d), lags.
+- At `interval_minutes=1` every conversion is an identity → legacy behavior preserved.
+
+### Contratto train↔inference esteso · Extended train↔inference contract
+
+🇮🇹 `PipelineState.interval` (già persistito) ora esposto come property `interval_minutes` (fallback 1 per pkl legacy). I consumer (`FeatureAssembler` live, `99_replay`) derivano l'interval dal **PipelineState**, non dalla config. Nuovo guard `RuntimeError` "interval mismatch" in `03_backtest.py` e `04_live_signals.py` (stesso pattern del guard `forecast_horizon`): modello-1m + config-1h = combinazione invalida bloccata.
+
+**EN** `PipelineState.interval` (already persisted) is now exposed as the `interval_minutes` property (fallback 1 for legacy pkl). Consumers (live `FeatureAssembler`, `99_replay`) derive the interval from the **PipelineState**, not from the config. New `RuntimeError` "interval mismatch" guard in `03_backtest.py` and `04_live_signals.py` (same pattern as the `forecast_horizon` guard): 1m-model + 1h-config = invalid combination, blocked.
+
+### Annualizzazione interval-aware · Interval-aware annualization
+
+🇮🇹 `bars_per_year = 525600 // interval_minutes` (1m→525600, 1h→8760) in `03_backtest.py` (`bootstrap_sharpe_ci`) e `RiskManager(bars_per_year=...)`. σ safety-net scalata: `0.05·√interval_minutes` (1h→≈0.387) — preserva l'intento del guard (cattura il bug di denormalizzazione z→raw ~30–100×, non la crescita √60 legittima della σ a orizzonte 30 barre orarie).
+
+**EN** `bars_per_year = 525600 // interval_minutes` (1m→525600, 1h→8760) in `03_backtest.py` (`bootstrap_sharpe_ci`) and `RiskManager(bars_per_year=...)`. Scaled σ safety net: `0.05·√interval_minutes` (1h→≈0.387) — preserves the guard's intent (catches the ~30–100× z→raw denormalization bug, not the legitimate √60 growth of σ at a 30-hourly-bar horizon).
+
+### Config pivot (`config/default.yaml`) · Pivot config (`config/default.yaml`)
+
+🇮🇹
+| Parametro | Valore 1h | Era (1m) |
+|---|---|---|
+| `interval` | `1h` | `1m` |
+| `start_time` | `2019-01-01` | `2025-05-19` |
+| `window_stride` | 1 | 5 |
+| `embargo_steps` | 168 | 1500 |
+| `max_hold_candles` | 60 (vincolo ≥ h=30) | 240 |
+| `min_expected_ret` | 0.0013 (gate cost-aware 13 bps; 2° test pre-registrato a 23 bps) | 0.0005 |
+| `max_sigma` | 0.10 (≈0.015·√60, da ricalibrare) | 0.015 |
+| `forecast_horizon` | 30 INVARIATO — ora = **30 ORE** | 30 (= 30 min) |
+| `window_size` | 120 INVARIATO — ora = **5 giorni** di contesto | 120 (= 2h) |
+
+**EN**
+| Parameter | 1h value | Was (1m) |
+|---|---|---|
+| `interval` | `1h` | `1m` |
+| `start_time` | `2019-01-01` | `2025-05-19` |
+| `window_stride` | 1 | 5 |
+| `embargo_steps` | 168 | 1500 |
+| `max_hold_candles` | 60 (constraint ≥ h=30) | 240 |
+| `min_expected_ret` | 0.0013 (cost-aware 13 bps gate; 2nd pre-registered test at 23 bps) | 0.0005 |
+| `max_sigma` | 0.10 (≈0.015·√60, to recalibrate) | 0.015 |
+| `forecast_horizon` | 30 UNCHANGED — now = **30 HOURS** | 30 (= 30 min) |
+| `window_size` | 120 UNCHANGED — now = **5 days** of context | 120 (= 2h) |
+
+🇮🇹 TODO documentato: GJR-GARCH ω da ri-stimare su rendimenti 1h (il forecast MC non è sul critical path del backtest).
+
+**EN** Documented TODO: GJR-GARCH ω to re-estimate on 1h returns (the MC forecast is not on the backtest critical path).
+
+### Overlay `config/interval/` (2026-06-10) · `config/interval/` overlay (2026-06-10)
+
+🇮🇹 Le chiavi interval-dipendenti della tabella sopra sono ora fattorizzate in **`config/interval/{1m,1h}.yaml`**, mergiate da `load_config` per-sezione shallow **dopo secrets e prima dell'overlay arch** (l'arch resta l'override più specifico). Selezione via `QUANTSYS_INTERVAL` o `python run_all.py --interval 1m|1h` (propagata a tutti i subprocess, incluso il loop `--distill`). File mancante → warning e si prosegue col solo default.yaml (stesso comportamento dell'overlay arch).
+
+**EN** The interval-dependent keys from the table above are now factored into **`config/interval/{1m,1h}.yaml`**, merged by `load_config` per-section shallow **after secrets and before the arch overlay** (arch stays the most specific override). Selected via `QUANTSYS_INTERVAL` or `python run_all.py --interval 1m|1h` (propagated to all subprocesses, including the `--distill` loop). Missing file → warning, then default.yaml only (same behavior as the arch overlay).
+
+### Dati · Data
+
+🇮🇹 `raw_candles.parquet` ora 1h 2019→oggi (**65.145 barre**); funding completo dal lancio perp 2019-09-10 (**7.394 obs**, re-download completo — il vecchio file partiva dal 2021); backup 1m in `data/backup_1m/` e `models/backup_1m/`. Dataset: `X_train (51120, 120, 104)` — **STESSA composizione canonica 104 = 86 dinamiche + 18 strutturali**. Fix cp1252 (`reconfigure` UTF-8) aggiunto a `01_download_data.py` e `01b_download_macro.py`.
+
+**EN** `raw_candles.parquet` is now 1h 2019→today (**65,145 bars**); full funding since the perp launch 2019-09-10 (**7,394 obs**, full re-download — the old file started in 2021); 1m backups in `data/backup_1m/` and `models/backup_1m/`. Dataset: `X_train (51120, 120, 104)` — **SAME canonical 104 = 86 dynamic + 18 structural composition**. cp1252 fix (UTF-8 `reconfigure`) added to `01_download_data.py` and `01b_download_macro.py`.
+
+### Rollback 1m · 1m rollback
+
+🇮🇹 Config 1m: basta `--interval 1m` (= overlay `config/interval/1m.yaml`: `interval: 1m`, `start_time: 2025-05-19`, stride 5, embargo 1500, max_hold 240, min_ret 0.0005, max_sigma 0.015) + restore `data/backup_1m/*` — tutte le conversioni sono identità a 1m, **il codice non va toccato**.
+
+**EN** 1m config: just `--interval 1m` (= `config/interval/1m.yaml` overlay: `interval: 1m`, `start_time: 2025-05-19`, stride 5, embargo 1500, max_hold 240, min_ret 0.0005, max_sigma 0.015) + restore `data/backup_1m/*` — every conversion is an identity at 1m, **no code changes needed**.
+
+### Gate pre-registrato e stato · Pre-registered gate and status
+
+🇮🇹 **Gate del pivot:** Sharpe≥1.0, PF≥1.3, ≥80 trade, net>0 a **ENTRAMBI** i costi 13 e 23 bps sul test OOS. **Stato:** dati e config completati ✅; **training/backtest 1h NON ancora eseguiti** (in corso).
+
+**EN** **Pivot gate:** Sharpe≥1.0, PF≥1.3, ≥80 trades, net>0 at **BOTH** 13 and 23 bps costs on the OOS test set. **Status:** data and config done ✅; **1h training/backtest NOT yet executed** (in progress).
+
+---
+
 ## 🧭 PIVOT ROADMAP 2026-06-06 — esauriti i lever model-side, 4 assi studiati · 4 axes studied after model-side levers exhausted
 
 🇮🇹 Dopo che tutti i lever model/backtest-side su BTC-1m sono risultati negativi OOS (distill≡baseline, ensemble corr 0.995, rank-harvest fallito, mixture/σ-recal inutili), è stata avviata la **Strada A (paper-trading live)** e studiato il pivot via fan-out di 4 subagent. Dettaglio in memoria `pivot_fanout_2026_06_06`.
@@ -1151,6 +1245,18 @@ mtf/                    # NUOVO package, isolato
 🇮🇹 **Lezione 2026-05-24:** attivare fix "completi" senza validation pre-merge può accendere dead state non calibrati (caso #5). Bisect rapido (un fix alla volta) trova il colpevole in 2 iterazioni anche con codebase complesso.
 
 **EN** **2026-05-24 lesson:** enabling "complete" fixes without pre-merge validation can activate uncalibrated dead state (case #5). Fast bisect (one fix at a time) finds the culprit in 2 iterations even on a complex codebase.
+
+---
+
+## ⚫🟢 2026-06-10 — Pivot 1h KILLED · Vol-S PASS (B2 chiusa positiva) · ⚫🟢 2026-06-10 — 1h pivot KILLED · Vol-S PASS (B2 closed positive)
+
+🇮🇹 **Pivot 1h (direzionale): KILL definitivo** dopo probe + 1 iterazione tuning pre-registrata. Il 1h sfonda il muro dei costi (|μ| raw mediano ≈ 43 bps ≫ 26 bps roundtrip, gate fee non più vincolante) ma il gate trading fallisce 4/4 a entrambi i costi (13/23 bps): probe Sharpe −0.87/PF 0.78/74 trade/−5.23%; tuned 5-seed 2 trade/PF 0.12 (l'ensemble medio-azzera μ e gonfia σ via legge varianza totale). L'**anti-correlazione val→test si conferma anche a 1h** (val ρ +0.19 → test ρ −0.04): è del target direzionale, non del timeframe. Filone "stesso metodo, altro timeframe" chiuso.
+
+**EN** **1h pivot (directional): definitive KILL** after probe + 1 pre-registered tuning iteration. 1h does break the cost wall (median raw |μ| ≈ 43 bps ≫ 26 bps roundtrip, fee gate no longer binding) but the trading gate fails 4/4 at both costs (13/23 bps): probe Sharpe −0.87/PF 0.78/74 trades/−5.23%; tuned 5-seed 2 trades/PF 0.12 (the ensemble averages μ toward zero and inflates σ via the total-variance law). The **val→test anti-correlation holds at 1h too** (val ρ +0.19 → test ρ −0.04): it belongs to the directional target, not the timeframe. The "same method, different timeframe" axis is closed.
+
+🇮🇹 **Vol-S (B2): PASS — primo gate pre-registrato superato nel progetto.** Target `features.target_type: log_rv` (log-RV a h=30 barre 1h), stessa pipeline/hyperparam: QLIKE test **NN 0.2572 vs HAR-RV 0.3681 vs naive 0.8067** → NN/HAR = 0.699 (gate ≤ 0.95, margine 6×); val 0.744 → test 0.699 **coerenti**. Modello: Spearman test +0.45, DA 71%, ICIR +3.56. La vol è prevedibile sopra la baseline econometrica seria ma NON tradabile sul perimetro spot/perp: valore = jump/no-trade gate difensivo (follow-up) + opzione Deribit/varianza. Dettagli e trappola denorm (centro+scala) in `TEORIA.md` §2 e `STATUS.md`.
+
+**EN** **Vol-S (B2): PASS — first pre-registered gate ever passed in this project.** Target `features.target_type: log_rv` (log-RV at h=30 1h-bars), same pipeline/hyperparams: test QLIKE **NN 0.2572 vs HAR-RV 0.3681 vs naive 0.8067** → NN/HAR = 0.699 (gate ≤ 0.95, 6× margin); val 0.744 → test 0.699 **consistent**. Model: test Spearman +0.45, DA 71%, ICIR +3.56. Vol is predictable above the serious econometric baseline but NOT tradable on the spot/perp perimeter: value = defensive jump/no-trade gate (follow-up) + Deribit/variance option. Details and the denorm trap (center+scale) in `TEORIA.md` §2 and `STATUS.md`.
 
 ---
 

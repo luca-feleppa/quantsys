@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from quantsys.utils import load_config, setup_logging, ensure_dirs, PipelineState
+from quantsys.utils import load_config, setup_logging, ensure_dirs, PipelineState, interval_minutes_from_cfg
 from quantsys.utils.atomic_save import atomic_save_npz, atomic_save_parquet
 from quantsys.data import fetch_klines_incremental, fetch_funding_rate
 from quantsys.features import FeatureBuilder, create_windows, temporal_split, LIVE_DROP_FEATURES
@@ -126,6 +126,10 @@ def main():
     # EN: 3. raw feature engineering (normalization happens after the split)
     t0 = time.time()
     log.info(f"Fase 2: feature engineering su {len(df_raw):,} candele ...")
+    # IT: interval_minutes da data.interval — finestre TIME-semantic convertite
+    #     in barre dal FeatureBuilder (identità a 1m).
+    # EN: interval_minutes from data.interval — TIME-semantic windows converted
+    #     to bars by the FeatureBuilder (identity at 1m).
     builder = FeatureBuilder(
         vp_bins          = fcfg["vp_bins"],
         vp_lookback      = fcfg["vp_lookback"],
@@ -134,6 +138,7 @@ def main():
         forecast_horizon = fcfg.get("forecast_horizon", 1),
         vp_stride        = fcfg.get("vp_stride", 1),
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
+        interval_minutes = interval_minutes_from_cfg(cfg),
     )
     df_feat = builder.build(df_raw, normalize=False, fit=False, funding_df=funding_df)
     log.info(f"Fase 2 completata in {time.time()-t0:.1f}s — {len(df_feat):,} righe valide")
@@ -270,7 +275,7 @@ def main():
   Arco temporale: {df_raw['open_time'].iloc[0].date()} → {df_raw['open_time'].iloc[-1].date()}
   Candele valide: {len(df_feat):,}
   Features      : {len(feat_cols)}
-  Window        : {mcfg['window_size']} minuti
+  Window        : {mcfg['window_size']} barre ({mcfg['window_size'] * interval_minutes_from_cfg(cfg)} min)
   Train samples : {len(splits['X_train']):,}
   Val samples   : {len(splits['X_val']):,}
   Test samples  : {len(splits['X_test']):,}

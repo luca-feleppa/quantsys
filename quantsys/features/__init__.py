@@ -74,18 +74,44 @@ class FeatureBuilder:
     """Pipeline completa: OHLCV grezzo → array numpy pronti per la LSTM."""
 
     # IT: Memorizza iperparametri feature (VP, lag, horizon, FFD, RevIN, scaler).
+    #     Contratto timeframe: le finestre TIME-semantic (giorni/ore/minuti di
+    #     calendario: structural, MA200m, session_position 4h, funding 24h) sono
+    #     convertite in barre via _tbars/bars_per_day; le finestre BAR-semantic
+    #     (windows, CVD, vwap rolling, lag, VP scales) restano in BARRE e si
+    #     traslano col timeframe. A interval_minutes=1 tutto è identico al legacy.
     # EN: Stores feature hyperparameters (VP, lag, horizon, FFD, RevIN, scaler).
+    #     Timeframe contract: TIME-semantic windows (calendar days/hours/minutes:
+    #     structural, MA200m, 4h session_position, 24h funding) are converted to
+    #     bars via _tbars/bars_per_day; BAR-semantic windows (windows, CVD, vwap
+    #     rolling, lags, VP scales) stay in BARS and translate with the timeframe.
+    #     At interval_minutes=1 everything is identical to legacy behavior.
     def __init__(self, vp_bins: int = 30, vp_lookback: int = 240,
                  windows: list[int] = None, lag_periods: int = 5,
                  forecast_horizon: int = 1, vp_stride: int = 1,
-                 frac_diff_d: float = 0.0, use_revin: bool = False):
+                 frac_diff_d: float = 0.0, use_revin: bool = False,
+                 interval_minutes: int = 1, target_type: str = "ret"):
         self.vp_bins             = vp_bins
         self.vp_lookback         = vp_lookback
         self.windows             = windows or [5, 10, 20, 60]
         self.lag_periods         = lag_periods
-        self.forecast_horizon    = forecast_horizon   # IT: minuti nel futuro | EN: minutes ahead to predict
+        self.forecast_horizon    = forecast_horizon   # IT: barre nel futuro (=minuti a 1m, ore a 1h) | EN: bars ahead (=minutes at 1m, hours at 1h)
+        # IT: Tipo di target — "ret" (somma log-return, direzionale, legacy) oppure
+        #     "log_rv" (log realized variance Σr² su h barre — esperimento vol-S 2026-06-10).
+        #     Default "ret": il path direzionale resta bit-invariato.
+        # EN: Target type — "ret" (sum of log-returns, directional, legacy) or
+        #     "log_rv" (log realized variance Σr² over h bars — vol-S experiment 2026-06-10).
+        #     Default "ret": the directional path stays bit-invariant.
+        if target_type not in ("ret", "log_rv"):
+            raise ValueError(f"target_type '{target_type}' non riconosciuto / unknown (ret|log_rv)")
+        self.target_type         = target_type
         self.vp_stride           = vp_stride          # IT: VP subsample stride | EN: VP subsample stride (O(n)→O(n/stride))
         self.frac_diff_d         = frac_diff_d         # IT: ordine FFD (0=skip) | EN: FFD order (0=skip)
+        # IT: Durata di una barra in minuti (1=legacy 1m, 60=1h) + barre per giorno
+        #     di calendario. Base delle conversioni TIME-semantic → barre.
+        # EN: Bar duration in minutes (1=legacy 1m, 60=1h) + bars per calendar day.
+        #     Basis for TIME-semantic → bars conversions.
+        self.interval_minutes    = max(1, int(interval_minutes))
+        self.bars_per_day        = max(1, 1440 // self.interval_minutes)
         # IT: RevIN fix — escludi return raw dal RobustScaler globale: RevIN opera in
         #     scala raw e denormalize_mu allinea le predizioni col target (somma di log_ret).
         # EN: RevIN fix — exclude raw returns from the global RobustScaler so RevIN runs in
@@ -100,6 +126,13 @@ class FeatureBuilder:
         # EN: Clip bounds fitted on training (P0.1/P99.9 per feature) — adaptive vs fixed ±20.
         self.clip_lo_: Optional[np.ndarray] = None
         self.clip_hi_: Optional[np.ndarray] = None
+
+    def _tbars(self, minutes: int, min_bars: int = 2) -> int:
+        # IT: Converte una finestra espressa in MINUTI in numero di barre, con floor
+        #     anti-degenerazione. Identità a 1m (minutes//1 = minutes).
+        # EN: Converts a window expressed in MINUTES to a bar count, with an
+        #     anti-degeneracy floor. Identity at 1m (minutes//1 = minutes).
+        return max(min_bars, minutes // self.interval_minutes)
 
     # ── Log-returns ──────────────────────────────────────────────────────────
     # IT: Calcola log-return OHLCV e target multi-step (somma h candele future).
@@ -122,6 +155,11 @@ class FeatureBuilder:
 
           Il modello vede comunque la finestra a 1 minuto — l'orizzonte
           cambia solo il target, non le feature.
+
+        IT: NB — l'orizzonte è espresso in BARRE del timeframe corrente
+            (h=30 → 30 minuti a 1m, 30 ore a 1h), non in minuti assoluti.
+        EN: NB — the horizon is expressed in BARS of the current timeframe
+            (h=30 → 30 minutes at 1m, 30 hours at 1h), not absolute minutes.
         """
         df["log_ret"]      = np.log(df["close"] / df["close"].shift(1))
         df["log_ret_high"] = np.log(df["high"]  / df["high"].shift(1))
@@ -131,12 +169,27 @@ class FeatureBuilder:
             df["volume"].shift(1).replace(0, np.nan)
         )
 
-        # IT: Target = somma dei log-return delle prossime h candele (rolling+shift).
-        # EN: Target = sum of next h log-returns (rolling+shift, no temp Series loop).
         h = max(1, forecast_horizon)
-        df["target_ret"] = df["log_ret"].rolling(h).sum().shift(-h)
-
-        df["target_dir"] = (df["target_ret"] > 0).astype(int)
+        if getattr(self, "target_type", "ret") == "log_rv":
+            # IT: Esperimento vol-S — target = log realized variance delle prossime h barre:
+            #     log(Σᵢ₌₁..ₕ r²ₜ₊ᵢ + ε). Il log rende la distribuzione ~gaussiana (code di RV
+            #     pesantissime) → RobustScaler/NLL/denorm funzionano invariati a valle.
+            #     target_dir = vol-up/down: RV futura > RV trailing h barre (causale a t).
+            # EN: Vol-S experiment — target = log realized variance of the next h bars:
+            #     log(Σᵢ₌₁..ₕ r²ₜ₊ᵢ + ε). The log makes the distribution ~Gaussian (RV tails
+            #     are extreme) → RobustScaler/NLL/denorm work unchanged downstream.
+            #     target_dir = vol-up/down: future RV > trailing h-bar RV (causal at t).
+            _eps = 1e-12
+            sq = df["log_ret"] ** 2
+            rv_fwd  = sq.rolling(h).sum().shift(-h)
+            rv_trail = sq.rolling(h).sum()
+            df["target_ret"] = np.log(rv_fwd + _eps)
+            df["target_dir"] = (rv_fwd > rv_trail).astype(int)
+        else:
+            # IT: Target legacy = somma dei log-return delle prossime h candele (rolling+shift).
+            # EN: Legacy target = sum of next h log-returns (rolling+shift, no temp Series loop).
+            df["target_ret"] = df["log_ret"].rolling(h).sum().shift(-h)
+            df["target_dir"] = (df["target_ret"] > 0).astype(int)
         return df
 
     # ── VWAP ─────────────────────────────────────────────────────────────────
@@ -172,8 +225,10 @@ class FeatureBuilder:
           intermedi. Con vp_stride=5 il costo scende da O(n) a O(n/5):
             · Scale 60:   2.1M × 60 / 5   = 25M  operazioni  (da 126M)
             · Scale 1440: 2.1M × 1440 / 5 = 605M operazioni  (da 3B)
-          Il VP a scala 1440 cambia pochissimo in 5 minuti → l'approssimazione
-          è trascurabile rispetto al rumore di mercato.
+          Il VP alla scala lunga (1440 BARRE) cambia pochissimo tra una barra
+          e la successiva → l'approssimazione è trascurabile rispetto al
+          rumore di mercato. NB: i lookback sono in BARRE (bar-semantic),
+          si traslano col timeframe — vedi _volume_profile.
 
         Struttura:
           1. Calcola il VP solo sugli indici campionati (i = lookback, lookback+stride, ...)
@@ -259,10 +314,13 @@ class FeatureBuilder:
           · In bassa volatilità: 4 ore coprono già mercato "maturo"
           · Il POC varia radicalmente in base al periodo scelto
 
-        Soluzione — tre scale temporali:
-          · Breve  (60 min  = 1 ora):   liquidità intraday recente
-          · Medio  (240 min = 4 ore):   struttura di sessione (default precedente)
-          · Lungo  (1440 min = 1 giorno): livelli tecnici giornalieri
+        Soluzione — tre scale in BARRE (bar-semantic, scelta deliberata):
+          · Breve  (60 barre):   a 1m = 1h,  a 1h = 60h  — liquidità recente
+          · Medio  (240 barre):  a 1m = 4h,  a 1h = 10d  — struttura di sessione
+          · Lungo  (1440 barre): a 1m = 1d,  a 1h = 60d  — livelli tecnici lunghi
+        Le scale si traslano col timeframe: i profili restano relativi
+        all'orizzonte di trading (h barre), non a durate di calendario fisse.
+        NB: vp_*_long è comunque in LIVE_DROP_FEATURES (escluso dal modello).
 
         La LSTM vede tutte e tre le scale → impara quale è più rilevante
         in ogni regime. In alta vol domina il breve termine; in bassa vol
@@ -286,12 +344,16 @@ class FeatureBuilder:
                 f"(se il calcolo è lento, aumenta vp_stride in config/default.yaml)"
             )
 
-        # IT: Tre scale VP: breve (1h), medio (4h default), lungo (1d).
-        # EN: Three VP scales: short (1h), medium (4h default), long (1d).
+        # IT: Tre scale VP in BARRE (bar-semantic, deliberato): a 1m = 1h/4h/1d,
+        #     a 1h = 60h/10d/60d — profili relativi all'orizzonte di trading;
+        #     vp_*_long è comunque LIVE_DROP. NON convertire via _tbars.
+        # EN: Three VP scales in BARS (bar-semantic, deliberate): at 1m = 1h/4h/1d,
+        #     at 1h = 60h/10d/60d — profiles relative to the trading horizon;
+        #     vp_*_long is LIVE_DROP anyway. Do NOT convert via _tbars.
         scales = [
-            (60,   "_short"),        # IT/EN: 1h — intraday liquidity
-            (self.vp_lookback, ""),  # IT/EN: 4h — default (legacy name)
-            (1440, "_long"),         # IT/EN: 1d — daily technical levels
+            (60,   "_short"),        # IT/EN: 60 barre | 60 bars (1h @1m, 60h @1h)
+            (self.vp_lookback, ""),  # IT/EN: default 240 barre (legacy name) | default 240 bars
+            (1440, "_long"),         # IT/EN: 1440 barre | 1440 bars (1d @1m, 60d @1h)
         ]
 
         all_vp = {}
@@ -373,9 +435,13 @@ class FeatureBuilder:
         df["spread_proxy"] = (hl / df["volume"].replace(0, np.nan)).fillna(0)
 
         # IT: Session position in [-0.5,+0.5] dentro il range 4h (mid_4h centrato).
+        #     Finestra TIME-semantic: 240 minuti → barre via _tbars (240 a 1m, 4 a 1h).
         # EN: Session position in [-0.5,+0.5] within the 4h range (mid_4h centered).
-        high_4h            = df["high"].rolling(240, min_periods=10).max()
-        low_4h             = df["low"].rolling(240,  min_periods=10).min()
+        #     TIME-semantic window: 240 minutes → bars via _tbars (240 at 1m, 4 at 1h).
+        _w_4h              = self._tbars(240)
+        _mp_4h             = self._tbars(10)
+        high_4h            = df["high"].rolling(_w_4h, min_periods=_mp_4h).max()
+        low_4h             = df["low"].rolling(_w_4h,  min_periods=_mp_4h).min()
         range_4h           = (high_4h - low_4h).replace(0, np.nan)
         mid_4h             = (high_4h + low_4h) / 2
         df["session_position"] = (df["close"] - mid_4h) / range_4h
@@ -475,19 +541,19 @@ class FeatureBuilder:
 
         return df
 
-    # IT: Allinea il funding rate (8h) all'indice 1m e deriva media/deviazione.
-    # EN: Aligns funding rate (8h) to the 1m index and derives mean/deviation.
+    # IT: Allinea il funding rate (8h) all'indice candele e deriva media/deviazione.
+    # EN: Aligns funding rate (8h) to the candle index and derives mean/deviation.
     def _funding_features(self, df: pd.DataFrame, funding_df: pd.DataFrame) -> pd.DataFrame:
         """
         Aggiunge funding rate features al DataFrame principale.
 
-        Il funding rate è a frequenza 8h; viene allineato all'indice 1m
-        del df principale con forward-fill. I NaN iniziali (dati pre-2020
-        o gap iniziali) vengono riempiti con 0.
+        Il funding rate è a frequenza 8h; viene allineato all'indice candele
+        del df principale (qualunque timeframe) con forward-fill. I NaN
+        iniziali (dati pre-2020 o gap iniziali) vengono riempiti con 0.
 
         Feature aggiunte:
           · funding_rate:     valore istantaneo (ffill da 8h)
-          · funding_rate_1d:  media mobile 24h (1440 min) — livello di base
+          · funding_rate_1d:  media mobile 24h (bars_per_day barre) — livello di base
           · funding_rate_dev: deviazione dalla media — segnale contrarian
         """
         funding_df = funding_df.copy()
@@ -503,7 +569,9 @@ class FeatureBuilder:
         df["funding_rate"]     = aligned
         df["funding_rate"]     = df["funding_rate"].fillna(0)
 
-        df["funding_rate_1d"]  = df["funding_rate"].rolling(1440, min_periods=1).mean()
+        # IT: Finestra TIME-semantic: 24h = bars_per_day barre (1440 a 1m, 24 a 1h).
+        # EN: TIME-semantic window: 24h = bars_per_day bars (1440 at 1m, 24 at 1h).
+        df["funding_rate_1d"]  = df["funding_rate"].rolling(self.bars_per_day, min_periods=1).mean()
         df["funding_rate_dev"] = df["funding_rate"] - df["funding_rate_1d"]
 
         return df
@@ -533,9 +601,13 @@ class FeatureBuilder:
         close = df["close"]
 
         for days in [30, 90, 365]:
-            w = days * 24 * 60   # IT/EN: candele 1m | 1m candles
-            ath = close.rolling(w, min_periods=60).max()
-            atl = close.rolling(w, min_periods=60).min()
+            # IT: Finestra TIME-semantic: giorni di calendario → barre via bars_per_day
+            #     (days*1440 a 1m, days*24 a 1h). Identità a 1m.
+            # EN: TIME-semantic window: calendar days → bars via bars_per_day
+            #     (days*1440 at 1m, days*24 at 1h). Identity at 1m.
+            w = days * self.bars_per_day
+            ath = close.rolling(w, min_periods=self._tbars(60)).max()
+            atl = close.rolling(w, min_periods=self._tbars(60)).min()
 
             df[f"dist_ath_{days}d"]   = (close - ath) / ath.replace(0, np.nan)   # IT/EN: ≤0
             df[f"dist_atl_{days}d"]   = (close - atl) / atl.replace(0, np.nan)   # IT/EN: ≥0
@@ -543,8 +615,10 @@ class FeatureBuilder:
             df[f"price_pos_{days}d"]  = (close - atl) / price_range              # IT/EN: [0,1]
 
         # IT/EN: momentum = log-return vs N giorni fa | log-return vs N days ago
+        # IT: TIME-semantic: giorni → barre via bars_per_day (identità a 1m).
+        # EN: TIME-semantic: days → bars via bars_per_day (identity at 1m).
         for days in [7, 30, 90]:
-            w = days * 24 * 60
+            w = days * self.bars_per_day
             df[f"momentum_{days}d"] = np.log(
                 close / close.shift(w).replace(0, np.nan)
             )
@@ -555,8 +629,12 @@ class FeatureBuilder:
         df["round_level_dist"] = (close - round_level) / close.replace(0, np.nan)
 
         # IT: price vs MA 200 MINUTI (~3.3h, intraday) — NON 200 giorni.
+        #     TIME-semantic: 200 min → barre via _tbars (200 a 1m, 3 a 1h ≈ 3h:
+        #     il nome resta accurato in tempo).
         # EN: price vs 200-MINUTE MA (~3.3h, intraday) — NOT 200 days.
-        df["price_vs_ma200m"] = close / close.rolling(200, min_periods=50).mean() - 1
+        #     TIME-semantic: 200 min → bars via _tbars (200 at 1m, 3 at 1h ≈ 3h:
+        #     the name stays time-accurate).
+        df["price_vs_ma200m"] = close / close.rolling(self._tbars(200), min_periods=self._tbars(50)).mean() - 1
 
         return df
 

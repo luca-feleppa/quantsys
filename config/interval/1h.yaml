@@ -1,0 +1,39 @@
+# IT: Override risoluzione candela 1h — mergiato sopra default.yaml (shallow,
+#     sezione per sezione) via QUANTSYS_INTERVAL=1h o run_all.py --interval 1h.
+#     Applicato DOPO secrets e PRIMA dell'overlay arch (l'arch resta il più
+#     specifico). Include SOLO le chiavi interval-dipendenti: tutto il resto
+#     della sezione viene preservato dal merge shallow. Questi valori sono
+#     identici al default.yaml corrente (esplicitati per simmetria col 1m).
+# EN: 1h candle-resolution override — merged on top of default.yaml (shallow,
+#     per-section) via QUANTSYS_INTERVAL=1h or run_all.py --interval 1h.
+#     Applied AFTER secrets and BEFORE the arch overlay (arch stays the most
+#     specific). Contains ONLY interval-dependent keys: everything else in the
+#     section is preserved by the shallow merge. These values mirror the
+#     current default.yaml (made explicit for symmetry with 1m).
+
+# IT: Dati — candele orarie multi-anno (2019→oggi ≈ 65k barre).
+# EN: Data — multi-year hourly candles (2019→today ≈ 65k bars).
+data:
+  interval: 1h
+  start_time: '2019-01-01'   # IT: storico lungo: a 1h servono anni per ~65k barre | EN: long history: at 1h you need years for ~65k bars
+
+# IT: Modello — stride finestre: 1 a 1h (~65k barre → massimizza i campioni).
+# EN: Model — window stride: 1 at 1h (~65k bars → maximizes samples).
+model:
+  window_stride: 1
+
+# IT: Walk-forward — embargo anti-leakage in barre.
+# EN: Walk-forward — anti-leakage embargo in bars.
+validation:
+  embargo_steps: 168         # IT: 168 barre = 1 settimana a 1h (≥ window_size+horizon = 150) | EN: 168 bars = 1 week at 1h (≥ window_size+horizon = 150)
+
+# IT: Risk — durata massima posizione in barre.
+# EN: Risk — max position holding time in bars.
+risk:
+  max_hold_candles: 60       # IT: 60 barre = 2.5 giorni a 1h (= 2×forecast_horizon) | EN: 60 bars = 2.5 days at 1h (= 2×forecast_horizon)
+
+# IT: Backtest — soglie SignalGenerator in SPAZIO RAW, scalano con l'orizzonte temporale.
+# EN: Backtest — SignalGenerator thresholds in RAW SPACE, scale with the time horizon.
+backtest:
+  min_expected_ret: 0.0013   # IT: |μ| min = 13 bps a h=30 barre 1h (gate cost-aware round-trip) | EN: min |μ| = 13 bps at h=30 1h-bars (cost-aware round-trip gate)
+  max_sigma: 0.10            # IT: σ max raw: a 30×1h ≈ √60× quella a 30 min → 0.015×√60 ≈ 0.10 | EN: max raw σ: at 30×1h ≈ √60× the 30-min one → 0.015×√60 ≈ 0.10

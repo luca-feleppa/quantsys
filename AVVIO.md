@@ -1,10 +1,60 @@
 # QUANTSYS — Guida all'avvio · QUANTSYS — Quick start guide
 
-🇮🇹 Sistema di trading algoritmico BTC/USDT 1m con ensemble eterogeneo (iTransformer + N-HiTS + TCN+Mamba) e Knowledge Distillation multi-teacher.
+🇮🇹 Sistema di trading algoritmico BTC/USDT con ensemble eterogeneo (iTransformer + N-HiTS + TCN+Mamba) e Knowledge Distillation multi-teacher. **Timeframe corrente: candele 1h** (pivot 2026-06-09; il precedente perimetro 1m è in backup, vedi sezione pivot).
 
-**EN** Algorithmic trading system for BTC/USDT 1m with a heterogeneous ensemble (iTransformer + N-HiTS + TCN+Mamba) and multi-teacher Knowledge Distillation.
+**EN** Algorithmic trading system for BTC/USDT with a heterogeneous ensemble (iTransformer + N-HiTS + TCN+Mamba) and multi-teacher Knowledge Distillation. **Current timeframe: 1h candles** (2026-06-09 pivot; the previous 1m perimeter is backed up, see the pivot section).
 
-## Stato del sistema (aggiornato 2026-06-04 — rollback T=120) · System status (updated 2026-06-04 — T=120 rollback)
+## Stato del sistema (aggiornato 2026-06-09 — pivot timeframe 1m→1h) · System status (updated 2026-06-09 — 1m→1h timeframe pivot)
+
+🇮🇹 Pivot al timeframe **1h** (Strada 1 dopo il KILL del probe cross-sectional 2026-06-06, diagnosi "muro = magnitudine non segno"): a 1h il rapporto costo/σ per barra scende da ~1.9–3.3× a ~0.25–0.42× (il movimento di barra cresce ∝ √Δt, il costo roundtrip è fisso). **Stesso motore, design interval-agnostic**: tutte le conversioni di finestra sono identità a 1m. Razionale econometrico in `TEORIA.md` §1, dettaglio implementativo in `docs/MODEL_IMPROVEMENTS.md` (sezione 2026-06-09).
+
+**EN** Pivot to the **1h** timeframe (Path 1 after the 2026-06-06 cross-sectional probe KILL, diagnosis "the wall is magnitude, not sign"): at 1h the per-bar cost/σ ratio drops from ~1.9–3.3× to ~0.25–0.42× (bar move grows ∝ √Δt, roundtrip cost is fixed). **Same engine, interval-agnostic design**: every window conversion is an identity at 1m. Econometric rationale in `TEORIA.md` §1, implementation detail in `docs/MODEL_IMPROVEMENTS.md` (2026-06-09 section).
+
+🇮🇹 **Config pivot (`config/default.yaml`):**
+
+🇮🇹
+| Parametro | Valore 1h | Era (1m) | Nota |
+|---|---|---|---|
+| `data.interval` | `1h` | `1m` | tutte le finestre derivano da qui via `interval_minutes` |
+| `data.start_time` | `2019-01-01` | `2025-05-19` | storico multi-anno, ~65k barre |
+| `window_stride` | 1 | 5 | massimizza i sample su ~65k barre |
+| `embargo_steps` | 168 (1 settimana) | 1500 (~25h) | ≥ window_size+horizon = 150 |
+| `max_hold_candles` | 60 (2.5 giorni) | 240 (4h) | vincolo ≥ h=30 |
+| `min_expected_ret` | 0.0013 (13 bps cost-aware) | 0.0005 | 2° test pre-registrato a 23 bps |
+| `max_sigma` | 0.10 (≈0.015·√60) | 0.015 | da ricalibrare sui percentili post-denorm |
+| `forecast_horizon` | 30 (INVARIATO) | 30 | ma ora = **30 ORE** (era 30 min) |
+| `window_size` | 120 (INVARIATO) | 120 | ma ora = **5 giorni** di contesto (era 2h) |
+
+**EN**
+| Parameter | 1h value | Was (1m) | Note |
+|---|---|---|---|
+| `data.interval` | `1h` | `1m` | every window derives from it via `interval_minutes` |
+| `data.start_time` | `2019-01-01` | `2025-05-19` | multi-year history, ~65k bars |
+| `window_stride` | 1 | 5 | maximizes samples on ~65k bars |
+| `embargo_steps` | 168 (1 week) | 1500 (~25h) | ≥ window_size+horizon = 150 |
+| `max_hold_candles` | 60 (2.5 days) | 240 (4h) | constraint ≥ h=30 |
+| `min_expected_ret` | 0.0013 (13 bps cost-aware) | 0.0005 | 2nd pre-registered test at 23 bps |
+| `max_sigma` | 0.10 (≈0.015·√60) | 0.015 | to recalibrate on post-denorm percentiles |
+| `forecast_horizon` | 30 (UNCHANGED) | 30 | but now = **30 HOURS** (was 30 min) |
+| `window_size` | 120 (UNCHANGED) | 120 | but now = **5 days** of context (was 2h) |
+
+🇮🇹 **Dati:** `data/raw_candles.parquet` = candele 1h 2019→oggi (**65.145 barre**); funding completo dal lancio dei perp 2019-09-10 (**7.394 osservazioni**, re-download completo — il vecchio file partiva dal 2021). Dataset npz: `X_train (51120, 120, 104)` — **stessa composizione canonica 104 = 86 dinamiche + 18 strutturali**.
+
+**EN** **Data:** `data/raw_candles.parquet` = 1h candles 2019→today (**65,145 bars**); full funding since the perp launch 2019-09-10 (**7,394 observations**, full re-download — the old file started in 2021). Npz dataset: `X_train (51120, 120, 104)` — **same canonical 104 = 86 dynamic + 18 structural composition**.
+
+🇮🇹 **Nuovi guard:** `RuntimeError` "interval mismatch" in `03_backtest.py` e `04_live_signals.py` (stesso pattern del guard `forecast_horizon`): modello addestrato a 1m + config 1h = combinazione invalida bloccata. I consumer live/replay derivano l'interval da `PipelineState.interval_minutes` (fallback 1 per i pkl legacy), non dalla config. σ safety-net scalata a `0.05·√interval_minutes` (≈0.387 a 1h). Annualizzazione interval-aware: `bars_per_year = 525600 // interval_minutes` (1m→525600, 1h→8760).
+
+**EN** **New guards:** `RuntimeError` "interval mismatch" in `03_backtest.py` and `04_live_signals.py` (same pattern as the `forecast_horizon` guard): a 1m-trained model + 1h config = invalid combination, blocked. Live/replay consumers derive the interval from `PipelineState.interval_minutes` (fallback 1 for legacy pkl), not from the config. σ safety net scaled to `0.05·√interval_minutes` (≈0.387 at 1h). Interval-aware annualization: `bars_per_year = 525600 // interval_minutes` (1m→525600, 1h→8760).
+
+🇮🇹 **Rollback 1m:** ripristina la config 1m (`interval: 1m`, `start_time: 2025-05-19`, stride 5, embargo 1500, max_hold 240, min_ret 0.0005, max_sigma 0.015) + restore `data/backup_1m/*` e `models/backup_1m/*`. **Il codice non va toccato**: tutte le conversioni sono identità a 1m.
+
+**EN** **1m rollback:** restore the 1m config (`interval: 1m`, `start_time: 2025-05-19`, stride 5, embargo 1500, max_hold 240, min_ret 0.0005, max_sigma 0.015) + restore `data/backup_1m/*` and `models/backup_1m/*`. **No code changes needed**: every conversion is an identity at 1m.
+
+🇮🇹 **Stato:** dati e config completati; **training e backtest 1h NON ancora eseguiti** (in corso). **Gate pre-registrato del pivot:** Sharpe≥1.0, PF≥1.3, ≥80 trade, net>0 a ENTRAMBI i costi 13 e 23 bps sul test OOS.
+
+**EN** **Status:** data and config done; **1h training and backtest NOT yet executed** (in progress). **Pre-registered pivot gate:** Sharpe≥1.0, PF≥1.3, ≥80 trades, net>0 at BOTH 13 and 23 bps costs on the OOS test set.
+
+## Stato precedente — perimetro 1m (2026-06-04 — rollback T=120) · Previous state — 1m perimeter (2026-06-04 — T=120 rollback)
 
 🇮🇹 Dopo gli esperimenti su window-size (T=180 e T=240 **regressivi**) il sistema è stato riportato a **T=120** (sweet spot empirico su ~525k candele 1m; finestre più lunghe over-fittano il noise temporale). Dataset corrente 549k candele → test set **10.104** finestre. Retrain 5-seed dei 3 archi su questa configurazione.
 
@@ -90,6 +140,10 @@ Senza flag mostra menu con checkbox (↑↓ naviga, SPAZIO seleziona, A toggle a
 🇮🇹 Modalità diretta: `python run_all.py --arch nhits --force-download`.
 
 **EN** Direct mode: `python run_all.py --arch nhits --force-download`.
+
+🇮🇹 **Risoluzione candela:** `python run_all.py --interval 1h` (o `1m`) applica l'overlay `config/interval/{interval}.yaml` sopra `default.yaml` (merge shallow per-sezione, dopo secrets e prima dell'overlay arch) e propaga `QUANTSYS_INTERVAL` a tutti i subprocess. Senza flag: config as-is. Le choices sono derivate dai file presenti in `config/interval/`.
+
+**EN** **Candle resolution:** `python run_all.py --interval 1h` (or `1m`) applies the `config/interval/{interval}.yaml` overlay on top of `default.yaml` (per-section shallow merge, after secrets and before the arch overlay) and propagates `QUANTSYS_INTERVAL` to every subprocess. Without the flag: config as-is. Choices are derived from the files present in `config/interval/`.
 
 ---
 
@@ -272,6 +326,14 @@ python run_all.py --distill                # full + distillation
 
 ---
 
+## Esperimento vol-S (forecasting di volatilità) · Vol-S experiment (volatility forecasting)
+
+🇮🇹 Con `features.target_type: log_rv` in `config/default.yaml` il target diventa la log-realized-variance delle prossime h barre (default `ret` = direzionale, bit-invariato). Pipeline: `01_download_data.py` (rebuild dataset) → `python scripts/dev_vols_macro_append.py` (ri-appende X_macro senza rifare il walk-forward regime, ~5s) → `02_train.py --n-ensemble 5` → giudice `QUANTSYS_VOLS_SPLIT=val python scripts/dev_vols_qlike.py` (val-first; poi `=test` UNA volta). Confronta NN vs HAR-RV vs naive in QLIKE; report in `results/vols/`. ⚠ NO backtest trading sui modelli vol (`03_backtest.py` non ha senso su questo target). Esito 2026-06-10: PASS (NN −30% QLIKE vs HAR-RV su test).
+
+**EN** With `features.target_type: log_rv` in `config/default.yaml` the target becomes the log realized variance of the next h bars (default `ret` = directional, bit-invariant). Pipeline: `01_download_data.py` (dataset rebuild) → `python scripts/dev_vols_macro_append.py` (re-appends X_macro without re-running the regime walk-forward, ~5s) → `02_train.py --n-ensemble 5` → judge `QUANTSYS_VOLS_SPLIT=val python scripts/dev_vols_qlike.py` (val-first; then `=test` ONCE). Compares NN vs HAR-RV vs naive in QLIKE; report in `results/vols/`. ⚠ NO trading backtest on vol models (`03_backtest.py` is meaningless on this target). Outcome 2026-06-10: PASS (NN −30% QLIKE vs HAR-RV on test).
+
+---
+
 ## Hardware
 
 ### CPU
@@ -440,13 +502,15 @@ quantsys_project/
 │   └── arch/
 │       ├── itransformer.yaml, nhits.yaml, tcnmamba.yaml, lstm.yaml
 ├── data/
-│   ├── raw_candles.parquet      # OHLCV storico
+│   ├── raw_candles.parquet      # OHLCV storico (1h 2019→oggi dal pivot 2026-06-09)
 │   ├── features.parquet         # feature normalizzate
 │   ├── lstm_dataset.npz         # windows X/y per training
-│   ├── funding_rate.parquet     # funding futures (8h)
-│   └── macro_*.parquet          # FRED/yFinance
+│   ├── funding_rate.parquet     # funding futures (8h, completo dal 2019-09-10)
+│   ├── macro_*.parquet          # FRED/yFinance
+│   └── backup_1m/               # raw_candles + regime_probs era-1m (rollback pivot)
 ├── models/
 │   ├── teacher_analysis.json    # output 07_verify_teacher.py
+│   ├── backup_1m/               # checkpoint era-1m (rollback pivot 2026-06-09)
 │   └── {arch}/
 │       ├── best_model.pt        # checkpoint
 │       ├── config.json          # iperparametri + flag distilled/teacher_arch

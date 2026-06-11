@@ -1007,17 +1007,20 @@ class RegimeSession:
 
 # IT: Markov-Switching su realized vol BTC oraria — Variante 3 di MODEL_IMPROVEMENTS.md.
 #     Sostituisce RegimeSession allineando il timescale del regime (switch ogni 3-8h)
-#     col timeframe trading (1m, h=30). Usa SOLO dati BTC, non più macro USA.
+#     col timeframe trading. Il clock del regime è ORARIO by design, a prescindere
+#     dall'intervallo candele (≤1h, aggregate a 1h). Usa SOLO dati BTC, non più macro USA.
 # EN: Markov-Switching on hourly BTC realized volatility — Variant 3 of MODEL_IMPROVEMENTS.md.
 #     Replaces RegimeSession by aligning the regime timescale (switches every 3-8h)
-#     with the trading timeframe (1m, h=30). Uses BTC data ONLY, no more US macro.
+#     with the trading timeframe. The regime clock is HOURLY by design, regardless of the
+#     candle interval (≤1h, aggregated to 1h). Uses BTC data ONLY, no more US macro.
 class RegimeMarkovBTC:
     """
     Markov-Switching (Hamilton 1989) su realized volatility intraday di BTC.
 
     Pipeline:
-      1. Carica candele 1m BTC da `data/raw_candles.parquet`
-      2. Aggrega a 1 ora: log_ret_h (somma log_ret 1m) + log_rv (log della
+      1. Carica candele BTC a qualunque intervallo ≤1h da `data/raw_candles.parquet`
+         (con input 1h il resample è un'identità; input >1h → ValueError fail-fast)
+      2. Aggrega a 1 ora: log_ret_h (somma dei log_ret per bucket) + log_rv (log della
          realized variance = log(Σ log_ret²) clippato per stabilità)
       3. RobustScaler globale (mediana/IQR, look-ahead trascurabile)
       4. Walk-forward expanding window con `RegimeMarkovSwitching` come engine:
@@ -1067,13 +1070,19 @@ class RegimeMarkovBTC:
         self.scaler = None
         self.feature_cols: list[str] = []
 
-    # IT: Aggrega le candele 1m in feature orarie (log-return + log realized vol).
-    # EN: Aggregates 1m candles into hourly features (log-return + log realized vol).
+    # IT: Aggrega candele a qualunque intervallo ≤1h in feature orarie (log-return + log RV).
+    # EN: Aggregates candles at any interval ≤1h into hourly features (log-return + log RV).
     def _build_btc_hourly_df(self) -> pd.DataFrame:
         """
-        Carica `raw_candles.parquet` e produce un DataFrame orario UTC con:
-          · log_ret_h: somma dei log-return 1m per ogni ora (return orario)
+        Carica `raw_candles.parquet` (candele a qualunque intervallo ≤1h; con input
+        1h il resample orario è un'identità) e produce un DataFrame orario UTC con:
+          · log_ret_h: somma dei log-return del bucket (return orario)
           · log_rv   : log della realized variance oraria = log(Σ log_ret²)
+
+        Con input 1h ogni bucket contiene UNA sola osservazione → rv = log_ret² della
+        singola barra: proxy povera ma valida della RV; il clip a 1e-12 evita log(0)
+        sistematici sulle ore senza variazione. Input >1h → ValueError (fail-fast:
+        il clock del regime è orario by design e non può essere ricostruito).
 
         Il log-trasform su `rv` è essenziale: la realized variance è fortemente
         right-skewed → senza log, la MarkovRegression collassa su outlier.
@@ -1101,17 +1110,39 @@ class RegimeMarkovBTC:
         else:
             candles.index = candles.index.tz_convert("UTC")
 
-        # IT: log-return 1m (close-to-close); inf/NaN dropati a valle.
-        # EN: 1m log-return (close-to-close); inf/NaN dropped downstream.
+        # IT: fail-fast se l'intervallo dei dati è >1h: il clock del regime è ORARIO by
+        #     design (Markov su realized vol oraria) e con barre >1h il resample("1h")
+        #     produrrebbe bucket vuoti / RV degeneri. Passo inferito dalla MEDIANA dei diff.
+        # EN: fail-fast if the data interval is >1h: the regime clock is HOURLY by design
+        #     (Markov on hourly realized vol) and >1h bars would yield empty buckets /
+        #     degenerate RV under resample("1h"). Step inferred from the MEDIAN diff.
+        _step = candles.index.to_series().diff().median()
+        if pd.notna(_step) and _step > pd.Timedelta("1h"):
+            raise ValueError(
+                f"RegimeMarkovBTC: intervallo candele inferito {_step} > 1h — "
+                f"il regime detector richiede candele a intervallo ≤1h "
+                f"(aggregate a 1h; con input 1h il resample è identità)."
+            )
+
+        # IT: log-return per barra (close-to-close, a qualunque intervallo ≤1h);
+        #     inf/NaN dropati a valle.
+        # EN: per-bar log-return (close-to-close, at any interval ≤1h);
+        #     inf/NaN dropped downstream.
         log_ret = np.log(candles["close"]).diff()
         log_ret = log_ret.replace([np.inf, -np.inf], np.nan)
 
         # IT: aggregazione oraria — somma log-return + somma quadrati (realized var).
+        #     Con input 1h il resample è identità: rv = log_ret² della singola barra
+        #     (proxy povera ma valida della RV oraria).
         # EN: hourly aggregation — sum of log-returns + sum of squares (realized var).
+        #     With 1h input the resample is an identity: rv = the single bar's log_ret²
+        #     (a poor but valid proxy of hourly RV).
         log_ret_h = log_ret.resample("1h").sum()
         rv = log_ret.pow(2).resample("1h").sum()
-        # IT: clip a 1e-12 per evitare log(0) su ore senza variazione.
-        # EN: clip at 1e-12 to avoid log(0) on hours with no variation.
+        # IT: clip a 1e-12 per evitare log(0) su ore senza variazione (o, con input 1h,
+        #     su barre con close invariato).
+        # EN: clip at 1e-12 to avoid log(0) on hours with no variation (or, with 1h
+        #     input, on bars with unchanged close).
         log_rv = np.log(rv.clip(lower=1e-12))
 
         out = pd.DataFrame({"log_ret_h": log_ret_h, "log_rv": log_rv})

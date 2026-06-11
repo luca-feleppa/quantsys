@@ -36,6 +36,16 @@ log = logging.getLogger("quantsys.script.01b")
 # IT: pipeline macro — download FRED/yfinance, regime MS, normalizer, merge nel dataset NN
 # EN: macro pipeline — download FRED/yfinance, MS regime, normalizer, merge into NN dataset
 def main():
+    # IT: Console Windows default cp1252 — i caratteri unicode dei banner (═, ✓, █)
+    #     crashano il print. Reconfigure UTF-8 (stesso fix di 01/02/04).
+    # EN: Windows console defaults to cp1252 — unicode banner chars (═, ✓, █)
+    #     crash the print. Reconfigure UTF-8 (same fix as 01/02/04).
+    import sys as _sys
+    for _stream in (_sys.stdout, _sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     cfg   = load_config("config/default.yaml")
     mcfg  = cfg.get("macro", {})
     dcfg  = cfg["data"]
@@ -92,8 +102,14 @@ def main():
     try:
         # IT: df_macro è ignorato dal detector — usa direttamente raw_candles.parquet.
         # EN: df_macro is ignored by the detector — uses raw_candles.parquet directly.
+        # IT: cadenza walk-forward da config (hmm_burn_in_days/hmm_retrain_days):
+        #     su storie multi-anno il refit expanding è O(t) — vedi commento in default.yaml.
+        # EN: walk-forward cadence from config (hmm_burn_in_days/hmm_retrain_days):
+        #     on multi-year histories the expanding refit is O(t) — see comment in default.yaml.
         regime_df = regime_model.fit_predict_walkforward(
-            df_macro, burn_in_days=30, retrain_days=30,
+            df_macro,
+            burn_in_days = mcfg.get("hmm_burn_in_days", 30),
+            retrain_days = mcfg.get("hmm_retrain_days", 90),
         )
         # IT: stesso filename del MS per backward compat (consumer non toccati).
         # EN: same filename as MS for backward compat (consumers untouched).

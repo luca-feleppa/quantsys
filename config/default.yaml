@@ -7,17 +7,25 @@ hardware:
   pin_memory: true
   cudnn_benchmark: true
 
-# IT: Sorgente dati BTC/USDT 1m da Binance e cache locale parquet.
-# EN: BTC/USDT 1m data source from Binance and local parquet cache.
+# IT: Sorgente dati BTC/USDT da Binance e cache locale parquet.
+# EN: BTC/USDT data source from Binance and local parquet cache.
 data:
   symbol: BTCUSDT
-  interval: 1m
+  # IT: PIVOT 1h (2026-06-09): cost/σ a 1m = 1.9-3.3× → a 1h ~0.25-0.42× (barre ∝ √Δt,
+  #     costo fisso). Rollback 1m: interval=1m, start_time='2025-05-19' + restore
+  #     data/backup_1m/raw_candles.parquet. Tutte le finestre temporali nel codice
+  #     derivano da questo campo via interval_minutes (identità a 1m).
+  # EN: 1h PIVOT (2026-06-09): cost/σ at 1m = 1.9-3.3× → at 1h ~0.25-0.42× (bar moves ∝ √Δt,
+  #     fixed cost). 1m rollback: interval=1m, start_time='2025-05-19' + restore
+  #     data/backup_1m/raw_candles.parquet. All temporal windows in the code derive
+  #     from this field via interval_minutes (identity at 1m).
+  interval: 1h
   # IT: 'limit' ignorato quando 'start_time' settato; finestra effettiva = start_time → oggi.
   # EN: 'limit' is ignored when 'start_time' is set; actual window = start_time → today.
-  # IT: 525000 min ≈ 365 giorni: sweet spot per BTC 1m (vedi MODEL_IMPROVEMENTS fix #1).
-  # EN: 525000 min ≈ 365 days: sweet spot for BTC 1m (see MODEL_IMPROVEMENTS fix #1).
+  # IT: a 1h: 2019→oggi ≈ 65k barre orarie (multi-anno; a 1m era 525k = 365 giorni).
+  # EN: at 1h: 2019→today ≈ 65k hourly bars (multi-year; at 1m it was 525k = 365 days).
   limit: 525000
-  start_time: '2025-05-19'
+  start_time: '2019-01-01'
   output_dir: ./data
   raw_path: ./data/raw_candles.parquet
 
@@ -28,8 +36,16 @@ macro:
   history_start: '2018-01-01'
   n_regimes: 3              # IT: 3 regimi (bull/bear/range) | EN: 3 regimes (bull/bear/range)
   embed_dim: 16             # IT: dim embedding regime | EN: regime embedding dim
-  hmm_burn_in_days: 365     # IT: burn-in iniziale | EN: initial burn-in
-  hmm_retrain_days: 90      # IT: refit ogni 90gg | EN: refit every 90d
+  # IT: walk-forward RegimeMarkovBTC (clock orario): burn-in 30gg (validato 2026-06-03);
+  #     retrain 90gg — su 7 anni il refit mensile expanding costa ~9h (O(t) per refit),
+  #     90gg ≈ 3h. Il Hamilton filter resta forward-only ogni ora, cambia solo la
+  #     frequenza di ri-stima dei parametri MS (processo lento per natura).
+  # EN: RegimeMarkovBTC walk-forward (hourly clock): 30d burn-in (validated 2026-06-03);
+  #     90d retrain — over 7 years monthly expanding refits cost ~9h (O(t) per refit),
+  #     90d ≈ 3h. The Hamilton filter stays forward-only every hour; only the MS
+  #     parameter re-estimation frequency changes (a slow process by nature).
+  hmm_burn_in_days: 30
+  hmm_retrain_days: 90
 
 # IT: Feature engineering — volume profile, lag, fractional diff, orizzonte target.
 # EN: Feature engineering — volume profile, lags, fractional diff, target horizon.
@@ -44,14 +60,23 @@ features:
   - 60
   lag_periods: 5            # IT: lag autoregressivi | EN: autoregressive lags
   frac_diff_d: 0.4          # IT: ordine fractional differencing | EN: fractional differencing order
-  forecast_horizon: 30      # IT: h=30 min (MODEL_IMPROVEMENTS fix #2) | EN: h=30 min (fix #2)
+  forecast_horizon: 30      # IT: h=30 BARRE (=30h a 1h; era 30 min a 1m, fix #2) | EN: h=30 BARS (=30h at 1h; was 30 min at 1m, fix #2)
+  # IT: ESPERIMENTO VOL-S (2026-06-10, pre-registrato in STATUS.md): target = log-RV
+  #     (log Σr² su h barre) invece della somma direzionale dei log-return.
+  #     "ret" = path direzionale legacy (bit-invariato). NO backtest trading su modelli
+  #     trainati con log_rv (giudice = QLIKE vs HAR-RV, scripts/dev_vols_qlike.py).
+  # EN: VOL-S EXPERIMENT (2026-06-10, pre-registered in STATUS.md): target = log-RV
+  #     (log Σr² over h bars) instead of the directional sum of log-returns.
+  #     "ret" = legacy directional path (bit-invariant). NO trading backtest on models
+  #     trained with log_rv (judge = QLIKE vs HAR-RV, scripts/dev_vols_qlike.py).
+  target_type: log_rv
   normalize: true
 
 # IT: Configurazione modello — comune a tutte le arch; gli override stanno in arch/*.yaml.
 # EN: Model config — shared across archs; overrides live in arch/*.yaml.
 model:
-  window_size: 120          # IT: T=120 (2h) — ROLLBACK definitivo 2026-06-04 dopo test C T=180 fallito (Sharpe -19) e Fix #3 T=240 regressivo. Dataset 525k 1m non supporta T>120 | EN: T=120 (2h) — definitive rollback 2026-06-04 after option C T=180 failed (Sharpe -19) and Fix #3 T=240 regressed. 525k 1m dataset cannot support T>120
-  window_stride: 5
+  window_size: 120          # IT: T=120 barre (=5 giorni a 1h; era 2h a 1m — rollback definitivo 2026-06-04, T>120 regressivo su 525k 1m) | EN: T=120 bars (=5 days at 1h; was 2h at 1m — definitive rollback 2026-06-04, T>120 regressed on 525k 1m)
+  window_stride: 1          # IT: stride 1 a 1h (~65k barre → max sample; a 1m era 5 su 525k) | EN: stride 1 at 1h (~65k bars → max samples; was 5 at 1m on 525k)
   lstm_hidden: 256
   gru_hidden: 128
   mlp_hidden: 64
@@ -97,7 +122,7 @@ validation:
   #     effective folds you would need n_folds=K+1. Kept at 6 for consistency
   #     with MODEL_IMPROVEMENTS fix #4 (documented behavior).
   n_folds: 6                # IT: 6 dichiarati → 5 effettivi (vedi sopra) | EN: 6 declared → 5 effective (see above)
-  embargo_steps: 1500       # IT: 1500 step embargo (rollback T=120 — deve essere ≥ window_size+horizon = 120+30=150, ampio margine) | EN: 1500-step embargo (rollback T=120 — must be ≥ window_size+horizon = 120+30=150, wide margin)
+  embargo_steps: 168        # IT: 168 barre = 1 settimana a 1h (≥ window_size+horizon = 120+30=150; a 1m era 1500 = ~25h) | EN: 168 bars = 1 week at 1h (≥ window_size+horizon = 120+30=150; was 1500 at 1m = ~25h)
 
 # IT: Training loop — ottimizzatore, scheduler, regolarizzazioni anti-overfit.
 # EN: Training loop — optimizer, scheduler, anti-overfit regularizers.
@@ -144,6 +169,12 @@ montecarlo:
   n_paths: 2000             # IT: percorsi simulati | EN: simulated paths
   n_steps: 30
   live_forecast_every: 10   # IT: MC ogni 10 candele in live | EN: MC every 10 candles live
+  # IT: ⚠ TODO pivot 1h: parametri GJR-GARCH calibrati su rendimenti BTC 1m — ω ha unità
+  #     [varianza/passo] e va RI-STIMATO su rendimenti 1h prima di usare il MC forecast.
+  #     MC non è sul critical path del backtest (usa μ/σ del modello, non GARCH).
+  # EN: ⚠ 1h-pivot TODO: GJR-GARCH params calibrated on BTC 1m returns — ω has units
+  #     [variance/step] and must be RE-FITTED on 1h returns before using the MC forecast.
+  #     MC is not on the backtest critical path (uses model μ/σ, not GARCH).
   gjr_omega: 1.2e-05        # IT: GJR-GARCH(1,1,1) params calibrati su BTC 1m | EN: GJR-GARCH(1,1,1) calibrated on BTC 1m
   gjr_alpha: 0.05
   gjr_gamma: 0.065
@@ -158,7 +189,7 @@ risk:
   tp_rr_ratio: 2.5              # IT: rapporto RR target | EN: RR target ratio
   max_position_pct: 0.25        # IT: max 25% equity per posizione | EN: max 25% equity per position
   max_drawdown_stop: 0.15       # IT: stop totale a -15% DD | EN: kill switch at -15% DD
-  max_hold_candles: 240         # IT: max 4h di holding | EN: max 4h holding
+  max_hold_candles: 60          # IT: max 60 barre = 2.5 giorni a 1h (= 2×horizon; vincolo ≥ forecast_horizon=30; a 1m era 240 = 4h) | EN: max 60 bars = 2.5 days at 1h (= 2×horizon; constraint ≥ forecast_horizon=30; was 240 at 1m = 4h)
   use_trailing_stop: false
   trailing_atr_mult: 3.0
   correlation_window: 10
@@ -175,10 +206,16 @@ backtest:
   # IT: NON sovrascrivere da arch/*.yaml senza ricalibrare.
   # EN: DO NOT override from arch/*.yaml without recalibrating.
   prob_threshold: 0.52        # IT: ripristino baseline post-bisect / EN: restored baseline post-bisect
-  min_expected_ret: 0.0005    # IT: |μ| min raw (=5 bps) | EN: min raw |μ| (=5 bps)
-  # IT: σ raw test post-denorm: p50=0.0024, p90=0.0040; max 0.015 ≈ p99.
-  # EN: σ raw test post-denorm: p50=0.0024, p90=0.0040; max 0.015 ≈ p99.
-  max_sigma: 0.015            # IT: σ max raw (=150 bps a h=30) | EN: max raw σ (=150 bps at h=30)
+  # IT: PIVOT 1h — gate cost-aware: |μ| min = 13 bps (costo round-trip leg); secondo
+  #     test pre-registrato a 23 bps. A 1m era 0.0005 (5 bps su orizzonte 30 min).
+  # EN: 1h PIVOT — cost-aware gate: min |μ| = 13 bps (round-trip leg cost); second
+  #     pre-registered test at 23 bps. At 1m it was 0.0005 (5 bps on 30-min horizon).
+  min_expected_ret: 0.0013    # IT: |μ| min raw (=13 bps a h=30 barre 1h) | EN: min raw |μ| (=13 bps at h=30 1h-bars)
+  # IT: σ a orizzonte 30 BARRE 1h ≈ √60× quella a 30 min → soglia 0.015×√60 ≈ 0.10.
+  #     Da RICALIBRARE empiricamente sui percentili post-denorm del primo training 1h.
+  # EN: σ at 30×1h-bar horizon ≈ √60× the 30-min one → threshold 0.015×√60 ≈ 0.10.
+  #     RECALIBRATE empirically on post-denorm percentiles of the first 1h training.
+  max_sigma: 0.10             # IT: σ max raw a h=30 barre 1h (a 1m era 0.015) | EN: max raw σ at h=30 1h-bars (was 0.015 at 1m)
   conviction_alpha: 0.5       # IT: esponente conviction curve | EN: conviction curve exponent
   # IT: SNR gate |μ|/σ — quick-win #2 contro entry deboli che passano min_expected_ret.
   # EN: SNR gate |μ|/σ — quick-win #2 against weak entries that pass min_expected_ret.

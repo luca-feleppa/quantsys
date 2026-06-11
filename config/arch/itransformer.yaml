@@ -8,14 +8,25 @@ model:
   tft_d_model: 128
   tft_n_heads: 4
   tft_n_layers: 3
-  tft_dropout: 0.1
-  patch_size: 5             # IT: patching 5-min (iTransformer ne beneficia) | EN: 5-min patching (iTransformer benefits)
-  drop_path_rate: 0.1       # IT: stochastic depth leggero | EN: light stochastic depth
+  # IT: dropout/drop_path ↑ (tuning pre-registrato 2026-06-10, dataset 1h): 51k finestre
+  #     stride-1 = ~1.7k campioni indipendenti effettivi (overlap target 29/30) → il
+  #     probe overfittava da epoca 2. Valori 1m-era: dropout 0.1, drop_path 0.1.
+  # EN: dropout/drop_path ↑ (pre-registered tuning 2026-06-10, 1h dataset): 51k stride-1
+  #     windows = ~1.7k effective independent samples (29/30 target overlap) → the
+  #     probe overfit from epoch 2. 1m-era values: dropout 0.1, drop_path 0.1.
+  tft_dropout: 0.3
+  patch_size: 5             # IT: patching 5-barre | EN: 5-bar patching
+  drop_path_rate: 0.2
 
-# IT: Training — lr più alto (2e-4) per convergenza più rapida su attention pura.
-# EN: Training — higher lr (2e-4) for faster convergence on pure attention.
+# IT: Training — lr 3e-5 (era 2e-4, 1m-era): col probe 1h il best era a epoca 1
+#     (~400 step) e val_nll degradava monotono → step troppo grandi rispetto al
+#     segnale; lr ↓7× risolve l'ottimo più finemente. wd ↑3× anti-memorizzazione.
+# EN: Training — lr 3e-5 (was 2e-4, 1m-era): the 1h probe peaked at epoch 1
+#     (~400 steps) with monotonic val_nll decay → steps too large for the signal;
+#     7× lower lr resolves the optimum more finely. 3× higher wd vs memorization.
 training:
-  learning_rate: 2.0e-4
+  learning_rate: 3.0e-5
+  weight_decay: 3.0e-03
   grad_clip_norm: 0.5
   output_dir: "./models/itransformer"
 
