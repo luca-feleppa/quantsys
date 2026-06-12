@@ -7,6 +7,20 @@
 
 ## 🕒 Ultimo aggiornamento: 2026-06-12 (checklist 1+2+3 chiusa: poller IV attivo, smoke Alpaca PASS, DVOL backfillato + RIORIENTAMENTO VOL-1H e cleanup disco −4,7 GB)
 
+## 🟢 FORWARD TEST VOL-PAPER — AVVIATO 2026-06-12 ~15:30 (harness `04b_vol_paper.py` --execute, detached)
+
+**Stato operativo a fine sessione 2026-06-12 — 2 processi PERSISTENTI attivi (⚠ NON sono servizi: dopo un riavvio vanno rilanciati, comandi Start-Process in AVVIO.md):**
+| Processo | PID (2026-06-12) | Cadenza | Log | Output |
+|---|---|---|---|---|
+| `01c_iv_poller.py` | 12740 | 10 min | `logs/iv_poller.log` | `data/iv/` |
+| `04b_vol_paper.py --execute` | 3924 | orario hh:00+90s | `logs/vol_paper.log` | `results/vol_paper/` |
+
+**Primo segnale (candela 2026-06-12 12:00 UTC):** NN-RV=1.090e-3 (≈56% ann) vs var_iv=3.4e-4 (IV 31% ann) → **edge +1.16 → LONG straddle BTC-13JUN26-63500** (fill simulato al mark — premio 0.0138 BTC, `executed:false`, aperto dallo smoke pre-lancio; i successivi saranno ordini reali testnet). Sanity: rv_pred tra trailing-30h (7.7e-4) e trailing-7d (1.29e-3) → il NN è un blend HAR-like; il mercato prezza il vol-crush del weekend a <½ della realized. Settlement: 2026-06-13 08:00 UTC. NB il primo tick del processo --execute dà HOLD (posizione aperta blocca, max-1 by design).
+
+**Dettagli implementativi chiave di `04b` (per debugging futuro):** canonico 104 derivato a runtime replicando i filtri di `01_download_data` su `ps.feature_cols` (exclude→C-funding→NaN50%→Inf) e validato vs `config.json` del modello — l'npz NON serve; macro 90 dal parquet + refit identico `MacroNormalizer` (lo state vol non le persiste; ultima data 2026-06-10, warn se >7g); inversione completa `μ·1.438−7.175`; candele in-memory (bootstrap parquet + delta REST 48, tz-aware UTC, scarta candela non chiusa); assert anti-mainnet su URL deribit.
+
+**▶️ AZIONE ESATTA ALLA RIPRESA:** (1) salute dei 2 processi (`Get-Content logs/{iv_poller,vol_paper}.log -Tail 5`; crescita `data/iv/atm_30h.parquet` ~144 righe/g e `results/vol_paper/forecasts.parquet` ~24 righe/g; se morti → Start-Process da AVVIO.md); (2) controllare il settlement del primo trade in `results/vol_paper/trades.jsonl` (post 2026-06-13 08:00 UTC); (3) NESSUN intervento sul test fino a ≥30 trade chiusi (gate pre-registrato sotto) — eventuale script di analisi baseline (always-long/short dal forecasts log + delivery prices) si può scrivere quando ci sono i primi trade; (4) lavoro parallelo sensato: paper "price+volume enough?" (effort S) e/o B1 order-book L2; (5) residuo minore: re-check IV/greeks Alpaca in RTH (alle 15:30-15:45 CET del 2026-06-12 le quote indicative erano ancora stale di un giorno — verificare in piena sessione US).
+
 ## 📋 PRE-REGISTRAZIONE FORWARD TEST VOL-PAPER (scritta PRIMA di girare, 2026-06-12)
 
 **Domanda:** il forecast NN-RV 1h (modello PASS, `models/itransformer` = restore backup_1h_vols) contiene informazione economica OLTRE la IV implicita del mercato opzioni? Test FORWARD (unbiased by construction) su testnet Deribit: straddle ATM su daily ~30h, entry sul divario NN-RV vs forward variance implicita.
