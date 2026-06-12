@@ -342,6 +342,14 @@ python run_all.py --distill                # full + distillation
 
 ---
 
+## Forward test vol-paper (NN-RV vs IV, testnet Deribit) · Vol-paper forward test (NN-RV vs IV, Deribit testnet)
+
+🇮🇹 `python scripts/04b_vol_paper.py` (loop orario a hh:00+90s; `--once` smoke, `--execute` per ordini REALI sul testnet — default fill SIMULATI al mark price). Pre-registrato in `STATUS.md` 2026-06-12: forecast NN-RV 30h (modello vol-1h PASS, inversione completa `μ·IQR+centro`, feature dal path parity-blessed, macro dal parquet con refit identico del normalizer) vs varianza implicita dal poller IV (staleness ≤30 min) → `edge = log(RV_pred/var_iv)`; |edge|>0.25 → straddle ATM daily ~30h LONG/SHORT, max 1 posizione, hold a scadenza (cash settlement). Richiede: poller IV attivo, key in `secrets.yaml` blocco `deribit_testnet:` (l'URL DEVE essere test.deribit.com — assert anti-mainnet). Output: `results/vol_paper/{forecasts.parquet,trades.jsonl,position.json}` — il log forecasts si scrive anche quando flat (serve alle baseline always-long/short). Avvio persistente: stesso pattern `Start-Process` del poller, log `logs/vol_paper.log`. ⚠ NON girare training GPU in parallelo senza fermare il processo (5 modelli CUDA residenti).
+
+**EN** `python scripts/04b_vol_paper.py` (hourly loop at hh:00+90s; `--once` smoke, `--execute` for REAL testnet orders — default SIMULATED mark-price fills). Pre-registered in `STATUS.md` 2026-06-12: 30h NN-RV forecast (PASS vol-1h model, full `μ·IQR+center` inversion, parity-blessed feature path, macro from the parquet with identical normalizer refit) vs implied variance from the IV poller (staleness ≤30 min) → `edge = log(RV_pred/var_iv)`; |edge|>0.25 → ~30h daily ATM straddle LONG/SHORT, max 1 position, hold to expiry (cash settlement). Requires: IV poller running, keys in `secrets.yaml` `deribit_testnet:` block (URL MUST be test.deribit.com — anti-mainnet assert). Output: `results/vol_paper/{forecasts.parquet,trades.jsonl,position.json}` — the forecasts log is written even when flat (feeds the always-long/short baselines). Persistent launch: same `Start-Process` pattern as the poller, log `logs/vol_paper.log`. ⚠ Do NOT run GPU training in parallel without stopping the process (5 CUDA-resident models).
+
+---
+
 ## Hardware
 
 ### CPU

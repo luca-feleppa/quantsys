@@ -7,6 +7,24 @@
 
 ## 🕒 Ultimo aggiornamento: 2026-06-12 (checklist 1+2+3 chiusa: poller IV attivo, smoke Alpaca PASS, DVOL backfillato + RIORIENTAMENTO VOL-1H e cleanup disco −4,7 GB)
 
+## 📋 PRE-REGISTRAZIONE FORWARD TEST VOL-PAPER (scritta PRIMA di girare, 2026-06-12)
+
+**Domanda:** il forecast NN-RV 1h (modello PASS, `models/itransformer` = restore backup_1h_vols) contiene informazione economica OLTRE la IV implicita del mercato opzioni? Test FORWARD (unbiased by construction) su testnet Deribit: straddle ATM su daily ~30h, entry sul divario NN-RV vs forward variance implicita.
+
+**Segnale (ogni ora, a candela 1h chiusa, script `04b_vol_paper.py`):**
+- `RV_pred = exp(μ_z·s + c)` — inversione COMPLETA dallo scaler persistito (pattern del giudice QLIKE); feature dal path parity-blessed (FeatureBuilder fit=False su storico full + scaler da PipelineState; macro via MacroSnapshotUpdater, fallback zeros).
+- `var_iv = (iv_30h/100)² · 30/8760` dall'ultima riga di `data/iv/atm_30h.parquet` (staleness ≤ 30 min, altrimenti NO-TRADE).
+- `edge = log(RV_pred / var_iv)`.
+
+**Regola pre-registrata (simmetrica, NESSUN tuning a risultati visti):**
+- `edge > +0.25` → LONG straddle ATM (buy C+P) sull'expiry daily più vicina a 30h; `edge < −0.25` → SHORT straddle; altrimenti flat.
+- Max 1 posizione aperta; size 1.0 contratto/leg; hold a SCADENZA (cash settlement al delivery price — P&L deterministico, zero rumore di exit); fee taker opzioni 0.0003 BTC/contratto cap 12.5% premium, contate per leg.
+- Ogni tick logga `(ts, μ_z, log_rv, rv_pred, iv_30h, var_iv, edge, azione)` su `results/vol_paper/forecasts.parquet` ANCHE quando flat: serve a calcolare le baseline sull'intero calendario.
+
+**GATE (valutazione a ≥30 trade chiusi, non prima):** (1) P&L medio/trade > 0 al netto fee; (2) P&L totale > ENTRAMBE le baseline always-long-vol e always-short-vol sullo stesso calendario di expiry (isola il timing del NN dal variance risk premium medio); (3) hit-rate > 0.5. Esito negativo = riportato com'è; qualsiasi modifica a soglie/sizing = NUOVA pre-registrazione.
+
+**Caveat dichiarati:** liquidità testnet simulata (fill market-order poco realistici — il test valida il SEGNALE, non lo slippage); IV mark Deribit (no bid/ask spread della vol); il lato short ha rischio illimitato (accettabile solo in paper).
+
 ## 🧹 RIORIENTAMENTO VOL-1H + CLEANUP DISCO (2026-06-12, deciso con l'utente)
 
 **Decisione:** il progetto si orienta sulla linea vol-1h (unico segnale PASS); lo stato disco ora la riflette.

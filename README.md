@@ -229,7 +229,8 @@ quantsys_project/
 │   ├── 02b_walkforward_validate.py   walk-forward purged k-fold con embargo
 │   ├── 02c_optuna_search.py      Bayesian hyperparameter search (solo LSTM)
 │   ├── 03_backtest.py            backtest + stress test + bootstrap CI
-│   ├── 04_live_signals.py        feed live WebSocket + paper trading
+│   ├── 04_live_signals.py        feed live WebSocket + paper trading (direzionale)
+│   ├── 04b_vol_paper.py          forward test vol: NN-RV vs IV → straddle testnet Deribit
 │   ├── 05_analyze_signals.py     analisi sessione live
 │   ├── 06_dashboard.py           server dashboard HTTP (Dash)
 │   ├── 07_verify_teacher.py      confronto architetture per selezione teacher
