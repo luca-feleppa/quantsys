@@ -334,6 +334,14 @@ python run_all.py --distill                # full + distillation
 
 ---
 
+## Poller IV Deribit (monetizzazione vol 1h) · Deribit IV poller (1h vol monetization)
+
+🇮🇹 `python scripts/01c_iv_poller.py` (loop, default 10 min; `--minutes N` per la cadenza, `--once` smoke, `--backfill-dvol` storico DVOL orario 2021→oggi) — 2 richieste pubbliche Deribit per tick, NESSUN account richiesto. Output append-only atomico in `data/iv/`: `chain/btc_options_YYYYMMDD.parquet` (snapshot raw, ~950 strumenti/tick), `atm_30h.parquet` (ATM IV delle 4 expiry vicine + IV interpolata in varianza totale a tenor costante 30h = forecast_horizon del modello vol), `dvol.parquet` (controllo 30d). Scopo: accumulare lo storico IV short-tenor (non gratis altrove) per il gate futuro **NN-RV vs IV implicita**. Avvio persistente (non è un servizio: va rilanciato dopo un riavvio): `Start-Process python -ArgumentList "scripts/01c_iv_poller.py" -WorkingDirectory E:\quantsys_project -WindowStyle Hidden -RedirectStandardError logs\iv_poller.log -RedirectStandardOutput logs\iv_poller.out.log`.
+
+**EN** `python scripts/01c_iv_poller.py` (loop, default 10 min; `--minutes N` for cadence, `--once` smoke, `--backfill-dvol` hourly DVOL history 2021→today) — 2 public Deribit requests per tick, NO account required. Atomic append-only output under `data/iv/`: `chain/btc_options_YYYYMMDD.parquet` (raw snapshot, ~950 instruments/tick), `atm_30h.parquet` (ATM IV of the 4 nearest expiries + total-variance-interpolated IV at constant 30h tenor = the vol model's forecast_horizon), `dvol.parquet` (30d control). Purpose: accumulate short-tenor IV history (not free elsewhere) for the future **NN-RV vs implied IV** gate. Persistent launch (not a service: must be relaunched after a reboot): `Start-Process python -ArgumentList "scripts/01c_iv_poller.py" -WorkingDirectory E:\quantsys_project -WindowStyle Hidden -RedirectStandardError logs\iv_poller.log -RedirectStandardOutput logs\iv_poller.out.log`.
+
+---
+
 ## Hardware
 
 ### CPU
@@ -507,10 +515,13 @@ quantsys_project/
 │   ├── lstm_dataset.npz         # windows X/y per training
 │   ├── funding_rate.parquet     # funding futures (8h, completo dal 2019-09-10)
 │   ├── macro_*.parquet          # FRED/yFinance
-│   └── backup_1m/               # raw_candles + regime_probs era-1m (rollback pivot)
+│   ├── iv/                      # IV Deribit: chain/ (snapshot raw), atm_30h.parquet, dvol.parquet — UNICO dato non rigenerabile
+│   └── backup_1m/               # raw_candles + regime_probs era-1m (rollback 1m = restore + retrain)
 ├── models/
+│   ├── pipeline_state.pkl       # copia canonica (scritta da 01, guard anti-stale in 02)
 │   ├── teacher_analysis.json    # output 07_verify_teacher.py
-│   ├── backup_1m/               # checkpoint era-1m (rollback pivot 2026-06-09)
+│   ├── backup_1h_vols/          # vol-1h PASS autosufficiente (5 membri + state + raw/regime 1h)
+│   ├── backup_1m_vols/          # vol-1m FAIL (record)
 │   └── {arch}/
 │       ├── best_model.pt        # checkpoint
 │       ├── config.json          # iperparametri + flag distilled/teacher_arch
@@ -520,7 +531,8 @@ quantsys_project/
 │   ├── dashboard_results.json
 │   └── live_signals.jsonl
 ├── tests/                       # pytest (test_recent_fixes.py: regression fix critici)
-├── scripts/                     # 00-07 numerati + 99_replay_live_vs_training.py
+├── scripts/                     # 00-07 numerati + 99_replay + dev_vols_* (giudici vol attivi)
+│   └── archive/                 # probe chiusi: xs_01/02/03 (KILL), dev_step0_regime_sigma
 └── logs/quantsys_YYYYMMDD_HHMMSS.log
 ```
 

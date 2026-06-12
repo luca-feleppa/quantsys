@@ -224,6 +224,7 @@ quantsys_project/
 │   ├── 01_download_data.py       Binance → 104 feature (C-funding) → lstm_dataset.npz
 │   ├── 01_update_data.py         aggiornamento incrementale (solo delta candele)
 │   ├── 01b_download_macro.py     FRED + yFinance → RegimeMarkovBTC su candele BTC → update dataset
+│   ├── 01c_iv_poller.py          poller IV Deribit (chain opzioni BTC + DVOL) → data/iv/
 │   ├── 02_train.py               training con --arch, --distill, ensemble
 │   ├── 02b_walkforward_validate.py   walk-forward purged k-fold con embargo
 │   ├── 02c_optuna_search.py      Bayesian hyperparameter search (solo LSTM)
@@ -232,7 +233,9 @@ quantsys_project/
 │   ├── 05_analyze_signals.py     analisi sessione live
 │   ├── 06_dashboard.py           server dashboard HTTP (Dash)
 │   ├── 07_verify_teacher.py      confronto architetture per selezione teacher
-│   └── 99_replay_live_vs_training.py   diagnostica BLOCKER #1 (parity live vs training)
+│   ├── 99_replay_live_vs_training.py   diagnostica BLOCKER #1 (parity live vs training)
+│   ├── dev_vols_*.py             famiglia vol: macro_append + giudici QLIKE/RS (linea attiva)
+│   └── archive/                  probe chiusi (xs cross-sectional KILL, step0 σ-recal)
 ├── tests/                        suite pytest (features, NLL, PipelineState, regression sui fix recenti)
 ├── dashboard/                    React dashboard (artifact per claude.ai)
 ├── data/                         generato (gitignored)

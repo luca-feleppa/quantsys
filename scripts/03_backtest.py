@@ -542,7 +542,7 @@ def main():
                 )
             all_mu, all_sigma = _state.denormalize_predictions(all_mu, all_sigma)
             # IT: Step 0.5 — ricalibrazione σ sperimentale (env, default 1.0 = INERTE). Lo Step 0
-            #     (scripts/dev_step0_regime_sigma.py) ha mostrato σ ~3× troppo grande (std(z)≈0.4)
+            #     (scripts/archive/dev_step0_regime_sigma.py) ha mostrato σ ~3× troppo grande (std(z)≈0.4)
             #     → SL/TP (σ·price·1.5) ~3× troppo larghi. Scala σ post-denorm per misurare l'impatto
             #     su SL/TP, Kelly (f*=μ/σ²) e gate SNR (|μ|/σ). Reversibile; se promosso va bakato in
             #     PipelineState.denormalize_predictions (parity-safe: identico backtest↔live).

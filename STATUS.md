@@ -5,7 +5,34 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-11 sera (PROBE SEMIVARIANZA eseguito → **FAIL su test**, filone HD-firmato CHIUSO)
+## 🕒 Ultimo aggiornamento: 2026-06-12 (checklist 1+2+3 chiusa: poller IV attivo, smoke Alpaca PASS, DVOL backfillato + RIORIENTAMENTO VOL-1H e cleanup disco −4,7 GB)
+
+## 🧹 RIORIENTAMENTO VOL-1H + CLEANUP DISCO (2026-06-12, deciso con l'utente)
+
+**Decisione:** il progetto si orienta sulla linea vol-1h (unico segnale PASS); lo stato disco ora la riflette.
+- **Restore production:** `models/itransformer/` = vol-1h PASS da `backup_1h_vols` (5 membri + best, state verificato: interval=1h, target_scale=1.4376, h=30); copia canonica `models/pipeline_state.pkl` allineata; config `target_type: log_rs_ratio → log_rv`. I modelli rs-ratio FAIL eliminati.
+- **Eliminati (~4,7 GB, tutti rigenerabili o filoni morti):** `data/lstm_dataset.npz` (3,07 GB, era vol-1m FAIL) + `features.parquet` (65 MB); `data/xs/` (433 MB, probe KILL — resta `results/xs/ic_report.json`); `models/{nhits,tcnmamba}` (535 MB, duplicati byte-identici dei backup 1m); `models/backup_1m/` (611 MB, direzionale-1m morto — riaddestrabile da `data/backup_1m/` che RESTA, 36 MB). ⚠ Conseguenze: **il dataset npz NON esiste** (prima di train/judge: `01_download_data.py` + `dev_vols_macro_append.py`, ~10 min); **rollback 1m = restore data + RETRAIN** (checkpoint 1m non esistono più).
+- **Script:** `xs_01/02/03` + `dev_step0_regime_sigma.py` → `scripts/archive/` (git mv). I `dev_vols_*` restano in `scripts/` (linea attiva).
+- **Tenuti:** `models/backup_1h_vols/` (asset primario), `data/iv/` (non rigenerabile), `data/backup_1m/`, `models/backup_1m_vols/` (15 MB, record FAIL), `models/lstm/` (5,7 MB).
+- Doc sincronizzate: CLAUDE.md (STATO NOTO + rollback), AVVIO.md (file layout), README.md (albero scripts).
+
+## 🟢 POLLER IV DERIBIT — IMPLEMENTATO, SMOKE OK, IN ESECUZIONE (2026-06-12)
+
+**Fatto (punti 1 e 3 della checklist 2026-06-11, in ~40 min):**
+- **`scripts/01c_iv_poller.py`** (numerazione famiglia dati): loop 5-15 min (default 10), 2 req pubbliche Deribit/tick — `get_book_summary_by_currency` (mark_iv di tutta la chain opzioni BTC, ~950 strumenti) + `get_volatility_index_data` (ultimo DVOL). NESSUN account richiesto (il vincolo "solo Alpaca free" dell'utente è irrilevante qui). Output append-only ATOMICO (tmp+os.replace, dedup su chiave) in `data/iv/`:
+  - `chain/btc_options_YYYYMMDD.parquet` — snapshot raw per-strumento (1 file/giorno; tutta la chain, è il dataset che Tardis vende ≥$300);
+  - `atm_30h.parquet` — 1 riga/tick: ATM IV (straddle, strike più vicino al forward = mediana underlying_price per-expiry) delle 4 expiry vive più vicine + **IV interpolata in varianza totale w=σ²·T a tenor costante 30h** (= forecast_horizon del modello vol 1h);
+  - `dvol.parquet` — serie DVOL (controllo tenor-30d).
+- **Smoke `--once` PASSATO** al primo colpo: tick 2026-06-12 11:10 UTC → iv_30h=31.40% (interpolato correttamente tra exp0 35.27%@20.8h e exp1 28.15%@44.8h), dvol=42.14, 950 strumenti, 12 expiry vive, dailies a 08:00 UTC confermate.
+- **Backfill DVOL storico ESEGUITO** (`--backfill-dvol`): 45.755 righe orarie 2021-03-24→oggi in 46 chiamate/29s, serie quasi-continua (atteso ~45.7k). → `data/iv/dvol.parquet`.
+- **Poller AVVIATO detached** (PID 12740, 2026-06-12 13:12 locale, cadenza 10 min, log `logs/iv_poller.log`). ⚠ NON è un servizio: dopo un riavvio va rilanciato — comando `Start-Process` documentato in `AVVIO.md` (sezione "Poller IV Deribit"). Verificare periodicamente che `data/iv/atm_30h.parquet` cresca (~144 righe/giorno).
+- Doc sincronizzate: `AVVIO.md` (sezione operativa nuova + file layout), `README.md` (albero scripts).
+
+**✅ Punto 2 (smoke chain IBIT Alpaca) — ESEGUITO 2026-06-12, PASS.** Key paper fornite dall'utente (rigenerate dalla dashboard, in `config/secrets.yaml` blocco `alpaca:`, gitignored — `load_config` le merge-a). Risultati: account **ACTIVE, options_trading_level 3** (multi-leg → long straddle/strangle ✅), equity paper $100k, **chain IBIT visibile e tradable** con dailies 0-DTE (expiry oggi stesso = Mon/Wed/Fri confermate). Perimetro di esecuzione paper CONFERMATO. ⚠ 2 trappole trovate: (1) l'`endpoint` della dashboard include già `/v2` → normalizzare (`re.sub(r'/v2/?$','',ep)`) prima di concatenare i path; (2) feed dati `indicative` (free): campi `impliedVolatility`/`greeks` = **None fuori RTH** (smoke girato alle 7:35 ET, quote = close di ieri 19:59 ET) — **da ri-verificare a mercato aperto (15:30-22:00 CET)**; `feed=opra` → 403 "agreement not signed" (atteso sul free).
+
+**▶️ AZIONE ESATTA ALLA RIPRESA:** (1) check salute poller (`Get-Content logs/iv_poller.log -Tail 5` + crescita `atm_30h.parquet` ~144 righe/giorno; se morto → rilancio con Start-Process da AVVIO.md); (2) **re-check IV/greeks Alpaca in RTH** (15:30-22:00 CET: snapshot ATM IBIT, atteso popolato — 1 call); (3) prossimo filone attivo: B1 order-book L2 o paper "price+volume enough?" (checklist 2026-06-11, punto 4). Il gate NN-RV vs IV matura col tempo-calendario del poller (settimane di accumulo), non richiede lavoro attivo. NB per l'esecuzione futura: la sorgente IV per il gate SCIENTIFICO resta Deribit (24/7, tenor esatto); Alpaca serve solo come execution layer paper.
+
+## 🕒 2026-06-11 sera (PROBE SEMIVARIANZA eseguito → **FAIL su test**, filone HD-firmato CHIUSO)
 
 ## ⚫ PROBE SEMIVARIANZA 1h — ESEGUITO → **FAIL** (primario E secondario, su test; chiuso senza appello come pre-registrato)
 

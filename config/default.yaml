@@ -73,9 +73,9 @@ features:
   #     "log_rv"       = log realized variance Σr² over h bars (vol-S 2026-06-10:
   #                      PASS at 1h, FAIL at 1m — judge scripts/dev_vols_qlike.py)
   #     "log_rs_ratio" = semivariance asymmetry log(RS⁺/RS⁻) over h bars (probe
-  #                      2026-06-11 — judge scripts/dev_vols_rs_judge.py).
+  #                      2026-06-11 FAIL — judge scripts/dev_vols_rs_judge.py).
   #     NO trading backtest on vol models.
-  target_type: log_rs_ratio
+  target_type: log_rv
   normalize: true
 
 # IT: Configurazione modello — comune a tutte le arch; gli override stanno in arch/*.yaml.
