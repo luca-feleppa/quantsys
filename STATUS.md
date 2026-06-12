@@ -7,6 +7,19 @@
 
 ## 🕒 Ultimo aggiornamento: 2026-06-12 (checklist 1+2+3 chiusa: poller IV attivo, smoke Alpaca PASS, DVOL backfillato + RIORIENTAMENTO VOL-1H e cleanup disco −4,7 GB)
 
+## 📋 PRE-REGISTRAZIONE BASELINE DIREZIONALI PER IL PAPER (scritta PRIMA di girare, 2026-06-12 sera)
+
+**Scopo (paper "Are price and volume enough?"):** la claim "i momenti dispari sono impredicibili" è finora dimostrata solo per il NN. Per attribuirla all'INFORMAZIONE (e non alla classe di modello) servono le baseline econometriche direzionali sullo stesso perimetro. Aspettativa pre-dichiarata: **nessuna baseline mostra skill OOS** (|Spearman| < 2/√n, signDA ≈ 0.5) — esito atteso, ma va misurato; un esito contrario falsificherebbe la tesi del paper (e andrebbe riportato com'è).
+
+**Design (`scripts/paper_01_dir_baselines.py`, stesso pattern dei giudici vol):**
+- **Perimetro:** 1h, raw candles su disco (immutate dal run rs, 65.191), target raw `y = Σ log-ret prossime h=30 barre` (stessa formula dei giudici); split ricostruito ESATTAMENTE replicando il path di 01 (build 04b-wiring → canonico 104 → maschera finestre NaN su T=120 → temporal_split 0.8/0.1/0.1) con assert sui conteggi noti (51130/6391/6392) — se l'assert fallisce, si riporta lo scostamento.
+- **Baseline:** (a) **OLS "HAR-mean"** `y ~ [1, r_h, r_7d→h, r_30d→h]` (analogo mean-equation dell'HAR, fit train-only); (b) **logit sul segno** stessi regressori; (c) **momentum persistence** `ŷ = r_h trailing`; (d) **train-mean costante** (null).
+- **Metriche:** Spearman, sign-DA, MSE su val E test (riportati entrambi com'è: è conferma di claim negativa, non model selection). Report `results/paper/dir_baselines_1h_{val,test}.json`. NO backtest, NO iterazioni.
+
+**✅ ESEGUITO 2026-06-12 sera → esito COME PRE-REGISTRATO (nessuna skill).** Tutte le baseline |ρ|≤0.048 (soglia 2/√n=0.025) e le poche nominalmente sopra **flippano segno val→test** (momentum −0.048→+0.016; OLS −0.013→+0.034; logit +0.025→−0.002); signDA ≈ base rate (0.52 val / 0.48 test). → L'instabilità val→test dei momenti dispari vale anche per i modelli lineari: **il limite è dell'informazione price/volume, non della classe di modello** — il tassello che mancava al paper. Split ricostruito ESATTO sul raw corrente: (51156/6394/6395); i numeri citati prima (51130/...) erano del probe 06-10 con 32 candele in meno — spiegazione verificata, documentata nello script.
+
+**📄 MATERIALI PAPER CREATI (2026-06-12):** `docs/paper/RESULTS_MAP.md` (inventario claim→artefatto→numeri, con note di provenienza per i risultati i cui artefatti sono stati sovrascritti) + `docs/paper/OUTLINE.md` (titolo, tesi, struttura §1-§8+appendici, venue JFDS/arXiv, TODO per il draft: 2 figure + tabelle LaTeX da JSON + stesura §1-§4).
+
 ## 🟢 FORWARD TEST VOL-PAPER — AVVIATO 2026-06-12 ~15:30 (harness `04b_vol_paper.py` --execute, detached)
 
 **Stato operativo a fine sessione 2026-06-12 — 2 processi PERSISTENTI attivi (⚠ NON sono servizi: dopo un riavvio vanno rilanciati, comandi Start-Process in AVVIO.md):**
