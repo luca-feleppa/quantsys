@@ -15,7 +15,8 @@ Flag disponibili (modalità diretta, salta il menu):
                     config/interval/{interval}.yaml e propaga QUANTSYS_INTERVAL
                     a tutti i subprocess (default: config as-is, nessun overlay)
   --n-ensemble N    seed nell'ensemble per il training single-arch (--arch), default 5;
-                    il path --distill resta SEMPRE a n_ensemble=1 (teacher+student)
+                    il path --distill resta a 1 di default (teacher+student), override
+                    SOLO se --n-ensemble è passato esplicitamente sulla CLI
   --skip-update     salta aggiornamento dati (usa dataset esistente)
   --skip-macro      salta download macro FRED/yFinance
   --skip-train      salta riaddestramento (usa modello esistente)
@@ -406,9 +407,11 @@ def phase_train(args) -> None:
         step_warn("Riaddestro su nuovo dataset ...")
 
     # IT: training single-arch (--arch) → ensemble multi-seed (default 5, override via --n-ensemble).
-    #     Il path --distill NON passa di qui: usa phase_distill con n_ensemble=1.
+    #     Il path --distill NON passa di qui: usa phase_distill (default 1, override
+    #     esplicito con --n-ensemble).
     # EN: single-arch training (--arch) → multi-seed ensemble (default 5, override via --n-ensemble).
-    #     The --distill path does NOT go through here: it uses phase_distill with n_ensemble=1.
+    #     The --distill path does NOT go through here: it uses phase_distill (default 1,
+    #     explicit override via --n-ensemble).
     _n_ens = getattr(args, "n_ensemble", 5)
     print(f"  •  Ensemble single-arch: n_ensemble={_n_ens} seed")
     run_script("02_train.py", extra_args=["--n-ensemble", str(_n_ens)])
@@ -482,7 +485,8 @@ def _select_best_teacher(all_archs: list) -> str:
 # EN: Phase 2 distillation: train candidates → pick teacher → retrain students.
 def phase_distill(args) -> str:
     """Pipeline completa di knowledge distillation:
-    1. Addestra tutti i modelli normalmente (n_ensemble=1) — lista da config
+    1. Addestra tutti i modelli normalmente (n_ensemble: default 1, override
+       esplicito con --n-ensemble) — lista da config
     2. Confronta le metriche → sceglie il teacher automaticamente
     3. Riaddestra i perdenti come student con distillation
 
@@ -493,6 +497,16 @@ def phase_distill(args) -> str:
     aggiungere un 4° modello).
     """
     from quantsys.model.ensemble import get_distillation_archs
+
+    # IT: n_ensemble del path distill — default 1 (comportamento storico bit-invariato);
+    #     usa args.n_ensemble SOLO se --n-ensemble è esplicito sulla CLI (il default
+    #     argparse è 5: usarlo direttamente cambierebbe silenziosamente il default distill).
+    #     Stesso pattern di rilevamento esplicito di "--arch" in main().
+    # EN: n_ensemble for the distill path — default 1 (historical behavior, bit-invariant);
+    #     use args.n_ensemble ONLY if --n-ensemble is explicit on the CLI (the argparse
+    #     default is 5: using it directly would silently change the distill default).
+    #     Same explicit-flag detection pattern as "--arch" in main().
+    distill_n = args.n_ensemble if "--n-ensemble" in sys.argv else 1
     try:
         with open(ROOT / "config" / "default.yaml", encoding="utf-8") as _f:
             _cfg = _yaml.safe_load(_f) or {}
@@ -504,6 +518,10 @@ def phase_distill(args) -> str:
     # ── Fase 2a: Addestra tutti i modelli configurati ─────────────────────
     banner(f"FASE 2a · TRAINING CANDIDATI ({len(all_archs)} arch: "
            f"{', '.join(a.upper() for a in all_archs)})")
+    # IT: log dell'override solo se non-default (output del path default invariato).
+    # EN: log the override only when non-default (default-path output unchanged).
+    if distill_n != 1:
+        step_warn(f"  --n-ensemble esplicito: distill multi-seed con n_ensemble={distill_n} (default 1)")
     for arch in all_archs:
         arch_dir = ROOT / "models" / arch
         arch_dir.mkdir(parents=True, exist_ok=True)
@@ -517,7 +535,9 @@ def phase_distill(args) -> str:
         banner(f"  TRAINING {arch.upper()}")
         t0 = time.time()
         os.environ["QUANTSYS_ARCH"] = arch
-        run_script("02_train.py", extra_args=["--n-ensemble", "1"])
+        # IT: n_ensemble parametrico (default 1, override esplicito via --n-ensemble).
+        # EN: parametric n_ensemble (default 1, explicit override via --n-ensemble).
+        run_script("02_train.py", extra_args=["--n-ensemble", str(distill_n)])
         step_ok(f"  {arch} addestrato in {elapsed(t0)}")
 
     # ── Fase 2b: Scoring e pesatura teacher ─────────────────────────────────
@@ -543,11 +563,13 @@ def phase_distill(args) -> str:
         t0_s = time.time()
 
         os.environ["QUANTSYS_ARCH"] = student_arch
+        # IT: stesso n_ensemble parametrico dei candidati (default 1, override via --n-ensemble).
+        # EN: same parametric n_ensemble as the candidates (default 1, override via --n-ensemble).
         run_script("02_train.py", extra_args=[
             "--distill",
             "--teacher", teacher,
             "--multi-teacher",
-            "--n-ensemble", "1",
+            "--n-ensemble", str(distill_n),
         ])
         step_ok(f"  {student_arch} (student) addestrato in {elapsed(t0_s)}")
 
@@ -709,15 +731,18 @@ def parse_args():
              "(propagato ai subprocess via QUANTSYS_INTERVAL; default: config as-is)",
     )
     # IT: n_ensemble per il training single-arch (--arch). Default 5 (ensemble multi-seed).
-    #     Il path --distill resta a 1 (vedi phase_distill: teacher e student a n_ensemble=1).
+    #     Il path --distill resta a 1 di default; override SOLO se il flag è esplicito
+    #     sulla CLI (vedi phase_distill: check "--n-ensemble" in sys.argv).
     # EN: n_ensemble for single-arch training (--arch). Default 5 (multi-seed ensemble).
-    #     The --distill path stays at 1 (see phase_distill: teacher and student at n_ensemble=1).
+    #     The --distill path defaults to 1; override ONLY if the flag is explicit
+    #     on the CLI (see phase_distill: "--n-ensemble" in sys.argv check).
     p.add_argument(
         "--n-ensemble",
         type=int,
         default=5,
         metavar="N",
-        help="seed nell'ensemble per il training single-arch (--arch); default 5. --distill resta a 1",
+        help="seed nell'ensemble per il training single-arch (--arch); default 5. "
+             "--distill: default 1, override solo se il flag è passato esplicitamente",
     )
     p.add_argument("--skip-update",    action="store_true", help="salta aggiornamento dati")
     p.add_argument("--skip-macro",     action="store_true", help="salta download macro")

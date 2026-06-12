@@ -277,3 +277,71 @@ class TestBlocker1Documentation:
         #     FeatureAssembler (unlike the legacy buffer). Canonical-order sanity check.
         first_five = set(training_feature_names[:5])
         assert {"open", "high", "low", "close", "volume"}.issubset(first_five)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IT: Fix 2026-06-12 — guard anti-stale per i membri numerati dell'ensemble
+#     (bug 2026-06-10: --n-ensemble 1 aggiorna solo best_model.pt, ma load()
+#     preferisce membri numerati residui di un run precedente → modelli stale).
+# EN: Fix 2026-06-12 — anti-stale guard for numbered ensemble members
+#     (2026-06-10 bug: --n-ensemble 1 only updates best_model.pt, but load()
+#     prefers numbered members left over from a previous run → stale models).
+# ─────────────────────────────────────────────────────────────────────────────
+import os
+
+from quantsys.model.ensemble import _stale_members_warning
+
+
+class TestStaleMembersWarning:
+    """
+    IT: Testa SOLO l'helper warning-only `_stale_members_warning` con file fittizi:
+        il guard non deve mai sollevare, e deve scattare solo quando best_model.pt
+        è più recente di >60s rispetto al più nuovo dei membri numerati.
+    EN: Tests ONLY the warning-only `_stale_members_warning` helper with dummy files:
+        the guard must never raise, and must fire only when best_model.pt is >60s
+        newer than the newest numbered member.
+    """
+
+    BASE_MTIME = 1_700_000_000.0  # IT: epoch arbitraria fissa | EN: arbitrary fixed epoch
+
+    def _touch(self, path: Path, mtime: float) -> None:
+        # IT: crea file vuoto e forza atime/mtime deterministici
+        # EN: create empty file and force deterministic atime/mtime
+        path.write_bytes(b"")
+        os.utime(path, (mtime, mtime))
+
+    def test_warning_when_single_best_newer_than_members(self, tmp_path):
+        # IT: (a) membri numerati + best più recente di >60s → warning non-None
+        # EN: (a) numbered members + best newer by >60s → non-None warning
+        for i in range(3):
+            self._touch(tmp_path / f"best_model_{i}.pt", self.BASE_MTIME)
+        self._touch(tmp_path / "best_model.pt", self.BASE_MTIME + 3600)
+        msg = _stale_members_warning(tmp_path)
+        assert msg is not None
+        # IT: il messaggio deve citare rischio e rimedio (membri stale, best ignorato)
+        # EN: the message must mention risk and remedy (stale members, best ignored)
+        assert "best_model.pt" in msg
+        assert "IGNORATO" in msg or "IGNORED" in msg
+
+    def test_no_warning_when_best_within_tolerance(self, tmp_path):
+        # IT: (b) best contemporaneo ai membri (entro 60s) → None (stesso run)
+        # EN: (b) best contemporaneous with members (within 60s) → None (same run)
+        for i in range(3):
+            self._touch(tmp_path / f"best_model_{i}.pt", self.BASE_MTIME)
+        self._touch(tmp_path / "best_model.pt", self.BASE_MTIME + 30)
+        assert _stale_members_warning(tmp_path) is None
+
+    def test_no_warning_when_only_numbered_members(self, tmp_path):
+        # IT: (c) solo membri numerati, nessun best singolo → None (caso del
+        #     forward-test vol: models/itransformer con 5 membri coerenti)
+        # EN: (c) only numbered members, no single best → None (vol forward-test
+        #     case: models/itransformer with 5 coherent members)
+        for i in range(5):
+            self._touch(tmp_path / f"best_model_{i}.pt", self.BASE_MTIME + i)
+        assert _stale_members_warning(tmp_path) is None
+
+    def test_no_warning_when_only_single_best(self, tmp_path):
+        # IT: (d) solo best singolo, nessun membro numerato → None
+        # EN: (d) only the single best, no numbered members → None
+        self._touch(tmp_path / "best_model.pt", self.BASE_MTIME)
+        assert _stale_members_warning(tmp_path) is None

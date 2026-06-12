@@ -802,6 +802,30 @@ def main():
         log.info(f"n_ensemble override da CLI: {n_ensemble}")
     models_dir = out_dir
 
+    # IT: Pre-check anti-stale warning-only (bug 2026-06-10): un run con n_ensemble
+    #     inferiore ai membri numerati già su disco aggiorna solo best_model.pt
+    #     (o un sottoinsieme dei membri), lasciando checkpoint stale che
+    #     EnsembleModel.load preferirà silenziosamente al nuovo best.
+    # EN: Warning-only anti-stale pre-check (2026-06-10 bug): a run with n_ensemble
+    #     lower than the numbered members already on disk only updates best_model.pt
+    #     (or a subset of the members), leaving stale checkpoints that
+    #     EnsembleModel.load will silently prefer over the new best.
+    _existing_members = sorted(out_dir.glob("best_model_[0-9]*.pt"))
+    if len(_existing_members) >= 2 and n_ensemble < len(_existing_members):
+        _updated = ("solo best_model.pt" if n_ensemble == 1
+                    else f"solo i primi {n_ensemble} membri numerati")
+        log.warning(
+            f"ANTI-STALE: in {out_dir} ci sono {len(_existing_members)} membri numerati "
+            f"(best_model_*.pt) ma n_ensemble={n_ensemble}: questo run aggiornerà "
+            f"{_updated}, lasciando membri stale che EnsembleModel.load preferirà "
+            f"al posto del nuovo best. Rimedio: rimuovi/archivia i membri numerati "
+            f"o ri-allena con n-ensemble pieno. | ANTI-STALE: {out_dir} holds "
+            f"{len(_existing_members)} numbered members but n_ensemble={n_ensemble}: "
+            f"this run will leave stale members that EnsembleModel.load will prefer "
+            f"over the new best. Remedy: remove/archive the numbered members or "
+            f"retrain with the full n-ensemble."
+        )
+
     # IT: history/modello finali — riferiti al membro 0 (o all'unico) per l'export
     # EN: final history/model — refer to member 0 (or the single one) for export
     history    = None

@@ -42,6 +42,55 @@ def get_distillation_archs(cfg: dict = None) -> list:
                 return cleaned
     return list(HETEROGENEOUS_ARCHS)
 
+# IT: Tolleranza (secondi) tra le scritture sequenziali dello stesso run di training:
+#     entro questa finestra best_model.pt e membri numerati sono considerati coerenti.
+# EN: Tolerance (seconds) between sequential writes of the same training run:
+#     within this window best_model.pt and numbered members are considered coherent.
+STALE_MEMBERS_TOLERANCE_S = 60.0
+
+
+# IT: Guard anti-stale NON-fatale (bug 2026-06-10): se best_model.pt è molto più recente
+#     dei membri numerati, questi sono probabilmente residui di un run precedente
+#     (altra config/target/interval) che load() preferirà ignorando il nuovo best.
+# EN: Non-fatal anti-stale guard (2026-06-10 bug): if best_model.pt is much newer than
+#     the numbered members, those are likely leftovers from a previous run
+#     (different config/target/interval) that load() will prefer, ignoring the new best.
+def _stale_members_warning(base: Path) -> str | None:
+    """Ritorna un messaggio di warning se i membri numerati sembrano stale, altrimenti None.
+
+    Condizione: esistono membri `best_model_[0-9]*.pt` E `best_model.pt` E
+    mtime(best_model.pt) > max(mtime(membri)) + STALE_MEMBERS_TOLERANCE_S.
+    Warning-only: non altera in alcun modo la selezione dei checkpoint.
+    """
+    members = sorted(base.glob("best_model_[0-9]*.pt"))
+    single = base / "best_model.pt"
+    # IT: senza membri numerati o senza best singolo non c'è ambiguità → nessun warning.
+    # EN: without numbered members or without the single best there is no ambiguity → no warning.
+    if not members or not single.exists():
+        return None
+    try:
+        newest_member = max(p.stat().st_mtime for p in members)
+        single_mtime = single.stat().st_mtime
+    except OSError:
+        # IT: race su filesystem (file rimosso tra glob e stat) → degrada silenziosamente.
+        # EN: filesystem race (file removed between glob and stat) → degrade silently.
+        return None
+    if single_mtime > newest_member + STALE_MEMBERS_TOLERANCE_S:
+        return (
+            f"Possibili checkpoint ensemble STALE in {base}: best_model.pt è più recente "
+            f"di {single_mtime - newest_member:.0f}s rispetto al più nuovo dei "
+            f"{len(members)} membri numerati (best_model_*.pt). EnsembleModel.load "
+            f"preferisce i membri numerati, quindi il best singolo più recente "
+            f"(es. da un run --n-ensemble 1) viene IGNORATO. Rimedio: rimuovi/archivia "
+            f"i membri numerati oppure ri-allena con n-ensemble pieno. | Possibly STALE "
+            f"ensemble checkpoints in {base}: best_model.pt is newer than the newest of "
+            f"the {len(members)} numbered members; load() prefers numbered members, so "
+            f"the more recent single best is SILENTLY IGNORED. Remedy: remove/archive "
+            f"the numbered members or retrain with full n-ensemble."
+        )
+    return None
+
+
 # IT: Pesi default per architettura; sovrascrivibili via arch_weights kwarg.
 # EN: Per-architecture default weights; overridable via arch_weights kwarg.
 DEFAULT_ARCH_WEIGHTS = {
@@ -173,6 +222,15 @@ class EnsembleModel:
         from quantsys.model import load_model
 
         base = Path(models_dir)
+
+        # IT: Guard anti-stale warning-only (bug 2026-06-10): segnala membri numerati
+        #     potenzialmente residui di un run precedente; NON cambia la selezione.
+        # EN: Warning-only anti-stale guard (2026-06-10 bug): flags numbered members
+        #     possibly left over from a previous run; does NOT change selection.
+        _stale_msg = _stale_members_warning(base)
+        if _stale_msg is not None:
+            log.warning(_stale_msg)
+
         ckpts = sorted(base.glob("best_model_[0-9]*.pt"),
                        key=lambda p: int(p.stem.split("_")[-1]))
 

@@ -24,6 +24,7 @@
 #     fair comparison). Secondary: MSE on log-RV.
 #     GATE (test): QLIKE_NN ≤ 0.95·QLIKE_HAR  AND  QLIKE_NN < QLIKE_naive.
 #     Protocol: val-first; test is evaluated ONCE.
+import argparse
 import json
 import logging
 import os
@@ -64,6 +65,22 @@ def main():
             _s.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+
+    # IT: argparse minimale — arch del modello da giudicare (models/{arch}); flag
+    #     CLI esplicito, NON env QUANTSYS_ARCH — default itransformer = run storica
+    #     bit-identica.
+    # EN: minimal argparse — model arch to judge (models/{arch}); explicit CLI flag,
+    #     NOT the QUANTSYS_ARCH env var — default itransformer = bit-identical
+    #     legacy run.
+    ap = argparse.ArgumentParser(description="Giudice QLIKE vol-S (NN vs HAR-RV vs naive) / "
+                                             "VOL-S QLIKE judge (NN vs HAR-RV vs naive)")
+    ap.add_argument("--arch", default="itransformer",
+                    choices=["itransformer", "nhits", "tcnmamba", "lstm"],
+                    help="architettura del modello vol da caricare (models/{arch}) / "
+                         "vol model architecture to load (models/{arch})")
+    args = ap.parse_args()
+    model_dir = Path("models") / args.arch
+    log.info(f"dir modelli effettiva / effective model dir: {model_dir} (arch={args.arch})")
 
     cfg = load_config("config/default.yaml")
     assert cfg["features"].get("target_type") == "log_rv", \
@@ -128,8 +145,8 @@ def main():
     from quantsys.model.ensemble import EnsembleModel
     from quantsys.utils import PipelineState
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = EnsembleModel.load("models/itransformer", device)
-    ps = PipelineState.load("models/itransformer/pipeline_state.pkl")
+    model = EnsembleModel.load(str(model_dir), device)
+    ps = PipelineState.load(str(model_dir / "pipeline_state.pkl"))
     idx = ps.scale_cols.index("target_ret")
     c, s = float(ps.scaler.center_[idx]), float(ps.scaler.scale_[idx])
     log.info(f"target_ret scaler: center={c:.3f} scale={s:.3f} (deve essere ~log-RV, non ~0)")

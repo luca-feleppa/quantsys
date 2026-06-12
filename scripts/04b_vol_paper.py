@@ -166,12 +166,22 @@ class VolForecaster:
     #     FeatureBuilder configured from config + interval/scaler/columns INJECTED
     #     from PipelineState → build(fit=False) identical to training. Candles
     #     live in memory (parquet bootstrap + REST delta per tick).
-    def __init__(self, cfg: dict, device):
+    def __init__(self, cfg: dict, device, arch: str = "itransformer"):
         self.cfg = cfg
         self.device = device
         self.symbol = cfg["data"].get("symbol", "BTCUSDT")
 
-        ps = PipelineState.load("models/itransformer/pipeline_state.pkl")
+        # IT: dir modelli parametrica via --arch (default itransformer = comportamento
+        #     storico bit-identico); flag CLI esplicito, MAI QUANTSYS_ARCH (una env
+        #     residua redirigerebbe il caricamento in silenzio).
+        # EN: model dir parametrized via --arch (default itransformer = bit-identical
+        #     legacy behavior); explicit CLI flag, NEVER QUANTSYS_ARCH (a stale env
+        #     would silently redirect the loading).
+        self.arch = arch
+        self.model_dir = Path("models") / arch
+        log.info(f"dir modelli effettiva / effective model dir: {self.model_dir} (arch={arch})")
+
+        ps = PipelineState.load(str(self.model_dir / "pipeline_state.pkl"))
         # IT: guard contratto config↔state (pattern repo: fail-fast su mix incoerenti).
         # EN: config↔state contract guard (repo pattern: fail-fast on incoherent mixes).
         if str(cfg["data"]["interval"]) != str(ps.interval):
@@ -213,11 +223,11 @@ class VolForecaster:
         #     exclude/C-funding/NaN/Inf over ps.feature_cols, builder order) and is
         #     validated against n_features in the model's config.json — no npz needed.
         self._canonical: list | None = None
-        mc = json.loads(Path("models/itransformer/config.json").read_text(encoding="utf-8"))
+        mc = json.loads((self.model_dir / "config.json").read_text(encoding="utf-8"))
         self.n_feat_expected = int(mc.get("n_features", 104))
         self.n_macro_expected = int(mc.get("n_macro", 0)) if mc.get("use_macro") else 0
 
-        self.model = EnsembleModel.load("models/itransformer", device)
+        self.model = EnsembleModel.load(str(self.model_dir), device)
         log.info(f"Ensemble vol caricato: {getattr(self.model, 'n_members', '?')} membri | "
                  f"scaler target: center={self.c:.3f} scale={self.s:.3f} | h={self.h}")
 
@@ -479,6 +489,14 @@ def main():
     ap.add_argument("--execute", action="store_true",
                     help="piazza ordini REALI sul testnet (default: fill simulati al mark) / "
                          "place REAL testnet orders (default: simulated mark fills)")
+    # IT: arch del modello da caricare (models/{arch}); flag esplicito, NON env
+    #     QUANTSYS_ARCH — default itransformer = run storica bit-identica.
+    # EN: model arch to load (models/{arch}); explicit flag, NOT the QUANTSYS_ARCH
+    #     env var — default itransformer = bit-identical legacy run.
+    ap.add_argument("--arch", default="itransformer",
+                    choices=["itransformer", "nhits", "tcnmamba", "lstm"],
+                    help="architettura del modello vol da caricare (models/{arch}) / "
+                         "vol model architecture to load (models/{arch})")
     args = ap.parse_args()
 
     cfg = load_config("config/default.yaml")
@@ -487,7 +505,7 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    fc = VolForecaster(cfg, device)
+    fc = VolForecaster(cfg, device, arch=args.arch)
     db = DeribitTestnet(cfg)
 
     log.info(f"vol-paper avviato/started — soglia edge ±{EDGE_THRESHOLD}, "

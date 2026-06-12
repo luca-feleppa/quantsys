@@ -203,9 +203,9 @@ Tabella comparativa: param count, forward time, Sharpe, WR, n trade, max DD, tot
 python run_all.py --distill --skip-update --skip-macro
 ```
 
-🇮🇹 **Fase 2a — Training candidati**: ogni arch in `distillation.archs` addestrata con `n_ensemble=1`. Se `models/{arch}/best_model.pt` esiste, skippata. Per forzare retrain: `--force-download`.
+🇮🇹 **Fase 2a — Training candidati**: ogni arch in `distillation.archs` addestrata con `n_ensemble=1` di default; override SOLO passando `--n-ensemble N` esplicito sulla CLI (vale per candidati E student). Se `models/{arch}/best_model.pt` esiste, skippata. Per forzare retrain: `--force-download`.
 
-**EN** **Phase 2a — Candidate training**: each arch in `distillation.archs` is trained normally with `n_ensemble=1`. If `models/{arch}/best_model.pt` exists, it is skipped. To force retrain: `--force-download`.
+**EN** **Phase 2a — Candidate training**: each arch in `distillation.archs` is trained with `n_ensemble=1` by default; override ONLY by passing an explicit `--n-ensemble N` on the CLI (applies to candidates AND students). If `models/{arch}/best_model.pt` exists, it is skipped. To force retrain: `--force-download`.
 
 🇮🇹 **Fase 2b — Multi-Teacher Scoring**: ogni candidato valutato alla best epoch con score normalizzato (40% val_loss + 35% spearman + 25% directional accuracy). Pesi softmax con temperature=2 calcolati per tutti. Lo score massimo diventa *primary teacher*; gli altri restano nel pool come teacher pesati.
 
@@ -344,9 +344,9 @@ python run_all.py --distill                # full + distillation
 
 ## Forward test vol-paper (NN-RV vs IV, testnet Deribit) · Vol-paper forward test (NN-RV vs IV, Deribit testnet)
 
-🇮🇹 `python scripts/04b_vol_paper.py` (loop orario a hh:00+90s; `--once` smoke, `--execute` per ordini REALI sul testnet — default fill SIMULATI al mark price). Pre-registrato in `STATUS.md` 2026-06-12: forecast NN-RV 30h (modello vol-1h PASS, inversione completa `μ·IQR+centro`, feature dal path parity-blessed, macro dal parquet con refit identico del normalizer) vs varianza implicita dal poller IV (staleness ≤30 min) → `edge = log(RV_pred/var_iv)`; |edge|>0.25 → straddle ATM daily ~30h LONG/SHORT, max 1 posizione, hold a scadenza (cash settlement). Richiede: poller IV attivo, key in `secrets.yaml` blocco `deribit_testnet:` (l'URL DEVE essere test.deribit.com — assert anti-mainnet). Output: `results/vol_paper/{forecasts.parquet,trades.jsonl,position.json}` — il log forecasts si scrive anche quando flat (serve alle baseline always-long/short). Avvio persistente: stesso pattern `Start-Process` del poller, log `logs/vol_paper.log`. ⚠ NON girare training GPU in parallelo senza fermare il processo (5 modelli CUDA residenti).
+🇮🇹 `python scripts/04b_vol_paper.py` (loop orario a hh:00+90s; `--once` smoke, `--execute` per ordini REALI sul testnet — default fill SIMULATI al mark price; `--arch` per la dir modelli, default `itransformer` = comportamento storico invariato — stesso flag in `dev_vols_qlike.py`). Pre-registrato in `STATUS.md` 2026-06-12: forecast NN-RV 30h (modello vol-1h PASS, inversione completa `μ·IQR+centro`, feature dal path parity-blessed, macro dal parquet con refit identico del normalizer) vs varianza implicita dal poller IV (staleness ≤30 min) → `edge = log(RV_pred/var_iv)`; |edge|>0.25 → straddle ATM daily ~30h LONG/SHORT, max 1 posizione, hold a scadenza (cash settlement). Richiede: poller IV attivo, key in `secrets.yaml` blocco `deribit_testnet:` (l'URL DEVE essere test.deribit.com — assert anti-mainnet). Output: `results/vol_paper/{forecasts.parquet,trades.jsonl,position.json}` — il log forecasts si scrive anche quando flat (serve alle baseline always-long/short). Avvio persistente: stesso pattern `Start-Process` del poller, log `logs/vol_paper.log`. ⚠ NON girare training GPU in parallelo senza fermare il processo (5 modelli CUDA residenti).
 
-**EN** `python scripts/04b_vol_paper.py` (hourly loop at hh:00+90s; `--once` smoke, `--execute` for REAL testnet orders — default SIMULATED mark-price fills). Pre-registered in `STATUS.md` 2026-06-12: 30h NN-RV forecast (PASS vol-1h model, full `μ·IQR+center` inversion, parity-blessed feature path, macro from the parquet with identical normalizer refit) vs implied variance from the IV poller (staleness ≤30 min) → `edge = log(RV_pred/var_iv)`; |edge|>0.25 → ~30h daily ATM straddle LONG/SHORT, max 1 position, hold to expiry (cash settlement). Requires: IV poller running, keys in `secrets.yaml` `deribit_testnet:` block (URL MUST be test.deribit.com — anti-mainnet assert). Output: `results/vol_paper/{forecasts.parquet,trades.jsonl,position.json}` — the forecasts log is written even when flat (feeds the always-long/short baselines). Persistent launch: same `Start-Process` pattern as the poller, log `logs/vol_paper.log`. ⚠ Do NOT run GPU training in parallel without stopping the process (5 CUDA-resident models).
+**EN** `python scripts/04b_vol_paper.py` (hourly loop at hh:00+90s; `--once` smoke, `--execute` for REAL testnet orders — default SIMULATED mark-price fills; `--arch` selects the model dir, default `itransformer` = historical behavior unchanged — same flag in `dev_vols_qlike.py`). Pre-registered in `STATUS.md` 2026-06-12: 30h NN-RV forecast (PASS vol-1h model, full `μ·IQR+center` inversion, parity-blessed feature path, macro from the parquet with identical normalizer refit) vs implied variance from the IV poller (staleness ≤30 min) → `edge = log(RV_pred/var_iv)`; |edge|>0.25 → ~30h daily ATM straddle LONG/SHORT, max 1 position, hold to expiry (cash settlement). Requires: IV poller running, keys in `secrets.yaml` `deribit_testnet:` block (URL MUST be test.deribit.com — anti-mainnet assert). Output: `results/vol_paper/{forecasts.parquet,trades.jsonl,position.json}` — the forecasts log is written even when flat (feeds the always-long/short baselines). Persistent launch: same `Start-Process` pattern as the poller, log `logs/vol_paper.log`. ⚠ Do NOT run GPU training in parallel without stopping the process (5 CUDA-resident models).
 
 ---
 
@@ -495,14 +495,14 @@ python scripts/02c_optuna_search.py --n-trials 50 --study-name quantsys
 🇮🇹 `config/default.yaml`:
 ```yaml
 training:
-  n_ensemble: 5   # default attuale = 5 (override automatico a 1 in --distill)
+  n_ensemble: 5   # default attuale = 5 (in --distill il default è 1; override esplicito con --n-ensemble)
 ```
 Output: `models/{arch}/best_model_0..4.pt`. Backtest/live li caricano via `EnsembleModel.load`. Indipendente dalla distillation (modalità non si escludono).
 
 **EN** `config/default.yaml`:
 ```yaml
 training:
-  n_ensemble: 5   # current default = 5 (auto-overridden to 1 when --distill)
+  n_ensemble: 5   # current default = 5 (--distill defaults to 1; explicit --n-ensemble overrides)
 ```
 Output: `models/{arch}/best_model_0..4.pt`. Backtest/live load them via `EnsembleModel.load`. Independent from distillation (modes are not mutually exclusive).
 

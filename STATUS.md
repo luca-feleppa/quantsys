@@ -5,7 +5,22 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-12 (checklist 1+2+3 chiusa: poller IV attivo, smoke Alpaca PASS, DVOL backfillato + RIORIENTAMENTO VOL-1H e cleanup disco −4,7 GB)
+## 🕒 Ultimo aggiornamento: 2026-06-12 (checklist 1+2+3 chiusa: poller IV attivo, smoke Alpaca PASS, DVOL backfillato + RIORIENTAMENTO VOL-1H e cleanup disco −4,7 GB + valutazione swap single-arch→distillato e fix di preparazione)
+
+## 📝 VALUTAZIONE SWAP iTRANSFORMER-5seed → DISTILLATO 3-ARCH SU TARGET VOL (2026-06-12 sera — analisi, NESSUN esperimento avviato)
+
+**Domanda dell'utente:** il codice permette di passare facilmente dal 5-seed iTransformer vol-1h a un modello distillato dalle 3 architetture? **Risposta: sì, strutturalmente — la pipeline distillation è target-agnostic (`02_train` consuma l'npz, il target vive in `01`/FeatureBuilder; scoring teacher su metriche da history.json valido anche su log_rv) — con 5 frizioni concrete:**
+1. **Hardcoding consumer-side:** `04b_vol_paper.py` (3 refs) e `dev_vols_qlike.py` (2 refs) puntano letteralmente a `models/itransformer` → serve parametrizzazione (~3 righe ciascuno).
+2. **`--distill` è n_ensemble=1 by design** (run_all.py, teacher e student 1 seed): il PASS vol è 5-seed → confronto impari senza estensione del path distill a n>1.
+3. **Trappola membri stale (bug noto 2026-06-10):** run n=1 aggiorna solo `best_model.pt`, MAI i `best_model_{0..4}.pt`; `EnsembleModel.load` preferisce i numerati → con membri vecchi su disco il nuovo best viene IGNORATO silenziosamente. Serve guard.
+4. **Prerequisiti:** npz NON esiste (cleanup 06-12, rigenerare ~10 min); nhits/tcnmamba mai addestrati su log_rv e i loro yaml hanno hyperparam era-1m (rischio overfit-epoca-1 su 58k finestre; il tuning vol — lr 3e-5/dropout 0.3 — è solo in itransformer.yaml).
+5. **⚠ NON ora e NON in-place:** `models/itransformer/` è il modello del forward test in corso (un retrain lì lo corromperebbe al prossimo restart di 04b); regola GPU: no training + inference oraria in parallelo. Eventuale esperimento → dir separate + pre-registrazione (gate QLIKE vs 5-seed corrente, val-first), DOPO il gate dei 30 trade.
+
+**✅ Fix di preparazione COMPLETATI (2026-06-12 sera, fan-out 3 subagent — tutti inerti by default, zero impatto su processi attivi e modelli su disco):**
+- **Fix A (FATTO):** flag CLI `--arch` (default `itransformer`, choices 4 arch → comportamento invariato; scelto flag esplicito e NON env QUANTSYS_ARCH per evitare redirect silenziosi) in `04b_vol_paper.py` (3 refs parametrizzati via `self.model_dir`, dir loggata all'avvio) + `dev_vols_qlike.py` (2 refs). Il processo 04b attivo ha il vecchio codice in memoria — invariato fino al prossimo restart, che senza flag è bit-identico.
+- **Fix B (FATTO):** helper `_stale_members_warning(base)` in `ensemble.py` (warning se `best_model.pt` più recente dei membri numerati di >60s — il load preferirebbe i membri stale) chiamato in `EnsembleModel.load` + pre-check warning in `02_train` (n_ensemble < membri numerati presenti, soglia ≥2 per evitare falsi positivi col fallback single). Verificato read-only su `models/itransformer/`: guard NON scatta (6 file coerenti). 4 regression test nuovi in `test_recent_fixes.py`.
+- **Fix C (FATTO):** `phase_distill` usa `distill_n = args.n_ensemble if "--n-ensemble" in sys.argv else 1` (2 punti parametrizzati: training candidati Fase 2a + retrain student Fase 2c); senza flag esplicito i comandi subprocess sono byte-identici a prima.
+- **Verifica:** suite full `pytest tests/` → **122 passed, 8 skipped, 0 failed** (skip pre-esistenti: npz/dataset assenti dal cleanup). Doc sincronizzate: `AVVIO.md` (Fase 2a distill, nota n_ensemble, sezione 04b col flag `--arch`). Working tree NON committato.
 
 ## 📋 PRE-REGISTRAZIONE BASELINE DIREZIONALI PER IL PAPER (scritta PRIMA di girare, 2026-06-12 sera)
 
