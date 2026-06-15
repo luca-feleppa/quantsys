@@ -231,6 +231,7 @@ quantsys_project/
 │   ├── 03_backtest.py            backtest + stress test + bootstrap CI
 │   ├── 04_live_signals.py        feed live WebSocket + paper trading (direzionale)
 │   ├── 04b_vol_paper.py          forward test vol: NN-RV vs IV → straddle testnet Deribit
+│   ├── 04c_vol_paper_baselines.py  baseline always-long/short-vol (gate pre-reg) dai chain snapshot
 │   ├── 05_analyze_signals.py     analisi sessione live
 │   ├── 06_dashboard.py           server dashboard HTTP (Dash)
 │   ├── 07_verify_teacher.py      confronto architetture per selezione teacher

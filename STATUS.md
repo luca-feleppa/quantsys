@@ -5,7 +5,27 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-12 (checklist 1+2+3 chiusa: poller IV attivo, smoke Alpaca PASS, DVOL backfillato + RIORIENTAMENTO VOL-1H e cleanup disco −4,7 GB + valutazione swap single-arch→distillato e fix di preparazione)
+## 🕒 Ultimo aggiornamento: 2026-06-13 (2 poller Deribit rilanciati post-riavvio + 1° trade SETTLATO −0.0100 BTC + harness baseline del gate `04c_vol_paper_baselines.py` costruito e validato; ⚠ PC SPENTO dall'utente a fine sessione → i 2 processi VANNO RILANCIATI alla ripresa)
+
+## 🔴 RIPRESA 2026-06-13 — RILANCIARE I 2 PROCESSI (PC spento dall'utente)
+
+Il PC è stato spento: i 2 processi detached sono morti. **Primo gesto alla ripresa: rilanciarli** (comandi `Start-Process` in `AVVIO.md`, sezioni "Poller IV Deribit" e "Forward test vol-paper"):
+```powershell
+Start-Process -WindowStyle Hidden python -ArgumentList "scripts/01c_iv_poller.py"
+Start-Process -WindowStyle Hidden python -ArgumentList "scripts/04b_vol_paper.py","--execute"
+```
+Poi verificare salute: `Get-Content logs/iv_poller.log,logs/vol_paper.log -Tail 5` + crescita `data/iv/atm_30h.parquet` e `results/vol_paper/forecasts.parquet`. ⚠ Il forward test ha un BUCO temporale per le ore di PC spento (il calendario forecasts salta quelle candele — atteso, il replay baseline lo gestisce).
+
+## 🟢 HARNESS BASELINE DEL GATE — COSTRUITO E VALIDATO 2026-06-13 (`scripts/04c_vol_paper_baselines.py`, lavoro parallelo mentre il poller matura)
+
+**Cosa fa:** calcola il **gate (2) pre-registrato** (NN batte ENTRAMBE always-long-vol e always-short-vol sullo stesso calendario di expiry → isola il timing dal variance risk premium medio). Metodo: **replay fedele** del loop di `04b` sul log `forecasts.parquet`, con premio dello straddle **ricostruito dai chain snapshot** (`data/iv/chain/*.parquet`, stessa selezione di `pick_straddle`: expiry≈30h, strike ATM, mark call+put) e **delivery price** dall'endpoint pubblico Deribit (cache `results/vol_paper/delivery_cache.json`). Semantica bit-identica a `04b` (max-1, hold-to-expiry, formula inverse-option). Gate (1) P&L medio>0 e (3) hit-rate>0.5 letti dai **trade REALI** in `trades.jsonl`; gate (2) dal replay ricostruito. Solo lettura, GPU-free, zero impatto sui processi. Output: `results/vol_paper/baseline_report.json`.
+
+**Validazione chiave (smoke su 7 righe forecast / 1 trade, NON valutabile n<30):** **NN-ricostruito (−0.00993 BTC) ≈ NN-reale (−0.01001 BTC)** a meno di **8e-5 BTC** (mark-snapshot vs mark-live a 10 min) → la ricostruzione del premio dalle chain è apples-to-apples. Sul singolo trade NN≡LONG (edge +1.16), SHORT vince (+0.00873, vol-crush); scarto LONG↔SHORT = esatto `2·fee=0.0012 BTC`. Il report si scrive comunque con warning "non valutabile" finché i trade NN ricostruiti <30 (pre-reg): **l'harness è pronto, la valutazione del gate matura col tempo-calendario del poller.** Doc sincronizzate (README albero scripts, AVVIO sezione vol-paper). Working tree NON committato.
+
+## ▶️ STATO 2026-06-13 (poller rilanciati in sessione poi PC spento, primo trade chiuso)
+
+- **1° trade SETTLATO** (2026-06-13 15:18 UTC): era lo straddle LONG bootstrap `executed:false` (BTC-13JUN26-63500), delivery 63779.78 (mossa +0.68% ≪ breakeven) → **PnL −0.0100 BTC**. 1 trade su ≥30 del gate: regime di rumore atteso, nessuna conclusione. ⚠ era `executed:false` (calibrazione, non segnale reale); i prossimi saranno ordini testnet reali.
+- **AZIONE ESATTA ALLA RIPRESA:** (1) **rilanciare i 2 processi** (sezione rossa sopra) + salute; (2) ri-girare `04c_vol_paper_baselines.py` quando i trade reali si accumulano (matura da solo); (3) NESSUN intervento sul test fino a ≥30 trade chiusi; (4) lavoro parallelo restante: paper "price+volume enough?" (figure+tabelle dai JSON, stesura §1-§4 — `docs/paper/OUTLINE.md`) e/o B1 order-book L2.
 
 ## 📝 VALUTAZIONE SWAP iTRANSFORMER-5seed → DISTILLATO 3-ARCH SU TARGET VOL (2026-06-12 sera — analisi, NESSUN esperimento avviato)
 
