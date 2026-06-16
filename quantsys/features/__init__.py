@@ -270,8 +270,19 @@ class FeatureBuilder:
 
             step    = (hi_ - lo_) / self.vp_bins
             idx_arr = np.clip(((tp - lo_) / step).astype(int), 0, self.vp_bins - 1)
-            bin_vol = np.zeros(self.vp_bins)
-            np.add.at(bin_vol, idx_arr, vol)
+            # IT: Istogramma volume-per-bin via np.bincount (somma segmentata vettoriale).
+            #     Sostituisce np.zeros+np.add.at: quest'ultimo usa il path unbuffered di NumPy
+            #     (~1 ciclo C/elemento), 10-40× più lento nell'anello interno della VP.
+            #     idx_arr è già clip a [0, vp_bins-1] → interi non negativi; minlength fissa la
+            #     lunghezza a vp_bins anche se l'ultimo bin è vuoto. bincount accumula sempre in
+            #     float64 (come np.zeros), quindi numericamente identico (riordino riduzione ≤1 ULP).
+            # EN: Volume-per-bin histogram via np.bincount (vectorized segmented sum).
+            #     Replaces np.zeros+np.add.at, whose unbuffered path (~1 C loop/element) is
+            #     10-40× slower in the VP inner loop. idx_arr is already clipped to [0, vp_bins-1]
+            #     → non-negative ints; minlength pins the length to vp_bins even if the last bin is
+            #     empty. bincount accumulates in float64 (like np.zeros), so numerically identical
+            #     (reduction reorder ≤1 ULP).
+            bin_vol = np.bincount(idx_arr, weights=vol, minlength=self.vp_bins)
 
             poc_idx   = int(bin_vol.argmax())
             poc_price = lo_ + (poc_idx + 0.5) * step

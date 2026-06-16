@@ -4,6 +4,21 @@
 
 **EN** Algorithmic trading system for BTC/USDT with a heterogeneous ensemble (iTransformer + N-HiTS + TCN+Mamba) and multi-teacher Knowledge Distillation. **Current timeframe: 1h candles** (2026-06-09 pivot; the previous 1m perimeter is backed up, see the pivot section).
 
+## ▶️ Processi in background — rilancio dopo ogni riavvio · Background processes — relaunch after every reboot
+
+🇮🇹 I 3 processi detached attualmente attivi (poller IV Deribit, forward-test vol-paper, recorder order-book L2) **NON sono servizi**: dopo un riavvio del PC muoiono e vanno rilanciati. Usa il percorso `.venv` **ESPLICITO** (evita l'ambiguità `python`→interprete base; vedi nota "venv = stub+worker" in `STATUS.md`). Incolla in PowerShell:
+
+```powershell
+$py = "E:\quantsys_project\.venv\Scripts\python.exe"
+Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01c_iv_poller.py"
+Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/04b_vol_paper.py","--execute"
+Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01d_orderbook_recorder.py"
+```
+
+🇮🇹 **Salute:** conta i processi **LOGICI**, non quelli OS — ogni `.venv\python.exe` è stub+worker = 2 processi OS, atteso 3 logici (confronta i `ParentProcessId`). Crescita attesa: `data/iv/atm_30h.parquet` ~144 righe/g, `results/vol_paper/forecasts.parquet` ~24 righe/g, `data/orderbook/l2_features_*.parquet` ~17k righe/g (a 5s). Log vivi in `logs/quantsys_*.log` (i più recenti per mtime), **non** i redirect `iv_poller.log`/`vol_paper.log`. Dettagli per-processo (flag, output, prerequisiti) nelle sezioni dedicate più sotto: *Poller IV Deribit*, *Recorder order-book L2*, *Forward test vol-paper*. ⚠ NON girare training/inferenza GPU in parallelo a `04b` senza fermarlo (contesa CUDA, 5 modelli residenti).
+
+**EN** The 3 currently-active detached processes (Deribit IV poller, vol-paper forward test, L2 order-book recorder) **are NOT services**: they die on reboot and must be relaunched. Use the **EXPLICIT** `.venv` path (avoids the `python`→base-interpreter ambiguity; see the "venv = stub+worker" note in `STATUS.md`). Paste in PowerShell the block above. **Health:** count **LOGICAL** processes, not OS ones — each `.venv\python.exe` is stub+worker = 2 OS processes, expected 3 logical (compare `ParentProcessId`). Expected growth: `data/iv/atm_30h.parquet` ~144 rows/day, `results/vol_paper/forecasts.parquet` ~24 rows/day, `data/orderbook/l2_features_*.parquet` ~17k rows/day (at 5s). Live logs in `logs/quantsys_*.log` (newest by mtime), **not** the `iv_poller.log`/`vol_paper.log` redirects. Per-process detail (flags, output, prerequisites) in the dedicated sections below: *Deribit IV poller*, *L2 order-book recorder*, *Vol-paper forward test*. ⚠ Do NOT run GPU training/inference in parallel with `04b` without stopping it (CUDA contention, 5 resident models).
+
 ## Stato del sistema (aggiornato 2026-06-09 — pivot timeframe 1m→1h) · System status (updated 2026-06-09 — 1m→1h timeframe pivot)
 
 🇮🇹 Pivot al timeframe **1h** (Strada 1 dopo il KILL del probe cross-sectional 2026-06-06, diagnosi "muro = magnitudine non segno"): a 1h il rapporto costo/σ per barra scende da ~1.9–3.3× a ~0.25–0.42× (il movimento di barra cresce ∝ √Δt, il costo roundtrip è fisso). **Stesso motore, design interval-agnostic**: tutte le conversioni di finestra sono identità a 1m. Razionale econometrico in `TEORIA.md` §1, dettaglio implementativo in `docs/MODEL_IMPROVEMENTS.md` (sezione 2026-06-09).

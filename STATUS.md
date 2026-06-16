@@ -7,6 +7,14 @@
 
 ## 🕒 Ultimo aggiornamento: 2026-06-16 (AUDIT + B1 order-book L2 + riorganizzazione repo)
 
+## 🚀 OTTIMIZZAZIONE P1 (Volume Profile bincount) — IMPLEMENTATA + VERIFICATA 2026-06-16
+
+Eseguito audit diagnostico delle inefficienze computazionali dei percorsi caldi (forward ensemble, FeatureBuilder, loop backtest/walkforward, MC GJR-GARCH, regime refit). **Implementato il solo fix P1** (impatto ampio + bit-equivalente); l'audit completo e lo scaffolding di test sono stati RIMOSSI su richiesta utente (conclusione preservata qui, analisi rigenerabile — coerente col workflow "conclusione in STATUS, codice/doc throwaway via").
+- **P1 (FATTO):** `quantsys/features/__init__.py` `_vp_single` — istogramma VP ora `np.bincount(idx_arr, weights=vol, minlength=vp_bins)` invece di `np.zeros`+`np.add.at` (innermost loop ×3 scale 60/240/1440) → ~10–40× sul singolo hotspot dell'engine feature; si paga al build dataset (01) **e** a ogni build feature live. Firma invariata, numericamente identico (≤1 ULP, accumulo float64). `idx_arr` già `np.clip(0, vp_bins-1)` → prerequisito non-negatività di bincount soddisfatto.
+- **Verifica (fan-out 2 subagent):** (a) audit consumer → SICURO (call chain unica `_vp_single`←`_volume_profile`←`build`; 5 consumer production tutti via API pubblica: `01_download_data`, `01_update_data`, `99_replay`, `04b_vol_paper`, `04_live_signals`; nessun golden bit-exact, nessun altro `np.add.at` in production); (b) suite completa post-fix → **122 passed, 8 skipped, 0 failed** (baseline invariata; il test di parità usato per validare è stato rimosso col cleanup) + smoke VP end-to-end via `build()` OK.
+- **Restanti P2–P7 (NON implementati, rigenerabili dall'audit):** P2 MC `forecast.py` copie host↔device per step (live only). P3 `03_backtest.py` `mdd_stats` loop Python→`np.maximum.accumulate`. P4 buffer rank/quiet `list.pop(0)`→`deque` (flag già FALLITI OOS). P5 `features.build` 3× `df.copy()` (985/1058 deliberati, 965 valutabile). P6 `ensemble.py:360` tensore pesi per `__call__` (cache). P7 `02b` `nanpercentile` per fold (NON bit-per-bit). Esclusi come falsi positivi (CLAUDE.md): refit expanding O(t) del regime, `predict_proba` sequenziale, batch-inference già batchata, `sliding_window_view` già zero-copy.
+- **Working tree:** `quantsys/features/__init__.py` + `STATUS.md` modificati, NON committati.
+
 ## 🗂️ RIORGANIZZAZIONE REPO 2026-06-16 (script per linea, motore condiviso invariato)
 
 Decisione con l'utente: la vol (unico PASS OOS) è la linea pubblicabile su GitHub; il direzionale serve al paper. **NON due repo/cartelle separate** (sarebbe duplicare `quantsys/` → trappola duplicati stale): un repo, motore condiviso, separazione solo degli script non numerati per linea.
