@@ -237,8 +237,9 @@ quantsys_project/
 │   ├── 06_dashboard.py           server dashboard HTTP (Dash)
 │   ├── 07_verify_teacher.py      confronto architetture per selezione teacher
 │   ├── 99_replay_live_vs_training.py   diagnostica BLOCKER #1 (parity live vs training)
-│   ├── dev_vols_*.py             famiglia vol: macro_append + giudici QLIKE/RS (linea attiva)
-│   ├── paper_01_dir_baselines.py baseline econometriche direzionali (paper, vedi docs/paper/)
+│   ├── vol/                      giudici linea vol: dev_vols_macro_append + QLIKE/RS
+│   ├── research/                 paper / negative-control direzionale: paper_01_dir_baselines.py
+│   ├── README.md                 mappa script → linea (shared / vol / direzionale)
 │   └── archive/                  probe chiusi (xs cross-sectional KILL, step0 σ-recal)
 ├── tests/                        suite pytest (features, NLL, PipelineState, regression sui fix recenti)
 ├── dashboard/                    React dashboard (artifact per claude.ai)

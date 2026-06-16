@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from quantsys.macro.regime import MacroNormalizer     # noqa: E402
 from quantsys.utils import setup_logging              # noqa: E402
 from quantsys.utils.atomic_save import atomic_save_npz  # noqa: E402

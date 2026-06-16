@@ -23,7 +23,7 @@
 - **Numeri/Numbers:** mean cross-sectional IC +0.0138, t=1.86 (<2), ICIR 0.035, 4/5 sotto-periodi positivi; spread top-bottom +1.5 bps/step vs ~26 bps costo → netto −43%/ann. **Il muro è la MAGNITUDINE, non il segno.**
 
 ### 1d. Baseline econometriche direzionali (1h) · Directional econometric baselines (1h) — **NUOVO 2026-06-12**
-- **Artefatto/Artifact:** `results/paper/dir_baselines_1h_{val,test}.json` ✓; script `scripts/paper_01_dir_baselines.py`; pre-registrazione in `STATUS.md` 2026-06-12 sera.
+- **Artefatto/Artifact:** `results/paper/dir_baselines_1h_{val,test}.json` ✓; script `scripts/research/paper_01_dir_baselines.py`; pre-registrazione in `STATUS.md` 2026-06-12 sera.
 - **Numeri/Numbers** (soglia 2/√n = 0.025):
 
 | Baseline | ρ val | ρ test | signDA val | signDA test |
@@ -40,7 +40,7 @@
 ## CLAIM 2 — La varianza (momento pari, 2°) è predicibile OOS, e solo a risoluzione 1h · Variance (even moment, 2nd) is predictable OOS, and only at 1h resolution
 
 ### 2a. VOL-S 1h — PASS (positive control del paper / the paper's positive control)
-- **Artefatto/Artifact:** `results/vols/qlike_report_1h_{val,test}.json` ✓; modelli in `models/backup_1h_vols/` (= `models/itransformer/` correnti); giudice `scripts/dev_vols_qlike.py`.
+- **Artefatto/Artifact:** `results/vols/qlike_report_1h_{val,test}.json` ✓; modelli in `models/backup_1h_vols/` (= `models/itransformer/` correnti); giudice `scripts/vol/dev_vols_qlike.py`.
 - **Numeri/Numbers:** QLIKE test NN **0.2572** vs HAR-RV 0.3681 vs naive 0.8067 → **NN/HAR = 0.699 (−30%)**; val 0.744 → test 0.699 **coerenti** (niente anti-correlazione). Test: Spearman +0.4532 (p≈0), DA 71.3%, ICIR +3.56 su 5 sotto-periodi, coverage 95.2%.
 
 ### 2b. Verifica cross-risoluzione 1m — FAIL (perimetro della claim / the claim's perimeter)
@@ -51,7 +51,7 @@
 
 ## CLAIM 3 — L'asimmetria firmata della varianza (oggetto dispari) è impredicibile per TUTTI · The signed variance asymmetry (odd object) is unpredictable for ALL
 
-- **Artefatto/Artifact:** `results/vols/rs_report_1h_{val,test}.json` ✓; giudice `scripts/dev_vols_rs_judge.py`; target `log(RS⁺/RS⁻)` (Barndorff-Nielsen–Kinnebrock–Shephard 2010; Patton–Sheppard 2015).
+- **Artefatto/Artifact:** `results/vols/rs_report_1h_{val,test}.json` ✓; giudice `scripts/vol/dev_vols_rs_judge.py`; target `log(RS⁺/RS⁻)` (Barndorff-Nielsen–Kinnebrock–Shephard 2010; Patton–Sheppard 2015).
 - **Numeri/Numbers (MSE log-ratio, test):** NN 0.99366, HAR-RS 0.99843, train-mean **0.99387**, naive 1.89025 → **HAR-RS fa peggio della costante**; NN/HAR 0.9952 (gate ≤0.95 fallito); signDA NN 0.459 < 0.5. ρ val +0.078 → test −0.038 (stesso flip dei momenti dispari).
 - **Punto chiave/Key point:** chiude il quadrato: pari predicibile / dispari no, *anche dentro la famiglia vol*.
 

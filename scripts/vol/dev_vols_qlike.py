@@ -35,7 +35,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg  # noqa: E402
 
 setup_logging()

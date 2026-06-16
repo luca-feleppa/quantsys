@@ -5,7 +5,16 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-16 (AUDIT completo + avvio B1 order-book L2)
+## 🕒 Ultimo aggiornamento: 2026-06-16 (AUDIT + B1 order-book L2 + riorganizzazione repo)
+
+## 🗂️ RIORGANIZZAZIONE REPO 2026-06-16 (script per linea, motore condiviso invariato)
+
+Decisione con l'utente: la vol (unico PASS OOS) è la linea pubblicabile su GitHub; il direzionale serve al paper. **NON due repo/cartelle separate** (sarebbe duplicare `quantsys/` → trappola duplicati stale): un repo, motore condiviso, separazione solo degli script non numerati per linea.
+- **Spostati** (`git mv`): `dev_vols_qlike.py`/`dev_vols_rs_judge.py`/`dev_vols_macro_append.py` → `scripts/vol/`; `paper_01_dir_baselines.py` → `scripts/research/`. ⚠ Fix `Path(__file__).resolve().parents[1]→parents[2]` in tutti e 4 (un livello più in profondità); lanciare dalla root (path relativi CWD-relativi). Smoke OK (import quantsys risolto, `paper_01` gira dalla nuova posizione).
+- **Spine numerato `00→99`: invariato** (è la *fase*, non la linea; `02_train` è condiviso, target da `config.features.target_type`). Nessun rinumero → zero riferimenti rotti in `run_all.py`.
+- **Nuovo `scripts/README.md`:** mappa bilingue script→linea (shared / vol / direzionale).
+- **Doc sincronizzati** (path `scripts/vol/`·`scripts/research/`): CLAUDE.md (§NOMENCLATURA + STATO NOTO), README.md (albero), AVVIO.md, TEORIA.md, config/default.yaml, docs/MODEL_IMPROVEMENTS.md, docs/paper/{OUTLINE,RESULTS_MAP}.md. STATUS storico lasciato com'è (log). `.gitignore` già copre data/models/results/logs/secrets → nessun rischio di pubblicare artefatti.
+- **Pubblicazione futura (NON ora):** vol-only su GitHub via README che mette la vol in primo piano + eventuale export `git subtree split` (mai branch divergente); pesi vol PASS via release asset (`models/` è gitignored).
 
 ## 🟢 AUDIT COMPLETO 2026-06-16 — esito + B1 AVVIATO
 

@@ -69,7 +69,7 @@
 ### Appendices
 - A. Pre-registration excerpts (verbatim, dated) + outcome ledger (all kills listed).
 - B. Feature list (104) + anti-lookahead engineering details.
-- C. Reproducibility: repo layout, judges (`dev_vols_qlike.py`, `dev_vols_rs_judge.py`, `paper_01_dir_baselines.py`), seeds, hardware, runtimes.
+- C. Reproducibility: repo layout, judges (`scripts/vol/dev_vols_qlike.py`, `scripts/vol/dev_vols_rs_judge.py`, `scripts/research/paper_01_dir_baselines.py`), seeds, hardware, runtimes.
 
 ---
 

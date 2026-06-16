@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from quantsys.utils import setup_logging, load_config, PipelineState           # noqa: E402
 from quantsys.features import FeatureBuilder, LIVE_DROP_FEATURES               # noqa: E402
 

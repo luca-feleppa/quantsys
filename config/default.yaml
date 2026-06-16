@@ -64,16 +64,16 @@ features:
   # IT: TARGET SPERIMENTALI famiglia vol (pre-registrati in STATUS.md):
   #     "ret"          = path direzionale legacy (bit-invariato, default codice)
   #     "log_rv"       = log realized variance Σr² su h barre (vol-S 2026-06-10:
-  #                      PASS a 1h, FAIL a 1m — giudice scripts/dev_vols_qlike.py)
+  #                      PASS a 1h, FAIL a 1m — giudice scripts/vol/dev_vols_qlike.py)
   #     "log_rs_ratio" = asimmetria semivarianza log(RS⁺/RS⁻) su h barre (probe
-  #                      2026-06-11 — giudice scripts/dev_vols_rs_judge.py).
+  #                      2026-06-11 — giudice scripts/vol/dev_vols_rs_judge.py).
   #     NO backtest trading sui modelli vol.
   # EN: EXPERIMENTAL vol-family targets (pre-registered in STATUS.md):
   #     "ret"          = legacy directional path (bit-invariant, code default)
   #     "log_rv"       = log realized variance Σr² over h bars (vol-S 2026-06-10:
-  #                      PASS at 1h, FAIL at 1m — judge scripts/dev_vols_qlike.py)
+  #                      PASS at 1h, FAIL at 1m — judge scripts/vol/dev_vols_qlike.py)
   #     "log_rs_ratio" = semivariance asymmetry log(RS⁺/RS⁻) over h bars (probe
-  #                      2026-06-11 FAIL — judge scripts/dev_vols_rs_judge.py).
+  #                      2026-06-11 FAIL — judge scripts/vol/dev_vols_rs_judge.py).
   #     NO trading backtest on vol models.
   target_type: log_rv
   normalize: true
