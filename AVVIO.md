@@ -15,6 +15,18 @@ Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FileP
 Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01d_orderbook_recorder.py"
 ```
 
+🇮🇹 **Stop** — ferma tutti e 3 (mirato: il match è sulla command line → cattura sia stub che worker, non tocca altri `python.exe`; `-Force` perché sono `-WindowStyle Hidden`):
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+  Where-Object { $_.CommandLine -match '01c_iv_poller|04b_vol_paper|01d_orderbook_recorder' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+🇮🇹 Per fermarne **uno solo**, restringi il regex (es. `'01d_orderbook_recorder'`). Verifica: rilancia lo stesso `Get-CimInstance ... | Select-Object ProcessId` senza il `ForEach-Object` → deve tornare vuoto. ⚠ Stoppare `04b_vol_paper`/`01c_iv_poller` interrompe la raccolta del forward test (buchi temporali tollerati per design).
+
+**EN** **Stop** all 3 (targeted: the match is on the command line → catches both stub and worker, leaves other `python.exe` untouched; `-Force` because they are `-WindowStyle Hidden`): block above. To stop **a single one**, narrow the regex (e.g. `'01d_orderbook_recorder'`). Verify: re-run the same `Get-CimInstance ... | Select-Object ProcessId` without the `ForEach-Object` → must come back empty. ⚠ Stopping `04b_vol_paper`/`01c_iv_poller` interrupts the forward-test collection (time gaps tolerated by design).
+
 🇮🇹 **Salute:** conta i processi **LOGICI**, non quelli OS — ogni `.venv\python.exe` è stub+worker = 2 processi OS, atteso 3 logici (confronta i `ParentProcessId`). Crescita attesa: `data/iv/atm_30h.parquet` ~144 righe/g, `results/vol_paper/forecasts.parquet` ~24 righe/g, `data/orderbook/l2_features_*.parquet` ~17k righe/g (a 5s). Log vivi in `logs/quantsys_*.log` (i più recenti per mtime), **non** i redirect `iv_poller.log`/`vol_paper.log`. Dettagli per-processo (flag, output, prerequisiti) nelle sezioni dedicate più sotto: *Poller IV Deribit*, *Recorder order-book L2*, *Forward test vol-paper*. ⚠ NON girare training/inferenza GPU in parallelo a `04b` senza fermarlo (contesa CUDA, 5 modelli residenti).
 
 **EN** The 3 currently-active detached processes (Deribit IV poller, vol-paper forward test, L2 order-book recorder) **are NOT services**: they die on reboot and must be relaunched. Use the **EXPLICIT** `.venv` path (avoids the `python`→base-interpreter ambiguity; see the "venv = stub+worker" note in `STATUS.md`). Paste in PowerShell the block above. **Health:** count **LOGICAL** processes, not OS ones — each `.venv\python.exe` is stub+worker = 2 OS processes, expected 3 logical (compare `ParentProcessId`). Expected growth: `data/iv/atm_30h.parquet` ~144 rows/day, `results/vol_paper/forecasts.parquet` ~24 rows/day, `data/orderbook/l2_features_*.parquet` ~17k rows/day (at 5s). Live logs in `logs/quantsys_*.log` (newest by mtime), **not** the `iv_poller.log`/`vol_paper.log` redirects. Per-process detail (flags, output, prerequisites) in the dedicated sections below: *Deribit IV poller*, *L2 order-book recorder*, *Vol-paper forward test*. ⚠ Do NOT run GPU training/inference in parallel with `04b` without stopping it (CUDA contention, 5 resident models).
