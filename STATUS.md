@@ -5,16 +5,40 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-13 (2 poller Deribit rilanciati post-riavvio + 1° trade SETTLATO −0.0100 BTC + harness baseline del gate `04c_vol_paper_baselines.py` costruito e validato; ⚠ PC SPENTO dall'utente a fine sessione → i 2 processi VANNO RILANCIATI alla ripresa)
+## 🕒 Ultimo aggiornamento: 2026-06-16 (AUDIT completo + avvio B1 order-book L2)
 
-## 🔴 RIPRESA 2026-06-13 — RILANCIARE I 2 PROCESSI (PC spento dall'utente)
+## 🟢 AUDIT COMPLETO 2026-06-16 — esito + B1 AVVIATO
 
-Il PC è stato spento: i 2 processi detached sono morti. **Primo gesto alla ripresa: rilanciarli** (comandi `Start-Process` in `AVVIO.md`, sezioni "Poller IV Deribit" e "Forward test vol-paper"):
+**Salute codice: VERDE.** `pytest tests/` → **122 passed, 8 skipped, 0 failed** (gli 8 skip sono attesi: test parity live + 3 in `test_recent_fixes` dipendono dall'npz eliminato col cleanup 06-12, non regressioni). Working tree pulito, tutto committato (harness `04c` in `03d15cf`). Guard scientifici critici (z-score denorm, interval/horizon config↔state, membri stale ensemble) coperti dai regression test e verdi.
+
+**⚠ LEZIONE INFRASTRUTTURALE — venv = stub+worker (NON sono processi duplicati).** Su questo host `.venv\Scripts\python.exe` è uno **stub** che delega all'interprete base (Python 3.12 di sistema): **1 processo logico = 2 processi OS** (stub `.venv` = padre, worker `python.exe` di sistema = figlio; uccidere il worker fa cadere lo stub). Quindi `Get-Process python` che mostra 4 processi con `04b`+`01c` ×2 = **1 poller + 1 vol_paper**, NON duplicati. Diagnosi corretta: confrontare `ParentProcessId` (figlio sys → padre .venv) e contare i processi LOGICI, non quelli OS. (In questa sessione ho inizialmente mis-diagnosticato una "race condition" e riavviato i 2 processi: restart pulito, nessun danno — forecast append-only dedup, vol_paper senza posizione aperta — ma evitabile.)
+
+**Forward test vol-paper:** 2 trade settlati (#1 −0.01001, #2 +0.00026 BTC), n=2 ≪ 30 → nessuna conclusione (rumore atteso). ⚠ **Velocità campione: ~2 trade in 4 giorni → i 30 del gate arrivano in ~7-8 settimane** (entry rara: `edge>0.25` scatta di rado). I 2 processi (poller IV + vol_paper) **rilanciati e sani** in questa sessione (coppia `.venv`, log vivi = `logs/quantsys_*.log` NON i redirect `iv_poller.log`/`vol_paper.log`).
+
+**🚀 B1 ORDER-BOOK L2 — AVVIATO 2026-06-16 (deciso con l'utente: GO solo se API gratuite bastano → confermato).** Binance spot `/api/v3/depth` è **free, no-auth, 1000 livelli/lato, weight 50/call** (a 5s = 600 weight/min ≪ 1200) — nessun servizio a pagamento. Come per la IV, lo **storico L2 NON è gratis (Tardis)** → raccolta FORWARD, è il collo di bottiglia temporale.
+- **`scripts/01d_orderbook_recorder.py`** (famiglia dati, gemello di `01c`): loop REST snapshot, append-only ATOMICO + dedup su `timestamp`, output `data/orderbook/l2_features_YYYYMMDD.parquet` (1 file/giorno). Persiste **feature microstrutturali derivate** (mid, microprice+tilt, spread_bps, imbalance L1/5/10/20, depth cumulata in bande 5/10/25/50 bps, total qty, **OFI best-level** cross-tick Cont-Kukanov-Stoikov) **+ top-25 livelli raw/lato** come list-column (rete di sicurezza: feature future ri-derivabili senza ri-raccogliere → schema NON bloccato). Modi `--once`/`--seconds N`/`--symbol`/`--levels`.
+- **Smoke + avvio PASS:** feature sane, list-column round-trip OK, OFI valorizzato dal 2° tick del processo persistente (NaN in `--once` per design: stato `_PREV` per-processo). **Recorder detached attivo** (cadenza 5s) — ⚠ NON è un servizio, rilanciare dopo riavvio (Start-Process in AVVIO.md).
+- **Prossimo passo B1 (NON ora):** dopo settimane di accumulo, integrare le feature L2 come nuovo stream nel `FeatureBuilder` (vincoli parity live↔training di BLOCKER #1 + causalità) e **pre-registrare** un gate direzionale OOS prima di modellare.
+
+## 📚 VALUTAZIONE 3 PAPER 2026-06-16 (fan-out) → tutti KILL come alpha; codice di test RIMOSSO
+
+Valutati 3 paper su richiesta utente; conclusioni preservate qui, **scaffolding di test rimosso** (cleanup richiesto dall'utente — coerente col workflow "conclusione in STATUS/memoria, codice rigenerabile via").
+1. **DRL + Evolutionary Strategies** (CIT 2024): KILL secco. Ottimizzatore ES al posto di SGD su **OHLCV puro**, zero costi, mesi cherry-picked, nessuno Sharpe. Nessuna informazione nuova → dentro la dead-zone già provata. Nessun codice prodotto.
+2. **News-Aware Direct RL** (arXiv:2510.19173): KILL il metodo (DDQN/GRPO instabili; il loro miglior risultato è il modello SENZA news, zero costi, single-regime bull). Sopravvive solo l'**idea**: news = terza fonte di informazione NUOVA (accanto a L2/IV) → eventuale data-clock futuro (poller CryptoPanic, gate-first sul vol). Nessun codice prodotto.
+3. **Separation Index** (Kalhor arXiv:2406.17083): KILL come alpha (criterio in-sample su target direzionale). Usato come **diagnostico** ha dato il risultato netto sotto. Script `paper_02_separation_index.py` + output rimossi post-valutazione (ricostruibili da [[session-2026-06-16-separation-index]]).
+
+**Risultato SI (preservato — figura per il paper "price+volume enough?"): con embargo temporale ±h nel 1-NN** (rimuove il gemello adiacente col target forward sovrapposto, stessa trappola di [[ic-metric-fix]]): **DIREZIONE test 0.701 raw → 0.495 embargo = floor permutazione 0.504** (separabilità direzionale OOS NULLA); **VOL-BUCKET test 0.826 raw → 0.672 embargo ≫ floor** (il livello di vol resta separabile OOS). Operazionalizza la dicotomia momenti pari/dispari. **Risposta alla domanda "SI feature-selector per alzare l'OOS del distill":** sui RENDIMENTI inutile a priori (separabilità=floor); sulla VOL unico caso non condannato ma headroom incerto (il vol-model già batte HAR del 30%) → non prioritario. Lezione metodologica blindata: ogni metrica di predicibilità su target forward sovrapposto richiede embargo ≥ h (vale anche per le future feature L2 di B1).
+
+## ▶️ RIPRESA 2026-06-16 — 3 PROCESSI DA TENERE VIVI (rilanciare dopo ogni riavvio)
+
+Dopo un riavvio del PC i 3 processi detached muoiono — rilanciarli (path `.venv` ESPLICITO per evitare l'ambiguità `python`→interprete):
 ```powershell
-Start-Process -WindowStyle Hidden python -ArgumentList "scripts/01c_iv_poller.py"
-Start-Process -WindowStyle Hidden python -ArgumentList "scripts/04b_vol_paper.py","--execute"
+$py = "E:\quantsys_project\.venv\Scripts\python.exe"
+Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01c_iv_poller.py"
+Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/04b_vol_paper.py","--execute"
+Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01d_orderbook_recorder.py"
 ```
-Poi verificare salute: `Get-Content logs/iv_poller.log,logs/vol_paper.log -Tail 5` + crescita `data/iv/atm_30h.parquet` e `results/vol_paper/forecasts.parquet`. ⚠ Il forward test ha un BUCO temporale per le ore di PC spento (il calendario forecasts salta quelle candele — atteso, il replay baseline lo gestisce).
+Salute: contare i processi LOGICI (ParentProcessId, vedi lezione sopra) = atteso 3; crescita `data/iv/atm_30h.parquet` (~144 righe/g), `results/vol_paper/forecasts.parquet` (~24 righe/g), `data/orderbook/l2_features_*.parquet` (~17k righe/g a 5s); log vivi in `logs/quantsys_*.log` (i più recenti per mtime). ⚠ Buchi temporali nei calendari per le ore di PC spento (attesi).
 
 ## 🟢 HARNESS BASELINE DEL GATE — COSTRUITO E VALIDATO 2026-06-13 (`scripts/04c_vol_paper_baselines.py`, lavoro parallelo mentre il poller matura)
 
