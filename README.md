@@ -225,6 +225,7 @@ quantsys_project/
 │   ├── 01_update_data.py         aggiornamento incrementale (solo delta candele)
 │   ├── 01b_download_macro.py     FRED + yFinance → RegimeMarkovBTC su candele BTC → update dataset
 │   ├── 01c_iv_poller.py          poller IV Deribit (chain opzioni BTC + DVOL) → data/iv/
+│   ├── 01d_orderbook_recorder.py recorder order-book L2 Binance (B1: microstruttura — OFI/imbalance/depth) → data/orderbook/
 │   ├── 02_train.py               training con --arch, --distill, ensemble
 │   ├── 02b_walkforward_validate.py   walk-forward purged k-fold con embargo
 │   ├── 02c_optuna_search.py      Bayesian hyperparameter search (solo LSTM)
