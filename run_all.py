@@ -669,13 +669,12 @@ def phase_dashboard(args, live_proc: subprocess.Popen = None) -> None:
   Dashboard attiva → {DASHBOARD_URL}
   PID dashboard   : {dash_proc.pid}
 
-  Tab disponibili:
-    · Backtest     — equity curve, metriche, trade table
-    · Live Segnali — segnali in tempo reale (aggiornamento ogni 5s)
-    · Equity Curve — P&L completo e distribuzione
+  QUANTSYS · Deribit Options Risk Terminal (dati Deribit pubblici, live):
+    · Volatility Surface — superficie IV 3D, smile per scadenza, term structure ATM
+    · Option Chain       — chain call/put con Greche calcolate live (Black-Scholes)
+    · Risk & Greeks      — OI per strike, max-pain, Greche aggregate pesate OI, DVOL
 
-  Usa il pulsante "⚡ Aggiorna" nella dashboard per rieseguire la pipeline ML.
-  Premi  Ctrl+C  per fermare tutto.
+  Risk terminal di mercato, indipendente dalla pipeline ML. Premi Ctrl+C per fermare.
 """)
 
     try:
@@ -856,14 +855,13 @@ def main():
         step_ok(f"Interval overlay attivo: config/interval/{args.interval}.yaml (QUANTSYS_INTERVAL={args.interval})")
 
     if args.only_dashboard:
-        live_proc = None
-        if not args.skip_live:
-            live_proc = phase_live(args)
-        if not args.skip_analyze:
-            phase_analyze(args)
-            t_analyze = threading.Thread(target=_analyze_loop, args=(args,), daemon=True)
-            t_analyze.start()
-        phase_dashboard(args, live_proc)
+        # IT: la dashboard è ora il Deribit Options Risk Terminal, indipendente
+        #     dalla pipeline ML (dati di mercato Deribit live) → nessun feed live
+        #     né analisi segnali da avviare ("nessun calcolo", come da help).
+        # EN: the dashboard is now the Deribit Options Risk Terminal, decoupled
+        #     from the ML pipeline (live Deribit market data) → no live feed nor
+        #     signal analysis to start ("no computation", per the help text).
+        phase_dashboard(args)
         return
 
     # ── Fase 1: dati ─────────────────────────────────────────────────────────

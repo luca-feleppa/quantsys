@@ -1,0 +1,23 @@
+# IT: Config CAFN — Causal Attention Flow Network (probe pre-registrato, inerte).
+#     Overlay opzionale letto da scripts/02d_cafn_joint_train.py (blocco `cafn`).
+#     NON usato dalla pipeline production (02_train/03_backtest/04_live): il
+#     coordinatore CAFN vive solo nel trainer congiunto 02d, output in models/cafn/.
+# EN: CAFN config — Causal Attention Flow Network (pre-registered, inert probe).
+#     Optional overlay read by scripts/02d_cafn_joint_train.py (`cafn` block).
+#     NOT used by the production pipeline (02_train/03_backtest/04_live): the CAFN
+#     coordinator lives only in the joint trainer 02d, output under models/cafn/.
+cafn:
+  # IT: dimensioni del coordinatore CAFN (encoder a monte dei 3 modelli).
+  # EN: CAFN coordinator dimensions (encoder upstream of the 3 models).
+  cafn_d_model: 64          # IT: dim interna attention | EN: internal attention dim
+  cafn_layers: 2            # IT: blocchi causali | EN: causal blocks
+  d_latent: 16              # IT: dim latente passato ai modelli | EN: latent dim fed downstream
+  lambda_causal: 0.1        # IT: peso penalità causale nella loss congiunta | EN: causal-penalty weight in joint loss
+
+  # IT: dimensione (ridotta) dei 3 modelli a valle nel setup congiunto: tenuta
+  #     piccola per la memoria (3 modelli + CAFN insieme su 8GB → OOM a dim piene).
+  # EN: (reduced) size of the 3 downstream models in the joint setup: kept small
+  #     for memory (3 models + CAFN together on 8GB → OOM at full size).
+  cafn_downstream_d_model: 64
+  loss_type: t_student      # IT: t_student → (mu,ls2,lnu); MSE su mu nel trainer | EN: t_student → (mu,ls2,lnu); MSE on mu in the trainer
+  n_output_experts: 1

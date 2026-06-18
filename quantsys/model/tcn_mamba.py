@@ -457,9 +457,18 @@ class QuantTCNMamba(nn.Module):
 
     # IT: Forward: TCN + Mamba in parallelo, fusi via gating, poi heads.
     # EN: Forward: TCN + Mamba in parallel, fused via gating, then heads.
-    def forward(self, x: torch.Tensor, x_macro=None) -> tuple:
+    def forward(self, x: torch.Tensor, x_macro=None,
+                latent: torch.Tensor = None) -> tuple:
         # IT: x_macro accettato per API uniforme ma ignorato (no macro qui).
+        #     latent = latente CAFN OPZIONALE (B,T,d_latent) concatenato sull'asse
+        #     feature. latent=None → path identico (parity). Costruire il modulo
+        #     con n_features+=d_latent se usato.
         # EN: x_macro accepted for API uniformity but ignored (no macro here).
+        #     latent = OPTIONAL CAFN latent (B,T,d_latent) concatenated on the
+        #     feature axis. latent=None → identical path (parity). Build the module
+        #     with n_features+=d_latent if used.
+        if latent is not None:
+            x = torch.cat([x, latent], dim=-1)
         _revin_stats = None
         if self.use_revin:
             x, _revin_stats = self.revin.normalize(x)

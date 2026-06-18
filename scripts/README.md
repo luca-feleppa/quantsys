@@ -15,10 +15,12 @@
 | `01c_iv_poller.py` | poller IV Deribit (forward) → `data/iv/` | vol (gate NN-RV vs IV) |
 | `01d_orderbook_recorder.py` | recorder order-book L2 Binance (forward) → `data/orderbook/` | B1 direzionale (raccolta) |
 | `02_train.py` · `02b_walkforward_validate.py` · `02c_optuna_search.py` | training / validazione | shared (target da config) |
+| `02d_cafn_joint_train.py` | training CONGIUNTO CAFN + 3 modelli (probe pre-registrato, inerte; output `models/cafn/`) | research (coordinatore) |
 | `03_backtest.py` | backtest trading | **direzionale** (no senso su vol) |
 | `04_live_signals.py` | live / paper trading WS | **direzionale** |
 | `04b_vol_paper.py` · `04c_vol_paper_baselines.py` | forward test vol + gate baselines | **vol** |
-| `05_analyze_signals.py` · `06_dashboard.py` · `07_verify_teacher.py` | analisi / dashboard / teacher | shared |
+| `05_analyze_signals.py` · `07_verify_teacher.py` | analisi segnali / confronto teacher | shared |
+| `06_dashboard.py` | Deribit Options Risk Terminal (vol surface + Greche + risk) — dati Deribit pubblici, indipendente dalla pipeline ML | standalone (market data) |
 | `99_replay_live_vs_training.py` | diagnostica parity (BLOCKER #1) | shared |
 
 ## Sottocartelle per linea · Per-line subfolders

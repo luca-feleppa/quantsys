@@ -138,6 +138,14 @@ python scripts/99_replay_live_vs_training.py    # diagnostica BLOCKER #1
 
 ---
 
+## Dashboard — Deribit Options Risk Terminal · Deribit Options Risk Terminal
+
+🇮🇹 `scripts/06_dashboard.py` è un **terminale istituzionale per l'analisi delle opzioni crypto**, server HTTP single-file + SPA (Plotly.js), GPU-free e **indipendente dalla pipeline ML**. Si connette ai dati **pubblici Deribit** (REST, no-auth): prezzo indice spot BTC + chain opzioni completa (mark/bid/ask, `mark_iv`, open interest, volume, forward per-expiry) + indice DVOL. Calcola le **Greche in tempo reale** sull'intera option chain (Black-Scholes forward-measure, r=0, convenzione USD: Δ delta, Γ gamma, ν vega per +1% vol, Θ theta/giorno, ρ). Tre viste: **Volatility Surface** (superficie IV 3D su griglia di moneyness K/F × giorni, smile per scadenza, term structure ATM), **Option Chain** (call/put a doppio lato con Greche live, strike ATM evidenziato), **Risk & Greeks** (OI per strike call vs put, max-pain, Greche aggregate pesate per OI, put/call ratio, DVOL). Avvio: `python scripts/06_dashboard.py` o `python run_all.py --only-dashboard` → `http://localhost:8050`. Sorgente underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH).
+
+**EN** `scripts/06_dashboard.py` is an **institutional crypto-options analytics terminal**, single-file HTTP server + SPA (Plotly.js), GPU-free and **decoupled from the ML pipeline**. It connects to **Deribit public** data (REST, no-auth): BTC spot index price + full option chain (mark/bid/ask, `mark_iv`, open interest, volume, per-expiry forward) + DVOL index. It computes **Greeks in real time** over the whole chain (Black-Scholes forward measure, r=0, USD convention: Δ delta, Γ gamma, ν vega per +1% vol, Θ theta/day, ρ). Three views: **Volatility Surface** (3D IV surface on a moneyness K/F × days grid, per-expiry smile, ATM term structure), **Option Chain** (two-sided call/put with live Greeks, ATM strike highlighted), **Risk & Greeks** (OI by strike call vs put, max-pain, OI-weighted aggregate Greeks, put/call ratio, DVOL). Launch: `python scripts/06_dashboard.py` or `python run_all.py --only-dashboard` → `http://localhost:8050`. Underlying source via `config/default.yaml → dashboard.options_currency` (BTC|ETH).
+
+---
+
 ## Architettura · Architecture
 
 ```
@@ -229,12 +237,13 @@ quantsys_project/
 │   ├── 02_train.py               training con --arch, --distill, ensemble
 │   ├── 02b_walkforward_validate.py   walk-forward purged k-fold con embargo
 │   ├── 02c_optuna_search.py      Bayesian hyperparameter search (solo LSTM)
+│   ├── 02d_cafn_joint_train.py   CAFN: coordinatore causale + training congiunto 3 modelli (probe)
 │   ├── 03_backtest.py            backtest + stress test + bootstrap CI
 │   ├── 04_live_signals.py        feed live WebSocket + paper trading (direzionale)
 │   ├── 04b_vol_paper.py          forward test vol: NN-RV vs IV → straddle testnet Deribit
 │   ├── 04c_vol_paper_baselines.py  baseline always-long/short-vol (gate pre-reg) dai chain snapshot
 │   ├── 05_analyze_signals.py     analisi sessione live
-│   ├── 06_dashboard.py           server dashboard HTTP (Dash)
+│   ├── 06_dashboard.py           Deribit Options Risk Terminal (HTTP single-file + Plotly)
 │   ├── 07_verify_teacher.py      confronto architetture per selezione teacher
 │   ├── 99_replay_live_vs_training.py   diagnostica BLOCKER #1 (parity live vs training)
 │   ├── vol/                      giudici linea vol: dev_vols_macro_append + QLIKE/RS
@@ -242,7 +251,6 @@ quantsys_project/
 │   ├── README.md                 mappa script → linea (shared / vol / direzionale)
 │   └── archive/                  probe chiusi (xs cross-sectional KILL, step0 σ-recal)
 ├── tests/                        suite pytest (features, NLL, PipelineState, regression sui fix recenti)
-├── dashboard/                    React dashboard (artifact per claude.ai)
 ├── data/                         generato (gitignored)
 ├── models/                       checkpoint per architettura (gitignored)
 ├── results/                      backtest + segnali live per architettura (gitignored)

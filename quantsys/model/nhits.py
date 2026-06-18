@@ -272,16 +272,24 @@ class QuantNHiTS(nn.Module):
 
     # IT: Forward gerarchico: residual decomp, somma forecast latenti, output.
     # EN: Hierarchical forward: residual decomp, sum latent forecasts, output.
-    def forward(self, x: torch.Tensor, x_macro: torch.Tensor = None) -> tuple:
+    def forward(self, x: torch.Tensor, x_macro: torch.Tensor = None,
+                latent: torch.Tensor = None) -> tuple:
         """Forward.
 
         x:       (B, T, F)
         x_macro: (B, n_macro) opzionale
+        latent:  (B, T, d_latent) latente CAFN OPZIONALE / OPTIONAL CAFN latent
 
         Returns:
             (mu, log_sigma2, log_nu) shape (B,) each
             o (..., dir_logits) se use_multitask.
         """
+        # IT: latente CAFN concatenato sull'asse feature. latent=None → identico
+        #     (parity). Costruire il modulo con n_features+=d_latent se usato.
+        # EN: CAFN latent concatenated on the feature axis. latent=None → identical
+        #     (parity). Build the module with n_features+=d_latent if used.
+        if latent is not None:
+            x = torch.cat([x, latent], dim=-1)
         _revin_stats = None
         if self.use_revin:
             x, _revin_stats = self.revin.normalize(x)

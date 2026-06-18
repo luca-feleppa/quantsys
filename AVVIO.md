@@ -139,7 +139,7 @@ python run_all.py --arch tcnmamba
 python run_all.py --arch lstm                        # backward compat
 python run_all.py --distill                          # Knowledge Distillation multi-teacher
 python run_all.py --distill --teacher itransformer   # forza teacher
-python run_all.py --only-dashboard                   # solo dashboard + live
+python run_all.py --only-dashboard                   # solo Options Risk Terminal (no ML)
 python scripts/07_verify_teacher.py                  # confronto architetture
 python scripts/99_replay_live_vs_training.py         # diagnostica BLOCKER #1
 set QUANTSYS_ARCH=lstm
@@ -208,11 +208,7 @@ python scripts/07_verify_teacher.py
 Tabella comparativa: param count, forward time, Sharpe, WR, n trade, max DD, total return per ogni arch con `best_model.pt`. In alternativa:
 - `models/{arch}/config.json` — `best_val_loss`, scaler, n_params
 - `models/{arch}/history.json` — curva loss
-- `results/{arch}/dashboard_results.json` — metriche backtest
-
-🇮🇹 Oppure dalla dashboard: `python run_all.py --only-dashboard` poi dropdown arch nel browser (`/api/archs` rileva quelle con `dashboard_results.json`).
-
-**EN** Or from the dashboard: `python run_all.py --only-dashboard` then arch dropdown (`/api/archs` auto-detects archs with `dashboard_results.json`).
+- `results/{arch}/dashboard_results.json` — metriche backtest (export di `03_backtest.py`; non più letto dalla dashboard, che ora è il terminale opzioni Deribit)
 
 ---
 
@@ -327,7 +323,7 @@ python run_all.py --distill                # full + distillation
 | `--skip-backtest` | Salta backtest |
 | `--skip-live` | No feed live WebSocket |
 | `--skip-analyze` | Salta `05_analyze_signals.py` |
-| `--only-dashboard` | Solo dashboard + live, no ML |
+| `--only-dashboard` | Solo Options Risk Terminal, no ML né live |
 | `--no-browser` | Non aprire browser |
 | `--force-download` | Ri-scarica + forza retrain |
 | `--max-model-age-days N` | Retrain se modello > N giorni |
@@ -344,7 +340,7 @@ python run_all.py --distill                # full + distillation
 | `--skip-backtest` | Skip backtest |
 | `--skip-live` | No live WebSocket feed |
 | `--skip-analyze` | Skip `05_analyze_signals.py` |
-| `--only-dashboard` | Dashboard + live only, no ML |
+| `--only-dashboard` | Options Risk Terminal only, no ML nor live |
 | `--no-browser` | Do not auto-open browser |
 | `--force-download` | Redownload + force retrain |
 | `--max-model-age-days N` | Retrain if model older than N days |
@@ -501,7 +497,7 @@ Inference batch fino a 1024 (guadagno marginale, GPU già satura).
 3. Branch in `scripts/02_train.py` (`architecture == "X"`)
 4. `config/arch/X.yaml`
 5. `choices` in `run_all.py` (parser `--arch` e `--teacher`)
-6. Whitelist in `06_dashboard.py`, `05_analyze_signals.py`
+6. Whitelist in `05_analyze_signals.py` (la dashboard è ora il terminale opzioni Deribit, arch-independent)
 7. (Opzionale) `distillation.archs` in `config/default.yaml`
 
 **EN**
@@ -510,7 +506,7 @@ Inference batch fino a 1024 (guadagno marginale, GPU già satura).
 3. Branch in `scripts/02_train.py` (`architecture == "X"`)
 4. `config/arch/X.yaml`
 5. `choices` in `run_all.py` (parser `--arch` and `--teacher`)
-6. Whitelists in `06_dashboard.py`, `05_analyze_signals.py`
+6. Whitelist in `05_analyze_signals.py` (the dashboard is now the Deribit options terminal, arch-independent)
 7. (Optional) `distillation.archs` in `config/default.yaml`
 
 ---
@@ -526,6 +522,21 @@ python scripts/02c_optuna_search.py --n-trials 50 --study-name quantsys
 🇮🇹 Studio persistente su SQLite (`models/lstm/optuna_quantsys.db`), ripristinabile.
 
 **EN** Study persists on SQLite (`models/lstm/optuna_quantsys.db`), resumable any time.
+
+---
+
+## CAFN — coordinatore causale + training congiunto · CAFN — causal coordinator + joint training
+
+🇮🇹 `scripts/02d_cafn_joint_train.py` — **probe pre-registrato, inerte**. La **CAFN** (`quantsys/model/cafn.py`, attention a maschera strettamente causale + penalità causale = regolarizzatore prossimità+stabilità) estrae un **latente causale** dal tensore feature; i 3 modelli (iTransformer, TCN-Mamba, N-HiTS) si allenano **in contemporanea** su quel segnale (loss congiunta end-to-end = Σ_arch MSE-mu + λ·penalità). Output **isolato** in `models/cafn/` (NON tocca `models/{arch}` né la parity live). La CAFN si addestra sul tensore **canonico 104-feature** (i dati Deribit grezzi sono forward-collected → solo canale `extra` futuro, no lookahead).
+
+```bash
+python scripts/02d_cafn_joint_train.py --smoke                 # valida il loop (CPU, dati sintetici)
+python scripts/02d_cafn_joint_train.py --epochs 20             # reale (richiede data/lstm_dataset.npz)
+```
+
+**GATE pre-registrato (val-first):** PASS sse CAFN-congiunto batte il baseline NO-CAFN (`latent=None`, stessi modelli/seed/epoche) di ≥3% MSE-mu su val per ≥2/3 modelli; altrimenti CAFN-coordinatore = KILL. Integrazione parity-safe: kwarg `latent=None` nei 3 forward → path bit-identico al legacy. ⚠ 3 modelli + CAFN insieme su 8GB → rischio OOM: riduci `--batch`/`--cafn-d-model`; NON in parallelo a poller/vol_paper.
+
+**EN** `scripts/02d_cafn_joint_train.py` — **pre-registered, inert probe**. The **CAFN** (`quantsys/model/cafn.py`, strictly causal-masked attention + causal penalty = proximity+stability regularizer) extracts a **causal latent** from the feature tensor; the 3 models (iTransformer, TCN-Mamba, N-HiTS) train **simultaneously** on that signal (end-to-end joint loss = Σ_arch MSE-mu + λ·penalty). Output **isolated** in `models/cafn/` (does NOT touch `models/{arch}` nor live parity). The CAFN trains on the **canonical 104-feature** tensor (raw Deribit data is forward-collected → optional future `extra` channel only, no lookahead). **Pre-registered GATE (val-first):** PASS iff joint-CAFN beats the NO-CAFN baseline (`latent=None`) by ≥3% val MSE-mu on ≥2/3 models, else the CAFN coordinator is KILL. Parity-safe: `latent=None` kwarg in the 3 forwards → bit-identical to legacy. ⚠ 3 models + CAFN on 8GB → OOM risk: lower `--batch`/`--cafn-d-model`; do not run alongside the poller/vol_paper.
 
 ---
 
@@ -585,30 +596,26 @@ quantsys_project/
 
 ---
 
-## Dashboard — pulsante "Aggiorna" · Dashboard — "Update" button
+## Dashboard — Deribit Options Risk Terminal · Deribit Options Risk Terminal
 
-🇮🇹
-1. **Aggiorna** in alto a destra
-2. Seleziona step da eseguire
-3. **Avvia** → barra di progresso
-4. Al termine dashboard si aggiorna automaticamente
-5. **Annulla** per fermare un job
+🇮🇹 `scripts/06_dashboard.py` è il **terminale opzioni crypto** (server HTTP single-file + SPA Plotly.js), **indipendente dalla pipeline ML** e GPU-free. Si connette ai dati **pubblici Deribit** (REST, no-auth) — nessuna chiave richiesta. Tre tab:
+1. **Volatility Surface** — superficie IV 3D (moneyness K/F × giorni), smile per scadenza, term structure ATM
+2. **Option Chain** — chain call/put a doppio lato con **Greche calcolate live** (Black-Scholes forward-measure: Δ, Γ, ν per +1% vol, Θ/giorno), strike ATM evidenziato
+3. **Risk & Greeks** — OI per strike (call vs put), max-pain, Greche aggregate pesate per OI, put/call ratio, DVOL
 
-**EN**
-1. Click **Update** top right
-2. Select the steps to run
-3. Click **Start** → progress bar
-4. When done the dashboard refreshes automatically
-5. **Cancel** to stop a job
+Header live: spot BTC (index), DVOL 30d, ATM IV 30d, OI/volume totali, put/call ratio. Auto-refresh ~12s. Underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH); `auth_token` opzionale (constant-time, header `X-Auth-Token` o `?token=`).
 
-🇮🇹 Switch arch: dropdown in alto (rileva arch con `dashboard_results.json`).
+**EN** `scripts/06_dashboard.py` is the **crypto options terminal** (single-file HTTP server + Plotly.js SPA), **decoupled from the ML pipeline** and GPU-free. It connects to **Deribit public** data (REST, no-auth) — no key required. Three tabs:
+1. **Volatility Surface** — 3D IV surface (moneyness K/F × days), per-expiry smile, ATM term structure
+2. **Option Chain** — two-sided call/put chain with **Greeks computed live** (Black-Scholes forward measure: Δ, Γ, ν per +1% vol, Θ/day), ATM strike highlighted
+3. **Risk & Greeks** — OI by strike (call vs put), max-pain, OI-weighted aggregate Greeks, put/call ratio, DVOL
 
-**EN** Switching arch: top dropdown (detects archs with `dashboard_results.json`).
+Live header: BTC spot (index), 30d DVOL, 30d ATM IV, total OI/volume, put/call ratio. Auto-refresh ~12s. Underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH); optional `auth_token` (constant-time, `X-Auth-Token` header or `?token=`).
 
 ---
 
 ## Fermare tutto · Stopping everything
 
-🇮🇹 `Ctrl+C` nel terminale di `run_all.py`. Termina dashboard + live feed.
+🇮🇹 `Ctrl+C` nel terminale di `run_all.py` (o del server dashboard). Termina la dashboard (e, nel run completo, il feed live).
 
-**EN** `Ctrl+C` in the `run_all.py` terminal. Terminates dashboard + live feed.
+**EN** `Ctrl+C` in the `run_all.py` terminal (or the dashboard server). Stops the dashboard (and, in the full run, the live feed).

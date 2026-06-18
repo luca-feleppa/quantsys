@@ -1163,8 +1163,17 @@ class QuantiTransformer(nn.Module):
 
     # IT: Forward: RevIN → multi-scala embed → attention inter-feature → testa output.
     # EN: Forward: RevIN → multi-scale embed → inter-feature attention → output head.
-    def forward(self, x: torch.Tensor, x_macro: torch.Tensor = None) -> tuple:
+    def forward(self, x: torch.Tensor, x_macro: torch.Tensor = None,
+                latent: torch.Tensor = None) -> tuple:
         # x: (B, T, F)
+        # IT: latente CAFN OPZIONALE (B,T,d_latent) concatenato come feature-token
+        #     extra (inverted transformer). latent=None → path byte-identico
+        #     (parity con BLOCKER #1). Il modulo va costruito con n_features+=d_latent.
+        # EN: OPTIONAL CAFN latent (B,T,d_latent) concatenated as extra feature
+        #     tokens (inverted transformer). latent=None → byte-identical path
+        #     (parity with BLOCKER #1). Build the module with n_features+=d_latent.
+        if latent is not None:
+            x = torch.cat([x, latent], dim=-1)
         _revin_stats = None
         if self.use_revin:
             x, _revin_stats = self.revin.normalize(x)
@@ -1325,3 +1334,4 @@ from quantsys.model.forecast import monte_carlo_forecast, summarize_forecast  # 
 from quantsys.model.ensemble import EnsembleModel  # noqa
 from quantsys.model.tcn_mamba import QuantTCNMamba  # noqa
 from quantsys.model.nhits import QuantNHiTS  # noqa
+from quantsys.model.cafn import CausalAttentionFlowNetwork  # noqa

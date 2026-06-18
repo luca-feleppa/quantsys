@@ -251,12 +251,15 @@ distillation:
   #     val→test distribution shift is fixed. For live: prefer iTrans standalone (-1.77%).
   ensemble_nll_temperature: 0.05
 
-# IT: Dashboard FastAPI/Dash — host locale, timeout subprocess, gzip log streaming.
-# EN: Dashboard FastAPI/Dash — local host, subprocess timeout, gzip log streaming.
+# IT: Dashboard = Deribit Options Risk Terminal (dati Deribit pubblici live).
+#     host/port bind locale, auth_token opzionale (constant-time), gzip risposte,
+#     options_currency = sottostante chain opzioni (BTC | ETH).
+# EN: Dashboard = Deribit Options Risk Terminal (live Deribit public data).
+#     local host/port bind, optional auth_token (constant-time), gzip responses,
+#     options_currency = options-chain underlying (BTC | ETH).
 dashboard:
   host: 127.0.0.1
   port: 8050
   auth_token: ''
-  subprocess_timeout_sec: 7200  # IT: 2h per training lunghi | EN: 2h for long training runs
   enable_gzip: true
-  log_lines_maxlen: 500
+  options_currency: BTC

@@ -5,7 +5,50 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-16 (AUDIT + B1 order-book L2 + riorganizzazione repo)
+## 🕒 Ultimo aggiornamento: 2026-06-18 (CAFN coordinatore + DASHBOARD opzioni)
+
+## 🧪 CAFN — Causal Attention Flow Network (coordinatore dei 3 modelli) — COSTRUITO + PRE-REGISTRATO 2026-06-18
+
+Costruito su richiesta utente (/goal) un layer di **coordinamento a monte** dei 3 modelli (iTransformer, TCN-Mamba, N-HiTS): la CAFN estrae un **latente causale** dal tensore feature e i 3 modelli si allenano **in contemporanea** su quel segnale (loss congiunta end-to-end). **Engineering COMPLETO e verificato; scientificamente è un PROBE pre-registrato, INERTE di default — NON ancora valutato su dati reali** (dataset npz assente dal cleanup 06-12).
+
+**Cosa è stato costruito (tutto isolato, zero impatto su production/parity):**
+- **`quantsys/model/cafn.py` — `CausalAttentionFlowNetwork`**: filtro denoising (gate per-feature sigmoide) → proiezione + pos-emb → stack di blocchi self-attention a **maschera STRETTAMENTE causale** (t vede solo ≤t) → latente `[B,T,d_latent]`. `forward(x, extra=None) -> (latent, causal_penalty)`. **Penalità causale = REGOLARIZZATORE** (prossimità: penalizza attenzione sul passato lontano; stabilità: penalizza salti del pattern fra t adiacenti) — NON causalità do-calculus/Granger (dichiarato nel docstring). Canale `extra` opzionale per feature Deribit forward-collected (futuro, gated).
+- **3 forward parity-safe**: aggiunto kwarg `latent=None` a `QuantiTransformer`/`QuantNHiTS`/`QuantTCNMamba` (concat sull'asse feature in cima). `latent=None` → path **bit-identico** alla chiamata legacy (test di parità verde su tutti e 3 → vincolo BLOCKER #1 preservato). I modelli aumentati si costruiscono con `n_features += d_latent`.
+- **`scripts/02d_cafn_joint_train.py`**: loop end-to-end, 1 optimizer su CAFN+3 modelli, loss = Σ_arch MSE-mu + λ·penalità. `--smoke` (CPU/synthetic, validato), fail-fast su npz assente. Output ISOLATO in `models/cafn/` + report `results/cafn/`. **Gate val-first** integrato (baseline NO-CAFN, `latent=None`, stessi modelli ri-inizializzati).
+- **`config/cafn.yaml`** (overlay opzionale, blocco `cafn`, non letto dalla pipeline production) + export in `quantsys.model`.
+
+**GATE PRE-REGISTRATO (scritto PRIMA di girare sul reale):** PASS sse CAFN-congiunto batte il baseline NO-CAFN (stessi modelli/seed/epoche) di **≥3% MSE-mu su val per ≥2 dei 3 modelli**. FAIL → CAFN-coordinatore KILL (flag inerte, documentato). Zero iterazioni a risultato visto; test split solo a gate val PASS.
+
+**⚠ 3 BLOCCHI scientifici dichiarati (mandato CLAUDE.md), e come risolti:**
+1. **Dati Deribit grezzi come input storico = lookahead + dataset inesistente** (greche/book/IV forward-collected, giorni di storia). → CAFN si addestra sul **tensore canonico 104-feature** (storia 2019→oggi); Deribit entra solo come canale `extra` opzionale futuro.
+2. **"invece del dataframe" romperebbe parity/PipelineState.** → integrazione **additiva** (concat, `latent=None`→identico), contratto forward intatto.
+3. **Training simultaneo 3 modelli su 8GB = OOM** (il repo impone 3-arch sequenziale). → default piccoli + `--smoke`; caveat memoria nel trainer.
+
+**PRIOR ONESTO:** è una variante di CLASSE-MODELLO; il progetto ha ripetutamente mostrato che ciò NON sposta il soffitto direzionale OOS (anti-corr val→test, cross-arch err≈0.995, distill 06-06 OOS≡baseline, baseline lineari senza skill → "il limite è l'informazione, non il modello"). Aspettativa pre-dichiarata: **FAIL del gate**. Lo smoke synthetic ha dato 1/3 win → FAIL (atteso, è rumore: serve solo a validare la macchina).
+
+**Verifica:** `pytest tests/test_cafn.py` 11/11 + suite completa **133 passed, 8 skipped** (era 122; +11 CAFN, zero regressioni — parità preservata). Smoke joint end-to-end OK su CUDA (1.7s). **Working tree non committato.**
+
+**▶️ AZIONE ALLA RIPRESA (se si vuole valutare il probe):** (1) rigenerare il dataset npz (`01_download_data.py` [+ `dev_vols_macro_append.py` se target vol]); (2) `python scripts/02d_cafn_joint_train.py --epochs <N>` (val-first, NON sul test); (3) applicare il GATE pre-registrato e, qualunque l'esito, scriverlo qui (KILL documentato se FAIL). NB: NON girare in parallelo a poller/vol_paper (contesa CUDA).
+
+## 🟢 REFACTORING DASHBOARD — `06_dashboard.py` ora è un terminale opzioni Deribit (2026-06-18)
+
+Riscritta **da zero** `scripts/06_dashboard.py`: da dashboard ML (metriche backtest/portafoglio, segnali live, pulsante "Aggiorna" pipeline) a **piattaforma istituzionale per l'analisi delle opzioni crypto**, single-file HTTP + SPA Plotly.js, GPU-free e **indipendente dalla pipeline ML**.
+- **Data layer Deribit** (REST pubblico, no-auth, cache TTL per-chiave anti thundering-herd): `get_index_price` (spot BTC, ttl 4s), `get_book_summary_by_currency` (chain opzioni completa: mark_iv/mark/bid/ask/OI/volume/underlying_price, ttl 8s), `get_volatility_index_data` (DVOL, ttl 60s). Riusa i pattern di `01c_iv_poller.py` (parse strumento, expiry 08:00 UTC).
+- **Motore Greche** (`bs_greeks`, Black-Scholes forward-measure, r=0, convenzione USD, vettoriale numpy; scipy.stats.norm con fallback math.erf): Δ delta, Γ gamma, ν vega (per +1% vol), Θ theta (per giorno), ρ + prezzo teorico. Calcolate **live sull'intera chain** ad ogni snapshot.
+- **Analytics:** `build_surface` (IV interpolata su griglia comune moneyness K/F=[0.6,1.6]×41 × giorni, no extrapolazione→NaN), `build_term_structure` (ATM IV vs giorni), `build_chain_table` (call|put a doppio lato per expiry), `build_risk` (OI per strike call/put, max-pain vettoriale O(n²), Greche aggregate pesate OI, P/C ratio).
+- **SPA** (Plotly.js CDN): header risk live (spot/DVOL/ATM IV 30d/OI/vol/PCR + conn status) + 3 tab: **Volatility Surface** (3D + smile selezionabile + term structure), **Option Chain** (tabella call/put con Greche, ATM evidenziato), **Risk & Greeks** (OI by strike a **profilo divergente** call ▲/put ▼ + linea **Net OI** sull'asse PRIMARIO (stessa unità delle barre — era su `yaxis2` overlay ma con `uirevision` collassava l'autorange delle barre al refresh → fix) + zoom auto sulla banda liquida + toggle contratti BTC/notional USD, spot/max-pain; Greche aggregate, P/C pie). Auto-refresh ~12s, gzip, auth opzionale constant-time. **Interazione grafici (2026-06-18):** i 5 grafici 2D (smile/term/oi/greeks/pcr) usano `PL_CFG_2D` (`scrollZoom:true`, `doubleClick:'reset'`) + layout `dragmode:'pan'`, `autosize:true`. Niente box-zoom "finestra"; zoom per-asse con la rotellina sopra l'asse (Y su/giù, X sx/dx), pan col drag, doppio-click reset. La **superficie 3D resta a interazione piena** (`PL_CFG`, orbit/zoom). Modifiche tentate (tutte committate): (1) `dragmode:false`→`dragmode:'pan'` (con `dragmode:false` Plotly disabilita ANCHE il drag sugli assi); (2) Net OI da `yaxis2` overlay all'asse primario (stessa unità delle barre); (3) `Plotly.react`→**`Plotly.newPlot`** per i 2 grafici con barre (`plot-oi`, `plot-greeks`), ipotesi: react non ridisegna le trace `bar` ai re-render; (4) rimosso `uirevision` (sospettato dello stesso bar-drop). Interazione assi: `scrollZoom:true` + `dragmode:'pan'` + doppio-click reset.
+
+**🔴 PROBLEMA APERTO — NON RISOLTO (2026-06-18):** nel grafico **Open Interest by Strike** le barre call/put compaiono all'apertura ma **dopo poco (≈refresh 12s) spariscono**, restano solo le linee (Net OI) e gli `shapes` (spot/max-pain). ⚠ **Discrepanza diagnostica da chiarire:** il test headless Playwright/Chromium contava 198 path-barra persistenti su 2 refresh → PASS, MA **l'utente continua a vederlo sparire nel browser reale** → la verità è l'osservazione dell'utente, il test headless NON replica il fault. Ipotesi ancora da verificare per la prossima sessione: (a) il test contava i path SVG ma in-browser le barre potrebbero avere width/opacity→0 (path presenti ma invisibili) — misurare bounding-box/fill, non il count; (b) intermittenza legata al timing reale del fetch `/api/risk` (il test girava su rete forse diversa); (c) interazione con `autosize`/resize o con `hovermode:'x unified'`; (d) il fault potrebbe scattare solo dopo interazione utente (zoom/hover) prima del refresh. PROSSIMO PASSO: riprodurre col vero browser dell'utente (screenshot/devtools), misurare gli attributi reali dei `<path>` barra (non il conteggio), prima di tentare altri fix.
+- **Endpoint JSON:** `/api/summary|surface|term|expiries|chain|risk`. Config: nuovo `dashboard.options_currency` (BTC|ETH); rimosse `subprocess_timeout_sec`/`log_lines_maxlen` (pipeline-runner eliminato).
+- **Rimossa** l'app React orfana `dashboard/` (`git rm` + working tree: era un esperimento non cablato in pipeline/doc, sarebbe stata una 2ª dashboard in conflitto).
+- **`run_all.py`:** `--only-dashboard` non avvia più live feed/analisi (la dashboard è disaccoppiata → "nessun calcolo" come da help); testo `phase_dashboard` riscritto. `00_check_setup.py` aggiornato (`scripts/06_dashboard.py` al posto del jsx rimosso).
+- **Doc sincronizzate:** README (nuova sezione bilingue + albero), AVVIO (sezione dashboard riscritta + flag + checklist nuova-arch step 6), TEORIA (rimosso "dashboard" dai consumer di regime_probs), scripts/README, config.
+- **Verifica:** AST OK; unit offline greche (ATM Δ call/put diff=1.0, Γ/ν>0, Θ<0) + analytics su chain sintetica JSON-serializzabili; **live end-to-end Deribit reale** (spot 62.8k, DVOL 41.9, 960 strumenti, 12 expiry, surface 12×41, greche sane); server HTTP smoke (HTML, `/api/summary`, gzip negoziato, `/api/risk`, 404). **NB: il backtest ML (`03_backtest.py`) continua a scrivere `results/{arch}/dashboard_results.json`** — non più letto dalla dashboard ma artefatto valido.
+- **Working tree:** non committato.
+
+---
+
+## 🕒 Aggiornamento precedente: 2026-06-16 (AUDIT + B1 order-book L2 + riorganizzazione repo)
 
 ## 🚀 OTTIMIZZAZIONE P1 (Volume Profile bincount) — IMPLEMENTATA + VERIFICATA 2026-06-16
 

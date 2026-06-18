@@ -198,7 +198,7 @@ expected = [
     "scripts/05_analyze_signals.py",
     "tests/conftest.py",
     "tests/test_features.py",
-    "dashboard/quant_dashboard_full.jsx",
+    "scripts/06_dashboard.py",
 ]
 for f in expected:
     check(f, Path(f).exists(), "✓" if Path(f).exists() else "MANCANTE")
