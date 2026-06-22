@@ -83,6 +83,16 @@ Script CPU-only `scripts/vol/wf_har_baseline.py` (helper `build_har_frame`/`har_
 - **Implicazione b2 (distill):** TCN+Mamba da solo PASSA; iTrans 1-seed è membro DEBOLE (sopra HAR) → ensemble equal-weight lo trascinerebbe, il distill quality-weighted dovrebbe pesare TCN+Mamba ma battere 0.364 con un membro debole è incerto → **b2 meno attraente**. Alternativa più sensata: **(c) TCN+Mamba 5-seed standalone** = modello vol robusto/deployabile.
 - Report: `results/vols/wf_har_baseline_1h.json`. Codice b1 (vol_metrics HAR helpers + wf_har_baseline.py) NON committato.
 
+## 🔎 VERIFICA 2026-06-22 (richiesta utente) — i risultati k-fold sono REALI (nessun bug), ma la MEDIA cross-fold è la statistica SBAGLIATA
+
+Indagine sul perché iTrans/N-HiTS sembravano "cattivi" nel k-fold mentre settimane fa erano il PASS vol.
+- **Check 1 — verità identica:** target NN (npz invertito `y·s+c`) == verità HAR (RV `rv_fwd` dai raw candle) a **rel diff 8e-7** → il confronto NN-vs-HAR NON è viziato (entrambi giudicati sulla stessa ground-truth).
+- **Check 2 — giudice validato `dev_vols_qlike.py` su val (data-rich), stessi 1-seed sandbox:** iTrans QLIKE **0.343 ratio 0.917 PASS** · tcnmamba 0.356 ratio 0.951 (FAIL di un soffio) · nhits 0.396 FAIL. Riconcilia coi fold data-rich del k-fold (iTrans fold4/5 = 0.30/0.32 ≈ val 0.343). HAR val 0.374 ∈ [fold4 0.40, fold5 0.35] → anche l'HAR riconcilia.
+- **CONCLUSIONE: nessun bug.** iTransformer NON è peggiorato — è il **MIGLIORE sullo split data-rich** (= regime di produzione), coerente col PASS 5-seed originale (test 0.257, ratio 0.70). Il "FAIL" nel k-fold MEAN era un **ARTEFATTO**: iTrans è il più **data-hungry** → pessimo sui fold 1-2 (expanding-window data-starved, ~fold_size campioni) che trascinano la media; tcnmamba è più robusto a pochi dati → media migliore, ma iTrans vince dove conta.
+- **⚠ LEZIONE METODOLOGICA (da non dimenticare):** la **media cross-fold over-penalizza i modelli data-hungry** sui fold early, che NON rappresentano la produzione (dove hai sempre la storia piena). Statistica corretta per la produzione = **val/test split + fold data-rich**, NON la media su tutti i fold. Il k-fold resta utile per la *stabilità*/robustezza, non per il ranking assoluto.
+- **Implicazione retrain:** il rationale "tcnmamba 5-seed perché domina il k-fold" **CADE**. iTrans è già il 5-seed PASS e vince sul regime di produzione. tcnmamba 5-seed resta **opzionale** (2° modello per ensemble/distill; oppure se interessa l'MSE-log, dove tcnmamba batte iTrans 0.63 vs 0.83; oppure la stabilità σ/μ 0.169 vs 0.324). Doppia conferma OOS del filone vol: single-split 5-seed + k-fold sui fold data-rich.
+- Report: `results/vols/qlike_report_1h_val.json` (ultimo arch giudicato), `results/vols/wf_har_baseline_1h.json`.
+
 ## 🕒 Aggiornamento precedente: 2026-06-21 (DISTILL TARGET-AWARE per la linea VOLATILITÀ/opzioni)
 
 ## 🟢 DISTILLATION RIADATTATA AL TARGET VARIANZA (`log_rv`) — FATTO 2026-06-21
