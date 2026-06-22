@@ -42,6 +42,16 @@ Su richiesta utente, eseguite 3 cose in parallelo (fan-out).
 
 **▶️ AZIONE ESATTA ALLA RIPRESA (per girare l'esperimento):** (1) mettere in pausa i 3 processi live; (2) `QUANTSYS_MODELS_ROOT` sandbox + seed canonical; (3) **STEP 0** (1 seed nhits+tcnmamba, corr errori) e applicare il kill-gate; (4) se passa, STEP 1–3 val-first; (5) qualunque esito → scriverlo qui; (6) rilanciare i 3 processi (blocco rosso 2026-06-16). **Working tree:** dataset/dir sono gitignored; `STATUS.md` modificato (questa sezione) NON committato.
 
+## 🟢 STEP 0 KILL-CHECK ESEGUITO 2026-06-22 → PROCEED (diversità cross-arch sulla vol)
+
+Eseguiti i 3 archi 1-seed su `log_rv` in sandbox (`QUANTSYS_MODELS_ROOT=models_distill_vol`, GPU dedicata, `models/itransformer` LIVE confermato intatto) → `scripts/vol/step0_xarch_corr.py --split val`.
+- **Correlazione errori cross-arch (val):** iTrans|N-HiTS 0.776 · iTrans|TCN-Mamba 0.815 · N-HiTS|TCN-Mamba 0.887 → **mean 0.826, min 0.776**. Gate KILL≥0.99 / PROCEED≤0.97 → **PROCEED** (non ucciso). Report `results/vols/step0_xarch_corr_val.json`.
+- **Significato:** sul VOL gli archi disaccordano (ρ_err ~0.83), in netto contrasto col direzionale (≈0.995, ensembling inutile). Rafforza la tesi momenti PARI: la vol è predicibile OOS (batte HAR 30%) **e** ha diversità cross-arch → distill/ensemble ha headroom potenziale.
+- **Best val_nll 1-seed:** TCN+Mamba 0.155 < iTrans 0.183 < N-HiTS 0.189 (TCN+Mamba miglior singolo, bias minore +0.11).
+- ⚠ **CAVEAT (non sovrainterpretare):** 1 seed · 1 split · N-HiTS/TCN+Mamba su yaml era-1m → overfit (gap val −0.13÷−0.20). Parte della "diversità" può essere overfit-indotta (ognuno overfitta diverso), NON segnale complementare. Il test vero resta il gate **QLIKE k-fold** pre-registrato (sopra). PROCEED = "non morto a priori", non "l'ensemble aiuterà OOS".
+- **Infra usata:** Tier 1 (modulo `quantsys/model/vol_metrics.py` QLIKE condiviso + fold-metric QLIKE/branch N-HiTS in `02b` + checkpoint sandbox-aware) e Tier 2 (`step0_xarch_corr.py`) — codice NON ancora committato. ⚠ Rigenerando l'npz sono emersi 2 fail in `test_live_training_parity.py` (prima skippati per npz assente): stato↔dati stale (`models/itransformer` vol-1h vs raw_candles ri-scaricati), NON regressione del Tier 1; 04b live sano. Known-issue da investigare a parte.
+- **Prossimo (decisione aperta):** STEP 1–3 = walk-forward **k-fold distill** (harness `02b` pronto) — run GPU pesante (5 fold × multi-arch sequenziali), richiede di ri-fermare `04b`. Oppure fermarsi e valutare.
+
 ## 🕒 Aggiornamento precedente: 2026-06-21 (DISTILL TARGET-AWARE per la linea VOLATILITÀ/opzioni)
 
 ## 🟢 DISTILLATION RIADATTATA AL TARGET VARIANZA (`log_rv`) — FATTO 2026-06-21

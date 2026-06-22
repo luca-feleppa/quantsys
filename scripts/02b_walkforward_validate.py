@@ -47,8 +47,9 @@ from torch.utils.data import DataLoader, TensorDataset
 
 torch.set_num_threads(int(_cpu_limit))
 
-from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs
+from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs, models_root
 from quantsys.model import QuantLSTM, student_t_nll, quantile_loss, EarlyStopping, set_clip_bounds, direction_value_loss
+from quantsys.model.vol_metrics import qlike_from_z
 from quantsys.features import walk_forward_folds
 
 setup_logging()
@@ -203,6 +204,32 @@ def train_fold(
             loss_type          = mcfg.get("loss_type", "t_student"),
             n_output_experts   = mcfg.get("n_output_experts", 1),
         ).to(device)
+    elif architecture == "nhits":
+        # IT: branch N-HiTS — ricalca la costruzione di 02_train (linea vol/distill),
+        #     necessario per riaddestrare il teacher N-HiTS per fold nel walk-forward.
+        # EN: N-HiTS branch — mirrors 02_train's construction (vol/distill line),
+        #     needed to retrain the N-HiTS teacher per fold in the walk-forward.
+        from quantsys.model import QuantNHiTS
+        _n_dyn = n_dynamic if n_dynamic is not None else n_feat
+        _T     = mcfg.get("window_size", 120)
+        model = QuantNHiTS(
+            n_features         = n_feat,
+            T                  = _T,
+            n_dynamic_features = _n_dyn,
+            n_macro            = n_macro if has_macro else 0,
+            d_model            = mcfg.get("d_model", 128),
+            hidden             = mcfg.get("nhits_hidden", 256),
+            n_stacks           = mcfg.get("nhits_stacks", 3),
+            pool_kernels       = tuple(mcfg.get("nhits_pool_kernels", [8, 4, 1])),
+            n_blocks_per_stack = mcfg.get("nhits_blocks_per_stack", 1),
+            n_mlp_layers       = mcfg.get("nhits_mlp_layers", 2),
+            dropout            = mcfg.get("dropout", 0.1),
+            loss_type          = _loss_type,
+            use_multitask      = _use_multitask,
+            n_output_experts   = mcfg.get("n_output_experts", 1),
+            use_revin          = mcfg.get("use_revin", False),
+            revin_target_idx   = mcfg.get("revin_target_idx", 0),
+        ).to(device)
     elif has_macro:
         from quantsys.macro.regime import QuantLSTMWithMacro
         model = QuantLSTMWithMacro(
@@ -244,7 +271,13 @@ def train_fold(
     use_amp  = tcfg["use_amp"] and device.type == "cuda"
     scaler   = torch.amp.GradScaler(device=device.type, enabled=use_amp)
 
-    ckpt_path = str(Path(cfg["training"]["output_dir"]) / f"wf_fold{fold_id}_best.pt")
+    # IT: ckpt temporaneo per-fold redirezionabile via QUANTSYS_MODELS_ROOT (default
+    #     models/{arch} = identico) → in sandbox NON tocca il modello live di 04b.
+    # EN: per-fold temp ckpt redirectable via QUANTSYS_MODELS_ROOT (default
+    #     models/{arch} = identical) → in sandbox it does NOT touch 04b's live model.
+    _ckpt_dir = models_root() / Path(cfg["training"]["output_dir"]).name
+    _ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = str(_ckpt_dir / f"wf_fold{fold_id}_best.pt")
     es        = EarlyStopping(patience=patience, path=ckpt_path)
 
     for epoch in range(1, max_epochs + 1):
@@ -311,7 +344,7 @@ def train_fold(
 # EN: inference on the test fold + metric computation (handles quantile and t-Student)
 
 def eval_model(model, X, y, X_macro=None, device=None,
-               cfg=None, has_macro=False) -> dict:
+               cfg=None, has_macro=False, target_type="ret", vol_cs=None) -> dict:
     """Valuta il modello sul fold di test (mai visto in training)."""
     batch = cfg["training"]["batch_size"]
     if has_macro:
@@ -353,6 +386,12 @@ def eval_model(model, X, y, X_macro=None, device=None,
     sig_a = np.concatenate(sigs)
     nu_a  = np.concatenate(nus)
     y_a   = np.concatenate(ys)
+    # IT: linea VOLATILITÀ (log_rv) → QLIKE su RV in livelli (le metriche direzionali
+    #     DA/Spearman/WHR/CI90 sono il segno-della-varianza, non un segnale: vedi STATUS).
+    # EN: VOLATILITY line (log_rv) → QLIKE on RV levels (directional DA/Spearman/WHR/CI90
+    #     are the sign-of-variance, not a signal: see STATUS).
+    if target_type == "log_rv" and vol_cs is not None:
+        return qlike_from_z(y_a, mu_a, vol_cs[0], vol_cs[1])
     return fold_metrics(y_a, mu_a, sig_a, nu_a)
 
 
@@ -373,6 +412,26 @@ def main():
     device = setup_device(cfg)
     ensure_dirs("results", "models")
     Path(cfg["training"]["output_dir"]).mkdir(parents=True, exist_ok=True)
+
+    # IT: linea target — vol (log_rv) usa la fold-metric QLIKE (inversione z→raw via
+    #     scaler), il direzionale resta IDENTICO (DA/Spearman/WHR/CI90). Lo scaler
+    #     globale (center/scale di target_ret) è lo stesso con cui l'npz è z-scorato.
+    # EN: target line — vol (log_rv) uses the QLIKE fold-metric (z→raw inversion via
+    #     scaler), directional path stays IDENTICAL (DA/Spearman/WHR/CI90). The global
+    #     scaler (target_ret center/scale) is the same that z-scored the npz.
+    target_type = cfg["features"].get("target_type", "ret")
+    is_vol = (target_type == "log_rv")
+    vol_cs = None
+    if is_vol:
+        from quantsys.utils import PipelineState
+        _ps_path = models_root() / "pipeline_state.pkl"
+        if not _ps_path.exists():
+            _ps_path = Path("models") / "pipeline_state.pkl"
+        _ps = PipelineState.load(str(_ps_path))
+        _i = _ps.scale_cols.index("target_ret")
+        vol_cs = (float(_ps.scaler.center_[_i]), float(_ps.scaler.scale_[_i]))
+        assert vol_cs[0] < -3, "center ≈ 0 → PipelineState non è del dataset log-RV (stale?)"
+        log.info(f"VOL fold-metric QLIKE attiva · target_ret center={vol_cs[0]:.3f} scale={vol_cs[1]:.3f}")
 
     # IT: ricompone il dataset completo (train+val+test) per ri-splittare in fold
     # EN: rebuild full dataset (train+val+test) to re-split into temporal folds
@@ -403,15 +462,20 @@ def main():
                                embargo_steps=embargo_steps,
                                val_frac=cfg["training"]["val_fraction"])
 
+    # IT: intestazione colonne — vol (QLIKE/MSElog) vs direzionale (DA/ρ/WHR/CI90).
+    # EN: column header — vol (QLIKE/MSElog) vs directional (DA/ρ/WHR/CI90).
+    _cols = (f"  {'Fold':<5} {'NLL':>8} {'QLIKE':>9} {'MSElog':>9} {'N':>6} {'Tempo':>7}"
+             if is_vol else
+             f"  {'Fold':<5} {'NLL':>8} {'DA':>7} {'ρ':>9} {'WHR':>7} {'CI90':>7} {'N':>6} {'Tempo':>7}")
     print(f"""
 {'═'*64}
-  02b · WALK-FORWARD VALIDATION
+  02b · WALK-FORWARD VALIDATION  [{target_type}]
   Modo     : {'Valuta modello esistente' if args.no_retrain else 'Riaddestra per fold'}
   Fold     : {len(folds)} (embargo={embargo_steps})
   Dataset  : {len(y):,} campioni  |  macro={'sì' if has_macro else 'no'}
   Max ep.  : {args.max_epochs}  |  patience: {args.patience}
 {'═'*64}
-  {'Fold':<5} {'NLL':>8} {'DA':>7} {'ρ':>9} {'WHR':>7} {'CI90':>7} {'N':>6} {'Tempo':>7}
+{_cols}
   {'─'*60}""")
 
     fold_results = []
@@ -437,7 +501,7 @@ def main():
             # EN: fast path — evaluate the already-trained global model
             try:
                 from quantsys.model import load_model
-                _best_pt = str(Path(cfg["training"]["output_dir"]) / "best_model.pt")
+                _best_pt = str(models_root() / Path(cfg["training"]["output_dir"]).name / "best_model.pt")
                 model = load_model(_best_pt).to(device)
                 val_nll = float("nan")
             except FileNotFoundError:
@@ -457,19 +521,24 @@ def main():
         # IT: valuta sul fold di test (out-of-sample puro)
         # EN: evaluate on the held-out fold (pure out-of-sample)
         m = eval_model(model, X_vl, y_vl, Xm_vl, device=device,
-                       cfg=cfg, has_macro=has_macro)
+                       cfg=cfg, has_macro=has_macro,
+                       target_type=target_type, vol_cs=vol_cs)
         elapsed = time.time() - t0_fold
 
         fold_results.append({**m, "fold": k, "val_nll": val_nll,
                               "n": len(y_vl), "elapsed_s": elapsed})
 
-        print(f"  {k:<5} {val_nll:>8.4f} {m['da']:>7.3f} {m['spearman']:>+9.4f} "
-              f"{m['whr']:>7.3f} {m['ci90']:>7.3f} {len(y_vl):>6} {elapsed:>6.0f}s")
+        if is_vol:
+            print(f"  {k:<5} {val_nll:>8.4f} {m['qlike']:>9.5f} {m['mse_log']:>9.4f} "
+                  f"{len(y_vl):>6} {elapsed:>6.0f}s")
+        else:
+            print(f"  {k:<5} {val_nll:>8.4f} {m['da']:>7.3f} {m['spearman']:>+9.4f} "
+                  f"{m['whr']:>7.3f} {m['ci90']:>7.3f} {len(y_vl):>6} {elapsed:>6.0f}s")
 
     # IT: aggregato cross-fold (media, std, range)
     # EN: cross-fold aggregate (mean, std, range)
     total_elapsed = time.time() - t0_total
-    keys = ["da", "spearman", "whr", "ci90"]
+    keys = ["qlike", "mse_log"] if is_vol else ["da", "spearman", "whr", "ci90"]
     agg  = {}
     print(f"  {'─'*60}")
     for k in keys:
@@ -480,27 +549,43 @@ def main():
         print(f"  {k:<22} {mean:>+8.4f} ± {std:.4f}  "
               f"[{agg[k]['min']:+.4f}, {agg[k]['max']:+.4f}]")
 
-    # IT: diagnosi automatica (stabilita' Spearman, calibrazione CI90)
-    # EN: auto-diagnosis (Spearman stability, CI90 calibration)
-    sp_mean = agg["spearman"]["mean"]
-    sp_std  = agg["spearman"]["std"]
-    ci_mean = agg["ci90"]["mean"]
-    print(f"""
+    # IT: diagnosi automatica — vol: stabilità del QLIKE cross-fold; direzionale:
+    #     stabilità Spearman + calibrazione CI90 (path invariato).
+    # EN: auto-diagnosis — vol: cross-fold QLIKE stability; directional: Spearman
+    #     stability + CI90 calibration (unchanged path).
+    if is_vol:
+        ql_mean = agg["qlike"]["mean"]; ql_std = agg["qlike"]["std"]
+        _rel = (ql_std / ql_mean) if ql_mean > 0 else float("inf")
+        print(f"""
   ── Diagnosi ────────────────────────────────────────────
-  {'⚠ Spearman instabile (σ='+f'{sp_std:.3f}'+'>0.05) → dipende dal regime' 
+  QLIKE medio cross-fold: {ql_mean:.5f} ± {ql_std:.5f}
+  {'⚠ QLIKE instabile tra fold (σ/μ='+f'{_rel:.2f}'+'>0.25) → dipende dal regime'
+    if _rel > 0.25 else '✓ QLIKE stabile tra fold (σ/μ='+f'{_rel:.2f}'+')'}
+  Tempo totale: {total_elapsed:.0f}s""")
+    else:
+        sp_mean = agg["spearman"]["mean"]
+        sp_std  = agg["spearman"]["std"]
+        ci_mean = agg["ci90"]["mean"]
+        print(f"""
+  ── Diagnosi ────────────────────────────────────────────
+  {'⚠ Spearman instabile (σ='+f'{sp_std:.3f}'+'>0.05) → dipende dal regime'
     if sp_std > 0.05 else '✓ Spearman stabile (σ='+f'{sp_std:.3f}'+')'}
-  {'⚠ Spearman medio debole ('+f'{sp_mean:.4f}'+' < 0.02)' 
+  {'⚠ Spearman medio debole ('+f'{sp_mean:.4f}'+' < 0.02)'
     if sp_mean < 0.02 else '✓ Spearman medio '+f'{sp_mean:.4f}'}
-  {'⚠ CI90 lontano da 0.90: '+f'{ci_mean:.3f}' 
+  {'⚠ CI90 lontano da 0.90: '+f'{ci_mean:.3f}'
     if abs(ci_mean-0.90) > 0.08 else '✓ Calibrazione CI90 '+f'{ci_mean:.3f}'}
   Tempo totale: {total_elapsed:.0f}s""")
 
-    # IT: salva risultati per dashboard /api/walkforward
-    # EN: persist results for the dashboard /api/walkforward endpoint
-    out_path = Path(cfg["backtest"]["output_dir"]) / "walkforward_metrics.json"
+    # IT: salva risultati per dashboard /api/walkforward — suffisso target per la
+    #     linea vol (non clobbera il file direzionale).
+    # EN: persist results for the dashboard /api/walkforward — target suffix for the
+    #     vol line (does not clobber the directional file).
+    _suffix = f"_{target_type}" if is_vol else ""
+    out_path = Path(cfg["backtest"]["output_dir"]) / f"walkforward_metrics{_suffix}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"fold_results": fold_results, "aggregate": agg,
+                   "target_type": target_type,
                    "retrained": not args.no_retrain,
                    "n_folds": len(folds), "embargo_steps": embargo_steps}, f, indent=2)
     print(f"\n  Risultati → {out_path}")

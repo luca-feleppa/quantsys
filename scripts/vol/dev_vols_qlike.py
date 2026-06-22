@@ -37,25 +37,18 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg, models_root  # noqa: E402
+# IT: QLIKE + ε ora vivono nel modulo condiviso (single source of truth con l'harness 02b).
+# EN: QLIKE + ε now live in the shared module (single source of truth with the 02b harness).
+from quantsys.model.vol_metrics import qlike, EPS  # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.vols_qlike")
 
-EPS = 1e-12  # IT: stesso ε del target in FeatureBuilder | EN: same ε as the FeatureBuilder target
 # IT: default/fallback dell'orizzonte in barre — il valore effettivo viene letto
 #     da cfg["features"]["forecast_horizon"] dentro main().
 # EN: default/fallback for the horizon in bars — the effective value is read
 #     from cfg["features"]["forecast_horizon"] inside main().
 H = 30
-
-
-# IT: QLIKE su RV in livelli — loss canonica per la valutazione di varianza
-#     (Patton 2011: robusta al rumore nella proxy di RV).
-# EN: QLIKE on RV levels — canonical variance-forecast loss
-#     (Patton 2011: robust to noise in the RV proxy).
-def qlike(rv_true: np.ndarray, rv_pred: np.ndarray) -> float:
-    r = rv_true / np.maximum(rv_pred, EPS)
-    return float(np.mean(r - np.log(r) - 1.0))
 
 
 def main():

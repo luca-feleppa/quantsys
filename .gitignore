@@ -24,6 +24,10 @@ data/*
 models/*
 !models/.gitkeep
 
+# ── Sandbox modelli isolata (QUANTSYS_MODELS_ROOT, es. distill/k-fold) ───
+models_distill_vol/
+models_*_sandbox/
+
 # ── Risultati backtest/live (generati dalla pipeline) ────────
 results/*
 !results/.gitkeep
