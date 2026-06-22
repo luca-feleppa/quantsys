@@ -7,6 +7,18 @@
 
 ## 🕒 Ultimo aggiornamento: 2026-06-22 (DECISIONE: resta sul PASS iTrans, distill 5-seed RIMANDATO)
 
+## 🟢 2026-06-22 sera — punti 2/3/4 eseguiti (parity FIX, health, gate B1)
+
+**Punto 2 — fail parity RISOLTO (era un bug del TEST, NON di produzione, NON serviva retrain).** Diagnosi: il test `test_live_training_parity` carica `ps` da `models/itransformer` e costruisce ENTRAMBI i path (FeatureAssembler + FeatureBuilder) dallo stesso buffer/scaler → il diff di 40 NON era data/scaler drift. Le feature divergenti erano TUTTE **time-semantic** (`momentum_x_funding`, `price_vs_ma200m`, `dist_atl/ath_30d`, `momentum_30d`, `session_position`, `funding_*`); le **bar-semantic** (VP) avevano diff 0.0 → firma di un mismatch `interval_minutes`. Causa: il fixture costruiva `FeatureBuilder` SENZA `interval_minutes` → default **1**, mentre `FeatureAssembler` usa `ps.interval_minutes`=**60** (1h). Bug latente dell'era 1m (default 1 matchava), emerso ora che l'npz rigenerato ri-attiva i test prima skippati. **Fix:** 1 riga nel fixture (`interval_minutes = ps.interval_minutes`). → parity **5/5**, suite **151 passed, 1 skipped, 0 failed**. ⚠ Conferma: BLOCKER #1 parity in PRODUZIONE è INTATTO (live usa ps.interval, training usa config interval, entrambi 1h); era solo il test stale.
+
+**Punto 3 — forward test sano.** 3 processi vivi (poller IV, recorder L2, `04b --execute`), log freschi. Nessun intervento.
+
+**Punto 4 — GATE B1 order-book L2 PRE-REGISTRATO (scritto PRIMA di modellare).**
+- **Stato dati:** 7 file `data/orderbook/l2_features_*.parquet` (06-16→22), ~31k righe a 5s ma **con buchi PC-off** → ~43h di book effettivo. **INSUFFICIENTE** (servono settimane-mesi di copertura). ⚠ Il recorder NON è 24/7 → i buchi PC-off sono un limite strutturale: valutare host always-on o accettare copertura parziale. Schema già raccolto: mid/microprice/tilt, spread_bps, imbalance L1-20, depth bande 5-50bps, OFI best, top-25 raw.
+- **Integrazione (quando i dati bastano):** nuovo stream nel `FeatureBuilder` con vincoli — (a) **parity live↔training** BLOCKER #1 (l'assembler deve ricostruire le L2 dallo stesso book in tempo reale → serve un buffer book live), (b) **causalità** (solo book ≤ t), (c) aggregazione a barra (last/mean/sum per tipo, da definire).
+- **GATE (cost-aware, split DATA-RICH non media k-fold, embargo ±h):** ① predicibilità: Spearman(μ, ret_fwd) su test data-rich con **embargo ±h**, |ρ| > 2/√n_eff E coerente val→test (no flip segno — lezione separation-index/ic-metric); ② tradabilità: backtest a costi reali (~26 bps round-trip a 1m) → Sharpe≥1.0, PF≥1.3, ≥80 trade, net>0 a ENTRAMBI i costi (riuso gate probe pivot); ③ negative control: feature-selection L2 batte il floor di permutazione (embargo ±h).
+- ⚠ **Prior:** il muro a 1m è il COSTO (~26bps ≫ effetto ~1.5bps price/volume). L2 è informazione NUOVA → può avere magnitudine maggiore, ma deve battere il costo; se l'edge esiste ma è sub-costo → valutare uso come TIMING/esecuzione, non alpha standalone. Esito negativo = documentato.
+
 ## ✅ DECISIONE 2026-06-22 — consolidamento sul PASS iTrans, distill = prossima cosa
 
 Dopo la catena STEP 0 → retune → A (k-fold) → b1 (gate vs HAR) → verifica anti-bug, deciso con l'utente: **il modello vol di produzione resta l'iTransformer 5-seed PASS** (`models/itransformer`, già validato due volte OOS: single-split test QLIKE 0.257/ratio 0.70 **e** k-fold sui fold data-rich, batte HAR). Il forward test `04b` continua a maturare verso i 30 trade. **Distill 5-seed RIMANDATO** (prossima cosa da fare).

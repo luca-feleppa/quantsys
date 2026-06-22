@@ -88,6 +88,13 @@ def parity_windows(env):
         vp_stride        = fcfg.get("vp_stride", 1),
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         use_revin        = bool(mcfg.get("use_revin", False)),
+        # IT: interval dal PipelineState (come FeatureAssembler) — senza, fb default=1
+        #     e le finestre TIME-semantic (30d/ma200/session/funding) divergono dal
+        #     path live a 1h. Era latente: il default 1 matchava solo l'era 1m.
+        # EN: interval from PipelineState (like FeatureAssembler) — without it fb defaults
+        #     to 1 and the TIME-semantic windows (30d/ma200/session/funding) diverge from
+        #     the 1h live path. Latent bug: the default 1 only matched the 1m era.
+        interval_minutes = ps.interval_minutes,
     )
     fb.scaler             = ps.scaler
     fb._scale_cols        = list(ps.scale_cols)
