@@ -330,9 +330,10 @@ def train_fold(
                     vl_loss += _l; vl_n += 1
 
         vl_nll = vl_loss / max(vl_n, 1)
-        if epoch % 5 == 0:
-            log.info(f"  Fold {fold_id} Ep {epoch:3d}  "
-                     f"train={tr_loss/len(tr_dl):.4f}  val={vl_nll:.4f}")
+        # IT: log per OGNI epoca (era ogni 5) — visibilità live della convergenza per fold.
+        # EN: log EVERY epoch (was every 5) — live per-fold convergence visibility.
+        log.info(f"  Fold {fold_id} Ep {epoch:3d}  "
+                 f"train={tr_loss/len(tr_dl):.4f}  val={vl_nll:.4f}")
         if es(vl_nll, model):
             break
 
