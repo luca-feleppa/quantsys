@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
@@ -518,6 +519,63 @@ def build_risk(market: dict) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# IT: 3b) FORWARD TEST — trade dello straddle vol (04b_vol_paper.py) da trades.jsonl.
+#     Per ogni trade: lato (LONG/SHORT straddle = long/short vol), strike, spot di
+#     ingresso, premio, prezzo di settlement, payoff e PnL (BTC) + sintesi aggregata.
+# EN: 3b) FORWARD TEST — vol straddle trades (04b_vol_paper.py) from trades.jsonl.
+#     Per trade: side (LONG/SHORT straddle = long/short vol), strike, entry spot,
+#     premium, settlement price, payoff and PnL (BTC) + aggregated summary.
+# ═══════════════════════════════════════════════════════════════════════════════
+TRADES_PATH = Path("results/vol_paper/trades.jsonl")
+
+
+def build_trades() -> dict:
+    if not TRADES_PATH.exists():
+        return {"trades": [], "summary": {"n": 0, "n_settled": 0, "gate_trades": 30,
+                                          "note": "nessun trade (forward test 04b non avviato)"}}
+    rows = []
+    for line in TRADES_PATH.read_text(encoding="utf-8").strip().splitlines():
+        if not line.strip():
+            continue
+        try:
+            t = json.loads(line)
+        except Exception:
+            continue
+        prem = float(t.get("prem_call", 0) or 0) + float(t.get("prem_put", 0) or 0)
+        rows.append({
+            "entry_ts": t.get("entry_ts"), "settled_ts": t.get("settled_ts"),
+            "side": int(t.get("side", 1)),                 # IT/EN: 1 LONG straddle, -1 SHORT
+            "executed": bool(t.get("executed", False)),
+            "settled": t.get("settled_ts") is not None,
+            "strike": _safe(t.get("strike")),
+            "entry_spot": _safe(t.get("index_at_entry")),
+            "delivery_price": _safe(t.get("delivery_price")),
+            "prem_call": _safe(t.get("prem_call")), "prem_put": _safe(t.get("prem_put")),
+            "premium": _safe(prem), "fee_btc": _safe(t.get("fee_btc")),
+            "amount": _safe(t.get("amount", 1.0)),
+            "payoff_btc": _safe(t.get("payoff_btc")), "pnl_btc": _safe(t.get("pnl_btc")),
+            "edge": _safe(t.get("edge")), "rv_pred": _safe(t.get("rv_pred")),
+            "var_iv": _safe(t.get("var_iv")), "t_hours": _safe(t.get("t_hours_at_entry")),
+            "call": t.get("call"), "put": t.get("put"),
+        })
+    settled = [r for r in rows if r["settled"] and r["pnl_btc"] is not None]
+    pnls = [r["pnl_btc"] for r in settled]
+    n_s = len(settled)
+    wins = sum(1 for p in pnls if p > 0)
+    summary = {
+        "n": len(rows), "n_settled": n_s,
+        "n_executed": sum(1 for r in rows if r["executed"]),
+        "total_pnl": _safe(sum(pnls)) if pnls else 0.0,
+        "hit_rate": _safe(wins / n_s) if n_s else None,
+        "avg_pnl": _safe(sum(pnls) / n_s) if n_s else None,
+        "best": _safe(max(pnls)) if pnls else None,
+        "worst": _safe(min(pnls)) if pnls else None,
+        "gate_trades": 30,
+    }
+    return {"trades": rows, "summary": summary}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # IT: 4) FRONTEND — SPA istituzionale (Plotly.js CDN per la superficie 3D).
 # EN: 4) FRONTEND — institutional SPA (Plotly.js CDN for the 3D surface).
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -598,6 +656,7 @@ HTML = r"""<!DOCTYPE html>
   <div class="tab active" data-tab="surface" onclick="switchTab('surface')">Volatility Surface</div>
   <div class="tab" data-tab="chain" onclick="switchTab('chain')">Option Chain</div>
   <div class="tab" data-tab="risk" onclick="switchTab('risk')">Risk &amp; Greeks</div>
+  <div class="tab" data-tab="trades" onclick="switchTab('trades')">Trades</div>
 </div>
 
 <!-- ── VOL SURFACE ── -->
@@ -657,6 +716,25 @@ HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- ── TRADES (forward test vol-paper 04b) ── -->
+<div id="page-trades" class="page">
+  <div class="cards" id="trades-cards"></div>
+  <div class="grid2">
+    <div class="panel">
+      <h3>Trade History <span style="font-weight:400;text-transform:none;letter-spacing:0">vol straddle · 04b forward test</span></h3>
+      <div class="scroll">
+        <table id="trades-table"><thead><tr id="trades-head"></tr></thead><tbody id="trades-body"></tbody></table>
+      </div>
+      <div class="legend">Clicca una riga per il profilo di rischio. LONG straddle = long vol (profitto se |mossa| &gt; breakeven), SHORT = short vol. Premio/payoff/PnL in BTC. status: settled (reale) · calib (bootstrap) · open.</div>
+    </div>
+    <div class="panel">
+      <h3>Risk Profile <span id="payoff-title" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
+      <div id="plot-payoff" class="plot tall"></div>
+      <div class="legend">PnL (BTC) a scadenza vs prezzo del sottostante. ◆ = settlement reale. Linee: Strike (punteggiata) · Entry spot (ambra). Opzioni inverse Deribit: payoff = |S−K|/S.</div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─── Plotly dark theme + helpers ──────────────────────────────────────────────
 const PL_DARK = {
@@ -677,6 +755,13 @@ function fmt(v,d=2){ if(v==null||isNaN(v)) return '—'; return Number(v).toLoca
 function fmt0(v){ return fmt(v,0); }
 function fmtK(v){ if(v==null||isNaN(v)) return '—'; if(Math.abs(v)>=1e3) return (v/1e3).toFixed(1)+'k'; return fmt(v,0); }
 function cls(v){ return v>=0?'pos':'neg'; }
+// IT: formatter con SEGNO esplicito (+ per positivi; i negativi hanno già −) per le greche.
+// EN: explicit-SIGN formatter (+ for positives; negatives already carry −) for the greeks.
+function sgn(v){ return (v!=null && !isNaN(v) && v>0) ? '+' : ''; }
+function fmtS(v,d=2){ if(v==null||isNaN(v)) return '—'; return sgn(v)+fmt(v,d); }
+function fmtKS(v){ if(v==null||isNaN(v)) return '—'; return sgn(v)+fmtK(v); }
+// IT: nomi estesi delle greche per header/etichette | EN: full greek names for headers/labels
+const GK_NAME = {'Θ':'Theta','ν':'Vega','Γ':'Gamma','Δ':'Delta','ρ':'Rho'};
 
 let SURFACE = null;
 
@@ -688,6 +773,7 @@ function switchTab(name){
   if(name==='surface'){ loadSurface(); }
   if(name==='chain')  loadChain();
   if(name==='risk')   loadRisk();
+  if(name==='trades') loadTrades();
 }
 
 // ─── Header / summary ─────────────────────────────────────────────────────────
@@ -792,14 +878,14 @@ async function loadChain(){
       `Forward ${fmt0(d.forward)}  ·  Spot ${fmt0(d.spot)}`;
     const head = document.getElementById('chain-head');
     head.innerHTML =
-      CH_COLS.map(c=>`<th class="call-side">${c}</th>`).join('') +
+      CH_COLS.map(c=>`<th class="call-side"${GK_NAME[c]?` title="${GK_NAME[c]}"`:''}>${GK_NAME[c]?`${c} (${GK_NAME[c]})`:c}</th>`).join('') +
       `<th class="k-col">STRIKE</th>` +
-      CH_COLS.slice().reverse().map(c=>`<th class="put-side">${c}</th>`).join('');
+      CH_COLS.slice().reverse().map(c=>`<th class="put-side"${GK_NAME[c]?` title="${GK_NAME[c]}"`:''}>${GK_NAME[c]?`${c} (${GK_NAME[c]})`:c}</th>`).join('');
     const atmK = nearest(d.rows.map(r=>r.strike), d.forward);
     const cell = (o,k,d2=2,sign=false)=>{
       if(!o||o[k]==null) return '<td>—</td>';
       let v=o[k], c = sign ? (v>=0?'pos':'neg') : '';
-      return `<td class="${c}">${fmt(v,d2)}</td>`;
+      return `<td class="${c}">${sign?fmtS(v,d2):fmt(v,d2)}</td>`;
     };
     document.getElementById('chain-body').innerHTML = d.rows.map(r=>{
       const c=r.call, p=r.put, atm = r.strike===atmK;
@@ -892,19 +978,19 @@ async function loadRisk(){
     document.getElementById('risk-cards').innerHTML = [
       {l:'Max Pain', v:'$'+fmt0(d.max_pain), s:'min total holder payoff', c:'amb'},
       {l:'Spot vs Max Pain', v:fmt(((d.spot-d.max_pain)/d.max_pain*100),1)+'%', s:'spot $'+fmt0(d.spot), c:(d.spot-d.max_pain)>=0?'pos':'neg'},
-      {l:'Net OI Δ (BTC)', v:fmtK(g.delta), s:'OI-weighted', c:cls(g.delta)},
-      {l:'Net OI Γ', v:fmt(g.gamma,4), s:'OI-weighted', c:cls(g.gamma)},
-      {l:'Net OI ν', v:fmtK(g.vega), s:'per +1% vol', c:cls(g.vega)},
-      {l:'Net OI Θ (USD/d)', v:fmtK(g.theta), s:'OI-weighted', c:cls(g.theta)},
+      {l:'Net OI Δ (Delta)', v:fmtKS(g.delta), s:'OI-weighted · BTC', c:cls(g.delta)},
+      {l:'Net OI Γ (Gamma)', v:fmtS(g.gamma,4), s:'OI-weighted', c:cls(g.gamma)},
+      {l:'Net OI ν (Vega)', v:fmtKS(g.vega), s:'per +1% vol', c:cls(g.vega)},
+      {l:'Net OI Θ (Theta)', v:fmtKS(g.theta), s:'OI-weighted · USD/day', c:cls(g.theta)},
       {l:'DVOL', v:fmt(d.dvol,1)+'%', s:'30d implied', c:'amb'},
     ].map(c=>`<div class="card"><div class="lbl">${c.l}</div><div class="val ${c.c||''}">${c.v}</div><div class="sub">${c.s}</div></div>`).join('');
 
     renderOI(d);
 
     const gv=['delta','gamma','vega','theta'].map(k=>g[k]);
-    Plotly.newPlot('plot-greeks', [{type:'bar', x:['Δ','Γ','ν','Θ'], y:gv,
+    Plotly.newPlot('plot-greeks', [{type:'bar', x:['Δ (Delta)','Γ (Gamma)','ν (Vega)','Θ (Theta)'], y:gv,
       marker:{color:gv.map(v=>v>=0?'#2ecc71':'#ff5c5c')},
-      hovertemplate:'%{x}: %{y:,.2f}<extra></extra>'}],
+      hovertemplate:'%{x}: %{y:+,.2f}<extra></extra>'}],
       Object.assign({}, PL_DARK, {dragmode:'pan', autosize:true, yaxis:Object.assign({},PL_DARK.yaxis,{title:'OI-weighted'})}), PL_CFG_2D);
 
     const totC = d.call_oi.reduce((a,b)=>a+b,0), totP = d.put_oi.reduce((a,b)=>a+b,0);
@@ -916,12 +1002,94 @@ async function loadRisk(){
   }catch(e){ setConn(false); }
 }
 
+// ─── Trades (forward test vol-paper) ────────────────────────────────────────────
+let TRADES = [];
+async function loadTrades(){
+  try{
+    const d = await (await fetch('/api/trades')).json();
+    TRADES = d.trades||[];
+    const s = d.summary||{};
+    document.getElementById('trades-cards').innerHTML = [
+      {l:'Total PnL (BTC)', v:fmtS(s.total_pnl,4), s:`${s.n_settled||0} settled / gate ${s.gate_trades||30}`, c:cls(s.total_pnl||0)},
+      {l:'Hit-rate', v:(s.hit_rate==null?'—':fmt(s.hit_rate*100,0)+'%'), s:'PnL > 0', c:(s.hit_rate>=0.5?'pos':'neg')},
+      {l:'Avg PnL/trade', v:(s.avg_pnl==null?'—':fmtS(s.avg_pnl,4)), s:'BTC', c:cls(s.avg_pnl||0)},
+      {l:'Trades', v:fmt0(s.n||0), s:`${s.n_executed||0} eseguiti (real)`, c:'amb'},
+      {l:'Best / Worst', v:(s.best==null?'—':fmtS(s.best,4))+' / '+(s.worst==null?'—':fmtS(s.worst,4)), s:'BTC', c:'amb'},
+    ].map(c=>`<div class="card"><div class="lbl">${c.l}</div><div class="val ${c.c||''}">${c.v}</div><div class="sub">${c.s}</div></div>`).join('');
+
+    const cols=['#','Entry','Side','Strike','Entry spot','Premium','Settle','Payoff','PnL','Edge','Status'];
+    document.getElementById('trades-head').innerHTML = cols.map(c=>`<th>${c}</th>`).join('');
+    document.getElementById('trades-body').innerHTML = TRADES.map((t,i)=>{
+      const stat = !t.settled ? 'open' : (t.executed?'settled':'calib');
+      return `<tr onclick="selectTrade(${i})" style="cursor:pointer">
+        <td>${i+1}</td><td>${(t.entry_ts||'').slice(5,16)}</td>
+        <td class="${t.side>0?'pos':'neg'}">${t.side>0?'LONG':'SHORT'}</td>
+        <td>${fmt0(t.strike)}</td><td>${fmt0(t.entry_spot)}</td>
+        <td>${fmt(t.premium,4)}</td>
+        <td>${t.delivery_price==null?'—':fmt0(t.delivery_price)}</td>
+        <td>${t.payoff_btc==null?'—':fmt(t.payoff_btc,4)}</td>
+        <td class="${cls(t.pnl_btc||0)}">${t.pnl_btc==null?'—':fmtS(t.pnl_btc,4)}</td>
+        <td>${fmt(t.edge,2)}</td><td>${stat}</td></tr>`;
+    }).join('');
+    if(TRADES.length){ selectTrade(TRADES.length-1); }
+    else { document.getElementById('payoff-title').textContent='(nessun trade)'; Plotly.purge('plot-payoff'); }
+    setConn(true);
+  }catch(e){ setConn(false); }
+}
+function selectTrade(i){
+  const t=TRADES[i]; if(!t) return;
+  document.querySelectorAll('#trades-body tr').forEach((r,j)=>r.classList.toggle('atm-row', j===i));
+  renderPayoff(t);
+}
+// IT: profilo di rischio dello straddle — PnL (BTC) a scadenza vs sottostante.
+//     Opzioni inverse Deribit: payoff(S)=amount·|S−K|/S. Il costo totale è calibrato
+//     dal trade realizzato (payoff@settle − pnl) così la curva passa per il marker ◆.
+// EN: straddle risk profile — PnL (BTC) at expiry vs underlying. Inverse Deribit
+//     options: payoff(S)=amount·|S−K|/S. Total cost is calibrated from the realized
+//     trade (payoff@settle − pnl) so the curve passes through the ◆ marker.
+function renderPayoff(t){
+  const K=t.strike, amt=t.amount||1, side=t.side>0?1:-1;
+  let cost=(t.premium||0)*amt+(t.fee_btc||0);
+  if(t.delivery_price!=null && t.pnl_btc!=null){
+    const pf=amt*Math.abs(t.delivery_price-K)/t.delivery_price;
+    cost = side>0 ? (pf - t.pnl_btc) : (pf + t.pnl_btc);
+  }
+  const lo=K*0.80, hi=K*1.20, N=121, xs=[], ys=[];
+  for(let j=0;j<N;j++){ const S=lo+(hi-lo)*j/(N-1);
+    const pf=amt*Math.abs(S-K)/S;
+    ys.push(side>0 ? pf-cost : cost-pf); xs.push(S);
+  }
+  const traces=[{type:'scatter',mode:'lines',x:xs,y:ys,line:{color:'#4aa3ff',width:2},
+    hovertemplate:'S %{x:,.0f}<br>PnL %{y:+,.4f} BTC<extra></extra>'}];
+  if(t.delivery_price!=null && t.pnl_btc!=null){
+    traces.push({type:'scatter',mode:'markers',x:[t.delivery_price],y:[t.pnl_btc],
+      marker:{color:(t.pnl_btc>=0?'#2ecc71':'#ff5c5c'),size:12,symbol:'diamond'},
+      hovertemplate:'settle %{x:,.0f}<br>PnL %{y:+,.4f} BTC<extra></extra>'});
+  }
+  document.getElementById('payoff-title').textContent =
+    `${t.side>0?'LONG':'SHORT'} straddle · K ${fmt0(K)} · cost ${fmt(cost,4)} BTC`;
+  Plotly.newPlot('plot-payoff', traces, Object.assign({}, PL_DARK, {
+    dragmode:'pan', autosize:true, showlegend:false,
+    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Underlying at expiry (USD)'}),
+    yaxis:Object.assign({},PL_DARK.yaxis,{title:'PnL (BTC)',zeroline:true,zerolinecolor:'#3a465c'}),
+    shapes:[
+      {type:'line',x0:K,x1:K,y0:0,y1:1,yref:'paper',line:{color:'#7d8aa0',width:1,dash:'dot'}},
+      {type:'line',x0:t.entry_spot,x1:t.entry_spot,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.2}},
+    ],
+    annotations:[
+      {x:K,y:1,yref:'paper',text:'Strike',showarrow:false,font:{color:'#7d8aa0',size:10},yanchor:'bottom'},
+      {x:t.entry_spot,y:1,yref:'paper',text:'Entry',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
+    ],
+  }), PL_CFG_2D);
+}
+
 // ─── Refresh loop ─────────────────────────────────────────────────────────────
 function refresh(){
   loadSummary();
   if(document.getElementById('page-surface').classList.contains('active')) loadSurface();
   if(document.getElementById('page-chain').classList.contains('active'))   loadChain();
   if(document.getElementById('page-risk').classList.contains('active'))    loadRisk();
+  if(document.getElementById('page-trades').classList.contains('active'))  loadTrades();
 }
 loadSummary(); loadSurface();
 setInterval(refresh, 12000);
@@ -1003,6 +1171,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if route == "/api/risk":
                 self._json(build_risk(build_market()))
+                return
+            if route == "/api/trades":
+                self._json(build_trades())
                 return
             self._json({"error": "not found"}, 404)
         except requests.RequestException as e:

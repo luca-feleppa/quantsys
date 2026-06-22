@@ -598,17 +598,19 @@ quantsys_project/
 
 ## Dashboard — Deribit Options Risk Terminal · Deribit Options Risk Terminal
 
-🇮🇹 `scripts/06_dashboard.py` è il **terminale opzioni crypto** (server HTTP single-file + SPA Plotly.js), **indipendente dalla pipeline ML** e GPU-free. Si connette ai dati **pubblici Deribit** (REST, no-auth) — nessuna chiave richiesta. Tre tab:
+🇮🇹 `scripts/06_dashboard.py` è il **terminale opzioni crypto** (server HTTP single-file + SPA Plotly.js), **indipendente dalla pipeline ML** e GPU-free. Si connette ai dati **pubblici Deribit** (REST, no-auth) — nessuna chiave richiesta. Greche mostrate **col segno (+/−) e nome tra parentesi** (`Δ (Delta)`). Quattro tab:
 1. **Volatility Surface** — superficie IV 3D (moneyness K/F × giorni), smile per scadenza, term structure ATM
 2. **Option Chain** — chain call/put a doppio lato con **Greche calcolate live** (Black-Scholes forward-measure: Δ, Γ, ν per +1% vol, Θ/giorno), strike ATM evidenziato
 3. **Risk & Greeks** — OI per strike (call vs put), max-pain, Greche aggregate pesate per OI, put/call ratio, DVOL
+4. **Trades** — storico trade del forward test vol (`04b`): lato LONG/SHORT straddle, prezzo d'ingresso/settlement, premio/payoff/PnL, **profilo di rischio/payoff** della posizione (click su una riga). Endpoint `/api/trades` (legge `results/vol_paper/trades.jsonl`)
 
 Header live: spot BTC (index), DVOL 30d, ATM IV 30d, OI/volume totali, put/call ratio. Auto-refresh ~12s. Underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH); `auth_token` opzionale (constant-time, header `X-Auth-Token` o `?token=`).
 
-**EN** `scripts/06_dashboard.py` is the **crypto options terminal** (single-file HTTP server + Plotly.js SPA), **decoupled from the ML pipeline** and GPU-free. It connects to **Deribit public** data (REST, no-auth) — no key required. Three tabs:
+**EN** `scripts/06_dashboard.py` is the **crypto options terminal** (single-file HTTP server + Plotly.js SPA), **decoupled from the ML pipeline** and GPU-free. It connects to **Deribit public** data (REST, no-auth) — no key required. Greeks shown **with sign (+/−) and name in parentheses** (`Δ (Delta)`). Four tabs:
 1. **Volatility Surface** — 3D IV surface (moneyness K/F × days), per-expiry smile, ATM term structure
 2. **Option Chain** — two-sided call/put chain with **Greeks computed live** (Black-Scholes forward measure: Δ, Γ, ν per +1% vol, Θ/day), ATM strike highlighted
 3. **Risk & Greeks** — OI by strike (call vs put), max-pain, OI-weighted aggregate Greeks, put/call ratio, DVOL
+4. **Trades** — vol forward-test (`04b`) trade history: LONG/SHORT straddle side, entry/settlement price, premium/payoff/PnL, position **risk/payoff profile** (click a row). `/api/trades` endpoint (reads `results/vol_paper/trades.jsonl`)
 
 Live header: BTC spot (index), 30d DVOL, 30d ATM IV, total OI/volume, put/call ratio. Auto-refresh ~12s. Underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH); optional `auth_token` (constant-time, `X-Auth-Token` header or `?token=`).
 
