@@ -202,6 +202,22 @@ def ensure_dirs(*paths: str) -> None:
         Path(p).mkdir(parents=True, exist_ok=True)
 
 
+# IT: root dei modelli — override via env QUANTSYS_MODELS_ROOT per ESPERIMENTI ISOLATI.
+#     Default "models" = comportamento byte-identico. Permette di girare un distill
+#     (o qualsiasi train) su una dir isolata (es. `models_exp/`) SENZA sovrascrivere un
+#     modello LIVE — tipicamente `models/itransformer/` usato dal forward-test vol-paper
+#     (04b). L'intero path train→distill→giudice deriva da qui la base: impostando l'env
+#     prima del comando, scrittura e lettura restano coerenti nella sandbox isolata.
+# EN: models root — env override QUANTSYS_MODELS_ROOT for ISOLATED EXPERIMENTS.
+#     Default "models" = byte-identical behavior. Lets a distill (or any train) run on
+#     an isolated dir (e.g. `models_exp/`) WITHOUT overwriting a LIVE model — typically
+#     `models/itransformer/` used by the vol-paper forward test (04b). The whole
+#     train→distill→judge path derives its base from here: set the env before the
+#     command and read/write stay consistent within the isolated sandbox.
+def models_root() -> Path:
+    return Path(os.environ.get("QUANTSYS_MODELS_ROOT", "models"))
+
+
 # IT: PipelineState — contenitore unificato scaler + config + metadati.
 # EN: PipelineState — unified container for scalers + config + metadata.
 

@@ -5,7 +5,26 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-18 (CAFN coordinatore + DASHBOARD opzioni)
+## 🕒 Ultimo aggiornamento: 2026-06-21 (DISTILL TARGET-AWARE per la linea VOLATILITÀ/opzioni)
+
+## 🟢 DISTILLATION RIADATTATA AL TARGET VARIANZA (`log_rv`) — FATTO 2026-06-21
+
+Su richiesta utente (/goal): riadattare gli script della distill a funzionare sulla **versione attuale per le opzioni** (target `log_rv` = varianza). **Problema scientifico individuato:** lo scoring teacher era cablato sul direzionale (`40% val_loss + 35% Spearman + 25% directional_acc`). Sulla linea vol la **directional accuracy è il segno della varianza-vs-mediana**, che NON è un segnale tradabile (lo straddle di `04b_vol_paper.py` è **direction-neutral**, monetizza RV vs IV = momento PARI). Pesare la selezione/blend dei teacher per la dir_acc della varianza è scorretto e poteva scegliere il teacher sbagliato.
+
+**Cosa è stato fatto (engineering completo, suite verde):**
+- **`quantsys/model/distillation.py`:** nuovo helper **`teacher_score_weights(target_type)`** = single source of truth dei pesi `(val_loss, spearman, dir_acc)`. Direzionale (`ret`/`log_rs_ratio`) → `(0.40, 0.35, 0.25)`; **vol (`log_rv`) → `(0.65, 0.35, 0.00)`** (dir_acc azzerata, ribilanciata su val_loss/QLIKE+Spearman). `compute_teacher_weights(all_archs, target_type=...)` lo usa.
+- **`run_all.py`:** `_select_best_teacher(all_archs, target_type=...)` (il selettore reale, legge `history.json`) ora usa lo stesso helper; `phase_distill` legge `target_type` da config e lo passa. Log diagnostico stampa i pesi attivi.
+- **`scripts/02_train.py`:** passa `target_type` a `compute_teacher_weights`; **persiste in `config.json`** `best_val_loss`/`best_spearman`/`best_da` (metriche di val alla best-val epoch). ⚠ Prima NON erano persistite → `compute_teacher_weights` (che le legge) ricadeva silenziosamente su pesi UNIFORMI: ora il blend multi-teacher è davvero quality-weighted.
+- **`tests/test_distillation.py`** (5 test nuovi): vol azzera dir_acc, direzionale la mantiene, blend ignora dir_acc su vol, blend preferisce val_loss più basso su vol, default back-compat. **Suite full: 138 passed, 8 skipped, 0 failed** (era 133; +5).
+- **Doc sincronizzate:** CLAUDE.md (§REGOLE), TEORIA.md, README.md (×2 lingue ×2 sezioni), AVVIO.md (Fase 2b). MODEL_IMPROVEMENTS.md non aveva la sezione scoring → nessun edit.
+
+**Verifica integrazione:** `_select_best_teacher` su dati sintetici — arch con dir_acc 0.95 ma val_loss peggiore: vince sotto `ret` solo se domina anche val/sp; sotto `log_rv` la dir_acc contribuisce 0 (score isola val_loss+Spearman). Il resto del path distill era già target-agnostic (`transfer_output_heads`, `distillation_loss_*`, `generate_multi_teacher_predictions` gestiscono quantile+t_student).
+
+**⚠ NON ESEGUITO (è solo l'engineering del metodo, non un esperimento):** il distill vol vero richiede i prerequisiti già noti (STATUS 2026-06-12): (1) rigenerare l'npz (`01_download_data.py`+`scripts/vol/dev_vols_macro_append.py`, eliminato col cleanup 06-12); (2) addestrare nhits/tcnmamba su `log_rv` (mai fatto; i loro yaml hanno hyperparam era-1m → rischio overfit, il tuning vol lr3e-5/drop0.3 è solo in itransformer.yaml); (3) **dir SEPARATE, non in-place** (`models/itransformer/` è il modello del forward test `04b` in corso); (4) **pre-registrare il gate prima di girare** (QLIKE val del distillato vs iTrans 5-seed corrente; misurare PRIMA la correlazione cross-arch degli errori sulla vol — se ≈0.995 come sul direzionale, il blend è inutile a priori). NON girare training in parallelo a poller/vol_paper (contesa CUDA).
+
+**Working tree:** modificati `quantsys/model/distillation.py`, `run_all.py`, `scripts/02_train.py`, `tests/test_distillation.py` (nuovo), CLAUDE/TEORIA/README/AVVIO + STATUS. NON committato.
+
+## 🕒 Aggiornamento precedente: 2026-06-18 (CAFN coordinatore + DASHBOARD opzioni)
 
 ## 🧪 CAFN — Causal Attention Flow Network (coordinatore dei 3 modelli) — COSTRUITO + PRE-REGISTRATO 2026-06-18
 
@@ -19,7 +38,7 @@ Costruito su richiesta utente (/goal) un layer di **coordinamento a monte** dei 
 
 **GATE PRE-REGISTRATO (scritto PRIMA di girare sul reale):** PASS sse CAFN-congiunto batte il baseline NO-CAFN (stessi modelli/seed/epoche) di **≥3% MSE-mu su val per ≥2 dei 3 modelli**. FAIL → CAFN-coordinatore KILL (flag inerte, documentato). Zero iterazioni a risultato visto; test split solo a gate val PASS.
 
-**⚠ 3 BLOCCHI scientifici dichiarati (mandato CLAUDE.md), e come risolti:**
+**⚠ 3 BLOCCHI scientifici dichiarati e come risolti:**
 1. **Dati Deribit grezzi come input storico = lookahead + dataset inesistente** (greche/book/IV forward-collected, giorni di storia). → CAFN si addestra sul **tensore canonico 104-feature** (storia 2019→oggi); Deribit entra solo come canale `extra` opzionale futuro.
 2. **"invece del dataframe" romperebbe parity/PipelineState.** → integrazione **additiva** (concat, `latent=None`→identico), contratto forward intatto.
 3. **Training simultaneo 3 modelli su 8GB = OOM** (il repo impone 3-arch sequenziale). → default piccoli + `--smoke`; caveat memoria nel trainer.

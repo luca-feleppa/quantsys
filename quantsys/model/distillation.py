@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from quantsys.utils import models_root as _models_root
+
 log = logging.getLogger("quantsys.model.distillation")
 
 
@@ -289,7 +291,7 @@ def load_teacher(teacher_arch: str, device: torch.device):
     """Load the best teacher checkpoint for the given architecture."""
     from quantsys.model import load_model
 
-    teacher_dir = Path("models") / teacher_arch
+    teacher_dir = _models_root() / teacher_arch
     ckpt = teacher_dir / "best_model.pt"
     if not ckpt.exists():
         raise FileNotFoundError(
@@ -316,7 +318,7 @@ def _is_teacher_overfit(arch: str, overfit_gap_threshold: float = 1.0) -> bool:
     Restituisce False (= non escludere) se non riusciamo a leggere history.
     """
     import json
-    hist_path = Path("models") / arch / "history.json"
+    hist_path = _models_root() / arch / "history.json"
     if not hist_path.exists():
         return False
     try:
@@ -377,7 +379,7 @@ def generate_multi_teacher_predictions(
     teacher_preds = {}
     skipped_overfit = []
     for arch in all_archs:
-        ckpt = Path("models") / arch / "best_model.pt"
+        ckpt = _models_root() / arch / "best_model.pt"
         if not ckpt.exists():
             log.warning(f"Multi-teacher: {arch} checkpoint non trovato — skip")
             continue
@@ -430,21 +432,47 @@ def generate_multi_teacher_predictions(
     return result
 
 
-# IT: Pesi teacher da metriche salvate (40% val_loss + 35% spearman + 25% DA).
-# EN: Teacher weights from saved metrics (40% val_loss + 35% spearman + 25% DA).
-def compute_teacher_weights(all_archs: list[str]) -> dict[str, float]:
+# IT: Pesi (val_loss, spearman, dir_acc) dello scoring teacher — TARGET-AWARE.
+#     Single source of truth condivisa con `_select_best_teacher` (run_all.py).
+#     • target direzionale (`ret`) o di SEGNO (`log_rs_ratio`): pesi storici
+#       0.40 val_loss + 0.35 spearman + 0.25 dir_acc (il segno È il segnale).
+#     • target di VOLATILITÀ (`log_rv`): la directional accuracy è il segno della
+#       varianza-vs-mediana, NON un segnale tradabile (lo straddle è direction-
+#       neutral) → si AZZERA e si ribilancia su val_loss (QLIKE/NLL, il momento
+#       PARI che generalizza OOS) + spearman (qualità di RANGO della vol). Selezionare
+#       un teacher per "dir_acc della vol" è scientificamente scorretto su questa linea.
+# EN: Teacher-scoring weights (val_loss, spearman, dir_acc) — TARGET-AWARE.
+#     Single source of truth shared with `_select_best_teacher` (run_all.py).
+#     • directional (`ret`) or SIGN target (`log_rs_ratio`): historical weights
+#       0.40 val_loss + 0.35 spearman + 0.25 dir_acc (the sign IS the signal).
+#     • VOLATILITY target (`log_rv`): directional accuracy is the sign of
+#       variance-vs-median, NOT a tradable signal (the straddle is direction-
+#       neutral) → ZERO it and rebalance onto val_loss (QLIKE/NLL, the EVEN moment
+#       that generalizes OOS) + spearman (rank quality of vol). Picking a teacher by
+#       "vol dir_acc" is scientifically wrong on this line.
+def teacher_score_weights(target_type: str = "ret") -> tuple[float, float, float]:
+    """Return (w_val_loss, w_spearman, w_dir_acc) for the teacher scoring, by target."""
+    if target_type == "log_rv":
+        return (0.65, 0.35, 0.0)
+    return (0.40, 0.35, 0.25)
+
+
+# IT: Pesi teacher da metriche salvate (scoring target-aware via teacher_score_weights).
+# EN: Teacher weights from saved metrics (target-aware scoring via teacher_score_weights).
+def compute_teacher_weights(all_archs: list[str],
+                            target_type: str = "ret") -> dict[str, float]:
     """Compute teacher weights from saved metrics (config.json).
 
-    Uses the same normalized scoring as _select_best_teacher in run_all.py:
-    40% val_loss (inverted), 35% spearman, 25% DA.
-    Returns weights proportional to scores (softmax-like).
+    Uses the same normalized, TARGET-AWARE scoring as _select_best_teacher in
+    run_all.py (see teacher_score_weights): on the vol target the dir_acc term is
+    dropped. Returns weights proportional to scores (softmax-like).
     """
     import json
     import numpy as np
 
     metrics = {}
     for arch in all_archs:
-        cfg_path = Path("models") / arch / "config.json"
+        cfg_path = _models_root() / arch / "config.json"
         if not cfg_path.exists():
             continue
         with open(cfg_path, encoding="utf-8") as f:
@@ -470,10 +498,11 @@ def compute_teacher_weights(all_archs: list[str]) -> dict[str, float]:
             return np.ones_like(arr) / len(arr)
         return (arr - arr.min()) / r
 
+    w_vl, w_sp, w_da = teacher_score_weights(target_type)
     loss_norm = 1.0 - _norm(losses)
     spe_norm = _norm(spearmans)
     da_norm = _norm(das)
-    scores = 0.40 * loss_norm + 0.35 * spe_norm + 0.25 * da_norm
+    scores = w_vl * loss_norm + w_sp * spe_norm + w_da * da_norm
 
     # IT: Softmax con T=2 — amplifica gap tra teacher (più peso al migliore).
     # EN: Softmax with T=2 — amplifies gap between teachers (more to the best).

@@ -36,7 +36,7 @@ import pandas as pd
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg  # noqa: E402
+from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg, models_root  # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.vols_qlike")
@@ -79,7 +79,9 @@ def main():
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
     args = ap.parse_args()
-    model_dir = Path("models") / args.arch
+    # IT: root env-aware (QUANTSYS_MODELS_ROOT) — giudica la sandbox isolata se attiva.
+    # EN: env-aware root (QUANTSYS_MODELS_ROOT) — judges the isolated sandbox if set.
+    model_dir = models_root() / args.arch
     log.info(f"dir modelli effettiva / effective model dir: {model_dir} (arch={args.arch})")
 
     cfg = load_config("config/default.yaml")

@@ -35,10 +35,10 @@
   - **LSTM+GRU** — dual-stream with temporal attention (legacy, kept for backward compat; under-performing, see `CHANGELOG.md`)
 
 🇮🇹
-- **Knowledge Distillation multi-teacher** (`--distill`): addestra tutte le architetture, le valuta (40% val_loss + 35% Spearman + 25% directional accuracy), le pesa via softmax(temperature=2), poi riadestra gli student con soft labels pesate da tutti i teacher + transfer delle output heads + loss mista scala-normalizzata.
+- **Knowledge Distillation multi-teacher** (`--distill`): addestra tutte le architetture, le valuta con scoring **target-aware** (direzionale `ret`: 40% val_loss + 35% Spearman + 25% directional accuracy; volatilità `log_rv`: 65% val_loss + 35% Spearman + 0% directional accuracy — sulla varianza la dir_acc non è un segnale tradabile), le pesa via softmax(temperature=2), poi riadestra gli student con soft labels pesate da tutti i teacher + transfer delle output heads + loss mista scala-normalizzata.
 
 **EN**
-- **Multi-teacher Knowledge Distillation** (`--distill`): trains all archs, scores them (40% val_loss + 35% Spearman + 25% directional accuracy), weights them via softmax(temperature=2), and retrains students with weighted soft labels from all teachers + output-head transfer + scale-normalized mixed loss.
+- **Multi-teacher Knowledge Distillation** (`--distill`): trains all archs, scores them with **target-aware** scoring (directional `ret`: 40% val_loss + 35% Spearman + 25% directional accuracy; volatility `log_rv`: 65% val_loss + 35% Spearman + 0% directional accuracy — on variance dir_acc is not a tradable signal), weights them via softmax(temperature=2), and retrains students with weighted soft labels from all teachers + output-head transfer + scale-normalized mixed loss.
 
 🇮🇹
 - **Ensemble eterogeneo** combina modelli strutturalmente diversi in inferenza via Legge della Varianza Totale (pesata):
@@ -271,7 +271,7 @@ python run_all.py --distill
 
 🇮🇹
 1. **Fase 2a** — Addestra tutte le architetture in `config/default.yaml → distillation.archs` (default: iTransformer + N-HiTS + TCN+Mamba) indipendentemente con `n_ensemble=1`. Skippa un'arch se `models/{arch}/best_model.pt` esiste già; forza retrain con `--force-download`.
-2. **Fase 2b** — Multi-Teacher Scoring: ogni modello valutato alla best epoch con scoring normalizzato (40% val_loss + 35% Spearman ρ + 25% directional accuracy). Pesi via softmax(temperature=2). Lo score massimo diventa primary teacher; gli altri restano nel pool come teacher pesati.
+2. **Fase 2b** — Multi-Teacher Scoring (target-aware): ogni modello valutato alla best epoch con scoring normalizzato. Pesi dipendenti dal `target_type` (`teacher_score_weights`): direzionale `ret` → 40% val_loss + 35% Spearman ρ + 25% directional accuracy; volatilità `log_rv` → 65% val_loss + 35% Spearman ρ + 0% directional accuracy (sulla varianza la dir_acc è il segno-vs-mediana, non tradabile). Pesi via softmax(temperature=2). Lo score massimo diventa primary teacher; gli altri restano nel pool come teacher pesati.
 3. **Fase 2c** — Riadestra ogni modello come student con:
    - Transfer dei pesi delle output heads (μ, σ, ν) dal best teacher
    - Loss mista scala-normalizzata `(1−α)·NLL_reale + α·distill_loss` con α=0.3, normalizzata per varianza per-componente del teacher (μ~1e-5, ν~5 contribuiscono equamente)
@@ -281,7 +281,7 @@ python run_all.py --distill
 
 **EN**
 1. **Phase 2a** — Trains all architectures listed in `config/default.yaml → distillation.archs` (default: iTransformer + N-HiTS + TCN+Mamba) independently with `n_ensemble=1`. Skips an arch if `models/{arch}/best_model.pt` already exists; force retrain with `--force-download`.
-2. **Phase 2b** — Multi-Teacher Scoring: every model scored at its best validation epoch with normalized scoring (40% val_loss + 35% Spearman ρ + 25% directional accuracy). Weights via softmax(temperature=2). Top score becomes the primary teacher; the others remain in the pool as weighted teachers.
+2. **Phase 2b** — Multi-Teacher Scoring (target-aware): every model scored at its best validation epoch with normalized scoring. Weights depend on `target_type` (`teacher_score_weights`): directional `ret` → 40% val_loss + 35% Spearman ρ + 25% directional accuracy; volatility `log_rv` → 65% val_loss + 35% Spearman ρ + 0% directional accuracy (on variance dir_acc is the sign-vs-median, not tradable). Weights via softmax(temperature=2). Top score becomes the primary teacher; the others remain in the pool as weighted teachers.
 3. **Phase 2c** — Retrains each model as student with:
    - Output head weight transfer (μ, σ, ν heads) from best teacher
    - Scale-normalized mixed loss `(1−α)·NLL_real + α·distill_loss` with α=0.3, normalized by per-component teacher variance (μ~1e-5, ν~5 contribute equally)

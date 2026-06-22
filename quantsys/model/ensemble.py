@@ -11,6 +11,8 @@ import logging
 import torch
 import torch.nn.functional as F
 
+from quantsys.utils import models_root as _models_root
+
 log = logging.getLogger("quantsys.model.ensemble")
 
 # IT: Temperatura softmax per pesi inverse-NLL (più bassa = più discriminativa).
@@ -121,8 +123,10 @@ def _compute_dynamic_weights(arch_names: list,
     quell'arch riceve peso 1.0 (fallback uniforme parziale). Se TUTTE
     mancano, restituisce dict vuoto → caller userà DEFAULT_ARCH_WEIGHTS.
     """
+    # IT: default = root env-aware (QUANTSYS_MODELS_ROOT) per esperimenti isolati.
+    # EN: default = env-aware root (QUANTSYS_MODELS_ROOT) for isolated experiments.
     if models_root is None:
-        models_root = Path("models")
+        models_root = _models_root()
 
     nlls = {}
     for arch in arch_names:
@@ -282,10 +286,13 @@ class EnsembleModel:
         if archs is None:
             archs = get_distillation_archs(cfg)
 
+        # IT: root env-aware — l'ensemble eterogeneo legge dalla sandbox isolata se attiva.
+        # EN: env-aware root — the heterogeneous ensemble reads from the isolated sandbox if set.
+        _mroot = _models_root()
         models = []
         arch_names = []
         for arch in archs:
-            ckpt = Path("models") / arch / "best_model.pt"
+            ckpt = _mroot / arch / "best_model.pt"
             if not ckpt.exists():
                 log.warning(f"Ensemble eterogeneo: {ckpt} non trovato, skip {arch}")
                 continue
@@ -318,7 +325,8 @@ class EnsembleModel:
             tcfg = cfg["distillation"].get("ensemble_nll_temperature")
             if isinstance(tcfg, (int, float)) and tcfg > 0:
                 temperature = float(tcfg)
-        dyn_weights = _compute_dynamic_weights(arch_names, temperature=temperature)
+        dyn_weights = _compute_dynamic_weights(arch_names, models_root=_mroot,
+                                               temperature=temperature)
         # IT: Se vuoto → fallback a DEFAULT_ARCH_WEIGHTS (uniforme). Altrimenti override.
         # EN: If empty → fallback to DEFAULT_ARCH_WEIGHTS (uniform). Otherwise override.
         return cls(models, device, arch_names,

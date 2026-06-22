@@ -55,6 +55,19 @@ from pathlib import Path
 ROOT          = Path(__file__).parent
 DATA_DIR      = ROOT / "data"
 MODELS_DIR    = ROOT / "models"      # root base; arch-specific: MODELS_DIR / arch
+
+
+# IT: root modelli env-aware (QUANTSYS_MODELS_ROOT) per ESPERIMENTI ISOLATI — default
+#     ROOT/models = invariato. Allineato a quantsys.utils.models_root: permette di girare
+#     un --distill su una sandbox (es. models_exp/) senza toccare il modello LIVE
+#     models/itransformer del forward-test 04b. Usato dai check di esistenza di phase_distill.
+# EN: env-aware models root (QUANTSYS_MODELS_ROOT) for ISOLATED EXPERIMENTS — default
+#     ROOT/models = unchanged. Mirrors quantsys.utils.models_root: lets a --distill run on
+#     a sandbox (e.g. models_exp/) without touching the LIVE models/itransformer used by
+#     the 04b forward test. Used by phase_distill existence checks.
+def _models_root() -> Path:
+    env = os.environ.get("QUANTSYS_MODELS_ROOT")
+    return Path(env) if env else MODELS_DIR
 RESULTS_DIR   = ROOT / "results"     # root base; arch-specific: RESULTS_DIR / arch
 RAW_CANDLES   = DATA_DIR / "raw_candles.parquet"
 DASHBOARD_URL = "http://localhost:8050"
@@ -418,19 +431,25 @@ def phase_train(args) -> None:
     step_ok(f"Training completato in {elapsed(t0)}")
 
 
-# IT: sceglie il teacher con score pesato (val_loss 0.4 + spearman 0.35 + dir_acc 0.25).
-# EN: picks the teacher by weighted score (val_loss 0.4 + spearman 0.35 + dir_acc 0.25).
-def _select_best_teacher(all_archs: list) -> str:
+# IT: sceglie il teacher con score pesato TARGET-AWARE (vedi teacher_score_weights):
+#     direzionale → val_loss 0.40 + spearman 0.35 + dir_acc 0.25; vol (log_rv) →
+#     0.65 + 0.35 + 0.00 (la dir_acc della varianza non è il segnale tradabile).
+# EN: picks the teacher by TARGET-AWARE weighted score (see teacher_score_weights):
+#     directional → val_loss 0.40 + spearman 0.35 + dir_acc 0.25; vol (log_rv) →
+#     0.65 + 0.35 + 0.00 (variance dir_acc is not the tradable signal).
+def _select_best_teacher(all_archs: list, target_type: str = "ret") -> str:
     """Confronta le metriche dei modelli appena addestrati e sceglie il migliore come teacher.
 
     Usa i valori alla best val_loss epoch (non il picco su tutte le epoche)
     e normalizza i contributi per evitare che un singolo criterio domini.
+    Lo scoring è target-aware: sul target di volatilità il termine dir_acc è 0.
     """
     import json as _json
+    from quantsys.model.distillation import teacher_score_weights
 
     raw = {}
     for arch in all_archs:
-        arch_dir = ROOT / "models" / arch
+        arch_dir = _models_root() / arch
         history_path = arch_dir / "history.json"
 
         best_val, sp_at_best, da_at_best = None, 0.0, 0.0
@@ -469,9 +488,15 @@ def _select_best_teacher(all_archs: list) -> str:
     sp_norm = _norm(sp_vals)
     da_norm = _norm(da_vals)
 
+    # IT: pesi target-aware (dir_acc=0 sul target vol log_rv).
+    # EN: target-aware weights (dir_acc=0 on the vol log_rv target).
+    w_vl, w_sp, w_da = teacher_score_weights(target_type)
+    print(f"    scoring weights (target={target_type}): "
+          f"val_loss={w_vl:.2f} spearman={w_sp:.2f} dir_acc={w_da:.2f}")
+
     scores = {}
     for i, arch in enumerate(archs_with_data):
-        score = (1.0 - vl_norm[i]) * 0.4 + sp_norm[i] * 0.35 + da_norm[i] * 0.25
+        score = (1.0 - vl_norm[i]) * w_vl + sp_norm[i] * w_sp + da_norm[i] * w_da
         scores[arch] = score
         print(f"    {arch:<18} score={score:.3f}  "
               f"(vl={raw[arch]['val_loss']:+.4f}  sp={raw[arch]['spearman']:+.4f}  "
@@ -523,7 +548,7 @@ def phase_distill(args) -> str:
     if distill_n != 1:
         step_warn(f"  --n-ensemble esplicito: distill multi-seed con n_ensemble={distill_n} (default 1)")
     for arch in all_archs:
-        arch_dir = ROOT / "models" / arch
+        arch_dir = _models_root() / arch
         arch_dir.mkdir(parents=True, exist_ok=True)
         model_file = arch_dir / "best_model.pt"
 
@@ -542,7 +567,10 @@ def phase_distill(args) -> str:
 
     # ── Fase 2b: Scoring e pesatura teacher ─────────────────────────────────
     banner("FASE 2b · MULTI-TEACHER SCORING (confronto metriche)")
-    teacher = _select_best_teacher(all_archs)
+    # IT: scoring target-aware — sul target vol (log_rv) la dir_acc è azzerata.
+    # EN: target-aware scoring — on the vol target (log_rv) dir_acc is zeroed.
+    _target_type = (_cfg.get("features", {}) or {}).get("target_type", "ret")
+    teacher = _select_best_teacher(all_archs, target_type=_target_type)
     student_archs = [a for a in all_archs if a != teacher]
     step_ok(f"  BEST teacher: {teacher.upper()}")
     step_ok(f"  STUDENT da riaddestrare: {', '.join(a.upper() for a in student_archs)}")
@@ -550,7 +578,7 @@ def phase_distill(args) -> str:
 
     # ── Fase 2c: Riaddestra gli student con multi-teacher distillation ─────
     for student_arch in student_archs:
-        _s_cfg = ROOT / "models" / student_arch / "config.json"
+        _s_cfg = _models_root() / student_arch / "config.json"
         if _s_cfg.exists() and not args.force_download:
             import json as _json_s
             with open(_s_cfg, encoding="utf-8") as _f_s:

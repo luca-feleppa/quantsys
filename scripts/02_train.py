@@ -39,7 +39,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 torch.set_num_threads(int(_cpu_limit))
 
-from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs
+from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs, models_root
 from quantsys.model import QuantLSTM, student_t_nll, quantile_loss, EarlyStopping, set_clip_bounds
 
 setup_logging()
@@ -536,7 +536,13 @@ def main():
     # IT: crea dir esperimento con timestamp — storicizza ogni run (config + metriche)
     # EN: create timestamped experiment dir — archives each run (config + metrics)
     exp_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    _out_dir_early = Path(cfg["training"]["output_dir"])
+    # IT: out_dir env-aware — redirige la WRITE su QUANTSYS_MODELS_ROOT mantenendo il
+    #     nome-arch del config (default "models/{arch}" = identico). Isola un train/distill
+    #     sperimentale dal modello LIVE (es. models/itransformer del forward-test 04b).
+    # EN: env-aware out_dir — redirects the WRITE to QUANTSYS_MODELS_ROOT keeping the
+    #     config arch-name (default "models/{arch}" = identical). Isolates an experimental
+    #     train/distill from the LIVE model (e.g. models/itransformer of the 04b forward test).
+    _out_dir_early = models_root() / Path(cfg["training"]["output_dir"]).name
     exp_dir  = _out_dir_early / "experiments" / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -571,8 +577,10 @@ def main():
     tcfg  = cfg["training"]; mcfg = cfg["model"]
     hwcfg = cfg["hardware"]; mccfg = cfg.get("macro", {})
     device = setup_device(cfg)
-    ensure_dirs(tcfg["output_dir"])
-    out_dir = Path(tcfg["output_dir"])
+    # IT: stessa root env-aware di _out_dir_early (WRITE isolabile via QUANTSYS_MODELS_ROOT).
+    # EN: same env-aware root as _out_dir_early (WRITE isolable via QUANTSYS_MODELS_ROOT).
+    out_dir = _out_dir_early
+    ensure_dirs(str(out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     data  = np.load("data/lstm_dataset.npz", allow_pickle=True)
@@ -729,7 +737,10 @@ def main():
                 all_archs = get_distillation_archs(cfg)
                 log.info(f"  Multi-teacher: archs={all_archs} (da config/default.yaml)")
                 log.info("  Multi-teacher: generazione soft labels pesate da tutti i modelli...")
-                arch_weights = compute_teacher_weights(all_archs)
+                # IT: scoring target-aware — sul target vol (log_rv) dir_acc=0.
+                # EN: target-aware scoring — on the vol target (log_rv) dir_acc=0.
+                _ttype = cfg.get("features", {}).get("target_type", "ret")
+                arch_weights = compute_teacher_weights(all_archs, target_type=_ttype)
                 teacher_preds_train = generate_multi_teacher_predictions(
                     all_archs, arch_weights, _train_dl_ordered, device, has_macro,
                     mc_samples=mc_samples)
@@ -1230,6 +1241,20 @@ def main():
     whr_t = test_metrics["weighted_hit_rate"]
     icir_t= test_metrics["icir"]
 
+    # IT: metriche di VALIDATION alla best-val epoch (argmin val_nll) — persistite
+    #     in config.json per lo scoring teacher target-aware (compute_teacher_weights).
+    # EN: VALIDATION metrics at the best-val epoch (argmin val_nll) — persisted to
+    #     config.json for target-aware teacher scoring (compute_teacher_weights).
+    _vnll = history.get("val_nll", [])
+    _vsp  = history.get("val_spearman", [])
+    _vda  = history.get("val_dir_acc", [])
+    if _vnll:
+        _best_ep = min(range(len(_vnll)), key=lambda i: _vnll[i])
+        _best_val_spearman = float(_vsp[_best_ep]) if _best_ep < len(_vsp) else None
+        _best_val_da       = float(_vda[_best_ep]) if _best_ep < len(_vda) else None
+    else:
+        _best_val_spearman = _best_val_da = None
+
     cfg_out = {
         **mcfg,
         "n_features":          int(n_feat),
@@ -1259,6 +1284,17 @@ def main():
         "mamba_layers":        mcfg.get("mamba_layers", 3),
         "mamba_d_state":       mcfg.get("mamba_d_state", 16),
         "mamba_expand":        mcfg.get("mamba_expand", 2),
+        # IT: metriche di validation alla best-val epoch — lette da
+        #     compute_teacher_weights per pesare il blend multi-teacher (senza
+        #     queste chiavi il blend ricadeva su pesi uniformi). best_da è il
+        #     segno-vs-mediana: ininfluente sul target vol (peso 0 nello scoring).
+        # EN: validation metrics at the best-val epoch — read by
+        #     compute_teacher_weights to weight the multi-teacher blend (without
+        #     these keys the blend fell back to uniform). best_da is the
+        #     sign-vs-median: irrelevant on the vol target (weight 0 in scoring).
+        "best_val_loss":       (float(min(history["val_nll"])) if history.get("val_nll") else None),
+        "best_spearman":       _best_val_spearman,
+        "best_da":             _best_val_da,
         # Distillation info
         "distilled":           use_distillation,
         "teacher_arch":        teacher_arch if use_distillation else None,
