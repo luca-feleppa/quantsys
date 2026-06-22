@@ -923,13 +923,35 @@ function renderOI(d){
   const putV  = d.put_oi.map((v,i)=>conv(v,i));
   const netV  = callV.map((v,i)=>v - putV[i]);                  // skew call−put
 
-  // IT: zoom sulla banda di strike che porta OI (≥0.5% del picco) + padding 5%.
-  // EN: zoom on the strike band carrying OI (≥0.5% of the peak) + 5% padding.
+  // IT: larghezza barra ESPLICITA (≈85% del gap mediano tra strike). Senza, Plotly
+  //     la deriva dal gap MINIMO: se a un refresh la chain porta due strike vicini il
+  //     min-gap crolla → tutte le barre larghe ~0 = invisibili (il bug "spariscono
+  //     dopo 12s", restano solo linee/shapes). Esplicita = deterministica, no collasso.
+  // EN: EXPLICIT bar width (≈85% of the median strike gap). Without it Plotly derives
+  //     width from the MIN gap: if a refresh brings two close strikes the min-gap
+  //     collapses → all bars ~0-wide = invisible (the "vanish after 12s" bug, only
+  //     lines/shapes remain). Explicit = deterministic, no collapse.
+  const _ks = d.strikes.slice().sort((a,b)=>a-b);
+  const _gaps = []; for(let i=1;i<_ks.length;i++){ const g=_ks[i]-_ks[i-1]; if(g>0) _gaps.push(g); }
+  _gaps.sort((a,b)=>a-b);
+  const _barW = (_gaps.length ? _gaps[Math.floor(_gaps.length/2)] : (_ks.length?_ks[0]*0.01:1)) * 0.85;
+
+  // IT: banda di zoom ROBUSTA — strike con OI (≥0.5% del picco) MA limitati a
+  //     spot ± 35%. CAUSA DEL BUG "barre spariscono dopo il refresh": senza il cap,
+  //     un singolo strike far-OTM (range 20k–380k) che supera la soglia fa esplodere
+  //     il range-x a ~360k → le barre (larghe ~500-1000) diventano SUB-PIXEL =
+  //     invisibili, mentre linea Net OI e shapes (scala-indipendenti) restano.
+  // EN: ROBUST zoom band — strikes with OI (≥0.5% of peak) BUT capped to spot ± 35%.
+  //     ROOT CAUSE of the "bars vanish after refresh" bug: without the cap, a single
+  //     far-OTM strike (range 20k–380k) crossing the threshold blows the x-range to
+  //     ~360k → bars (~500-1000 wide) become SUB-PIXEL = invisible, while the Net OI
+  //     line and shapes (scale-independent) remain.
   const peak = Math.max(1e-9, ...callV, ...putV);
   const thr = peak * 0.005;
+  const cap = (d.spot>0 ? d.spot : Math.max(...d.strikes)) * 0.35;
   let lo=null, hi=null;
-  d.strikes.forEach((k,i)=>{ if(callV[i]>thr||putV[i]>thr){ if(lo==null)lo=k; hi=k; } });
-  if(lo==null){ lo=Math.min(...d.strikes); hi=Math.max(...d.strikes); }
+  d.strikes.forEach((k,i)=>{ if((callV[i]>thr||putV[i]>thr) && Math.abs(k-d.spot)<=cap){ if(lo==null)lo=k; hi=k; } });
+  if(lo==null){ lo=d.spot*0.85; hi=d.spot*1.15; }
   const pad=((hi-lo)*0.05)||lo*0.1; const xr=[lo-pad, hi+pad];
 
   // IT: newPlot (NON react): Plotly.react al re-render non ridisegna le trace
@@ -939,9 +961,9 @@ function renderOI(d){
   //     re-render (bars vanished on refresh, only lines/shapes stayed). newPlot
   //     rebuilds from scratch every time = always like the working first render.
   Plotly.newPlot('plot-oi', [
-    {type:'bar', name:'Call OI', x:d.strikes, y:callV, marker:{color:'#2ecc7199'},
+    {type:'bar', name:'Call OI', x:d.strikes, y:callV, width:_barW, marker:{color:'#2ecc7199'},
      customdata:callV, hovertemplate:`K %{x:,.0f}<br>Call OI %{customdata:,.0f} ${unit}<extra></extra>`},
-    {type:'bar', name:'Put OI', x:d.strikes, y:putV.map(v=>-v), marker:{color:'#ff5c5c99'},
+    {type:'bar', name:'Put OI', x:d.strikes, y:putV.map(v=>-v), width:_barW, marker:{color:'#ff5c5c99'},
      customdata:putV, hovertemplate:`K %{x:,.0f}<br>Put OI %{customdata:,.0f} ${unit}<extra></extra>`},
     // IT: Net OI = call−put → stessa unità/scala delle barre → asse PRIMARIO
     //     (no yaxis2 overlay, più semplice e corretto). NB: niente `uirevision`
@@ -1059,6 +1081,16 @@ function renderPayoff(t){
     const pf=amt*Math.abs(S-K)/S;
     ys.push(side>0 ? pf-cost : cost-pf); xs.push(S);
   }
+  // IT: range ESPLICITI x/y (come renderOI) — non affidarsi all'autorange, che con
+  //     il div in una tab appena attivata (reflow) può collassare e non disegnare la
+  //     curva (restavano solo gli shapes = le 2 linee verticali). | EN: EXPLICIT x/y
+  //     ranges (like renderOI) — don't rely on autorange, which with the div in a
+  //     just-activated tab (reflow) can collapse and skip the curve (only the shapes
+  //     = the 2 vertical lines remained).
+  const _xpad=(hi-lo)*0.03; const _xr=[lo-_xpad, hi+_xpad];
+  let _ymin=Math.min(...ys), _ymax=Math.max(...ys);
+  if(t.pnl_btc!=null){ _ymin=Math.min(_ymin,t.pnl_btc); _ymax=Math.max(_ymax,t.pnl_btc); }
+  const _ypad=((_ymax-_ymin)*0.10)||0.01; const _yr=[_ymin-_ypad, _ymax+_ypad];
   const traces=[{type:'scatter',mode:'lines',x:xs,y:ys,line:{color:'#4aa3ff',width:2},
     hovertemplate:'S %{x:,.0f}<br>PnL %{y:+,.4f} BTC<extra></extra>'}];
   if(t.delivery_price!=null && t.pnl_btc!=null){
@@ -1070,8 +1102,8 @@ function renderPayoff(t){
     `${t.side>0?'LONG':'SHORT'} straddle · K ${fmt0(K)} · cost ${fmt(cost,4)} BTC`;
   Plotly.newPlot('plot-payoff', traces, Object.assign({}, PL_DARK, {
     dragmode:'pan', autosize:true, showlegend:false,
-    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Underlying at expiry (USD)'}),
-    yaxis:Object.assign({},PL_DARK.yaxis,{title:'PnL (BTC)',zeroline:true,zerolinecolor:'#3a465c'}),
+    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Underlying at expiry (USD)',range:_xr}),
+    yaxis:Object.assign({},PL_DARK.yaxis,{title:'PnL (BTC)',range:_yr,zeroline:true,zerolinecolor:'#3a465c'}),
     shapes:[
       {type:'line',x0:K,x1:K,y0:0,y1:1,yref:'paper',line:{color:'#7d8aa0',width:1,dash:'dot'}},
       {type:'line',x0:t.entry_spot,x1:t.entry_spot,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.2}},
@@ -1080,7 +1112,7 @@ function renderPayoff(t){
       {x:K,y:1,yref:'paper',text:'Strike',showarrow:false,font:{color:'#7d8aa0',size:10},yanchor:'bottom'},
       {x:t.entry_spot,y:1,yref:'paper',text:'Entry',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
     ],
-  }), PL_CFG_2D);
+  }), PL_CFG_2D).then(()=>{ try{ Plotly.Plots.resize('plot-payoff'); }catch(e){} });
 }
 
 // ─── Refresh loop ─────────────────────────────────────────────────────────────
