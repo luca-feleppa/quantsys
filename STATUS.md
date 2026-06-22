@@ -5,7 +5,22 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-22 (COMMIT distill + prereq distill-vol pronti + GATE pre-registrato)
+## 🕒 Ultimo aggiornamento: 2026-06-22 (DECISIONE: resta sul PASS iTrans, distill 5-seed RIMANDATO)
+
+## ✅ DECISIONE 2026-06-22 — consolidamento sul PASS iTrans, distill = prossima cosa
+
+Dopo la catena STEP 0 → retune → A (k-fold) → b1 (gate vs HAR) → verifica anti-bug, deciso con l'utente: **il modello vol di produzione resta l'iTransformer 5-seed PASS** (`models/itransformer`, già validato due volte OOS: single-split test QLIKE 0.257/ratio 0.70 **e** k-fold sui fold data-rich, batte HAR). Il forward test `04b` continua a maturare verso i 30 trade. **Distill 5-seed RIMANDATO** (prossima cosa da fare).
+
+**▶️ PER RIPRENDERE IL DISTILL 5-SEED (prerequisiti esatti — NON ci sono scorciatoie):**
+- ⚠ **Serve riaddestrare TUTTI E 3 gli archi a `--n-ensemble 5` sui dati correnti, in dir sandbox PULITA.** Motivi: (1) N-HiTS/TCN+Mamba a 5-seed su `log_rv` **non esistono** (i vecchi `models/{nhits,tcnmamba}` erano duplicati 1m, eliminati il 06-12; oggi esistono solo 1-seed); (2) l'iTrans 5-seed PASS è **inutilizzabile come teacher** — `config.json` SENZA `best_val_loss/spearman/da` e SENZA `history.json` (addestrato prima del fix 06-21) → `compute_teacher_weights`/`_select_best_teacher` ricadrebbero su uniforme/skip; inoltre è su scaler dati-vecchi (1.4376 vs 1.4343 npz corrente).
+- **⚠ LEZIONE seed≠fold (per non riconfondersi):** `best_model_0..4.pt` = **5-seed ensemble** (stessi dati, init diversi, mediati a inference, caricati da `EnsembleModel.load` → è il modello di produzione). `wf_fold1..5_best.pt` = **5 checkpoint del walk-forward** (fette temporali diverse, throwaway diagnostici, NON caricabili come ensemble). Entrambi danno "5 file/arch" ma sono cose diverse. Oggi gli arch sandbox hanno 1-seed (`best_model.pt`) + 5 `wf_fold*` (da A), **nessun 5-seed**.
+- **Comando:** dir sandbox nuova, copia canonical `pipeline_state.pkl`, `$env:QUANTSYS_MODELS_ROOT=<sandbox>; python run_all.py --distill --n-ensemble 5` (Fase 2a addestra i 3 a 5-seed, Fase 2b scoring target-aware `log_rv`→0.65/0.35/0.00, retrain student). Giudizio `dev_vols_qlike.py --arch <student>` su val. **GATE:** QLIKE_student ≤ 0.97×0.343 (battere iTrans-standalone) E ratio HAR ≤0.95. Fermare `04b` (GPU).
+- **⚠ PRIOR BASSO (atteso FAIL):** iTrans è già il QLIKE-migliore sul regime di produzione; il mismatch **val_nll↔QLIKE** (tcnmamba miglior val_nll 0.155 ma iTrans miglior QLIKE 0.343) fa sì che lo scoring eleggerebbe tcnmamba teacher e distillerebbe iTrans *verso il basso*; err cross-arch ρ~0.83 → riduzione varianza modesta. Da fare solo per chiudere la domanda "combinare aiuta?" con un NO documentato.
+- **Pulizia opzionale:** `models_distill_vol/` (1-seed + wf checkpoint di oggi) è throwaway/gitignored → eliminabile.
+
+---
+
+## 🕒 Storico 2026-06-22 (COMMIT distill + prereq + GATE pre-registrato)
 
 ## 🟢 CICLO 2026-06-22 — committato il distill target-aware + rigenerato il dataset npz + gate pre-registrato (fan-out 3 subagent)
 
