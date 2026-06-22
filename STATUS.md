@@ -5,7 +5,44 @@
 
 ---
 
-## 🕒 Ultimo aggiornamento: 2026-06-21 (DISTILL TARGET-AWARE per la linea VOLATILITÀ/opzioni)
+## 🕒 Ultimo aggiornamento: 2026-06-22 (COMMIT distill + prereq distill-vol pronti + GATE pre-registrato)
+
+## 🟢 CICLO 2026-06-22 — committato il distill target-aware + rigenerato il dataset npz + gate pre-registrato (fan-out 3 subagent)
+
+Su richiesta utente, eseguite 3 cose in parallelo (fan-out).
+
+**1) COMMIT del ciclo distill target-aware → `73fef66`** `feat(distill): scoring teacher TARGET-AWARE per la linea volatilita (log_rv)`. 12 file (+256/−40), working tree pulito, **NON pushato**. `pytest tests/test_distillation.py` 5/5 verde pre-commit. ⚠ Nel diff era bundlato anche un 2° concern dello **stesso ciclo**: nuovo helper **`models_root()`** (`quantsys/utils/__init__.py`) gated su env **`QUANTSYS_MODELS_ROOT`**, propagato a `distillation.py`/`ensemble.py`/`run_all.py`/`02_train.py`/`dev_vols_qlike.py` — sostituisce gli hardcoded `Path("models")` per far girare un distill vol in **sandbox isolata** senza clobberare il modello live di `04b`. Default byte-identico al comportamento precedente. Dichiarato nel body del commit.
+
+**2) SALUTE 3 PROCESSI DETACHED → 3/3 SANI** (nessun rilancio). `01c_iv_poller` (parquet sul grid 10-min), `04b_vol_paper --execute` (tick 16:01 `edge=+0.538 → HOLD`), `01d_orderbook_recorder` (tick 5s `err=0`). Conteggio LOGICO verificato via ParentProcessId (6 OS proc = 3 logici, lezione venv stub+worker), no duplicati.
+
+**3) PREREQUISITI DISTILL-VOL → PRONTI (NON è l'esperimento, solo la prep reversibile).**
+- Config verificata read-only: `target_type: log_rv`, `interval: 1h`, `forecast_horizon: 30`. ✅
+- **Dataset npz RIGENERATO** (era assente dal cleanup 06-12): `01_download_data.py` (`QUANTSYS_ARCH=lstm` per NON toccare `models/itransformer/`) + `scripts/vol/dev_vols_macro_append.py`. Risultato: `data/lstm_dataset.npz` (3.2 GB), `X_train (51364,120,104)`, split 51364/6420/6421, `X_macro_* (·,90)`, target z-scored (`target_scale=1.4343` = IQR del log_rv, log-ret avrebbe IQR ~1e-3 → conferma log_rv). Canonical `models/pipeline_state.pkl` riscritta: interval=1h, h=30. **`models/itransformer/` confermato INTATTO** (tutti i file ancora 2026-06-10 20:25 — forward test di `04b` salvo).
+  - ⚠ **Trappola incontrata e risolta:** lanciato in chain PS `cmd1 *> log; if ($?){cmd2}`, lo step macro_append era stato **saltato** (npz senza `X_macro_*`): è il gotcha PS 5.1 di CLAUDE.md — `01_download` logga su stderr, sotto `*>` PowerShell marca `$?`=`$false` (NativeCommandError) anche con exit 0. Rilanciato `dev_vols_macro_append.py` in foreground → OK. **Lezione: per chain dipendenti da uno script Python che logga su stderr, NON affidarsi a `if ($?)`; sequenziare a mano o usare la shell bash.**
+- **Dir sandbox create:** `models/distill_vol/`, `results/distill_vol/` (gitignored). NB la garanzia vera dell'isolamento è l'env `QUANTSYS_MODELS_ROOT`, non queste dir.
+- **NESSUN training avviato** (è l'esperimento gated, non la prep; + contesa CUDA coi 3 processi live).
+
+### 🎯 GATE PRE-REGISTRATO — esperimento DISTILL-VOL (scritto PRIMA di girare, zero iterazioni a risultato visto)
+
+**Obiettivo:** lo student distillato multi-teacher su `log_rv` batte l'iTransformer 5-seed corrente in **QLIKE (split VAL)**? Protocollo: val-first, dir-isolata, esito negativo documentato.
+
+**Isolamento (obbligatorio, protegge il modello live di `04b`):** `$env:QUANTSYS_MODELS_ROOT="E:\quantsys_project\models_distill_vol"` → l'intero path train→distill→judge legge/scrive in sandbox, MAI in `models/`. Seedare la sandbox copiando la canonical `pipeline_state.pkl` (log_rv) negli arch dir. Pre-condizione dura: **i 3 processi live IN PAUSA prima di QUALSIASI training** (RTX 2070S 8GB → OOM/contesa); arch **sequenziali**.
+
+**STEP 0 — KILL-CHECK ECONOMICO PRIMA del run completo (correlazione errori cross-arch sulla vol):** allena **1 seed** di nhits e tcnmamba su `log_rv`, forward dei due + iTransformer su VAL, Pearson degli errori per-campione `(pred−y)` a coppie.
+- **KILL gate:** se corr media ≥ **0.99** (come ≈0.995 sul direzionale) → ensembling/distill riduce varianza ≈0 → **STOP, FAIL in STATUS, niente GPU sprecata.**
+- **PROCEDI** solo se almeno una coppia ≤ **0.97** (diversità sfruttabile).
+
+**STEP 1–3 (solo se Step 0 passa):** train teacher nhits+tcnmamba `--n-ensemble 5` in sandbox (sequenziali) → `run_all.py --distill --multi-teacher` (scoring già target-aware: `log_rv`→pesi 0.65/0.35/0.00) → giudice `dev_vols_qlike.py` su VAL (`QUANTSYS_VOLS_SPLIT=val`).
+
+**PASS/FAIL (split VAL):** QLIKE(student) ≤ **0.97 × QLIKE(iTrans 5-seed)** (≥3% di miglioramento) **E** il gate assoluto del giudice resta valido (QLIKE_NN ≤ 0.95·QLIKE_HAR e < naive). Campione: `n_val ≥ 0.95·len(t_val)` (~6.4k → no fragilità small-sample). **FAIL → scrivilo in STATUS, NON toccare il test, NON promuovere in `models/itransformer/`. PASS su val → test UNA sola volta** con la stessa soglia.
+
+**Trappole da onorare:** bug membri stale (`n=1` aggiorna solo `best_model.pt`, mai i `best_model_{0..4}.pt` → usare `--n-ensemble 5` in dir PULITA); `nhits.yaml`/`tcnmamba.yaml` hanno hyperparam era-1m (rischio overfit su 65k 1h → rivedere lr/dropout prima); val-only fino a gate; test single-use.
+
+**Prior onesto (pre-dichiarato):** sul direzionale cross-arch err≈0.995 → ensembling inutile; SI 06-16 dà la vol-bucket come unico asse non condannato ma con headroom incerto. **Aspettativa: Step 0 è il punto di kill più probabile** — documentare un FAIL lì è l'esito economico e corretto.
+
+**▶️ AZIONE ESATTA ALLA RIPRESA (per girare l'esperimento):** (1) mettere in pausa i 3 processi live; (2) `QUANTSYS_MODELS_ROOT` sandbox + seed canonical; (3) **STEP 0** (1 seed nhits+tcnmamba, corr errori) e applicare il kill-gate; (4) se passa, STEP 1–3 val-first; (5) qualunque esito → scriverlo qui; (6) rilanciare i 3 processi (blocco rosso 2026-06-16). **Working tree:** dataset/dir sono gitignored; `STATUS.md` modificato (questa sezione) NON committato.
+
+## 🕒 Aggiornamento precedente: 2026-06-21 (DISTILL TARGET-AWARE per la linea VOLATILITÀ/opzioni)
 
 ## 🟢 DISTILLATION RIADATTATA AL TARGET VARIANZA (`log_rv`) — FATTO 2026-06-21
 
