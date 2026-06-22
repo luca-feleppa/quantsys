@@ -9,6 +9,7 @@
 #     → one place for the QLIKE formula and the inversion, no divergence between
 #     the two paths.
 import numpy as np
+import pandas as pd
 
 # IT: stesso ε del target in FeatureBuilder | EN: same ε as the FeatureBuilder target
 EPS = 1e-12
@@ -50,4 +51,64 @@ def qlike_from_z(y_true_z: np.ndarray, mu_pred_z: np.ndarray,
     return {
         "qlike":   qlike(np.exp(log_true), np.exp(log_pred)),
         "mse_log": float(np.mean((log_true - log_pred) ** 2)),
+    }
+
+
+# IT: normalizza un indice temporale a tz-naive (gestisce sia naive sia tz-aware UTC),
+#     per l'allineamento HAR↔split coerente col giudice dev_vols_qlike.py.
+# EN: normalize a time index to tz-naive (handles both naive and tz-aware UTC),
+#     for HAR↔split alignment consistent with the dev_vols_qlike.py judge.
+def _to_naive(values) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(pd.to_datetime(values))
+    if idx.tz is not None:
+        idx = idx.tz_convert("UTC").tz_localize(None)
+    return idx
+
+
+# IT: componenti HAR-RV (Corsi 2009) + target fwd dai raw candles. STESSA definizione
+#     del giudice dev_vols_qlike.py (single source): RV trailing h-barre/7d/30d in
+#     log, componenti settimana/mese riscalate all'orizzonte h; target = log(RV fwd h).
+# EN: HAR-RV components (Corsi 2009) + fwd target from raw candles. SAME definition as
+#     the dev_vols_qlike.py judge (single source): trailing h-bar/7d/30d RV in log,
+#     weekly/monthly components rescaled to the h-bar horizon; target = log(fwd h RV).
+def build_har_frame(raw: pd.DataFrame, h: int, bars_day: int) -> pd.DataFrame:
+    raw = raw.sort_values("open_time").reset_index(drop=True)
+    lr2 = np.log(raw["close"] / raw["close"].shift(1)) ** 2
+    rv_h = lr2.rolling(h).sum()                      # IT: RV trailing h barre | EN: trailing h-bar RV
+    rv_w = lr2.rolling(7 * bars_day).sum() / 7       # IT: media giornaliera 7gg | EN: 7d daily mean
+    rv_m = lr2.rolling(30 * bars_day).sum() / 30     # IT: media giornaliera 30gg | EN: 30d daily mean
+    rv_fwd = lr2.rolling(h).sum().shift(-h)          # IT/EN: target (formula del FeatureBuilder)
+    har = pd.DataFrame({
+        "open_time": raw["open_time"],
+        "y":  np.log(rv_fwd + EPS),
+        "xh": np.log(rv_h + EPS),
+        "xw": np.log(rv_w * (h / bars_day) + EPS),
+        "xm": np.log(rv_m * (h / bars_day) + EPS),
+    }).dropna().set_index("open_time")
+    har.index = _to_naive(har.index)
+    return har
+
+
+# IT: fit OLS dell'HAR sui timestamp di train del fold, valuta sui timestamp held-out:
+#     QLIKE su RV in livelli (HAR) + naive persistence (RV trailing h). Same info set
+#     del NN per fold → confronto fair. NaN se allineamento insufficiente.
+# EN: OLS-fit HAR on the fold's train timestamps, evaluate on the held-out timestamps:
+#     QLIKE on RV levels (HAR) + naive persistence (trailing h-bar RV). Same info set
+#     as the per-fold NN → fair comparison. NaN if alignment is insufficient.
+def har_fold_qlike(har: pd.DataFrame, t_train, t_eval) -> dict:
+    tr_idx = _to_naive(t_train)
+    ev_idx = _to_naive(t_eval)
+    tr = har.loc[har.index.intersection(tr_idx)]
+    ev = har.loc[har.index.intersection(ev_idx)]
+    if len(tr) < 50 or len(ev) < 1:
+        return {"qlike_har": float("nan"), "qlike_naive": float("nan"),
+                "n_har": int(len(ev)), "n_eval": int(len(ev_idx))}
+    Xtr = np.column_stack([np.ones(len(tr)), tr[["xh", "xw", "xm"]].values])
+    beta, *_ = np.linalg.lstsq(Xtr, tr["y"].values, rcond=None)
+    Xev = np.column_stack([np.ones(len(ev)), ev[["xh", "xw", "xm"]].values])
+    rv_true = np.exp(ev["y"].values)
+    return {
+        "qlike_har":   qlike(rv_true, np.exp(Xev @ beta)),
+        "qlike_naive": qlike(rv_true, np.exp(ev["xh"].values)),
+        "n_har": int(len(ev)), "n_eval": int(len(ev_idx)),
     }

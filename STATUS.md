@@ -52,6 +52,37 @@ Eseguiti i 3 archi 1-seed su `log_rv` in sandbox (`QUANTSYS_MODELS_ROOT=models_d
 - **Infra usata:** Tier 1 (modulo `quantsys/model/vol_metrics.py` QLIKE condiviso + fold-metric QLIKE/branch N-HiTS in `02b` + checkpoint sandbox-aware) e Tier 2 (`step0_xarch_corr.py`) — codice NON ancora committato. ⚠ Rigenerando l'npz sono emersi 2 fail in `test_live_training_parity.py` (prima skippati per npz assente): stato↔dati stale (`models/itransformer` vol-1h vs raw_candles ri-scaricati), NON regressione del Tier 1; 04b live sano. Known-issue da investigare a parte.
 - **Prossimo (decisione aperta):** STEP 1–3 = walk-forward **k-fold distill** (harness `02b` pronto) — run GPU pesante (5 fold × multi-arch sequenziali), richiede di ri-fermare `04b`. Oppure fermarsi e valutare.
 
+## 🟢 A — PURGED K-FOLD per-arch sul vol ESEGUITO 2026-06-22 (post-retune regolarizzazione)
+
+Dopo il retune (commit `df4b5fb`: N-HiTS/TCN+Mamba allineati al regime vol iTransformer + `4647194` log per-epoca) → `02b_walkforward_validate.py` per i 3 archi (5 fold effettivi, embargo 168=1sett, 1-seed, sandbox `models_distill_vol`, fold-metric QLIKE). Esito QLIKE cross-fold (split = ogni fold held-out, n=9172/fold):
+
+| arch | QLIKE mean ± std | σ/μ | range fold1→5 |
+|---|---|---|---|
+| **TCN+Mamba** | **0.364 ± 0.062** | **0.169** | 0.37/0.43/0.43/0.30/0.28 |
+| N-HiTS | 0.401 ± 0.080 | 0.200 | 0.41/0.51/0.45/0.35/0.28 |
+| iTransformer | 0.493 ± 0.160 | 0.324 | 0.61/0.71/0.52/0.30/0.32 |
+
+- **Retune efficace:** N-HiTS/TCN+Mamba ora più stabili e MIGLIORI di iTransformer; **TCN+Mamba domina** (best + più stabile), coerente con STEP 0 (val_nll 0.155).
+- **Trend temporale:** QLIKE cala fold1→fold5 (effetto expanding-window: più dati nei fold tardivi / vol più predicibile di recente). σ/μ 0.17–0.32 = stabilità moderata.
+- ⚠ **GAP da colmare prima di concludere skill OOS:** `02b` WF **NON calcola HAR-RV per fold** → da questo run NON si può dire "batte HAR OOS cross-fold" (solo che la QLIKE NN è stabile e TCN+Mamba domina). Il gate vs-HAR richiede la baseline HAR per fold.
+- **Prossimo (decisione aperta):** (b1) aggiungere HAR-per-fold al WF per il confronto gate; oppure (b2) k-fold ensemble/distill — testa se *combinare* batte il best single (0.364): con err cross-arch ~0.83 la riduzione varianza è modesta, da verificare se supera TCN+Mamba da solo. Report: `results/{arch}/walkforward_metrics_log_rv.json`.
+
+## 🟢 b1 — HAR-RV PER-FOLD (gate vs HAR cross-fold) ESEGUITO 2026-06-22
+
+Script CPU-only `scripts/vol/wf_har_baseline.py` (helper `build_har_frame`/`har_fold_qlike` in `quantsys/model/vol_metrics.py`): stessi 5 fold, HAR OLS fit-per-fold sui timestamp di train, eval sull'held-out, confronto coi QLIKE NN già salvati. Gate per-fold QLIKE_NN ≤ 0.95·QLIKE_HAR. HAR QLIKE medio cross-fold = **0.430** (naive 0.800).
+
+| arch | NN medio | ratio NN/HAR | batte HAR | verdetto |
+|---|---|---|---|---|
+| **TCN+Mamba** | **0.364** | **0.863** | **4/5** | ✅ PASS |
+| N-HiTS | 0.401 | 0.948 | 3/5 | ~ borderline |
+| iTransformer | 0.493 | 1.170 | 3/5 | ❌ FAIL |
+
+- **TCN+Mamba batte HAR OOS cross-fold (~14%)**, decisivo nei fold data-rich (ratio 0.75–0.83) → la skill vol **sopravvive al purged k-fold**.
+- **Effetto fold-1 (strutturale):** TUTTI gli archi falliscono il fold 1, il più antico (expanding window data-starved: NN data-hungry < HAR a 3 param). NON model-failure; la skill emerge coi dati (fold 3→5 sempre PASS).
+- **iTransformer 1-seed FAIL** ma era PASS a **5-seed** single-split (0.257, ratio 0.70) → NON apples-to-apples (seed-variance + fold early lo penalizzano).
+- **Implicazione b2 (distill):** TCN+Mamba da solo PASSA; iTrans 1-seed è membro DEBOLE (sopra HAR) → ensemble equal-weight lo trascinerebbe, il distill quality-weighted dovrebbe pesare TCN+Mamba ma battere 0.364 con un membro debole è incerto → **b2 meno attraente**. Alternativa più sensata: **(c) TCN+Mamba 5-seed standalone** = modello vol robusto/deployabile.
+- Report: `results/vols/wf_har_baseline_1h.json`. Codice b1 (vol_metrics HAR helpers + wf_har_baseline.py) NON committato.
+
 ## 🕒 Aggiornamento precedente: 2026-06-21 (DISTILL TARGET-AWARE per la linea VOLATILITÀ/opzioni)
 
 ## 🟢 DISTILLATION RIADATTATA AL TARGET VARIANZA (`log_rv`) — FATTO 2026-06-21
