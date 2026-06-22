@@ -11,14 +11,18 @@ model:
   mamba_layers: 3
   mamba_d_state: 16             # IT: dim stato SSM | EN: SSM state dim
   mamba_expand: 2               # IT: fattore espansione Mamba | EN: Mamba expansion factor
-  dropout: 0.25
+  # IT: dropout 0.3 (era 0.25) — allineato al regime vol iTransformer (~1.7k campioni
+  #     eff., overfit gap val −0.19). Edit SAFE per distill/CAFN (solo rate, no shape).
+  # EN: dropout 0.3 (was 0.25) — aligned to iTransformer vol regime (~1.7k eff. samples,
+  #     val overfit gap −0.19). SAFE edit for distill/CAFN (rate only, no shape change).
+  dropout: 0.3
   drop_path_rate: 0.1
 
 # IT: Training — plateau scheduler + SWA finale; AMP off per overflow ricorrenti.
 # EN: Training — plateau scheduler + final SWA; AMP off due to recurring overflow.
 training:
-  learning_rate: 1.5e-4
-  weight_decay: 5.0e-4
+  learning_rate: 3.0e-5         # IT: 3e-5 (era 1.5e-4) — match regime vol iTransformer su ~1.7k campioni eff. | EN: 3e-5 (was 1.5e-4) — match iTransformer vol regime on ~1.7k eff. samples
+  weight_decay: 3.0e-3          # IT: 3e-3 (era 5e-4) — wd ↑ anti-memorizzazione, come iTransformer vol | EN: 3e-3 (was 5e-4) — higher wd vs memorization, like iTransformer vol
   grad_clip_norm: 0.5
   lr_scheduler: "plateau"
   lr_scheduler_patience: 8

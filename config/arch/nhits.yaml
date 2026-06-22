@@ -13,7 +13,13 @@ model:
   nhits_pool_kernels: [8, 4, 1]   # IT: long → mid → short term | EN: long → mid → short term
   nhits_blocks_per_stack: 1
   nhits_mlp_layers: 2
-  dropout: 0.1
+  # IT: dropout 0.3 (era 0.1, 1m-era) — allineato al regime vol di iTransformer:
+  #     51k finestre stride-1 = ~1.7k campioni indipendenti (overlap target 29/30)
+  #     → N-HiTS overfittava da epoca 1 (gap val −0.24). Edit SAFE per distill/CAFN.
+  # EN: dropout 0.3 (was 0.1, 1m-era) — aligned to iTransformer's vol regime:
+  #     51k stride-1 windows = ~1.7k independent samples (29/30 target overlap)
+  #     → N-HiTS overfit from epoch 1 (val gap −0.24). SAFE edit for distill/CAFN.
+  dropout: 0.3
   patch_size: 1                   # IT: N-HiTS non usa patching | EN: N-HiTS does not use patching
   drop_path_rate: 0.0             # IT: N-HiTS non ha DropPath | EN: N-HiTS has no DropPath
   # IT: quantile + MoE supportati (legacy: t_student + 1 expert).
@@ -24,7 +30,7 @@ model:
 # IT: Training — lr basso per stabilità, weight_decay alto, AMP off (gradient overflow).
 # EN: Training — low lr for stability, high weight_decay, AMP off (gradient overflow).
 training:
-  learning_rate: 1.0e-4           # IT: 1e-4 (era 2e-4) per stabilità numerica | EN: 1e-4 (was 2e-4) for numerical stability
+  learning_rate: 3.0e-5           # IT: 3e-5 (era 1e-4) — match regime vol iTransformer, step fini su ~1.7k campioni eff. | EN: 3e-5 (was 1e-4) — match iTransformer vol regime, fine steps on ~1.7k eff. samples
   weight_decay: 5.0e-3            # IT: 5e-3 (ratio sample/param sfavorevole) | EN: 5e-3 (unfavorable sample/param ratio)
   asymmetry_alpha: 0.5            # IT: come LSTM, riduce penalty segno | EN: like LSTM, lowers sign penalty
   grad_clip_norm: 0.5
