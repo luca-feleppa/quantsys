@@ -176,8 +176,22 @@ def fetch_option_chain(currency: str = CURRENCY) -> list:
     #     open_interest, volume, per-instrument underlying_price). Single source
     #     from which greeks, surface, smile and term structure are derived.
     def _f():
-        return _deribit_get("public/get_book_summary_by_currency",
-                            {"currency": currency, "kind": "option"})
+        # IT: una chain valida ha centinaia di strumenti; un risultato vuoto/parziale
+        #     (hiccup Deribit) NON va in cache, altrimenti svuoterebbe i grafici (barre
+        #     OI che spariscono) per tutto il TTL. Retry singolo, poi si solleva →
+        #     get_or_fetch NON cacha e il frontend tiene l'ultimo buono.
+        # EN: a valid chain has hundreds of instruments; an empty/partial result
+        #     (Deribit hiccup) must NOT be cached, else it blanks the charts (OI bars
+        #     vanishing) for the whole TTL. Single retry, then raise → get_or_fetch
+        #     does NOT cache and the frontend keeps the last good one.
+        for _attempt in range(2):
+            res = _deribit_get("public/get_book_summary_by_currency",
+                               {"currency": currency, "kind": "option"})
+            if isinstance(res, list) and len(res) >= 50:
+                return res
+            time.sleep(0.3)
+        raise RuntimeError(f"chain Deribit vuota/parziale dopo retry "
+                           f"({len(res) if isinstance(res, list) else type(res).__name__})")
     return _CACHE.get_or_fetch(f"chain:{currency}", 8.0, _f)
 
 
@@ -996,6 +1010,16 @@ function renderOI(d){
 async function loadRisk(){
   try{
     const d = await (await fetch('/api/risk')).json();
+    // IT: guard dati — se la risposta è degradata (chain parziale/desincronizzata:
+    //     niente strike o OI tutto a zero) NON ridisegnare: tieni l'ultimo grafico
+    //     buono invece di svuotare le barre. Difesa frontend (oltre al fix backend).
+    // EN: data guard — if the response is degraded (partial/desynced chain: no
+    //     strikes or all-zero OI) do NOT redraw: keep the last good chart instead of
+    //     blanking the bars. Frontend defense (on top of the backend fix).
+    if(d && d.error){ setConn(false); return; }
+    const _noStrk = !d || !Array.isArray(d.strikes) || d.strikes.length < 3;
+    const _noOI = !_noStrk && (d.call_oi||[]).every(v=>!v) && (d.put_oi||[]).every(v=>!v);
+    if(_noStrk || _noOI){ console.warn('risk: dati parziali/desincronizzati → skip redraw'); return; }
     const g = d.agg_greeks;
     document.getElementById('risk-cards').innerHTML = [
       {l:'Max Pain', v:'$'+fmt0(d.max_pain), s:'min total holder payoff', c:'amb'},
@@ -1158,15 +1182,26 @@ class Handler(BaseHTTPRequestHandler):
             enc = True
         else:
             enc = False
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        if enc:
-            self.send_header("Content-Encoding", "gzip")
-            self.send_header("Vary", "Accept-Encoding")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        # IT: il client (browser) può chiudere la connessione a metà risposta quando
+        #     il refresh ~12s annulla i fetch ancora in volo → ConnectionAborted/Reset/
+        #     BrokenPipe. NON è un errore del server: ignora silenziosamente (prima
+        #     crashava e ri-crashava provando a scrivere il 500).
+        # EN: the client (browser) may drop the connection mid-response when the ~12s
+        #     refresh cancels in-flight fetches → ConnectionAborted/Reset/BrokenPipe.
+        #     NOT a server error: swallow it silently (it used to crash, then crash
+        #     again trying to write the 500).
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            if enc:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
 
     def _json(self, obj, code: int = 200):
         self._send(code, json.dumps(obj).encode("utf-8"),
