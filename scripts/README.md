@@ -20,14 +20,14 @@
 | `04_live_signals.py` | live / paper trading WS | **direzionale** |
 | `04b_vol_paper.py` · `04c_vol_paper_baselines.py` | forward test vol + gate baselines | **vol** |
 | `05_analyze_signals.py` · `07_verify_teacher.py` | analisi segnali / confronto teacher | shared |
-| `06_dashboard.py` | Deribit Options Risk Terminal (vol surface + Greche + risk) — dati Deribit pubblici, indipendente dalla pipeline ML | standalone (market data) |
+| `06_dashboard.py` | Deribit Options Risk Terminal (SPA HTTP+Plotly: vol surface 3D, smile/term, OI by strike, Greche, PCR, tab Trades + payoff) — dati Deribit pubblici, GPU-free, indipendente dalla pipeline ML | standalone (market data) |
 | `99_replay_live_vs_training.py` | diagnostica parity (BLOCKER #1) | shared |
 
 ## Sottocartelle per linea · Per-line subfolders
 
 | Cartella / Folder | Contenuto / Content | Linea / Line |
 |---|---|---|
-| `vol/` | `dev_vols_macro_append.py` (ri-appende X_macro), `dev_vols_qlike.py` (giudice QLIKE vs HAR-RV), `dev_vols_rs_judge.py` (giudice MSE semivarianza) | **vol** |
+| `vol/` | `dev_vols_macro_append.py` (ri-appende X_macro), `dev_vols_qlike.py` (giudice QLIKE vs HAR-RV), `dev_vols_rs_judge.py` (giudice MSE semivarianza), `step0_xarch_corr.py` (STEP 0 kill-check correlazione cross-arch), `wf_har_baseline.py` (baseline HAR per-fold del walk-forward) | **vol** |
 | `research/` | `paper_01_dir_baselines.py` (baseline econometriche direzionali = negative-control del paper) | direzionale / paper |
 | `archive/` | probe chiusi: `xs_*` (cross-sectional KILL), `dev_step0_regime_sigma.py` | morti / dead |
 

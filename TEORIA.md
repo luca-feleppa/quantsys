@@ -4,6 +4,10 @@
 
 **EN** A descriptive walkthrough of the full flow, from raw material (candles) to the operating signal (BUY / SELL / HOLD with size and stop loss).
 
+> 🇮🇹 **Orientamento — due linee, una sola di produzione.** Lo stesso motore (dati → 104 feature → finestre 120×104 → archs probabilistiche → ensemble/distill) serve due `target_type`. La **linea di produzione corrente è la VOLATILITÀ a 1h** (`features.target_type: log_rv`, `data.interval: 1h`): il NN batte HAR-RV del ~30% in QLIKE su test, val→test **coerenti** (l'edge esiste OOS), e alimenta la linea opzioni (forward test straddle su Deribit, `04b_vol_paper.py`). La **linea DIREZIONALE** (`target_type: ret`, somma dei prossimi 30 log-return → BUY/SELL/HOLD, §9–§11) è **legacy/KILLED OOS**: l'anti-correlazione val→test e il muro dei costi la rendono non tradabile (probe pivot 1m→1h KILL 2026-06-10), ma il suo path di codice (SignalGenerator/RiskManager/LiveEngine) resta bit-invariato come baseline e per il rollback. Sintesi del progetto: **i momenti PARI (livello di vol) generalizzano OOS, i momenti DISPARI (direzione, semivarianza firmata) no.**
+
+> **EN** **Orientation — two lines, only one in production.** The same engine (data → 104 features → 120×104 windows → probabilistic archs → ensemble/distill) serves two `target_type`s. The **current production line is VOLATILITY at 1h** (`features.target_type: log_rv`, `data.interval: 1h`): the NN beats HAR-RV by ~30% in test QLIKE, val→test **coherent** (the edge exists OOS), and it feeds the options line (Deribit straddle forward test, `04b_vol_paper.py`). The **DIRECTIONAL line** (`target_type: ret`, sum of the next 30 log-returns → BUY/SELL/HOLD, §9–§11) is **legacy/KILLED OOS**: val→test anti-correlation and the cost wall make it untradable (1m→1h pivot probe KILL 2026-06-10), but its code path (SignalGenerator/RiskManager/LiveEngine) stays bit-invariant as a baseline and for rollback. Project synthesis: **EVEN moments (vol level) generalize OOS, ODD moments (direction, signed semivariance) do not.**
+
 ---
 
 ## 1. Raccolta dati di prezzo · 1. Price data collection
@@ -44,9 +48,9 @@
 
 ## 3. Feature engineering — cosa vede il modello · 3. Feature engineering — what the model sees
 
-🇮🇹 **104 feature** per candela (**86 dinamiche + 18 strutturali**, verificate sul dataset corrente 2026-06-02), pensate per dare al modello gli strumenti che un trader esperto userebbe. Il conteggio è post-filtro **C-funding** (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decisione 2026-05-28): sono state rimosse 15 feature live-incompatibili con ROI ≤ 0 (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — vedi `MODEL_IMPROVEMENTS.md` per il razionale completo.
+🇮🇹 **104 feature** per candela (**86 dinamiche + 18 strutturali**, verificate sull'npz corrente rigenerato il 2026-06-22 → asse feature = 104), pensate per dare al modello gli strumenti che un trader esperto userebbe. Il conteggio è post-filtro **C-funding** (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decisione 2026-05-28): sono state rimosse 15 feature live-incompatibili con ROI ≤ 0 (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — vedi `MODEL_IMPROVEMENTS.md` per il razionale completo.
 
-**EN** **104 features** per candle (**86 dynamic + 18 structural**, verified on the current dataset 2026-06-02), designed to give the model the same tools an experienced trader would use. The count is after the **C-funding** filter (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decision 2026-05-28): 15 live-incompatible features with ROI ≤ 0 were removed (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — see `MODEL_IMPROVEMENTS.md` for the full rationale.
+**EN** **104 features** per candle (**86 dynamic + 18 structural**, verified on the current npz regenerated 2026-06-22 → feature axis = 104), designed to give the model the same tools an experienced trader would use. The count is after the **C-funding** filter (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decision 2026-05-28): 15 live-incompatible features with ROI ≤ 0 were removed (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — see `MODEL_IMPROVEMENTS.md` for the full rationale.
 
 ### Contratto timeframe — finestre TIME-semantic vs BAR-semantic · Timeframe contract — TIME-semantic vs BAR-semantic windows
 
@@ -208,9 +212,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** Features are organized into **temporal windows**: every example is a `120×104` matrix (last 120 **bars** of context = **5 days** at the current 1h timeframe; it was 2 hours at 1m, 104 features). The target is the cumulative log-return over the next 30 bars (§2).
 
-🇮🇹 Sul dataset corrente 1h (65.145 barre, 2019→oggi) con `window_stride: 1` si ottengono **51.120 esempi train** (`X_train (51120, 120, 104)`) più gli split val/test. (Il precedente dataset 1m 549k con stride 5 dava 80824 / 10103 / 10104.)
+🇮🇹 Sul dataset corrente 1h (2019→oggi) con `window_stride: 1` l'ultima rigenerazione npz (2026-06-22, `01_download_data.py` + `scripts/vol/dev_vols_macro_append.py`) produce **51.364 esempi train** (`X_train (51364, 120, 104)`), split **51.364 / 6.420 / 6.421** (train/val/test) più `X_macro_* (·, 90)`. (Il precedente dataset 1m 549k con stride 5 dava 80824 / 10103 / 10104.)
 
-**EN** On the current 1h dataset (65,145 bars, 2019→today) with `window_stride: 1` we get **51,120 train examples** (`X_train (51120, 120, 104)`) plus the val/test splits. (The previous 549k 1m dataset with stride 5 yielded 80,824 / 10,103 / 10,104.)
+**EN** On the current 1h dataset (2019→today) with `window_stride: 1` the latest npz regeneration (2026-06-22, `01_download_data.py` + `scripts/vol/dev_vols_macro_append.py`) yields **51,364 train examples** (`X_train (51364, 120, 104)`), split **51,364 / 6,420 / 6,421** (train/val/test) plus `X_macro_* (·, 90)`. (The previous 549k 1m dataset with stride 5 yielded 80,824 / 10,103 / 10,104.)
 
 🇮🇹 **Perché T=120 e non di più.** La finestra di 120 barre è uno sweet spot empirico verificato il 2026-06-04 **sul perimetro 1m**: esperimenti a **T=180 e T=240 hanno prodotto regressioni** (degrado monotono di Spearman walkforward e backtest, μ_pred collassata, sotto-random WHR). Il dataset 1m ~525k non aveva profondità informativa per sostenere context più lunghi (over-fitting al noise temporale; il plateau di letteratura 192-384 vale su dataset multi-anno multi-asset). T=120 è stato **mantenuto invariato** nel pivot 1h (ora = 5 giorni di contesto): non aumentarlo senza nuova evidenza empirica.
 
@@ -222,17 +226,21 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 ### Invariante critico — Spazio z-score vs raw · Critical invariant — z-score vs raw space
 
-🇮🇹 Il `target_ret` è scalato dal RobustScaler insieme alle altre feature. Il fattore di scala (`target_scale`) è calcolato runtime come IQR del target raw sul training set e persistito in `PipelineState`; varia col dataset e l'orizzonte di forecast (es. ~0.002707 sulla run 2026-06-02 con `data.limit=525k`, `forecast_horizon=30`). Quindi:
+🇮🇹 Il target (`target_ret`, qualunque sia `target_type`) è scalato dal RobustScaler insieme alle altre feature. Il RobustScaler persiste **due** parametri per colonna in `PipelineState`: il **centro** (mediana raw) e la **scala** (`target_scale` = IQR del target raw sul training set); entrambi variano col dataset, l'orizzonte di forecast e il `target_type`. Quindi:
 - **Il modello predice μ, σ, ν in spazio z-score** (frazione standardizzata). Una σ = 1.0 significa "una IQR del target", non "1% di prezzo".
-- **Il trading layer (`SignalGenerator`, `RiskManager`) opera in spazio raw**: soglie `min_expected_ret`, `max_sigma`, calcoli SL/TP assumono frazioni di log-return dirette (`σ × price = distanza in USD`).
+- **Il trading/valutazione layer opera in spazio raw**: soglie `min_expected_ret`, `max_sigma`, SL/TP (linea direzionale) e QLIKE/inversione RV (linea vol) assumono valori raw del target.
 
-**EN** The `target_ret` is scaled by the RobustScaler along with the other features. The scale factor (`target_scale`) is computed at runtime as the IQR of the raw target on the training set and persisted in `PipelineState`; it varies with dataset and forecast horizon (e.g. ~0.002707 on the 2026-06-02 run with `data.limit=525k`, `forecast_horizon=30`). Therefore:
+🇮🇹 **Inversione z→raw — dipende dal `target_type`.**
+- **Target direzionale (`ret`, linea legacy).** Il target raw è ≈ centrato (mediana log-ret ≈ 0), quindi la riconciliazione si riduce a `PipelineState.denormalize_predictions(mu, sigma) -> (mu_raw, sigma_raw)`, che moltiplica per `target_scale` (il centro è trascurabile su μ ed è strutturalmente nullo sulla σ). Esempio storico di `target_scale` ≈ 0.002707 (run 2026-06-02, 1m, h=30). **Sia `03_backtest.py` sia `04_live_signals.py` la applicano subito dopo il forward**, prima del `SignalGenerator`. Senza denormalizzazione, SL/TP `σ × price × multiplier` diventano macroscopici (σ_z=1 × $42k × 1.5 = $63k) — bug strutturale fixato il 2026-05-23 (Sharpe −256 → +18.7).
+- **Target di volatilità (`log_rv`, linea di PRODUZIONE).** Qui `denormalize_predictions` (solo `μ·scale`) **è insufficiente**: la mediana del log-RV è ≈ −7.2, quindi serve l'**inversione completa** `log_rv = μ_z · scale + center` (con `center`/`scale` dal RobustScaler persistito), poi `RV = exp(log_rv)` per riportare in livelli. È implementata in `quantsys/model/vol_metrics.py` (`invert_log_rv(z, center, scale)`, `qlike_from_z(...)`), single source of truth condivisa dai giudici (`scripts/vol/dev_vols_qlike.py`, walk-forward `02b`, `step0_xarch_corr.py`). Saltare il `center` collassa la RV stimata di ~e⁷ ordini di grandezza. `target_scale` corrente ≈ **1.4343** (IQR del log-RV sull'npz 2026-06-22; un IQR ~1e-3 segnalerebbe invece il target direzionale).
+
+**EN** The target (`target_ret`, whatever `target_type`) is scaled by the RobustScaler along with the other features. The RobustScaler persists **two** per-column parameters in `PipelineState`: the **center** (raw median) and the **scale** (`target_scale` = IQR of the raw target on the training set); both vary with dataset, forecast horizon and `target_type`. Therefore:
 - **The model predicts μ, σ, ν in z-score space** (standardized fraction). σ = 1.0 means "one IQR of the target", not "1% of price".
-- **The trading layer (`SignalGenerator`, `RiskManager`) operates in raw space**: thresholds `min_expected_ret`, `max_sigma`, SL/TP math assume direct log-return fractions (`σ × price = USD distance`).
+- **The trading/evaluation layer operates in raw space**: thresholds `min_expected_ret`, `max_sigma`, SL/TP (directional line) and QLIKE/RV inversion (vol line) assume raw target values.
 
-🇮🇹 Riconciliazione tramite `PipelineState.denormalize_predictions(mu, sigma) -> (mu_raw, sigma_raw)` che moltiplica per `target_scale`. **Sia `03_backtest.py` sia `04_live_signals.py` la applicano subito dopo il forward**, prima di passare le predizioni al `SignalGenerator`. Senza denormalizzazione, SL/TP `σ × price × multiplier` diventano macroscopici (σ_z=1 × $42k × 1.5 = $63k) — bug strutturale identificato e fixato il 2026-05-23 (Sharpe −256 → +18.7).
-
-**EN** Reconciliation via `PipelineState.denormalize_predictions(mu, sigma) -> (mu_raw, sigma_raw)` which multiplies by `target_scale`. **Both `03_backtest.py` and `04_live_signals.py` apply it right after the forward pass**, before handing predictions to the `SignalGenerator`. Without denormalization, SL/TP `σ × price × multiplier` become macroscopic (σ_z=1 × $42k × 1.5 = $63k) — structural bug identified and fixed on 2026-05-23 (Sharpe −256 → +18.7).
+**EN** **z→raw inversion — depends on `target_type`.**
+- **Directional target (`ret`, legacy line).** The raw target is ≈ centered (log-ret median ≈ 0), so reconciliation reduces to `PipelineState.denormalize_predictions(mu, sigma) -> (mu_raw, sigma_raw)`, which multiplies by `target_scale` (the center is negligible on μ and structurally null on σ). Historical `target_scale` ≈ 0.002707 (2026-06-02 run, 1m, h=30). **Both `03_backtest.py` and `04_live_signals.py` apply it right after the forward pass**, before the `SignalGenerator`. Without it, SL/TP `σ × price × multiplier` become macroscopic (σ_z=1 × $42k × 1.5 = $63k) — structural bug fixed on 2026-05-23 (Sharpe −256 → +18.7).
+- **Volatility target (`log_rv`, PRODUCTION line).** Here `denormalize_predictions` (only `μ·scale`) **is insufficient**: the log-RV median is ≈ −7.2, so the **full inversion** `log_rv = μ_z · scale + center` is required (with `center`/`scale` from the persisted RobustScaler), then `RV = exp(log_rv)` to return to levels. It lives in `quantsys/model/vol_metrics.py` (`invert_log_rv(z, center, scale)`, `qlike_from_z(...)`), the single source of truth shared by the judges (`scripts/vol/dev_vols_qlike.py`, walk-forward `02b`, `step0_xarch_corr.py`). Skipping the `center` collapses the estimated RV by ~e⁷ orders of magnitude. Current `target_scale` ≈ **1.4343** (IQR of log-RV on the 2026-06-22 npz; an IQR of ~1e-3 would instead flag the directional target).
 
 🇮🇹 **Per nuovi entry point**: usare sempre `denormalize_predictions` prima di interpretare μ/σ. Safety net contro regressioni:
 - `RuntimeError` in `03_backtest.py` se `σ_max ≥ 0.05·√interval_minutes` (0.05 a 1m, ≈0.387 a 1h; `raise` invece di `assert` sopravvive a `python -O`). Lo scaling √Δt preserva l'intento del guard: cattura il bug di denormalizzazione z→raw (~30–100×), non la crescita √60 legittima della σ a orizzonte 30 barre orarie.
@@ -256,9 +264,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 ## 6. Architetture disponibili · 6. Available architectures
 
-🇮🇹 Quattro architetture selezionabili con `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. Composizione ensemble eterogeneo configurabile in `config/default.yaml` → `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba; LSTM disponibile ma fuori dall'ensemble per under-performance strutturale).
+🇮🇹 Quattro architetture selezionabili con `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. Composizione ensemble eterogeneo configurabile in `config/default.yaml` → `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba; LSTM disponibile ma fuori dall'ensemble per under-performance strutturale). **Modello di produzione corrente (linea vol):** **iTransformer 5-seed** in `models/itransformer/` (target `log_rv`, PASS QLIKE validato due volte OOS — single-split test e k-fold sui fold data-rich). Il distill multi-teacher 5-seed sulla vol resta un esperimento gated (prior basso: vedi nota fine §7).
 
-**EN** Four architectures selectable via `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. The heterogeneous ensemble composition is configurable in `config/default.yaml` → `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba; LSTM available but outside the ensemble due to structural under-performance).
+**EN** Four architectures selectable via `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. The heterogeneous ensemble composition is configurable in `config/default.yaml` → `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba; LSTM available but outside the ensemble due to structural under-performance). **Current production model (vol line):** the **5-seed iTransformer** in `models/itransformer/` (target `log_rv`, QLIKE PASS validated twice OOS — single-split test and k-fold on the data-rich folds). The 5-seed multi-teacher vol distill remains a gated experiment (low prior: see note end of §7).
 
 ### LSTM dual-stream (`--arch lstm`, legacy)
 
@@ -408,6 +416,14 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** The ensemble returns (μ, σ, ν) directly in natural space, no intermediate numerical conversions.
 
+🇮🇹 **⚠ Quanto aiuta l'ensembling dipende dal `target_type` (misurato, non assunto).** La riduzione di varianza è ∝ alla **decorrelazione degli errori cross-arch**. Sulla linea **direzionale** l'errore cross-arch è ρ ≈ **0.995** → riduzione di varianza ≈ 0, ensembling **matematicamente inutile** (l'edge direzionale è regime-condizionato, non risolvibile combinando modelli). Sulla linea **vol** (`log_rv`) lo STEP 0 kill-check 2026-06-22 (`scripts/vol/step0_xarch_corr.py`, split val) misura invece ρ_err ≈ **0.83** (iTrans|N-HiTS 0.78, iTrans|TCN-Mamba 0.82, N-HiTS|TCN-Mamba 0.89) → c'è diversità sfruttabile e l'ensemble/distill ha **headroom potenziale** (gate KILL≥0.99 superato → PROCEED). Coerente con la tesi momenti-pari: la vol è predicibile OOS **e** gli archi disaccordano.
+
+**EN** **⚠ How much ensembling helps depends on `target_type` (measured, not assumed).** Variance reduction is ∝ to the **decorrelation of cross-arch errors**. On the **directional** line the cross-arch error is ρ ≈ **0.995** → variance reduction ≈ 0, ensembling is **mathematically useless** (the directional edge is regime-conditioned, not fixable by combining models). On the **vol** line (`log_rv`) the 2026-06-22 STEP 0 kill-check (`scripts/vol/step0_xarch_corr.py`, val split) instead measures ρ_err ≈ **0.83** (iTrans|N-HiTS 0.78, iTrans|TCN-Mamba 0.82, N-HiTS|TCN-Mamba 0.89) → exploitable diversity, so ensemble/distill has **potential headroom** (KILL≥0.99 gate cleared → PROCEED). Consistent with the even-moment thesis: vol is predictable OOS **and** the archs disagree.
+
+🇮🇹 **Stato del distill multi-teacher sulla vol (prior onesto).** Lo STEP 0 dà PROCEED ma il run completo 5-seed è **gated e ancora da eseguire** (val-first, dir sandbox via `QUANTSYS_MODELS_ROOT`, gate pre-registrato: QLIKE_student ≤ 0.97×QLIKE(iTrans 5-seed) **E** ratio HAR ≤ 0.95). Prior **basso/atteso-FAIL**: l'iTransformer è già il QLIKE-migliore sul regime di produzione e il mismatch `val_nll↔QLIKE` (TCN-Mamba miglior val_nll, iTrans miglior QLIKE) eleggerebbe un teacher che distillerebbe l'iTrans *verso il basso*. Si esegue per chiudere la domanda "combinare aiuta?" con un NO documentato.
+
+**EN** **State of the vol multi-teacher distill (honest prior).** STEP 0 gives PROCEED but the full 5-seed run is **gated and not yet executed** (val-first, sandbox dir via `QUANTSYS_MODELS_ROOT`, pre-registered gate: QLIKE_student ≤ 0.97×QLIKE(5-seed iTrans) **AND** HAR ratio ≤ 0.95). **Low / expected-FAIL** prior: the iTransformer is already the best QLIKE on the production regime, and the `val_nll↔QLIKE` mismatch (TCN-Mamba best val_nll, iTrans best QLIKE) would elect a teacher that distills the iTrans *downward*. Run to close the "does combining help?" question with a documented NO.
+
 ---
 
 ## 8. Monte Carlo
@@ -431,6 +447,10 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 ---
 
 ## 9. Generazione del segnale · 9. Signal generation
+
+> 🇮🇹 **Nota di linea.** Le sezioni §9–§11 descrivono il **trading layer DIREZIONALE** (`target_type: ret`) — codice intatto come baseline ma **KILLED OOS** (vedi orientamento in testa). La linea di produzione (vol/opzioni) non passa da questo path: dal segnale RV-vs-IV (`edge = log(rv_pred / var_iv)`) lo straddle ATM su Deribit è gestito da `scripts/04b_vol_paper.py` (direction-neutral, hold-to-expiry), non da `SignalGenerator`/`RiskManager`.
+>
+> **EN** **Line note.** §9–§11 describe the **DIRECTIONAL trading layer** (`target_type: ret`) — code intact as a baseline but **KILLED OOS** (see orientation at the top). The production (vol/options) line does not go through this path: from the RV-vs-IV signal (`edge = log(rv_pred / var_iv)`) the ATM Deribit straddle is run by `scripts/04b_vol_paper.py` (direction-neutral, hold-to-expiry), not by `SignalGenerator`/`RiskManager`.
 
 🇮🇹 Il segnale operativo (BUY / SELL / HOLD) combina più elementi:
 

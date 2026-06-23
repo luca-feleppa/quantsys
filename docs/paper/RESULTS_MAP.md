@@ -43,7 +43,24 @@
 - **Artefatto/Artifact:** `results/vols/qlike_report_1h_{val,test}.json` ✓; modelli in `models/backup_1h_vols/` (= `models/itransformer/` correnti); giudice `scripts/vol/dev_vols_qlike.py`.
 - **Numeri/Numbers:** QLIKE test NN **0.2572** vs HAR-RV 0.3681 vs naive 0.8067 → **NN/HAR = 0.699 (−30%)**; val 0.744 → test 0.699 **coerenti** (niente anti-correlazione). Test: Spearman +0.4532 (p≈0), DA 71.3%, ICIR +3.56 su 5 sotto-periodi, coverage 95.2%.
 
-### 2b. Verifica cross-risoluzione 1m — FAIL (perimetro della claim / the claim's perimeter)
+### 2b. Robustezza purged k-fold + gate HAR-per-fold (1h) · Purged k-fold robustness + HAR-per-fold gate — **NUOVO 2026-06-22**
+- **Artefatto/Artifact:** `results/vols/wf_har_baseline_1h.json` ✓ (script `scripts/vol/wf_har_baseline.py`, helper `build_har_frame`/`har_fold_qlike` in `quantsys/model/vol_metrics.py`); QLIKE NN per-fold in `results/{arch}/walkforward_metrics_log_rv.json` (harness `scripts/02b_walkforward_validate.py`, fold-metric QLIKE). Pre-registrazione `STATUS.md` 2026-06-22.
+- **Numeri/Numbers (5 fold effettivi, embargo 168h=1 sett, 1-seed; HAR fit-per-fold; gate per-fold QLIKE_NN ≤ 0.95·QLIKE_HAR):** HAR QLIKE medio cross-fold **0.430** (naive 0.800).
+
+| arch | NN medio | ratio NN/HAR | batte HAR | verdetto |
+|---|---|---|---|---|
+| **TCN+Mamba** | **0.364** | **0.863** | **4/5** | ✅ PASS |
+| N-HiTS | 0.401 | 0.948 | 3/5 | ~ borderline |
+| iTransformer (1-seed) | 0.493 | 1.170 | 3/5 | ❌ FAIL |
+
+- **Punto chiave/Key point:** la skill vol **sopravvive al purged k-fold**: TCN+Mamba batte HAR di ~14% OOS, decisivo nei fold data-rich (ratio 0.75–0.83). TUTTI gli archi falliscono il fold 1 (più antico, expanding-window data-starved → NN data-hungry < HAR a 3 param): è effetto strutturale, non model-failure (la skill emerge coi dati, fold 3→5 sempre PASS). ⚠ L'iTrans 1-seed "FAIL" qui è **artefatto della MEDIA cross-fold** (over-penalizza i data-hungry sui fold early), NON apples-to-apples col PASS 5-seed single-split di 2a: sul giudice val data-rich (= regime di produzione) iTrans 5-seed resta 0.343/ratio 0.92 ✓ (verifica `STATUS.md` 2026-06-22). → doppia conferma OOS (single-split 5-seed + k-fold data-rich).
+
+### 2c. Diversità cross-arch sugli errori vol · Cross-arch error diversity on vol — **NUOVO 2026-06-22**
+- **Artefatto/Artifact:** `results/vols/step0_xarch_corr_val.json` ✓ (script `scripts/vol/step0_xarch_corr.py`, kill-check pre-distill).
+- **Numeri/Numbers (Pearson errori per-campione, val, n=6420):** iTrans|N-HiTS 0.776 · iTrans|TCN-Mamba 0.815 · N-HiTS|TCN-Mamba 0.887 → **mean 0.826, min 0.776**.
+- **Punto chiave/Key point:** sul vol gli archi **disaccordano** (ρ_err ~0.83), in netto contrasto col direzionale (≈0.995, dove l'ensembling riduce la varianza ≈0 → matematicamente inutile, vedi CLAIM 1). La diversità cross-arch è quindi anch'essa un **oggetto pari-specifico**: esiste solo dove l'informazione esiste. ⚠ Caveat: 1 seed/1 split, yaml era-1m → parte della diversità può essere overfit-indotta; la robustezza vera è 2b.
+
+### 2d. Verifica cross-risoluzione 1m — FAIL (perimetro della claim / the claim's perimeter)
 - **Artefatto/Artifact:** `results/vols/qlike_report_1m_val.json` ✓.
 - **Numeri/Numbers:** val 1m NN/HAR QLIKE = **1.0127** (>0.95, sanity val-first fallita; test mai toccato, come pre-registrato). → L'edge vol sopra HAR esiste **solo a RV oraria** (h=30h): a RV-30min HAR è già sufficiente.
 
@@ -59,13 +76,13 @@
 
 ## CLAIM 4 (in accumulo / accruing) — Test economico forward: NN-RV vs IV implicita · Forward economic test: NN-RV vs implied IV
 
-- **Artefatto/Artifact:** `results/vol_paper/{forecasts.parquet, trades.jsonl}` (harness `scripts/04b_vol_paper.py`, testnet Deribit, dal 2026-06-12); IV: `data/iv/atm_30h.parquet` (poller `01c_iv_poller.py`); DVOL storico `data/iv/dvol.parquet`.
-- **Stato/Status:** pre-registrato (regola |log(RV_pred/var_iv)|>0.25, straddle ATM ~30h, gate a ≥30 trade). Per il paper: sezione "economic relevance" — risultato preliminare o follow-up, secondo i tempi.
+- **Artefatto/Artifact:** `results/vol_paper/{forecasts.parquet, trades.jsonl, baseline_report.json}` (harness `scripts/04b_vol_paper.py`, testnet Deribit, dal 2026-06-12); IV: `data/iv/atm_30h.parquet` (poller `01c_iv_poller.py`); DVOL storico `data/iv/dvol.parquet`.
+- **Stato/Status:** pre-registrato (regola |log(RV_pred/var_iv)|>0.25, straddle ATM ~30h, hold-to-expiry direction-neutral, gate a ≥30 trade — non ancora raggiunto, `evaluable=false`). **Preliminare (n=7, da `trades.jsonl` / `STATUS.md` 2026-06-23):** PnL ≈ −0.038 BTC, hit-rate ~29%, trade quasi tutti LONG-vol che perdono → **IV > RV realizzata (VRP positivo)**; il lato che paga è plausibilmente lo SHORT-vol (atteso da un VRP strutturalmente positivo su BTC). ⚠ Il testnet valida bene il **segnale** hold-to-expiry (settlement deterministico) ma NON l'esecuzione (liquidità simulata). Per il paper: sezione "economic relevance" come outlook, da chiudere a n≥30.
 
 ---
 
 ## Note di provenienza · Provenance notes
 
-🇮🇹 (1) I numeri senza artefatto su disco sono ricostruibili dal lab notebook `STATUS.md` alla data indicata e dai commit git (`6ca5676` xs-KILL, `21e86a8` pivot 1h+vol-S, `0253d2e` rs-FAIL, `590b96a` cleanup+restore). (2) Split: i report vol/rs usano il dataset del run (65.159 candele il 06-10; 65.191 il 06-11 → 51156/6394/6395 finestre); le baseline direzionali ricostruiscono lo split sul raw corrente (verificato esatto, vedi commento in `paper_01_dir_baselines.py`) — scostamento di boundary ≤0,05%, irrilevante per claim a ρ≈0. (3) Tutti i gate erano pre-registrati in `STATUS.md` PRIMA delle run, protocollo val-first, test toccato una volta.
+🇮🇹 (1) I numeri senza artefatto su disco sono ricostruibili dal lab notebook `STATUS.md` alla data indicata e dai commit git (`6ca5676` xs-KILL, `21e86a8` pivot 1h+vol-S, `0253d2e` rs-FAIL, `590b96a` cleanup+restore, `73fef66` distill target-aware). Il codice 2c/2b (k-fold QLIKE, cross-arch corr, HAR-per-fold, `vol_metrics.py` helpers) è eseguito ma NON ancora committato (artefatti JSON su disco; STATUS 2026-06-22 è il registro). (2) Split: i report vol/rs usano il dataset del run (65.159 candele il 06-10; 65.191 il 06-11 → 51156/6394/6395 finestre); le baseline direzionali ricostruiscono lo split sul raw corrente (verificato esatto, vedi commento in `paper_01_dir_baselines.py`) — scostamento di boundary ≤0,05%, irrilevante per claim a ρ≈0. (3) Tutti i gate erano pre-registrati in `STATUS.md` PRIMA delle run, protocollo val-first, test toccato una volta.
 
-**EN** (1) Numbers without an on-disk artifact are recoverable from the `STATUS.md` lab notebook at the stated date and from git commits (`6ca5676` xs-KILL, `21e86a8` 1h pivot+vol-S, `0253d2e` rs-FAIL, `590b96a` cleanup+restore). (2) Splits: vol/rs reports use the run's dataset (65,159 candles on 06-10; 65,191 on 06-11 → 51156/6394/6395 windows); the directional baselines rebuild the split on the current raw (verified exact, see comment in `paper_01_dir_baselines.py`) — boundary deviation ≤0.05%, immaterial for ρ≈0 claims. (3) All gates were pre-registered in `STATUS.md` BEFORE the runs, val-first protocol, test touched once.
+**EN** (1) Numbers without an on-disk artifact are recoverable from the `STATUS.md` lab notebook at the stated date and from git commits (`6ca5676` xs-KILL, `21e86a8` 1h pivot+vol-S, `0253d2e` rs-FAIL, `590b96a` cleanup+restore, `73fef66` target-aware distill). The 2c/2b code (k-fold QLIKE, cross-arch corr, HAR-per-fold, `vol_metrics.py` helpers) is run but NOT yet committed (JSON artifacts on disk; STATUS 2026-06-22 is the registry). (2) Splits: vol/rs reports use the run's dataset (65,159 candles on 06-10; 65,191 on 06-11 → 51156/6394/6395 windows); the directional baselines rebuild the split on the current raw (verified exact, see comment in `paper_01_dir_baselines.py`) — boundary deviation ≤0.05%, immaterial for ρ≈0 claims. (3) All gates were pre-registered in `STATUS.md` BEFORE the runs, val-first protocol, test touched once.

@@ -1,8 +1,8 @@
 # QUANTSYS — Motore neurale di forecasting per BTC/USDT · QUANTSYS — Neural Forecasting Engine for BTC/USDT
 
-🇮🇹 Sistema di trading algoritmico end-to-end che combina **deep learning forecasting**, **gestione probabilistica del rischio** e **knowledge distillation multi-teacher** per generare segnali direzionali su candele BTC/USDT. **Timeframe corrente: 1 ora** (design interval-agnostic; perimetro 1m in backup). Stato 2026-06-11: il filone direzionale è negativo OOS su 1m E 1h (pivot 1h killed); la famiglia **vol** ha prodotto l'unico segnale validato del progetto — `log_rv` batte HAR-RV del 30% in QLIKE su test a 1h (FAIL a 1m: risoluzione-specifico), mentre l'asimmetria firmata `log_rs_ratio` è impredicibile (FAIL 2026-06-11) → **i momenti pari generalizzano OOS, i dispari no**. Config corrente: `features.target_type: log_rs_ratio` (ultimo probe). Vedi `docs/MODEL_IMPROVEMENTS.md` e `STATUS.md`.
+🇮🇹 Motore neurale di forecasting per BTC/USDT + analytics opzioni crypto. **Linea di produzione: volatilità @ 1 ora** (`config/default.yaml → features.target_type: log_rv`, `data.interval: 1h`; design interval-agnostic, 1m = identità, perimetro 1m in backup). Stato 2026-06-22: la famiglia **vol** ha prodotto l'unico segnale validato del progetto — `log_rv` batte HAR-RV del 30% in QLIKE su test a 1h (confermato due volte OOS: single-split 5-seed 0.257/ratio 0.70 **e** purged k-fold sui fold data-rich; FAIL a 1m: risoluzione-specifico). Il modello di produzione è l'**iTransformer 5-seed**. Il filone **direzionale** è negativo OOS su 1m E 1h (pivot 1h killed) — resta legacy/in backup. L'asimmetria firmata `log_rs_ratio` è impredicibile (FAIL 2026-06-11) → **i momenti pari generalizzano OOS, i dispari no**. Vedi `docs/MODEL_IMPROVEMENTS.md` e `STATUS.md`.
 
-**EN** End-to-end algorithmic trading system that combines **deep learning forecasting**, **probabilistic risk management**, and **multi-teacher knowledge distillation** to generate directional signals on BTC/USDT candles. **Current timeframe: 1 hour** (interval-agnostic design; the 1m perimeter is backed up). Status 2026-06-11: the directional axis is OOS-negative at both 1m AND 1h (1h pivot killed); the **vol** family produced the project's only validated signal — `log_rv` beats HAR-RV by 30% in test QLIKE at 1h (FAIL at 1m: resolution-specific), while the signed asymmetry `log_rs_ratio` is unpredictable (FAIL 2026-06-11) → **even moments generalize OOS, odd ones don't**. Current config: `features.target_type: log_rs_ratio` (latest probe). See `docs/MODEL_IMPROVEMENTS.md` and `STATUS.md`.
+**EN** Neural forecasting engine for BTC/USDT + crypto-options analytics. **Production line: volatility @ 1 hour** (`config/default.yaml → features.target_type: log_rv`, `data.interval: 1h`; interval-agnostic design, 1m = identity, the 1m perimeter is backed up). Status 2026-06-22: the **vol** family produced the project's only validated signal — `log_rv` beats HAR-RV by 30% in test QLIKE at 1h (confirmed OOS twice: single-split 5-seed 0.257/ratio 0.70 **and** purged k-fold on the data-rich folds; FAIL at 1m: resolution-specific). The production model is the **iTransformer 5-seed**. The **directional** axis is OOS-negative at both 1m AND 1h (1h pivot killed) — kept as legacy/backup. The signed asymmetry `log_rs_ratio` is unpredictable (FAIL 2026-06-11) → **even moments generalize OOS, odd ones don't**. See `docs/MODEL_IMPROVEMENTS.md` and `STATUS.md`.
 
 🇮🇹 **Stack:** Python 3.12 | PyTorch (CUDA) | NumPy/Pandas | Binance REST+WebSocket | FRED API
 
@@ -207,11 +207,12 @@ quantsys_project/
 │   ├── interval/                 override risoluzione candela (QUANTSYS_INTERVAL / --interval)
 │   │   ├── 1m.yaml               chiavi interval-dipendenti era 1m (stride 5, embargo 1500, ...)
 │   │   └── 1h.yaml               chiavi interval-dipendenti pivot 1h (stride 1, embargo 168, ...)
-│   └── arch/
-│       ├── lstm.yaml             override LSTM
-│       ├── itransformer.yaml     override iTransformer
-│       ├── nhits.yaml            override N-HiTS
-│       └── tcnmamba.yaml         override TCN+Mamba
+│   ├── arch/
+│   │   ├── lstm.yaml             override LSTM
+│   │   ├── itransformer.yaml     override iTransformer
+│   │   ├── nhits.yaml            override N-HiTS
+│   │   └── tcnmamba.yaml         override TCN+Mamba
+│   └── cafn.yaml                 overlay opzionale CAFN (probe, non letto dalla pipeline production)
 ├── quantsys/                     package Python installabile
 │   ├── data/                     Binance REST + WebSocket + funding rate
 │   ├── features/                 FeatureBuilder (104 feature post C-funding, split dual-stream)
@@ -221,8 +222,10 @@ quantsys_project/
 │   │   ├── nhits.py              QuantNHiTS (pure-MLP gerarchico)
 │   │   ├── tcn_mamba.py          QuantTCNMamba (TCN + Mamba SSM + gated fusion)
 │   │   ├── ensemble.py           EnsembleModel (omogeneo / eterogeneo, AMP off in inferenza)
-│   │   ├── distillation.py       Knowledge Distillation multi-teacher
+│   │   ├── distillation.py       Knowledge Distillation multi-teacher (scoring target-aware)
 │   │   ├── forecast.py           Monte Carlo GJR-GARCH(1,1) + neural-guided
+│   │   ├── vol_metrics.py        QLIKE / inversione log-RV / baseline HAR-RV (linea vol, condivisi)
+│   │   ├── cafn.py               CausalAttentionFlowNetwork (coordinatore causale, probe inerte)
 │   │   └── revin.py              Reversible Instance Normalization (opzionale)
 │   ├── trading/                  Kelly sizing, SL dinamico, trailing, circuit breaker
 │   └── utils/                    config loader, device setup, logging, PipelineState
@@ -246,7 +249,9 @@ quantsys_project/
 │   ├── 06_dashboard.py           Deribit Options Risk Terminal (HTTP single-file + Plotly)
 │   ├── 07_verify_teacher.py      confronto architetture per selezione teacher
 │   ├── 99_replay_live_vs_training.py   diagnostica BLOCKER #1 (parity live vs training)
-│   ├── vol/                      giudici linea vol: dev_vols_macro_append + QLIKE/RS
+│   ├── vol/                      linea vol: giudici QLIKE/RS (dev_vols_qlike, dev_vols_rs_judge),
+│   │                             prep dati (dev_vols_macro_append), kill-check cross-arch
+│   │                             (step0_xarch_corr), baseline HAR per-fold (wf_har_baseline)
 │   ├── research/                 paper / negative-control direzionale: paper_01_dir_baselines.py
 │   ├── README.md                 mappa script → linea (shared / vol / direzionale)
 │   └── archive/                  probe chiusi (xs cross-sectional KILL, step0 σ-recal)

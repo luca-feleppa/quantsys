@@ -504,16 +504,24 @@ def build_risk(market: dict) -> dict:
     #     contracts). Vectorized O(n_strikes²): a few hundred at most.
     max_pain = float("nan")
     if strikes:
-        ks = np.array(strikes)
+        ks = np.array(strikes, dtype=float)              # IT/EN: strike ordinati crescenti
         call_arr = np.array([call_oi[k] for k in strikes])
         put_arr = np.array([put_oi[k] for k in strikes])
-        # IT: per ogni prezzo candidato p (riga): payoff call = (p-K)+ ·OI_call,
-        #     payoff put = (K-p)+ ·OI_put, sommati su tutti gli strike (colonna).
-        # EN: for each candidate price p (row): call payoff = (p-K)+ ·OI_call,
-        #     put payoff = (K-p)+ ·OI_put, summed over all strikes (column).
-        diff = ks[:, None] - ks[None, :]
-        pain = (np.maximum(diff, 0.0) * call_arr[None, :]).sum(1) \
-            + (np.maximum(-diff, 0.0) * put_arr[None, :]).sum(1)
+        # IT: pain(p) = Σ_K (p−K)⁺·OI_call + Σ_K (K−p)⁺·OI_put, valutata su ogni strike.
+        #     Forma chiusa O(n) via prefix/suffix sum (gli strike sono già ordinati):
+        #       call (K≤p): p·Σ_{K≤p}OI_c − Σ_{K≤p}K·OI_c   → cumsum
+        #       put  (K≥p): Σ_{K≥p}K·OI_p − p·Σ_{K≥p}OI_p   → suffix-sum
+        #     La diagonale K=p contribuisce 0 in entrambi (esatto vs la vecchia O(n²)).
+        # EN: pain(p) = Σ_K (p−K)⁺·OI_call + Σ_K (K−p)⁺·OI_put, evaluated at each strike.
+        #     Closed-form O(n) via prefix/suffix sums (strikes already sorted):
+        #       call (K≤p): p·Σ_{K≤p}OI_c − Σ_{K≤p}K·OI_c   → cumsum
+        #       put  (K≥p): Σ_{K≥p}K·OI_p − p·Σ_{K≥p}OI_p   → suffix-sum
+        #     The K=p diagonal contributes 0 in both (exact vs the old O(n²)).
+        call_cum = np.cumsum(call_arr)
+        wcall_cum = np.cumsum(ks * call_arr)
+        put_suf = np.cumsum(put_arr[::-1])[::-1]
+        wput_suf = np.cumsum((ks * put_arr)[::-1])[::-1]
+        pain = (ks * call_cum - wcall_cum) + (wput_suf - ks * put_suf)
         max_pain = float(ks[int(np.argmin(pain))])
 
     agg = {"delta": 0.0, "gamma": 0.0, "vega": 0.0, "theta": 0.0}
@@ -608,7 +616,7 @@ HTML = r"""<!DOCTYPE html>
     --amber:#f0a020; --blue:#4aa3ff; --violet:#b07cff;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{background:var(--bg);color:var(--text);font:13px/1.4 'Segoe UI',system-ui,sans-serif;}
+  body{background:var(--bg);color:var(--text);font:13px/1.4 'Segoe UI',system-ui,sans-serif;overflow-y:scroll;}
   header{background:var(--surface);border-bottom:1px solid var(--border);
     padding:8px 18px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
   .brand{font-size:15px;font-weight:700;letter-spacing:.5px;color:var(--amber);white-space:nowrap;}
@@ -765,6 +773,33 @@ const PL_CFG = {displayModeBar:false, responsive:true};
 // EN: 2D config — no box "window" zoom (dragmode 'pan'), but axis zoom via wheel
 //     over the axis (Y up/down, X left/right) + drag/pan; double-click reset.
 const PL_CFG_2D = {displayModeBar:false, responsive:true, scrollZoom:true, doubleClick:'reset'};
+// IT: ── plot() — render guard UNICO (meccanismo olistico, sostituisce le patch
+//     per-grafico). Plotly disegna su geometria sbagliata se il container è a
+//     dimensione 0 o appena riflowato (tab display:none→block): barre/curve nascono
+//     fuori vista o sub-pixel → il bug "spariscono al cambio-tab" (restano solo
+//     linee/shapes, scala-indipendenti). Fix deterministico in due mosse:
+//       (1) se offsetWidth==0 (tab nascosta o reflow non ancora completato) ritenta
+//           al frame successivo (cap 60 ≈1s, poi rinuncia: il prossimo switchTab
+//           ridisegna comunque) — leggere offsetWidth forza già il reflow sincrono;
+//       (2) passa width/height ESPLICITI dai pixel reali del container + autosize:false
+//           → Plotly NON rimisura da solo (era la sua misura transitoria, durante il
+//           reflow del cambio-tab, a corrompere la geometria delle barre).
+// EN: ── plot() — SINGLE render guard (holistic mechanism, replaces the per-chart
+//     patches). Plotly draws on wrong geometry when the container is 0-sized or just
+//     reflowed (tab display:none→block): bars/curves are born off-view or sub-pixel →
+//     the "vanish on tab switch" bug (only scale-independent lines/shapes remain).
+//     Deterministic two-step fix: (1) if offsetWidth==0 (hidden tab or reflow not yet
+//     flushed) retry next frame (cap 60 ≈1s, then give up: next switchTab redraws) —
+//     reading offsetWidth already forces a synchronous reflow; (2) pass EXPLICIT
+//     width/height from the container's real pixels + autosize:false → Plotly does NOT
+//     self-measure (its transient measure during the tab-switch reflow was corrupting
+//     the bar geometry).
+function plot(id, traces, layout, cfg, _t){
+  const el = document.getElementById(id);
+  if(!el) return;
+  if(el.offsetWidth===0){ if((_t||0)<60) requestAnimationFrame(()=>plot(id,traces,layout,cfg,(_t||0)+1)); return; }
+  Plotly.react(el, traces, Object.assign({}, layout, {width:el.offsetWidth, height:el.offsetHeight, autosize:false}), cfg);
+}
 function fmt(v,d=2){ if(v==null||isNaN(v)) return '—'; return Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); }
 function fmt0(v){ return fmt(v,0); }
 function fmtK(v){ if(v==null||isNaN(v)) return '—'; if(Math.abs(v)>=1e3) return (v/1e3).toFixed(1)+'k'; return fmt(v,0); }
@@ -782,12 +817,15 @@ let SURFACE = null;
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.getElementById('page-'+name).classList.add('active');
-  if(name==='surface'){ loadSurface(); }
-  if(name==='chain')  loadChain();
-  if(name==='risk')   loadRisk();
-  if(name==='trades') loadTrades();
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active', p.id==='page-'+name));
+  // IT: la pagina è ORA display:block; i loader sono async ma ogni render passa per
+  //     plot() che misura il container reale (size-guard) → niente resize manuale qui.
+  // EN: the page is NOW display:block; loaders are async but every render goes through
+  //     plot() which measures the real container (size-guard) → no manual resize here.
+  if(name==='surface') loadSurface();
+  else if(name==='chain')  loadChain();
+  else if(name==='risk')   loadRisk();
+  else if(name==='trades') loadTrades();
 }
 
 // ─── Header / summary ─────────────────────────────────────────────────────────
@@ -823,7 +861,7 @@ async function loadSurface(){
 }
 function renderSurface(){
   if(!SURFACE || !SURFACE.z.length) return;
-  Plotly.react('plot-surface', [{
+  plot('plot-surface', [{
     type:'surface', x:SURFACE.moneyness, y:SURFACE.days, z:SURFACE.z,
     colorscale:[[0,'#1a3a6b'],[0.4,'#4aa3ff'],[0.7,'#f0a020'],[1,'#ff5c5c']],
     colorbar:{title:{text:'IV %',font:{color:'#7d8aa0'}}, tickfont:{color:'#7d8aa0'}, thickness:10, len:.7},
@@ -843,7 +881,7 @@ function renderSmile(){
   if(!SURFACE) return;
   const i = +document.getElementById('smile-sel').value || 0;
   const s = SURFACE.smiles[i]; if(!s) return;
-  Plotly.react('plot-smile', [{
+  plot('plot-smile', [{
     type:'scatter', mode:'lines+markers', x:s.strikes, y:s.iv,
     line:{color:'#f0a020',width:2}, marker:{size:4,color:'#f0a020'},
     hovertemplate:'K %{x:,.0f}<br>IV %{y:.1f}%<extra></extra>',
@@ -859,7 +897,7 @@ function renderSmile(){
 function renderTerm(){
   fetch('/api/term').then(r=>r.json()).then(t=>{
     const x = t.term.map(d=>d.days), y = t.term.map(d=>d.atm_iv), lbl = t.term.map(d=>d.label);
-    Plotly.react('plot-term', [{
+    plot('plot-term', [{
       type:'scatter', mode:'lines+markers', x, y, text:lbl,
       line:{color:'#b07cff',width:2}, marker:{size:5,color:'#b07cff'},
       hovertemplate:'%{text} · %{x:.0f}d<br>ATM IV %{y:.1f}%<extra></extra>',
@@ -968,35 +1006,34 @@ function renderOI(d){
   //     already contain only band strikes) → consistent with x, no off-view bar
   //     inflating the axis.
   const _lo=Math.min(...ks), _hi=Math.max(...ks);
-  const _pad=((_hi-_lo)*0.04)||_lo*0.1; const xr=[_lo-_pad, _hi+_pad];
-
-  // IT: newPlot (NON react): Plotly.react al re-render non ridisegna le trace
-  //     `bar` (le barre sparivano ai refresh, restavano solo linee/shapes).
-  //     newPlot ricostruisce da zero ogni volta = sempre come il primo render OK.
-  // EN: newPlot (NOT react): Plotly.react fails to redraw `bar` traces on
-  //     re-render (bars vanished on refresh, only lines/shapes stayed). newPlot
-  //     rebuilds from scratch every time = always like the working first render.
-  Plotly.newPlot('plot-oi', [
+  // IT: clamp left ≥0 (gli strike non sono mai negativi). Range x esplicito (banda+pad)
+  //     con autorange:false → l'asse è deterministico ad ogni refresh; la geometria del
+  //     container è gestita da plot() (width/height espliciti), non più dall'asse sticky.
+  // EN: clamp left ≥0 (strikes are never negative). Explicit x range (band+pad) with
+  //     autorange:false → the axis is deterministic each refresh; container geometry is
+  //     handled by plot() (explicit width/height), no longer a sticky-axis concern.
+  const _pad=((_hi-_lo)*0.04)||(_hi*0.05); const xr=[Math.max(0,_lo-_pad), _hi+_pad];
+  plot('plot-oi', [
     {type:'bar', name:'Call OI', x:ks, y:callV, width:_barW, marker:{color:'#2ecc7199'},
      customdata:callV, hovertemplate:`K %{x:,.0f}<br>Call OI %{customdata:,.0f} ${unit}<extra></extra>`},
     {type:'bar', name:'Put OI', x:ks, y:putV.map(v=>-v), width:_barW, marker:{color:'#ff5c5c99'},
      customdata:putV, hovertemplate:`K %{x:,.0f}<br>Put OI %{customdata:,.0f} ${unit}<extra></extra>`},
     // IT: Net OI = call−put → stessa unità/scala delle barre → asse PRIMARIO
-    //     (no yaxis2 overlay, più semplice e corretto). NB: niente `uirevision`
-    //     su questi grafici — con Plotly.react ai refresh non ridisegnava le
-    //     trace `bar` (sparivano le barre, restavano solo le linee/shapes).
+    //     (no yaxis2 overlay, più semplice e corretto). Niente `uirevision`:
+    //     i dati si auto-aggiornano, il range x/y va ricalcolato ad ogni refresh
+    //     (react applica i range espliciti forniti = comportamento voluto).
     // EN: Net OI = call−put → same unit/scale as the bars → PRIMARY axis (no
-    //     yaxis2 overlay, simpler and correct). NB: no `uirevision` on these
-    //     charts — with Plotly.react it failed to redraw `bar` traces on refresh
-    //     (bars vanished, only lines/shapes remained).
+    //     yaxis2 overlay, simpler and correct). No `uirevision`: data auto-
+    //     refreshes, x/y range must be recomputed each refresh (react applies
+    //     the explicit ranges provided = the intended behavior).
     {type:'scatter', name:'Net OI', mode:'lines', x:ks, y:netV,
      line:{color:'#f0a020',width:1.6}, hovertemplate:`K %{x:,.0f}<br>Net %{y:,.0f} ${unit}<extra></extra>`},
   ], Object.assign({}, PL_DARK, {
-    dragmode:'pan', autosize:true,
+    dragmode:'pan',
     barmode:'relative', showlegend:true,
     legend:{font:{color:'#7d8aa0'},orientation:'h',y:1.08,x:0},
     hovermode:'x unified',
-    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Strike',range:xr}),
+    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Strike',range:xr,autorange:false}),
     yaxis:Object.assign({},PL_DARK.yaxis,{title:`Puts ▼ / Calls ▲ / Net (${unit})`,zeroline:true,zerolinecolor:'#3a465c'}),
     shapes:[
       {type:'line',x0:d.spot,x1:d.spot,y0:0,y1:1,yref:'paper',line:{color:'#4aa3ff',width:1.5}},
@@ -1006,12 +1043,25 @@ function renderOI(d){
       {x:d.spot,y:1,yref:'paper',text:'Spot',showarrow:false,font:{color:'#4aa3ff',size:10},yanchor:'bottom'},
       {x:d.max_pain,y:1,yref:'paper',text:'Max Pain',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
     ],
+  // IT: range x già fissato nel layout (range:xr, autorange:false).
+  // EN: x range already pinned in the layout (range:xr, autorange:false).
   }), PL_CFG_2D);
 }
 
 async function loadRisk(){
   try{
     const d = await (await fetch('/api/risk')).json();
+    // IT: GUARD anti-race async↔tab. loadRisk è async: tra l'inizio della fetch e il suo
+    //     ritorno l'utente può aver cambiato tab. Se page-risk NON è più attiva, il
+    //     render atterrerebbe su un container nascosto (0×0 / reflow) → barre disegnate
+    //     con geometria sbagliata = il bug "barre sparite al cambio-tab". Skip: il
+    //     prossimo switch-to-risk rifà fetch+render a container visibile.
+    // EN: async↔tab race GUARD. loadRisk is async: between fetch start and resolve the
+    //     user may have switched tabs. If page-risk is no longer active, the render would
+    //     land on a hidden container (0×0 / reflow) → bars drawn with wrong geometry =
+    //     the "bars vanish on tab switch" bug. Skip: the next switch-to-risk re-fetches
+    //     and re-renders into a visible container.
+    if(!document.getElementById('page-risk').classList.contains('active')) return;
     // IT: guard dati — se la risposta è degradata (chain parziale/desincronizzata:
     //     niente strike o OI tutto a zero) NON ridisegnare: tieni l'ultimo grafico
     //     buono invece di svuotare le barre. Difesa frontend (oltre al fix backend).
@@ -1034,18 +1084,17 @@ async function loadRisk(){
     ].map(c=>`<div class="card"><div class="lbl">${c.l}</div><div class="val ${c.c||''}">${c.v}</div><div class="sub">${c.s}</div></div>`).join('');
 
     renderOI(d);
-
     const gv=['delta','gamma','vega','theta'].map(k=>g[k]);
-    Plotly.newPlot('plot-greeks', [{type:'bar', x:['Δ (Delta)','Γ (Gamma)','ν (Vega)','Θ (Theta)'], y:gv,
+    plot('plot-greeks', [{type:'bar', x:['Δ (Delta)','Γ (Gamma)','ν (Vega)','Θ (Theta)'], y:gv,
       marker:{color:gv.map(v=>v>=0?'#2ecc71':'#ff5c5c')},
       hovertemplate:'%{x}: %{y:+,.2f}<extra></extra>'}],
-      Object.assign({}, PL_DARK, {dragmode:'pan', autosize:true, yaxis:Object.assign({},PL_DARK.yaxis,{title:'OI-weighted'})}), PL_CFG_2D);
+      Object.assign({}, PL_DARK, {dragmode:'pan', yaxis:Object.assign({},PL_DARK.yaxis,{title:'OI-weighted'})}), PL_CFG_2D);
 
     const totC = d.call_oi.reduce((a,b)=>a+b,0), totP = d.put_oi.reduce((a,b)=>a+b,0);
-    Plotly.react('plot-pcr', [{type:'pie', labels:['Calls','Puts'], values:[totC,totP],
+    plot('plot-pcr', [{type:'pie', labels:['Calls','Puts'], values:[totC,totP],
       marker:{colors:['#2ecc71','#ff5c5c']}, hole:.55, textinfo:'label+percent',
       textfont:{color:'#dfe6f0'}, hovertemplate:'%{label}: %{value:,.0f} BTC<extra></extra>'}],
-      Object.assign({}, PL_DARK, {dragmode:'pan', autosize:true, margin:{l:8,r:8,t:8,b:8}}), PL_CFG_2D);
+      Object.assign({}, PL_DARK, {dragmode:'pan', margin:{l:8,r:8,t:8,b:8}}), PL_CFG_2D);
     setConn(true);
   }catch(e){ setConn(false); }
 }
@@ -1113,10 +1162,17 @@ function renderPayoff(t){
   //     ranges (like renderOI) — don't rely on autorange, which with the div in a
   //     just-activated tab (reflow) can collapse and skip the curve (only the shapes
   //     = the 2 vertical lines remained).
-  const _xpad=(hi-lo)*0.03; const _xr=[lo-_xpad, hi+_xpad];
+  const _xpad=(hi-lo)*0.03; let _xr=[lo-_xpad, hi+_xpad];
   let _ymin=Math.min(...ys), _ymax=Math.max(...ys);
   if(t.pnl_btc!=null){ _ymin=Math.min(_ymin,t.pnl_btc); _ymax=Math.max(_ymax,t.pnl_btc); }
-  const _ypad=((_ymax-_ymin)*0.10)||0.01; const _yr=[_ymin-_ypad, _ymax+_ypad];
+  const _ypad=((_ymax-_ymin)*0.10)||0.01; let _yr=[_ymin-_ypad, _ymax+_ypad];
+  // IT: guard range NON-finiti (strike/settle anomali → NaN da |S−K|/S): senza,
+  //     la curva NON si disegna ma gli shapes sì = il bug "solo 2 linee verticali".
+  //     null → autorange. | EN: guard NON-finite ranges (anomalous strike/settle →
+  //     NaN from |S−K|/S): otherwise the curve won't draw but shapes do = the
+  //     "only 2 vertical lines" bug. null → autorange.
+  if(!_xr.every(Number.isFinite)) _xr=null;
+  if(!_yr.every(Number.isFinite)) _yr=null;
   const traces=[{type:'scatter',mode:'lines',x:xs,y:ys,line:{color:'#4aa3ff',width:2},
     hovertemplate:'S %{x:,.0f}<br>PnL %{y:+,.4f} BTC<extra></extra>'}];
   if(t.delivery_price!=null && t.pnl_btc!=null){
@@ -1126,10 +1182,16 @@ function renderPayoff(t){
   }
   document.getElementById('payoff-title').textContent =
     `${t.side>0?'LONG':'SHORT'} straddle · K ${fmt0(K)} · cost ${fmt(cost,4)} BTC`;
-  Plotly.newPlot('plot-payoff', traces, Object.assign({}, PL_DARK, {
-    dragmode:'pan', autosize:true, showlegend:false,
-    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Underlying at expiry (USD)',range:_xr}),
-    yaxis:Object.assign({},PL_DARK.yaxis,{title:'PnL (BTC)',range:_yr,zeroline:true,zerolinecolor:'#3a465c'}),
+  // IT: render via plot() (size-guard + width/height espliciti): la curva non collassa
+  //     più sul reflow della tab .grid2 (prima restavano solo gli shapes = 2 linee
+  //     verticali). Range x/y espliciti già nel layout → asse deterministico.
+  // EN: render via plot() (size-guard + explicit width/height): the curve no longer
+  //     collapses on the .grid2 tab reflow (previously only the shapes = 2 vertical
+  //     lines remained). Explicit x/y ranges already in the layout → deterministic axis.
+  plot('plot-payoff', traces, Object.assign({}, PL_DARK, {
+    dragmode:'pan', showlegend:false,
+    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Underlying at expiry (USD)',range:_xr,autorange:!_xr}),
+    yaxis:Object.assign({},PL_DARK.yaxis,{title:'PnL (BTC)',range:_yr,autorange:!_yr,zeroline:true,zerolinecolor:'#3a465c'}),
     shapes:[
       {type:'line',x0:K,x1:K,y0:0,y1:1,yref:'paper',line:{color:'#7d8aa0',width:1,dash:'dot'}},
       {type:'line',x0:t.entry_spot,x1:t.entry_spot,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.2}},
@@ -1138,7 +1200,7 @@ function renderPayoff(t){
       {x:K,y:1,yref:'paper',text:'Strike',showarrow:false,font:{color:'#7d8aa0',size:10},yanchor:'bottom'},
       {x:t.entry_spot,y:1,yref:'paper',text:'Entry',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
     ],
-  }), PL_CFG_2D).then(()=>{ try{ Plotly.Plots.resize('plot-payoff'); }catch(e){} });
+  }), PL_CFG_2D);
 }
 
 // ─── Refresh loop ─────────────────────────────────────────────────────────────

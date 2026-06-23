@@ -606,6 +606,21 @@ quantsys_project/
 
 Header live: spot BTC (index), DVOL 30d, ATM IV 30d, OI/volume totali, put/call ratio. Auto-refresh ~12s. Underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH); `auth_token` opzionale (constant-time, header `X-Auth-Token` o `?token=`).
 
+🇮🇹 **Rendering unificato (2026-06-24):** tutti i 7 grafici (surface/smile/term/oi/greeks/pcr/payoff) passano per un **unico helper `plot(id, traces, layout, cfg)`** in `06_dashboard.py` (sostituisce le patch per-grafico accumulate). Meccanismo deterministico: **size-guard** (`offsetWidth===0` → ritenta al frame successivo via `requestAnimationFrame`, cap ~1s) + **dimensioni esplicite** (`width`/`height` dai pixel reali del container + `autosize:false`, così Plotly non rimisura durante il reflow `display:none→block`). Era questa la root cause comune di "OI by strike" e "profilo di rischio dei trade" che sparivano al cambio-tab (barre/curve nate fuori vista o sub-pixel su container a dimensione 0).
+
+**EN** **Unified rendering (2026-06-24):** all 7 charts (surface/smile/term/oi/greeks/pcr/payoff) go through a **single `plot(id, traces, layout, cfg)` helper** in `06_dashboard.py` (it replaces the accumulated per-chart patches). Deterministic mechanism: **size-guard** (`offsetWidth===0` → retry next frame via `requestAnimationFrame`, ~1s cap) + **explicit dimensions** (`width`/`height` from the container's real pixels + `autosize:false`, so Plotly does not re-measure during the `display:none→block` reflow). This was the common root cause of "OI by strike" and "trade risk profile" charts vanishing on tab switch (bars/curves born off-view or sub-pixel on a zero-size container).
+
+### Avviare e verificare la dashboard · Running and verifying the dashboard
+
+```bash
+python scripts/06_dashboard.py     # avvio diretto · direct launch
+python run_all.py --only-dashboard # idem (no ML, no feed live · no ML, no live feed)
+```
+
+🇮🇹 ⚠ **Trappola `SO_REUSEADDR`:** un vecchio processo dashboard può tenere `:8050` e continuare a servire HTML **stale**. Prima di un nuovo smoke, **uccidi il processo precedente** (è uno stub+worker `.venv` = 1 processo logico): `Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '06_dashboard' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`. ⚠ **La verità finale è il browser dell'utente con HARD RELOAD (Ctrl+Shift+R)**: una pagina già aperta gira il JS vecchio e non riflette il fix. Smoke server-side: l'HTML servito deve contenere `plot(` e `/api/risk` deve rispondere HTTP 200 con la chain reale.
+
+**EN** ⚠ **`SO_REUSEADDR` trap:** a stale dashboard process can keep `:8050` and keep serving **stale** HTML. Before a fresh smoke, **kill the previous process** (it is a `.venv` stub+worker = 1 logical process): `Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match '06_dashboard' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`. ⚠ **The final truth is the user's browser with a HARD RELOAD (Ctrl+Shift+R)**: an already-open page runs the old JS and won't reflect the fix. Server-side smoke: the served HTML must contain `plot(` and `/api/risk` must return HTTP 200 with the real chain.
+
 **EN** `scripts/06_dashboard.py` is the **crypto options terminal** (single-file HTTP server + Plotly.js SPA), **decoupled from the ML pipeline** and GPU-free. It connects to **Deribit public** data (REST, no-auth) — no key required. Greeks shown **with sign (+/−) and name in parentheses** (`Δ (Delta)`). Four tabs:
 1. **Volatility Surface** — 3D IV surface (moneyness K/F × days), per-expiry smile, ATM term structure
 2. **Option Chain** — two-sided call/put chain with **Greeks computed live** (Black-Scholes forward measure: Δ, Γ, ν per +1% vol, Θ/day), ATM strike highlighted
@@ -618,6 +633,6 @@ Live header: BTC spot (index), 30d DVOL, 30d ATM IV, total OI/volume, put/call r
 
 ## Fermare tutto · Stopping everything
 
-🇮🇹 `Ctrl+C` nel terminale di `run_all.py` (o del server dashboard). Termina la dashboard (e, nel run completo, il feed live).
+🇮🇹 `Ctrl+C` nel terminale di `run_all.py` (o del server dashboard). La dashboard è disaccoppiata dalla pipeline ML e non avvia alcun feed live; in un run completo `Ctrl+C` ferma anche il feed live WebSocket. ⚠ Se la dashboard era detached (`Start-Process`), `Ctrl+C` non basta: usa lo `Stop-Process` mirato (vedi *Avviare e verificare la dashboard*). I 3 processi di sfondo (poller IV, recorder L2, vol-paper) si fermano col blocco *Stop* in cima a questa guida.
 
-**EN** `Ctrl+C` in the `run_all.py` terminal (or the dashboard server). Stops the dashboard (and, in the full run, the live feed).
+**EN** `Ctrl+C` in the `run_all.py` terminal (or the dashboard server). The dashboard is decoupled from the ML pipeline and starts no live feed; in a full run `Ctrl+C` also stops the WebSocket live feed. ⚠ If the dashboard was detached (`Start-Process`), `Ctrl+C` is not enough: use the targeted `Stop-Process` (see *Running and verifying the dashboard*). The 3 background processes (IV poller, L2 recorder, vol-paper) are stopped via the *Stop* block at the top of this guide.

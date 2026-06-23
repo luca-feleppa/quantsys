@@ -5,19 +5,21 @@
 
 ---
 
-## 🔴 APERTO — DASHBOARD rendering (riprendere 2026-06-24)
+## 🟢 RISOLTO 2026-06-24 — DASHBOARD rendering: meccanismo di render unificato (`plot()`)
 
-Sessione 2026-06-23 sera: molti fix al terminale opzioni (`scripts/06_dashboard.py`), **2 problemi ancora aperti**. ⚠ NON fare altri patch per-grafico: domani affrontare il MECCANISMO di render in modo olistico.
+Chiusi i 2 problemi residui ("OI by strike" e "Risk profile dei trade" che sparivano al cambio-tab `risk`/`trades`). Come da nota del 06-23 ("NON fare altri patch per-grafico: affrontare il MECCANISMO in modo olistico"), **rimosse TUTTE le patch per-grafico accumulate** e sostituite con **un solo helper `plot(id, traces, layout, cfg)`** in `scripts/06_dashboard.py`.
 
-**1) OI by strike — in gran parte RISOLTO, residuo flicker.** Root cause confermata via devtools: l'asse Y si scalava su una "balena" di OI **fuori** dalla finestra x (24.5k @ K=80000) → barre near-money schiacciate a ~1px. Fix (commit `e3d3732`): `renderOI` **filtra i dati alla banda spot±35% PRIMA di plottare** → x e y coerenti. **Conferma devtools post-fix:** shapes spot=63951/max-pain=70000, **60 barre visibili** (>3px), 3 trace → le barre ORA si disegnano. Residuo: **flicker** ("prima ok, poi per un attimo una sola barra ~45000 al refresh"; 45000 NON è uno shape → transiente). Probabile 2° `Plotly.newPlot` al refresh che rompe momentaneamente le bar.
+**Root cause unificante (confermata):** Plotly disegna su geometria sbagliata quando il container è a dimensione 0 o appena riflowato (tab `display:none→block`): le barre/curve nascono fuori vista o sub-pixel → spariscono, restano solo linee+shapes (scala-indipendenti). I sintomi "OI" e "payoff" erano LA STESSA classe di bug (container non misurabile al momento del render async).
 
-**2) Risk profile (tab Trades, `renderPayoff`) — REGRESSIONE: prima andava, ora no.** Codice attuale (commit `446ccee`): range `_xr`/`_yr` espliciti + `Plotly.Plots.resize('plot-payoff')` in `.then()`. Da capire domani: (a) se l'hard-reload ha rivelato che non andava davvero; (b) se `resize`/`.then` o i range espliciti lo rompono; (c) se è la stessa classe (reflow tab `.grid2` / newPlot ripetuto).
+**Fix (`plot()` — meccanismo olistico, deterministico):**
+1. **Size-guard:** se `offsetWidth===0` (tab nascosta o reflow non ancora flushato) ritenta al frame successivo (`requestAnimationFrame`, cap 60 ≈1s, poi rinuncia: il prossimo `switchTab` ridisegna). Leggere `offsetWidth` forza già il reflow sincrono.
+2. **Dimensioni esplicite:** passa `width`/`height` dai pixel reali del container + `autosize:false` → Plotly NON rimisura da solo (era la sua misura transitoria durante il reflow a corrompere la geometria).
 
-**IPOTESI UNIFICANTE:** tutti i sintomi ("prima ok, poi rotto al refresh/tab-switch; restano linee+shapes") puntano al **render ripetuto di Plotly** (`newPlot` ri-chiamato ogni 12s + `responsive:true` ri-registrato + `.page` display:none↔block) che rompe le trace al 2°+ giro. **Approccio domani** (scegliere uno, testare): (a) `Plotly.react` con struttura trace STABILE per i refresh invece di `newPlot`; (b) `Plotly.purge` prima di `newPlot`; (c) togliere `responsive:true` dai grafici problematici + resize manuale. ⚠ Testare SEMPRE con **HARD RELOAD (Ctrl+Shift+R)**: la pagina aperta gira il JS vecchio (la dashboard auto-aggiorna i dati ma NON ricarica il codice).
+**Pulizia (rimosso il cruft diagnostico):** eliminati `PL_CFG_2D_STATIC` (responsive:false), contatore `__roi`, `console.log` di debug, retry-rAF locale in `renderOI`, doppio-rAF resize in `switchTab`, `Plotly.purge` TEST in `loadRisk`, `.then(relayout+resize)` in `renderPayoff`. **TUTTI** i 7 render (surface/smile/term/oi/greeks/pcr/payoff) ora passano per `plot()` → unico punto di controllo della geometria. Mantenuti: guard anti-race async↔tab in `loadRisk` (skip se `page-risk` non più attiva), guard dati degradati, `Plotly.purge('plot-payoff')` quando non ci sono trade.
 
-**Diagnostici devtools (console browser, quando rotto):** `var gd=document.getElementById('plot-oi')`; `gd.querySelectorAll('.barlayer path').length` (barre nel DOM); `[].slice.call(gd.querySelectorAll('.barlayer path')).filter(p=>p.getBoundingClientRect().height>3).length` (visibili); `gd.layout.xaxis.range`/`.yaxis.range`; `gd.data.map(t=>t.type+' n='+(t.y||[]).length)`. Idem per `plot-payoff`.
+**Verifica:** `py_compile` OK; smoke server fresco su :8050 → HTML 37219 byte con `plot()` presente, zero residui (`PL_CFG_2D_STATIC`/`__roi`/`console.log`/`Plots.resize` = 0), `/api/risk` HTTP 200 con chain reale (3006 byte). ⚠ Trappola onorata: un vecchio processo dashboard teneva :8050 e serviva HTML stale (`SO_REUSEADDR`) → ucciso (stub+worker venv, 1 processo logico) prima dello smoke. Dashboard riavviata, live. **NB: la verità finale è il browser dell'utente con HARD RELOAD (Ctrl+Shift+R)** — la pagina già aperta gira il JS vecchio.
 
-**Commit dashboard 2026-06-23:** `1c0a1d8` (greche segno+nome, tab Trades), `446ccee` (OI band-cap+width, payoff range+resize), `fa1a02b` (chain-validate, _send ConnectionAborted, loadRisk guard), `e3d3732` (OI filtro-banda). Processi sfondo 01c/01d/04b vivi.
+**Doc sincronizzate (2026-06-24):** sezioni dashboard di README/AVVIO + intero corpus `.md` (fan-out subagent — vedi sotto). Processi sfondo 01c/01d/04b vivi.
 
 ## 🕒 Ultimo aggiornamento: 2026-06-22 (DECISIONE: resta sul PASS iTrans, distill 5-seed RIMANDATO)
 

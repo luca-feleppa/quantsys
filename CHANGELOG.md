@@ -1,6 +1,44 @@
 # QUANTSYS — Changelog
 
-## Iterazione 9 — Fix denormalizzazione z-score + paper-trading ready (corrente, 2026-05-23)
+## Iterazione 10 — Dashboard: meccanismo di render Plotly unificato (corrente, 2026-06-24)
+
+### Helper `plot()` unico — `scripts/06_dashboard.py`
+
+Tutti e 7 i render della SPA (surface, smile, term, OI by strike, greeks, PCR,
+payoff) ora passano per un singolo helper `plot(id, traces, layout, cfg)`. Unico
+punto di controllo della geometria del grafico, in sostituzione delle patch
+per-grafico accumulate nelle iterazioni di debug precedenti.
+
+**Root cause unificante**: Plotly disegnava su geometria errata quando il container
+era a dimensione 0 o appena riflowato (tab `display:none→block`): barre e curve
+nascevano fuori vista o sub-pixel → sparivano, restando solo linee e shapes
+(scala-indipendenti). I sintomi "OI by strike" e "Risk profile dei trade" erano
+la stessa classe di bug (container non misurabile al momento del render async).
+
+**Fix deterministico in due passi**:
+- **Size-guard**: se `offsetWidth===0` (tab nascosta o reflow non flushato) il
+  render ritenta al frame successivo (`requestAnimationFrame`, cap 60 ≈1s, poi
+  rinuncia — il prossimo `switchTab` ridisegna). Leggere `offsetWidth` forza già
+  il reflow sincrono.
+- **Dimensioni esplicite**: `width`/`height` dai pixel reali del container +
+  `autosize:false` → Plotly non rimisura da solo (era la sua misura transitoria
+  durante il reflow a corrompere la geometria).
+
+**Pulizia (rimosso il cruft per-grafico)**: eliminati `PL_CFG_2D_STATIC`
+(responsive:false), contatore di debug `__roi`, `console.log` diagnostici,
+retry-rAF locale in `renderOI`, doppio-rAF resize in `switchTab`, `Plotly.purge`
+di test in `loadRisk`, `.then(relayout+resize)` in `renderPayoff`. Mantenuti i
+guard utili: anti-race async↔tab in `loadRisk`, guard dati degradati,
+`Plotly.purge('plot-payoff')` quando non ci sono trade.
+
+**Verifica**: `py_compile` OK; smoke server fresco su :8050 → HTML con `plot()`
+presente e zero residui (`PL_CFG_2D_STATIC`/`__roi`/`console.log` = 0),
+`/api/risk` HTTP 200 con chain reale. La verifica finale resta il browser
+dell'utente con hard reload (Ctrl+Shift+R).
+
+---
+
+## Iterazione 9 — Fix denormalizzazione z-score + paper-trading ready (2026-05-23)
 
 ### Bug strutturale: trading layer in spazio raw vs modello in z-score
 

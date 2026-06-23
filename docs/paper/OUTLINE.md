@@ -23,7 +23,7 @@
 ### 1. Introduction (~1.5 pp)
 - Hook: ML4F literature reports both spectacular successes and failures on return prediction; rarely on the *same* pipeline with pre-registration. We ask a sharper question: *which functionals of the conditional distribution does price/volume information actually identify?*
 - Contributions (bulleted):
-  1. **Even/odd moment dichotomy** on one fixed pipeline: RV strongly predictable (positive control), direction + signed jump variation not — for NN *and* econometric baselines (→ it's the information set, not the model class).
+  1. **Even/odd moment dichotomy** on one fixed pipeline: RV strongly predictable (positive control, robust under purged k-fold), direction + signed jump variation not — for NN *and* econometric baselines (→ it's the information set, not the model class). Corollary: even *model diversity* tracks the boundary — cross-arch error correlation is ≈0.83 on RV (ensembling has headroom) but ≈0.995 on direction (ensembling is mathematically useless).
   2. **Resolution specificity**: the NN edge over HAR-RV exists at hourly RV (h=30h) and vanishes at 30-minute RV — a boundary, not a blanket claim.
   3. **Methodological warning**: systematic val→test sign-instability of directional metrics (documented at 1m, 1h, and for linear baselines) — in-sample/validation skill on odd moments is anti-informative here.
   4. **Pre-registration discipline** as first-class methodology in a quant ML study (gates written before runs, kill-on-fail, test split touched once).
@@ -45,19 +45,20 @@
 - NN: iTransformer 5-seed ensemble (t-Student NLL + asymmetric-sign penalty + CRPS; total-variance law for σ_ens). Same hyperparameters across all three targets (tuned once on the directional task — conservative *against* the vol claim).
 - Econometric baselines, all OLS/logit fit on train only:
   - direction: "HAR-mean" OLS on [r_h, r_7d, r_30d], sign logit, momentum persistence, train-mean;
-  - variance: HAR-RV (Corsi), naive persistence;
+  - variance: HAR-RV (Corsi), naive persistence — evaluated both on the single split *and* fit-per-fold under a purged walk-forward (HAR re-estimated on each fold's train, gate QLIKE_NN ≤ 0.95·QLIKE_HAR per fold);
   - asymmetry: HAR-RS (Patton–Sheppard regressors), naive lratio, train-mean.
 - Judges: QLIKE on RV levels (even), MSE on log-ratio (asymmetry), Spearman/sign-DA (direction).
+- Robustness instruments (vol only): purged k-fold QLIKE per arch (embargo 168h) and HAR-per-fold baseline; cross-arch error-correlation kill-check (Pearson of per-sample errors) as a pre-distillation diversity probe.
 
 ### 5. Results (~3 pp) — one table per claim, numbers from RESULTS_MAP.md
 - **5.1 Direction (odd #1).** NN: val ρ +0.19 → test −0.04 (p=0.001); econometric baselines table (all |ρ|≤0.05, sign-flipping val→test); cross-sectional IC +0.014 (t=1.86, spread 1.5 bps vs 26 bps cost). Figure: val-vs-test scatter of directional metrics across all models/experiments → the anti-correlation cloud.
-- **5.2 Realized variance (even). The positive control.** QLIKE table (NN 0.257 / HAR 0.368 / naive 0.807 on test; val→test *coherent*). Resolution boundary: 1m ratio 1.013 → FAIL. Figure: predicted vs realized log-RV on test; sub-period ICIR stability.
+- **5.2 Realized variance (even). The positive control.** QLIKE table (NN 0.257 / HAR 0.368 / naive 0.807 on test; val→test *coherent*). **Robustness — purged k-fold with HAR-per-fold gate**: skill survives walk-forward (TCN+Mamba 0.364, ratio 0.86, beats HAR on 4/5 folds; all archs fail only the oldest, data-starved fold — structural, not model failure). **Cross-arch error diversity exists on vol** (pairwise ρ_err ≈ 0.78–0.89, mean 0.83) — sharp contrast with the directional ≈0.995 (where ensembling is mathematically useless): diversity, like predictability, is an even-moment-specific object. Resolution boundary: 1m ratio 1.013 → FAIL. Figure: predicted vs realized log-RV on test; sub-period ICIR stability.
 - **5.3 Signed semivariance (odd #2).** MSE table — headline: **HAR-RS underperforms the unconditional mean on test**; NN matches the constant. The asymmetry is unpredictable *for everyone*.
 - **5.4 Synthesis figure.** One chart, the paper's centerpiece: each experiment on an axis "even ↔ odd object" × "OOS skill vs baseline" — even side clusters positive, odd side clusters at zero.
-- (5.5 optional, if matured) Forward economic test: NN-RV vs Deribit implied variance at 30h tenor, pre-registered straddle rule on testnet — preliminary n, reported as outlook.
+- (5.5 optional, if matured) Forward economic test: NN-RV vs Deribit implied variance at 30h tenor, pre-registered straddle rule (|log(RV_pred/var_IV)|>0.25, hold-to-expiry, direction-neutral) on testnet, gate ≥30 trades. Preliminary (n=7): negative PnL on a near-all-long-vol book → IV > realized RV (positive variance-risk-premium); the paying side is plausibly short-vol — consistent with a structurally positive BTC VRP. Reported as outlook (testnet validates the hold-to-expiry *signal*, not execution).
 
 ### 6. Discussion (~1 p)
-- Information-theoretic reading: candle aggregation is (nearly) sign-symmetric — squared-return functionals survive aggregation, signed functionals don't. Odd-moment prediction plausibly requires *exogenous* state: order-flow imbalance, depth (L2), positioning — exactly what OHLCV destroys.
+- Information-theoretic reading: candle aggregation is (nearly) sign-symmetric — squared-return functionals survive aggregation, signed functionals don't. Odd-moment prediction plausibly requires *exogenous* state: order-flow imbalance, depth (L2), positioning — exactly what OHLCV destroys. The cross-arch diversity contrast (ρ_err 0.83 on RV vs 0.995 on direction) is a second signature of the same boundary: where there is genuine conditional signal, different function approximators disagree on the residual; where there is none, they collapse onto the same (un)predictable target.
 - Why val→test anti-correlation: weak overfit on a stationary-vol but non-stationary-direction generating process; implications for model selection on odd moments (validation is a trap).
 - Economic corollary: even where direction had rank-information (Quiet regime, cross-section), magnitude ≪ costs — the even/odd boundary coincides with the tradability boundary for price/volume strategies.
 
@@ -69,7 +70,7 @@
 ### Appendices
 - A. Pre-registration excerpts (verbatim, dated) + outcome ledger (all kills listed).
 - B. Feature list (104) + anti-lookahead engineering details.
-- C. Reproducibility: repo layout, judges (`scripts/vol/dev_vols_qlike.py`, `scripts/vol/dev_vols_rs_judge.py`, `scripts/research/paper_01_dir_baselines.py`), seeds, hardware, runtimes.
+- C. Reproducibility: repo layout, judges (`scripts/vol/dev_vols_qlike.py`, `scripts/vol/dev_vols_rs_judge.py`, `scripts/research/paper_01_dir_baselines.py`), robustness scripts (`scripts/02b_walkforward_validate.py` k-fold QLIKE, `scripts/vol/wf_har_baseline.py` HAR-per-fold, `scripts/vol/step0_xarch_corr.py` cross-arch corr; shared QLIKE/HAR helpers in `quantsys/model/vol_metrics.py`), seeds, hardware, runtimes.
 
 ---
 

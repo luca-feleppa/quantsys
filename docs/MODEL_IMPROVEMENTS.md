@@ -6,7 +6,11 @@
 
 ---
 
-## 🔵 2026-06-09 — Pivot timeframe 1m→1h (Strada 1 post-KILL cross-sectional) · 🔵 2026-06-09 — 1m→1h timeframe pivot (Path 1 after the cross-sectional KILL)
+## ⚫🟢 2026-06-09 — Pivot timeframe 1m→1h (Strada 1 post-KILL cross-sectional) · ⚫🟢 2026-06-09 — 1m→1h timeframe pivot (Path 1 after the cross-sectional KILL)
+
+🇮🇹 > ⚠ **ESITO (vedi sezioni in fondo "2026-06-10" e `STATUS.md`):** il pivot **direzionale** 1h è **KILLED** (gate 4/4 fallito a 13 e 23 bps, anti-corr val→test confermata anche a 1h). MA l'infra interval-agnostica descritta qui è il **fondamento della linea di produzione attuale = volatilità @ 1h** (`target_type: log_rv`, Vol-S PASS): config/dataset/modelli su disco sono 1h. La descrizione tecnica sotto resta valida; **NON è "in progress" — è infrastruttura production sotto un target diverso (vol, non direzione).**
+
+**EN** > ⚠ **OUTCOME (see the bottom "2026-06-10" sections and `STATUS.md`):** the **directional** 1h pivot is **KILLED** (gate failed 4/4 at 13 and 23 bps, val→test anti-correlation confirmed at 1h too). BUT the interval-agnostic infra described here is the **foundation of the current production line = volatility @ 1h** (`target_type: log_rv`, Vol-S PASS): on-disk config/dataset/models are 1h. The technical description below stays valid; **it is NOT "in progress" — it is production infrastructure under a different target (vol, not direction).**
 
 ### Razionale · Rationale
 
@@ -82,9 +86,9 @@
 
 ### Dati · Data
 
-🇮🇹 `raw_candles.parquet` ora 1h 2019→oggi (**65.145 barre**); funding completo dal lancio perp 2019-09-10 (**7.394 obs**, re-download completo — il vecchio file partiva dal 2021); backup 1m in `data/backup_1m/` e `models/backup_1m/`. Dataset: `X_train (51120, 120, 104)` — **STESSA composizione canonica 104 = 86 dinamiche + 18 strutturali**. Fix cp1252 (`reconfigure` UTF-8) aggiunto a `01_download_data.py` e `01b_download_macro.py`.
+🇮🇹 `raw_candles.parquet` ora 1h 2019→oggi (**~65k barre**); funding completo dal lancio perp 2019-09-10 (**~7.4k obs**, re-download completo — il vecchio file partiva dal 2021); backup 1m in `data/backup_1m/` (i checkpoint `models/backup_1m/` sono stati **eliminati** col cleanup 2026-06-12: il rollback 1m ora richiede retrain). Dataset corrente (rigenerato 2026-06-22): `X_train (51364, 120, 104)`, split 51364/6420/6421, `X_macro_* (·,90)`, target **z-scored su `log_rv`** (`target_scale=1.4343` = IQR del log-RV; il log-ret avrebbe IQR ~1e-3 → conferma che il target è `log_rv`, non direzionale) — **STESSA composizione canonica 104 = 86 dinamiche + 18 strutturali**. Fix cp1252 (`reconfigure` UTF-8) aggiunto a `01_download_data.py` e `01b_download_macro.py`. ⚠ Il dataset npz è gitignored e va rigenerato (`01_download_data.py` + `scripts/vol/dev_vols_macro_append.py`) prima di train/judge.
 
-**EN** `raw_candles.parquet` is now 1h 2019→today (**65,145 bars**); full funding since the perp launch 2019-09-10 (**7,394 obs**, full re-download — the old file started in 2021); 1m backups in `data/backup_1m/` and `models/backup_1m/`. Dataset: `X_train (51120, 120, 104)` — **SAME canonical 104 = 86 dynamic + 18 structural composition**. cp1252 fix (UTF-8 `reconfigure`) added to `01_download_data.py` and `01b_download_macro.py`.
+**EN** `raw_candles.parquet` is now 1h 2019→today (**~65k bars**); full funding since the perp launch 2019-09-10 (**~7.4k obs**, full re-download — the old file started in 2021); 1m backups in `data/backup_1m/` (the `models/backup_1m/` checkpoints were **deleted** in the 2026-06-12 cleanup: 1m rollback now requires retrain). Current dataset (regenerated 2026-06-22): `X_train (51364, 120, 104)`, split 51364/6420/6421, `X_macro_* (·,90)`, target **z-scored on `log_rv`** (`target_scale=1.4343` = IQR of log-RV; log-ret would have IQR ~1e-3 → confirms the target is `log_rv`, not directional) — **SAME canonical 104 = 86 dynamic + 18 structural composition**. cp1252 fix (UTF-8 `reconfigure`) added to `01_download_data.py` and `01b_download_macro.py`. ⚠ The npz dataset is gitignored and must be regenerated (`01_download_data.py` + `scripts/vol/dev_vols_macro_append.py`) before train/judge.
 
 ### Rollback 1m · 1m rollback
 
@@ -94,13 +98,17 @@
 
 ### Gate pre-registrato e stato · Pre-registered gate and status
 
-🇮🇹 **Gate del pivot:** Sharpe≥1.0, PF≥1.3, ≥80 trade, net>0 a **ENTRAMBI** i costi 13 e 23 bps sul test OOS. **Stato:** dati e config completati ✅; **training/backtest 1h NON ancora eseguiti** (in corso).
+🇮🇹 **Gate del pivot (direzionale):** Sharpe≥1.0, PF≥1.3, ≥80 trade, net>0 a **ENTRAMBI** i costi 13 e 23 bps sul test OOS. **Stato: ⚫ KILLED 2026-06-10** — probe + 1 iterazione tuning pre-registrata falliti 4/4 a entrambi i costi (dettaglio nella sezione "2026-06-10" in fondo e in `STATUS.md`). Il muro dei costi è sfondato (|μ| raw mediano ≈43 bps) ma zero skill direzionale OOS. **Il timeframe 1h è invece rimasto in produzione per il target volatilità** (`log_rv`, Vol-S PASS): la RV oraria è il setting naturale di HAR-RV/QLIKE.
 
-**EN** **Pivot gate:** Sharpe≥1.0, PF≥1.3, ≥80 trades, net>0 at **BOTH** 13 and 23 bps costs on the OOS test set. **Status:** data and config done ✅; **1h training/backtest NOT yet executed** (in progress).
+**EN** **Pivot gate (directional):** Sharpe≥1.0, PF≥1.3, ≥80 trades, net>0 at **BOTH** 13 and 23 bps costs on the OOS test set. **Status: ⚫ KILLED 2026-06-10** — probe + 1 pre-registered tuning iteration failed 4/4 at both costs (detail in the bottom "2026-06-10" section and in `STATUS.md`). The cost wall is broken (median raw |μ| ≈43 bps) but zero directional skill OOS. **The 1h timeframe instead stayed in production for the volatility target** (`log_rv`, Vol-S PASS): hourly RV is the natural HAR-RV/QLIKE setting.
 
 ---
 
 ## 🧭 PIVOT ROADMAP 2026-06-06 — esauriti i lever model-side, 4 assi studiati · 4 axes studied after model-side levers exhausted
+
+🇮🇹 > ⚠ **ESITO degli assi (aggiornato):** **Cross-sectional** = KILL (2026-06-06, muro = magnitudine). **Timeframe→1h direzionale** = KILL (2026-06-10). **Target→volatilità** = **PASS** (Vol-S 2026-06-10, B2 chiusa positiva: NN batte HAR-RV del 30% in QLIKE; semivarianza firmata `log_rs_ratio` poi FAIL 2026-06-11). **ES** = non avviato. **Asse vivo:** monetizzazione vol-1h (RV vs IV: poller Deribit `01c`, opzioni IBIT via Alpaca, forward test straddle `04b`) + **B1 order-book L2** (recorder `01d`, raccolta forward). Tabella sotto = prior PRE-esito, conservata come record.
+
+**EN** > ⚠ **Axis OUTCOMES (updated):** **Cross-sectional** = KILL (2026-06-06, wall = magnitude). **Directional timeframe→1h** = KILL (2026-06-10). **Target→volatility** = **PASS** (Vol-S 2026-06-10, B2 closed positive: NN beats HAR-RV by 30% in QLIKE; signed semivariance `log_rs_ratio` then FAIL 2026-06-11). **ES** = not started. **Live axis:** vol-1h monetization (RV vs IV: Deribit poller `01c`, IBIT options via Alpaca, `04b` straddle forward test) + **B1 order-book L2** (recorder `01d`, forward collection). The table below = PRE-outcome priors, kept as record.
 
 🇮🇹 Dopo che tutti i lever model/backtest-side su BTC-1m sono risultati negativi OOS (distill≡baseline, ensemble corr 0.995, rank-harvest fallito, mixture/σ-recal inutili), è stata avviata la **Strada A (paper-trading live)** e studiato il pivot via fan-out di 4 subagent. Dettaglio in memoria `pivot_fanout_2026_06_06`.
 
@@ -886,6 +894,10 @@ class Reconciler:
 
 ## 🟡 Roadmap modello — Fix #3, #4, #5, #6 · 🟡 Model roadmap — Fix #3, #4, #5, #6
 
+🇮🇹 > ⚠ **SUPERATA / LEGACY-DIREZIONALE.** Questa roadmap nasce per spingere la **directional accuracy** della linea direzionale-1m (Sharpe backtest, WHR, ICIR), che è **KILLED OOS** (anti-corr val→test strutturale; pivot 1h KILL 2026-06-10). Fix #3 (T 120→240) ha già **regredito** sul dataset 1m (vedi "RESUME 2026-06-04"); Fix #5 (multi-tf) era esplicitamente gated dietro un paper-trading direzionale con Sharpe>0 mai raggiunto. **Niente di questo è sul critical path della linea di produzione vol-1h.** Conservata come record tecnico. Unica voce target-agnostica ancora potenzialmente utile: **Fix #6 (`mamba-ssm` CUDA kernel)** — speedup del branch Mamba, indipendente dal target.
+
+**EN** > ⚠ **SUPERSEDED / LEGACY-DIRECTIONAL.** This roadmap was written to push the **directional accuracy** of the directional-1m line (backtest Sharpe, WHR, ICIR), which is **KILLED OOS** (structural val→test anti-correlation; 1h pivot KILL 2026-06-10). Fix #3 (T 120→240) already **regressed** on the 1m dataset (see "RESUME 2026-06-04"); Fix #5 (multi-tf) was explicitly gated behind a directional paper-trading Sharpe>0 that was never reached. **None of this is on the vol-1h production critical path.** Kept as a technical record. The only target-agnostic item still potentially useful: **Fix #6 (`mamba-ssm` CUDA kernel)** — Mamba-branch speedup, target-independent.
+
 🇮🇹 Tutti gated post paper-trading (paper-trading è gated post BLOCKER #1).
 
 **EN** All gated post paper-trading (which is gated post BLOCKER #1).
@@ -1200,6 +1212,10 @@ mtf/                    # NUOVO package, isolato
 
 ## 📋 Soglie di promozione paper-trading · 📋 Paper-trading promotion thresholds
 
+🇮🇹 > ⚠ **LEGACY-DIREZIONALE / SUPERATA.** Questo è il gate della linea direzionale (KILLED OOS); i numeri (Sharpe +18.71, WHR walkforward) sono in-sample 1m e NON OOS-replicabili. Il gate **attivo** oggi è quello del **forward test vol** (`04b_vol_paper`, straddle ATM su `edge=log(rv_pred/var_iv)`): chiudere a **30 trade** pre-registrato (2026-06-12) prima di valutare. Conservata come record metodologico.
+
+**EN** > ⚠ **LEGACY-DIRECTIONAL / SUPERSEDED.** This is the directional-line gate (KILLED OOS); the numbers (Sharpe +18.71, walkforward WHR) are 1m in-sample and NOT OOS-reproducible. The **active** gate today is the **vol forward test** (`04b_vol_paper`, ATM straddle on `edge=log(rv_pred/var_iv)`): close at the pre-registered **30 trades** (2026-06-12) before judging. Kept as a methodological record.
+
 🇮🇹 Indipendenti dai fix, da soddisfare CONTEMPORANEAMENTE prima di andare live (3/4 raggiunte 2026-05-23):
 
 **EN** Independent of the fixes, must be satisfied SIMULTANEOUSLY before going live (3/4 met on 2026-05-23):
@@ -1268,17 +1284,61 @@ mtf/                    # NUOVO package, isolato
 
 ---
 
+## 🟢 Infra linea-vol implementata (2026-06) · 🟢 Vol-line infra implemented (2026-06)
+
+🇮🇹 Componenti aggiunti/modificati a supporto della linea di produzione **vol-1h** (tutti DONE, su disco):
+- **Distillation TARGET-AWARE** (`quantsys/model/distillation.py`): `teacher_score_weights(target_type)` = single source of truth dei pesi di scoring teacher, usata da `_select_best_teacher` + `compute_teacher_weights`. `ret` (direzionale) → `0.40 val_loss + 0.35 spearman + 0.25 dir_acc`; **`log_rv` (vol) → `0.65 val_loss + 0.35 spearman + 0.00 dir_acc`** (la dir_acc della varianza = segno-vs-mediana, NON tradabile: lo straddle è direction-neutral; il momento PARI val_loss/QLIKE è ciò che generalizza OOS). Metriche di val alla best epoch (`best_val_loss`/`best_spearman`/`best_da`) persistite in `config.json` (senza, il blend ricadeva su pesi uniformi). Committato `73fef66`. Soft labels = media pesata di TUTTI gli archi → student `(1−α)·NLL + α·distill` (α=0.3).
+- **`models_root()` + env `QUANTSYS_MODELS_ROOT`** (`quantsys/utils/__init__.py`, propagato a `distillation.py`/`ensemble.py`/`run_all.py`/`02_train.py`/`dev_vols_qlike.py`): redirige TUTTE le read/write modelli su una root sandbox (default `models/`), isola un esperimento distill/k-fold dal modello LIVE di `04b`. Default byte-identico al comportamento precedente.
+- **`quantsys/model/vol_metrics.py`**: helper condivisi QLIKE / inversione log-RV (centro+scala dal RobustScaler) / baseline HAR — usati da `dev_vols_qlike.py`, `02b` (fold-metric QLIKE), `step0_xarch_corr.py`.
+- **CAFN coordinatore causale** (`quantsys/model/cafn.py` + `scripts/02d_cafn_joint_train.py`): probe coordinatore, **inerte** (non sul path production), da validare con gate pre-registrato.
+- **Inversione completa del target vol:** con `target_type: log_rv` `denormalize_predictions` (solo μ·scale) è insufficiente (mediana log-RV ≈ −7.2): l'inversione corretta è `μ·IQR + centro` dal RobustScaler persistito (vedi `vol_metrics.py` / `TEORIA.md` §2).
+
+**EN** Components added/changed to support the **vol-1h** production line (all DONE, on disk):
+- **TARGET-AWARE distillation** (`quantsys/model/distillation.py`): `teacher_score_weights(target_type)` = single source of truth for teacher-scoring weights, used by `_select_best_teacher` + `compute_teacher_weights`. `ret` (directional) → `0.40 val_loss + 0.35 spearman + 0.25 dir_acc`; **`log_rv` (vol) → `0.65 val_loss + 0.35 spearman + 0.00 dir_acc`** (variance dir_acc = sign-vs-median, NOT tradable: the straddle is direction-neutral; the EVEN moment val_loss/QLIKE is what generalizes OOS). Best-epoch val metrics (`best_val_loss`/`best_spearman`/`best_da`) persisted in `config.json` (without them the blend fell back to uniform weights). Committed `73fef66`. Soft labels = weighted mean of ALL archs → student `(1−α)·NLL + α·distill` (α=0.3).
+- **`models_root()` + env `QUANTSYS_MODELS_ROOT`** (`quantsys/utils/__init__.py`, propagated to `distillation.py`/`ensemble.py`/`run_all.py`/`02_train.py`/`dev_vols_qlike.py`): redirects ALL model reads/writes to a sandbox root (default `models/`), isolating a distill/k-fold experiment from `04b`'s LIVE model. Default byte-identical to prior behavior.
+- **`quantsys/model/vol_metrics.py`**: shared QLIKE / log-RV inversion (center+scale from RobustScaler) / HAR baseline helpers — used by `dev_vols_qlike.py`, `02b` (fold-metric QLIKE), `step0_xarch_corr.py`.
+- **CAFN causal coordinator** (`quantsys/model/cafn.py` + `scripts/02d_cafn_joint_train.py`): coordinator probe, **inert** (not on the production path), to validate with a pre-registered gate.
+- **Full vol-target inversion:** with `target_type: log_rv`, `denormalize_predictions` (μ·scale only) is insufficient (log-RV median ≈ −7.2): the correct inversion is `μ·IQR + center` from the persisted RobustScaler (see `vol_metrics.py` / `TEORIA.md` §2).
+
+---
+
+## ⚫ Lever sperimentali env-gated — TUTTI FALLITI OOS · ⚫ Env-gated experimental levers — ALL FAILED OOS
+
+🇮🇹 Lever direzionali implementati come **env-flag inerti di default** in `scripts/03_backtest.py` (pattern protocollo sperimentale: zero impatto production, reversibili). **Tutti validati e FALLITI OOS** — documentati qui come vaccino contro il re-test (vedi `STATUS.md` per i numeri):
+- `QUANTSYS_QUIET_RANK_Q`/`QUANTSYS_QUIET_REGIME`/`QUANTSYS_QUIET_CONVICTION` (entry rank-based discreta per regime Quiet) → overfit del test, return −0.22% su val.
+- `QUANTSYS_DECISION_CADENCE` (Fix ①, cadenza entry N candele/`h`) + `QUANTSYS_RANK_EXPOSURE` (Fix ②, esposizione continua ∝ percentile causale di μ, regime-gated) → baseline val +4.03%/PF 1.88 → Fix①② −2.24%/PF 0.22; rank anti-predittivo OOS, PnL dominata dal path SL/TP.
+- `QUANTSYS_SIGMA_SCALE` (Step 0.5, ricalibra σ post-denorm) → σ↓ peggiora il backtest, ottimo ≈1.0.
+- `QUANTSYS_MIN_EXPECTED_RET` (sweep cost-aware 13 vs 23 bps) → a 1h NON vincolante (|μ| raw mediano ≈43 bps); gate trading comunque fallito.
+- `QUANTSYS_HORIZON_EXIT`, `QUANTSYS_REGIME_ALLOW`/`_INVERT` → isolamento edge rango / regime gating, nessun PnL OOS.
+
+🇮🇹 **Sintesi:** l'edge a soglia/rango e la calibrazione-σ non producono PnL OOS sul direzionale; restano flag inerti documentati. **Non re-testarli.**
+
+**EN** Directional levers implemented as **env-flags inert by default** in `scripts/03_backtest.py` (experimental-protocol pattern: zero production impact, reversible). **All validated and FAILED OOS** — documented here as a vaccine against re-testing (see `STATUS.md` for numbers):
+- `QUANTSYS_QUIET_RANK_Q`/`QUANTSYS_QUIET_REGIME`/`QUANTSYS_QUIET_CONVICTION` (discrete rank-based entry for the Quiet regime) → test overfit, −0.22% return on val.
+- `QUANTSYS_DECISION_CADENCE` (Fix ①, entry cadence N candles/`h`) + `QUANTSYS_RANK_EXPOSURE` (Fix ②, continuous exposure ∝ causal percentile of μ, regime-gated) → val baseline +4.03%/PF 1.88 → Fix①② −2.24%/PF 0.22; rank anti-predictive OOS, PnL dominated by the SL/TP path.
+- `QUANTSYS_SIGMA_SCALE` (Step 0.5, recalibrate σ post-denorm) → σ↓ worsens the backtest, optimum ≈1.0.
+- `QUANTSYS_MIN_EXPECTED_RET` (cost-aware sweep 13 vs 23 bps) → at 1h NOT binding (median raw |μ| ≈43 bps); trading gate failed anyway.
+- `QUANTSYS_HORIZON_EXIT`, `QUANTSYS_REGIME_ALLOW`/`_INVERT` → rank-edge isolation / regime gating, no OOS PnL.
+
+**EN** **Summary:** threshold/rank edge and σ-calibration produce no OOS PnL on the directional target; they remain documented inert flags. **Do not re-test them.**
+
+---
+
 ## 💡 Insights consolidati (validi long-term) · 💡 Consolidated insights (long-term valid)
 
+🇮🇹 > ⚠ **Caveat di lettura:** i punti 1-4 sono lezioni della linea **direzionale-1m** (ora KILLED OOS). Le metriche in-sample (walkforward DA/Spearman) **anti-correlano** col backtest sul target direzionale (fatto strutturale); restano insegnamenti su *trading layer* e *scale*, NON una promessa di edge. Sul target **vol** (`log_rv`) val→test sono invece coerenti (Vol-S PASS).
+
 🇮🇹
-1. **Modello predittivo sano in tutti i setup**: walkforward DA 0.53-0.54, Spearman 0.08-0.09, σ ben calibrato. Il problema, quando emerge, è quasi sempre nel **trading layer** (scala, soglie, SL/TP), non nel modello — vedi sessione 2026-05-23 per il caso paradigmatico (Sharpe −256 → +18.7 con 1 moltiplicazione mancante).
+1. **Modello predittivo "sano" in-sample in tutti i setup direzionali**: walkforward DA 0.53-0.54, Spearman 0.08-0.09, σ ben calibrato — ma queste metriche anti-correlano col PnL OOS. Il problema, quando emerge in-sample, è quasi sempre nel **trading layer** (scala, soglie, SL/TP), non nel modello — vedi sessione 2026-05-23 per il caso paradigmatico (Sharpe −256 → +18.7 con 1 moltiplicazione mancante: la lezione vale, il +18.7 NON è OOS-replicabile).
 2. **h=15 è strutturalmente perdente**: cost roundtrip 26 bps ≈ |realized return medio| 25 bps. h=30 raddoppia il segnale mantenendo costo costante. Già applicato.
 3. **`max_sigma` va sempre dimensionato sulla distribuzione σ del modello specifico** (es. p99 della σ_test). Valori arbitrari sono inutili.
 4. **`trailing_atr_mult: 1.5`** ≈ 11 bps di trail su BTC 1m → chiude su rumore (< del cost 26 bps). Su 1m bar `use_trailing_stop: false` (attuale) batte qualsiasi trailing tunato.
 5. **Verificare le scale unit-by-unit prima di retrainare**: per 6+ sessioni a maggio 2026 abbiamo cercato fix sui pesi del modello (RevIN, h, stride, multi-teacher) — il vero bug era 1 moltiplicazione mancante in 2 file (denormalizzazione z-score → raw).
 
+**EN** > ⚠ **Reading caveat:** points 1-4 are lessons from the **directional-1m** line (now KILLED OOS). In-sample metrics (walkforward DA/Spearman) **anti-correlate** with the backtest on the directional target (structural fact); they remain *trading-layer* and *scale* lessons, NOT an edge promise. On the **vol** target (`log_rv`) val→test are instead consistent (Vol-S PASS).
+
 **EN**
-1. **Predictive model healthy in all setups**: walkforward DA 0.53-0.54, Spearman 0.08-0.09, well-calibrated σ. When problems emerge, they're almost always in the **trading layer** (scale, thresholds, SL/TP), not in the model — see the 2026-05-23 session for the paradigmatic case (Sharpe −256 → +18.7 from one missing multiplication).
+1. **Predictive model "healthy" in-sample across all directional setups**: walkforward DA 0.53-0.54, Spearman 0.08-0.09, well-calibrated σ — but these metrics anti-correlate with OOS PnL. When problems emerge in-sample, they're almost always in the **trading layer** (scale, thresholds, SL/TP), not in the model — see the 2026-05-23 session for the paradigmatic case (Sharpe −256 → +18.7 from one missing multiplication: the lesson holds, the +18.7 is NOT OOS-reproducible).
 2. **h=15 is structurally a losing setup**: roundtrip cost 26 bps ≈ |mean realized return| 25 bps. h=30 doubles the signal while keeping cost constant. Already applied.
 3. **`max_sigma` must always be sized on the specific model's σ distribution** (e.g. p99 of σ_test). Arbitrary values are useless.
 4. **`trailing_atr_mult: 1.5`** ≈ 11 bps of trail on BTC 1m → closes on noise (< 26 bps cost). On 1m bars `use_trailing_stop: false` (current) beats any tuned trailing.
