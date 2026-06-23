@@ -932,10 +932,21 @@ function nearest(arr,v){ let b=arr[0],bd=1e18; arr.forEach(x=>{const dd=Math.abs
 function renderOI(d){
   const usd = document.getElementById('oi-metric').value === 'usd';
   const unit = usd ? 'USD' : 'BTC';
-  const conv = (v,i) => usd ? v * d.strikes[i] : v;             // notional o contratti
-  const callV = d.call_oi.map((v,i)=>conv(v,i));
-  const putV  = d.put_oi.map((v,i)=>conv(v,i));
-  const netV  = callV.map((v,i)=>v - putV[i]);                  // skew call−put
+  // IT: FILTRA i dati alla banda spot±35% PRIMA di plottare (non solo la vista): X e Y
+  //     si scalano sugli STESSI strike → niente barra fuori-vista (balena OTM con OI
+  //     enorme) che schiaccia l'asse Y e fa "sparire" le near-money. Confermato in
+  //     browser: 24.5k OI @ K=80000 fuori vista schiacciava le near-money a ~1px.
+  // EN: FILTER data to the spot±35% band BEFORE plotting (not just the view): X and Y
+  //     scale on the SAME strikes → no off-view bar (OTM whale, huge OI) squishing the
+  //     Y axis and making the near-money "vanish". Confirmed in browser: 24.5k OI @
+  //     K=80000 off-view squished the near-money to ~1px.
+  const cap = (d.spot>0 ? d.spot : Math.max(...d.strikes)) * 0.35;
+  let idx = []; d.strikes.forEach((k,i)=>{ if(Math.abs(k-d.spot)<=cap) idx.push(i); });
+  if(!idx.length) idx = d.strikes.map((_,i)=>i);                // fallback: tutti / all
+  const ks    = idx.map(i=>d.strikes[i]);
+  const callV = idx.map(i=> usd ? d.call_oi[i]*d.strikes[i] : d.call_oi[i]);
+  const putV  = idx.map(i=> usd ? d.put_oi[i]*d.strikes[i]  : d.put_oi[i]);
+  const netV  = callV.map((v,j)=>v - putV[j]);                  // skew call−put (banda)
 
   // IT: larghezza barra ESPLICITA (≈85% del gap mediano tra strike). Senza, Plotly
   //     la deriva dal gap MINIMO: se a un refresh la chain porta due strike vicini il
@@ -945,28 +956,19 @@ function renderOI(d){
   //     width from the MIN gap: if a refresh brings two close strikes the min-gap
   //     collapses → all bars ~0-wide = invisible (the "vanish after 12s" bug, only
   //     lines/shapes remain). Explicit = deterministic, no collapse.
-  const _ks = d.strikes.slice().sort((a,b)=>a-b);
-  const _gaps = []; for(let i=1;i<_ks.length;i++){ const g=_ks[i]-_ks[i-1]; if(g>0) _gaps.push(g); }
+  const _sk = ks.slice().sort((a,b)=>a-b);
+  const _gaps = []; for(let i=1;i<_sk.length;i++){ const g=_sk[i]-_sk[i-1]; if(g>0) _gaps.push(g); }
   _gaps.sort((a,b)=>a-b);
-  const _barW = (_gaps.length ? _gaps[Math.floor(_gaps.length/2)] : (_ks.length?_ks[0]*0.01:1)) * 0.85;
+  const _barW = (_gaps.length ? _gaps[Math.floor(_gaps.length/2)] : (_sk.length?_sk[0]*0.01:1)) * 0.85;
 
-  // IT: banda di zoom ROBUSTA — strike con OI (≥0.5% del picco) MA limitati a
-  //     spot ± 35%. CAUSA DEL BUG "barre spariscono dopo il refresh": senza il cap,
-  //     un singolo strike far-OTM (range 20k–380k) che supera la soglia fa esplodere
-  //     il range-x a ~360k → le barre (larghe ~500-1000) diventano SUB-PIXEL =
-  //     invisibili, mentre linea Net OI e shapes (scala-indipendenti) restano.
-  // EN: ROBUST zoom band — strikes with OI (≥0.5% of peak) BUT capped to spot ± 35%.
-  //     ROOT CAUSE of the "bars vanish after refresh" bug: without the cap, a single
-  //     far-OTM strike (range 20k–380k) crossing the threshold blows the x-range to
-  //     ~360k → bars (~500-1000 wide) become SUB-PIXEL = invisible, while the Net OI
-  //     line and shapes (scale-independent) remain.
-  const peak = Math.max(1e-9, ...callV, ...putV);
-  const thr = peak * 0.005;
-  const cap = (d.spot>0 ? d.spot : Math.max(...d.strikes)) * 0.35;
-  let lo=null, hi=null;
-  d.strikes.forEach((k,i)=>{ if((callV[i]>thr||putV[i]>thr) && Math.abs(k-d.spot)<=cap){ if(lo==null)lo=k; hi=k; } });
-  if(lo==null){ lo=d.spot*0.85; hi=d.spot*1.15; }
-  const pad=((hi-lo)*0.05)||lo*0.1; const xr=[lo-pad, hi+pad];
+  // IT: range x = estensione della banda + pad; l'asse Y va in AUTORANGE sui SOLI dati
+  //     di banda (le trace contengono già solo gli strike di banda) → coerente con x,
+  //     nessuna barra fuori-vista a gonfiare l'asse.
+  // EN: x range = band extent + pad; the Y axis AUTORANGES over band-only data (traces
+  //     already contain only band strikes) → consistent with x, no off-view bar
+  //     inflating the axis.
+  const _lo=Math.min(...ks), _hi=Math.max(...ks);
+  const _pad=((_hi-_lo)*0.04)||_lo*0.1; const xr=[_lo-_pad, _hi+_pad];
 
   // IT: newPlot (NON react): Plotly.react al re-render non ridisegna le trace
   //     `bar` (le barre sparivano ai refresh, restavano solo linee/shapes).
@@ -975,9 +977,9 @@ function renderOI(d){
   //     re-render (bars vanished on refresh, only lines/shapes stayed). newPlot
   //     rebuilds from scratch every time = always like the working first render.
   Plotly.newPlot('plot-oi', [
-    {type:'bar', name:'Call OI', x:d.strikes, y:callV, width:_barW, marker:{color:'#2ecc7199'},
+    {type:'bar', name:'Call OI', x:ks, y:callV, width:_barW, marker:{color:'#2ecc7199'},
      customdata:callV, hovertemplate:`K %{x:,.0f}<br>Call OI %{customdata:,.0f} ${unit}<extra></extra>`},
-    {type:'bar', name:'Put OI', x:d.strikes, y:putV.map(v=>-v), width:_barW, marker:{color:'#ff5c5c99'},
+    {type:'bar', name:'Put OI', x:ks, y:putV.map(v=>-v), width:_barW, marker:{color:'#ff5c5c99'},
      customdata:putV, hovertemplate:`K %{x:,.0f}<br>Put OI %{customdata:,.0f} ${unit}<extra></extra>`},
     // IT: Net OI = call−put → stessa unità/scala delle barre → asse PRIMARIO
     //     (no yaxis2 overlay, più semplice e corretto). NB: niente `uirevision`
@@ -987,7 +989,7 @@ function renderOI(d){
     //     yaxis2 overlay, simpler and correct). NB: no `uirevision` on these
     //     charts — with Plotly.react it failed to redraw `bar` traces on refresh
     //     (bars vanished, only lines/shapes remained).
-    {type:'scatter', name:'Net OI', mode:'lines', x:d.strikes, y:netV,
+    {type:'scatter', name:'Net OI', mode:'lines', x:ks, y:netV,
      line:{color:'#f0a020',width:1.6}, hovertemplate:`K %{x:,.0f}<br>Net %{y:,.0f} ${unit}<extra></extra>`},
   ], Object.assign({}, PL_DARK, {
     dragmode:'pan', autosize:true,
