@@ -5,6 +5,20 @@
 
 ---
 
+## 🔴 APERTO — DASHBOARD rendering (riprendere 2026-06-24)
+
+Sessione 2026-06-23 sera: molti fix al terminale opzioni (`scripts/06_dashboard.py`), **2 problemi ancora aperti**. ⚠ NON fare altri patch per-grafico: domani affrontare il MECCANISMO di render in modo olistico.
+
+**1) OI by strike — in gran parte RISOLTO, residuo flicker.** Root cause confermata via devtools: l'asse Y si scalava su una "balena" di OI **fuori** dalla finestra x (24.5k @ K=80000) → barre near-money schiacciate a ~1px. Fix (commit `e3d3732`): `renderOI` **filtra i dati alla banda spot±35% PRIMA di plottare** → x e y coerenti. **Conferma devtools post-fix:** shapes spot=63951/max-pain=70000, **60 barre visibili** (>3px), 3 trace → le barre ORA si disegnano. Residuo: **flicker** ("prima ok, poi per un attimo una sola barra ~45000 al refresh"; 45000 NON è uno shape → transiente). Probabile 2° `Plotly.newPlot` al refresh che rompe momentaneamente le bar.
+
+**2) Risk profile (tab Trades, `renderPayoff`) — REGRESSIONE: prima andava, ora no.** Codice attuale (commit `446ccee`): range `_xr`/`_yr` espliciti + `Plotly.Plots.resize('plot-payoff')` in `.then()`. Da capire domani: (a) se l'hard-reload ha rivelato che non andava davvero; (b) se `resize`/`.then` o i range espliciti lo rompono; (c) se è la stessa classe (reflow tab `.grid2` / newPlot ripetuto).
+
+**IPOTESI UNIFICANTE:** tutti i sintomi ("prima ok, poi rotto al refresh/tab-switch; restano linee+shapes") puntano al **render ripetuto di Plotly** (`newPlot` ri-chiamato ogni 12s + `responsive:true` ri-registrato + `.page` display:none↔block) che rompe le trace al 2°+ giro. **Approccio domani** (scegliere uno, testare): (a) `Plotly.react` con struttura trace STABILE per i refresh invece di `newPlot`; (b) `Plotly.purge` prima di `newPlot`; (c) togliere `responsive:true` dai grafici problematici + resize manuale. ⚠ Testare SEMPRE con **HARD RELOAD (Ctrl+Shift+R)**: la pagina aperta gira il JS vecchio (la dashboard auto-aggiorna i dati ma NON ricarica il codice).
+
+**Diagnostici devtools (console browser, quando rotto):** `var gd=document.getElementById('plot-oi')`; `gd.querySelectorAll('.barlayer path').length` (barre nel DOM); `[].slice.call(gd.querySelectorAll('.barlayer path')).filter(p=>p.getBoundingClientRect().height>3).length` (visibili); `gd.layout.xaxis.range`/`.yaxis.range`; `gd.data.map(t=>t.type+' n='+(t.y||[]).length)`. Idem per `plot-payoff`.
+
+**Commit dashboard 2026-06-23:** `1c0a1d8` (greche segno+nome, tab Trades), `446ccee` (OI band-cap+width, payoff range+resize), `fa1a02b` (chain-validate, _send ConnectionAborted, loadRisk guard), `e3d3732` (OI filtro-banda). Processi sfondo 01c/01d/04b vivi.
+
 ## 🕒 Ultimo aggiornamento: 2026-06-22 (DECISIONE: resta sul PASS iTrans, distill 5-seed RIMANDATO)
 
 ## 🟢 2026-06-23 — DASHBOARD: greche col segno+nome, tab Trades, e RISOLTI 2 bug di rendering Plotly
