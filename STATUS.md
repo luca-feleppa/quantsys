@@ -5,6 +5,33 @@
 
 ---
 
+## 🕒 FINE SESSIONE 2026-06-24 — esiti + ripartenza domani
+
+**Fatto oggi (2 idee "while we collect data", fan-out):**
+1. **Short-vol arm** — costruito `scripts/vol/short_vol_arm.py` (sim OFFLINE su dati raccolti, no GPU, non tocca 04b live). Fixato bug fee (cap 12.5% Deribit). Esito n=4 (aneddotico): strangle OTM always-short leggermente +, ATM straddle NEGATIVO al bid, NN-timing non aiuta. **Gate pre-registrato** (sezione sotto). Limite = `n` (cresce ~1/giorno → ~metà luglio).
+2. **IVS relative-value → ⚫ KILL net-of-cost.** `scripts/vol/ivs_scout.py` + `scripts/vol/ivs_rv_backtest.py`: struttura reale (residui smile revertono, autocorr 0.77) MA netto **−2.3/−3.8 vol-pt/leg** (gross +0.01/+0.04 vs costo round-trip 2.3/3.9 → ~50× sotto lo spread). Morta come price-taker; vivrebbe solo da market-maker. NON serve più dati (tetto economico).
+3. **Decisione infra:** vale la pena un **host 24/7** (VPS ~€4/mese > Oracle ARM free per affidabilità) per sbloccare B1 (recorder L2), dare `n` pulito allo short-vol e proteggere l'IV (asset unico). Spostare prima `01c`+`01d` (no GPU). Deploy NON ancora chiesto.
+
+**▶️ RIPARTENZA DOMANI (in ordine di priorità):**
+- **(a)** se l'utente vuole: preparare lo **script di deploy** dei collector 24/7 (`01c`+`01d` + systemd auto-restart) — sblocca B1 + n short-vol. *(offerto, in attesa di OK)*.
+- **(b)** opzionale: **backtest storico short-vol con premio-proxy BS** (DVOL/GARCH + delivery reali su candele BTC storiche) = evidenza strutturale VRP SUBITO senza aspettare luglio.
+- **(c)** altrimenti lasciar maturare: forward test long verso 30 trade + short-vol sim verso n≥20 (ri-girare `short_vol_arm.py --sweep` quando i dati crescono).
+- Memoria lungo periodo: [[project_short_vol_arm]], [[project_ivs_relative_value]], [[project_247_collector_decision]]. **Working tree NON committato** (script vol nuovi + STATUS): lavoro esplorativo, decidere se committare.
+
+## 🎯 PRE-REGISTRAZIONE GATE — SHORT-VOL ARM (offline sim) · 2026-06-24
+
+> 🇮🇹 Gate scritto **PRIMA** di interpretare i risultati (protocollo sperimentale, passo 1: vieta il goalpost-moving). Simulatore: `scripts/vol/short_vol_arm.py`. Decide se il 2° braccio short-vol (vendita strangle/straddle daily Deribit, hold-to-expiry) merita di entrare nel forward test live come braccio affiancato all'always-long.
+> **EN** Gate written **BEFORE** interpreting any result (experimental protocol, step 1: forbids goalpost-moving). Simulator: `scripts/vol/short_vol_arm.py`. Decides whether the 2nd short-vol arm (sell daily Deribit strangle/straddle, hold-to-expiry) is worth adding to the live forward test alongside the always-long arm.
+
+**Condizioni di PASS (tutte e tre, AND) · PASS conditions (all three, AND):**
+1. **`n ≥ 20`** scadenze giornaliere simulabili (chain con snapshot entro ±6h dal tenor 30h + delivery noto). Sotto questa soglia **NESSUNA conclusione** — solo direzionale. / `n ≥ 20` simulable daily expiries; below it **no conclusion**, directional only.
+2. **Short-vol NET > 0 dopo bid-ask:** `tot(pnl_short_bid) > 0` sulla config scelta (fill realistico al BID, non al mark) **E** hit-rate ≥ 55%. / short-vol NET > 0 after bid-ask, hit ≥ 55%.
+3. **NN-timing batte ALWAYS-SHORT:** `mean(pnl_short_bid | NN-timed) > mean(pnl_short_bid | always-short)` **E** l'NN-timed mantiene `n_NN ≥ 15` (il timing non deve azzerare il campione). / NN-timed mean (at bid) > always-short mean (at bid), with `n_NN ≥ 15`.
+
+**Note onestà / honesty notes:** `n` corrente ≈ 4 (la chain copre solo ~12 giorni, dal 2026-06-12; cresce ~1/giorno → ~20 atteso a metà luglio). **Qualsiasi numero ora è aneddotico**, NON statisticamente valido. Il tail-risk dello short-vol (mossa >width) NON è ancora apparso nel campione (tutti i payoff=0): il gate hit≥55% + net>0 al bid è progettato per non farsi ingannare da una finestra calma. Esito atteso ≥ metà luglio.
+
+---
+
 ## 🟢 RISOLTO (definitivo) 2026-06-24 — DASHBOARD rendering: la causa era l'asse LINEARE; fix = asse CATEGORY
 
 Chiuso **per davvero** il bug "barre OI + curva payoff spariscono/si schiacciano al cambio-tab", dopo che il primo tentativo (helper `plot()` con size-guard + width/height espliciti, sezione sotto) si è rivelato **necessario ma NON sufficiente** (riverificato col browser: barre ancora KO al rientro-tab). Diagnosi browser sistematica (Playwright + `getBoundingClientRect`, ~14 esperimenti) → **root cause vera trovata e fix verificato indipendentemente su 3 restart freschi.**
