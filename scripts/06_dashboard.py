@@ -773,32 +773,61 @@ const PL_CFG = {displayModeBar:false, responsive:true};
 // EN: 2D config — no box "window" zoom (dragmode 'pan'), but axis zoom via wheel
 //     over the axis (Y up/down, X left/right) + drag/pan; double-click reset.
 const PL_CFG_2D = {displayModeBar:false, responsive:true, scrollZoom:true, doubleClick:'reset'};
-// IT: ── plot() — render guard UNICO (meccanismo olistico, sostituisce le patch
-//     per-grafico). Plotly disegna su geometria sbagliata se il container è a
-//     dimensione 0 o appena riflowato (tab display:none→block): barre/curve nascono
-//     fuori vista o sub-pixel → il bug "spariscono al cambio-tab" (restano solo
-//     linee/shapes, scala-indipendenti). Fix deterministico in due mosse:
-//       (1) se offsetWidth==0 (tab nascosta o reflow non ancora completato) ritenta
-//           al frame successivo (cap 60 ≈1s, poi rinuncia: il prossimo switchTab
-//           ridisegna comunque) — leggere offsetWidth forza già il reflow sincrono;
-//       (2) passa width/height ESPLICITI dai pixel reali del container + autosize:false
-//           → Plotly NON rimisura da solo (era la sua misura transitoria, durante il
-//           reflow del cambio-tab, a corrompere la geometria delle barre).
-// EN: ── plot() — SINGLE render guard (holistic mechanism, replaces the per-chart
-//     patches). Plotly draws on wrong geometry when the container is 0-sized or just
-//     reflowed (tab display:none→block): bars/curves are born off-view or sub-pixel →
-//     the "vanish on tab switch" bug (only scale-independent lines/shapes remain).
-//     Deterministic two-step fix: (1) if offsetWidth==0 (hidden tab or reflow not yet
-//     flushed) retry next frame (cap 60 ≈1s, then give up: next switchTab redraws) —
-//     reading offsetWidth already forces a synchronous reflow; (2) pass EXPLICIT
-//     width/height from the container's real pixels + autosize:false → Plotly does NOT
-//     self-measure (its transient measure during the tab-switch reflow was corrupting
-//     the bar geometry).
+// IT: ── plot() — render guard UNICO (meccanismo olistico). Il bug "barre/curve
+//     spariscono al cambio-tab" ha DUE cause distinte, entrambe coperte qui:
+//       (a) container non ancora misurabile (tab display:none→block, reflow non
+//           flushato) → la trace nasce a geometria 0/sub-pixel;
+//       (b) DOPO un display:none→block, Plotly.react fa un update MINIMO e NON
+//           ricostruisce i clip-path della cartesian layer (azzerati dal toggle di
+//           visibilità) → le trace clippate (barre/linea payoff) spariscono mentre
+//           shapes/annotation paper-ref (scala-indipendenti) restano. È esattamente
+//           la firma osservata: px=0 sulle barre, asse-x senza tick, ma spot/max-pain ok.
+//     Fix deterministico:
+//       (1) size-guard via getBoundingClientRect: ritenta a rAF finché il box è
+//           davvero DIPINTO (w,h ≥ 2px; cap 60 ≈1s) — niente render su geometria 0;
+//       (2) sul RIENTRO tab (finestra <4s da switchTab) o su div mai disegnato →
+//           Plotly.newPlot = rebuild COMPLETO con clip-path freschi (la react minimale
+//           non li rifà; la width esplicita+autosize:false del tentativo precedente
+//           anzi impediva pure a Plots.resize di ricostruirli). Sui refresh in-place
+//           (stessa tab già visibile) resta Plotly.react → preserva zoom/pan.
+// EN: ── plot() — SINGLE render guard (holistic). The "bars/curves vanish on tab switch"
+//     bug has TWO distinct causes, both handled here:
+//       (a) container not yet measurable (tab display:none→block, reflow not flushed) →
+//           the trace is born at 0/sub-pixel geometry;
+//       (b) AFTER a display:none→block, Plotly.react does a MINIMAL update and does NOT
+//           rebuild the cartesian layer clip-paths (zeroed by the visibility toggle) →
+//           clipped traces (bars/payoff line) vanish while paper-ref shapes/annotations
+//           (scale-independent) remain. Exactly the observed signature: px=0 on bars,
+//           x-axis without ticks, but spot/max-pain fine.
+//     Deterministic fix: (1) size-guard via getBoundingClientRect: retry on rAF until
+//     the box is actually PAINTED (w,h ≥ 2px; cap 60 ≈1s) — never render on 0 geometry;
+//     (2) on tab RE-ENTRY (window <4s from switchTab) or a never-drawn div → Plotly.newPlot
+//     = FULL rebuild with fresh clip-paths (the minimal react does not redo them; the
+//     previous attempt's explicit width+autosize:false even stopped Plots.resize from
+//     rebuilding them). On in-place refresh (same already-visible tab) keep Plotly.react
+//     → preserves zoom/pan.
 function plot(id, traces, layout, cfg, _t){
   const el = document.getElementById(id);
   if(!el) return;
-  if(el.offsetWidth===0){ if((_t||0)<60) requestAnimationFrame(()=>plot(id,traces,layout,cfg,(_t||0)+1)); return; }
-  Plotly.react(el, traces, Object.assign({}, layout, {width:el.offsetWidth, height:el.offsetHeight, autosize:false}), cfg);
+  // IT: (1) size-guard schermo-reale: getBoundingClientRect riflette visibilità/transform.
+  // EN: (1) real-screen size-guard: getBoundingClientRect reflects visibility/transform.
+  const rc = el.getBoundingClientRect();
+  if(rc.width < 2 || rc.height < 2){
+    if((_t||0)<60) requestAnimationFrame(()=>plot(id,traces,layout,cfg,(_t||0)+1));
+    return;
+  }
+  // IT: (2) rebuild completo nel rientro-tab (clip-path da rifare) o su div mai disegnato;
+  //     altrimenti update in-place. Responsivo (no width esplicita) → newPlot/resize
+  //     leggono il container vivo.
+  // EN: (2) full rebuild on tab re-entry (clip-paths to redo) or a never-drawn div;
+  //     otherwise in-place update. Responsive (no explicit width) → newPlot/resize read
+  //     the live container.
+  const fresh = (Date.now() - (window.__tabShownAt||0)) < 4000;
+  if(fresh || !el.data){
+    Plotly.newPlot(el, traces, layout, cfg);
+  } else {
+    Plotly.react(el, traces, layout, cfg);
+  }
 }
 function fmt(v,d=2){ if(v==null||isNaN(v)) return '—'; return Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); }
 function fmt0(v){ return fmt(v,0); }
@@ -818,10 +847,15 @@ let SURFACE = null;
 function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
   document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active', p.id==='page-'+name));
+  // IT: marca l'istante del cambio-tab: per i prossimi ~4s plot() farà un newPlot
+  //     (rebuild dei clip-path corrotti dal display:none→block), poi torna a react.
+  // EN: stamp the tab-switch instant: for the next ~4s plot() does a newPlot (rebuild the
+  //     clip-paths corrupted by display:none→block), then reverts to react.
+  window.__tabShownAt = Date.now();
   // IT: la pagina è ORA display:block; i loader sono async ma ogni render passa per
-  //     plot() che misura il container reale (size-guard) → niente resize manuale qui.
+  //     plot() (size-guard + rebuild on re-entry) → niente resize manuale qui.
   // EN: the page is NOW display:block; loaders are async but every render goes through
-  //     plot() which measures the real container (size-guard) → no manual resize here.
+  //     plot() (size-guard + rebuild on re-entry) → no manual resize here.
   if(name==='surface') loadSurface();
   else if(name==='chain')  loadChain();
   else if(name==='risk')   loadRisk();
@@ -957,6 +991,18 @@ async function loadChain(){
   }catch(e){ setConn(false); }
 }
 function nearest(arr,v){ let b=arr[0],bd=1e18; arr.forEach(x=>{const dd=Math.abs(x-v);if(dd<bd){bd=dd;b=x;}}); return b; }
+// IT: posizione FRAZIONARIA di un valore su un asse CATEGORY (categorie = arr ordinato
+//     ascendente). Plotly legge un x NUMERICO su asse category come indice 0-based
+//     (frazionario ammesso) → piazza linee spot/strike PROPORZIONALI fra le categorie.
+// EN: FRACTIONAL position of a value on a CATEGORY axis (categories = ascending arr).
+//     Plotly reads a NUMERIC x on a category axis as a 0-based (fractional) index → places
+//     spot/strike lines PROPORTIONALLY between categories.
+function catPos(v, arr){
+  const n=arr.length; if(!n) return 0;
+  if(v<=arr[0]) return 0; if(v>=arr[n-1]) return n-1;
+  for(let i=1;i<n;i++){ if(v<=arr[i]) return (i-1)+(v-arr[i-1])/((arr[i]-arr[i-1])||1); }
+  return n-1;
+}
 
 // ─── Risk & Greeks ────────────────────────────────────────────────────────────
 // IT: profilo OI per strike — barre DIVERGENTI (call ▲ verde sopra, put ▼ rosso
@@ -981,70 +1027,68 @@ function renderOI(d){
   const cap = (d.spot>0 ? d.spot : Math.max(...d.strikes)) * 0.35;
   let idx = []; d.strikes.forEach((k,i)=>{ if(Math.abs(k-d.spot)<=cap) idx.push(i); });
   if(!idx.length) idx = d.strikes.map((_,i)=>i);                // fallback: tutti / all
+  // IT: ordina la banda per strike ASCENDENTE → le categorie dell'asse-x seguono l'ordine
+  //     di strike (un asse category ordina per prima apparizione nei dati).
+  // EN: sort the band by ASCENDING strike → x-axis categories follow strike order (a
+  //     category axis orders by first appearance in the data).
+  idx.sort((a,b)=>d.strikes[a]-d.strikes[b]);
   const ks    = idx.map(i=>d.strikes[i]);
+  const ksStr = ks.map(k=>String(k));                          // categorie (label = strike) / categories
   const callV = idx.map(i=> usd ? d.call_oi[i]*d.strikes[i] : d.call_oi[i]);
   const putV  = idx.map(i=> usd ? d.put_oi[i]*d.strikes[i]  : d.put_oi[i]);
   const netV  = callV.map((v,j)=>v - putV[j]);                  // skew call−put (banda)
 
-  // IT: larghezza barra ESPLICITA (≈85% del gap mediano tra strike). Senza, Plotly
-  //     la deriva dal gap MINIMO: se a un refresh la chain porta due strike vicini il
-  //     min-gap crolla → tutte le barre larghe ~0 = invisibili (il bug "spariscono
-  //     dopo 12s", restano solo linee/shapes). Esplicita = deterministica, no collasso.
-  // EN: EXPLICIT bar width (≈85% of the median strike gap). Without it Plotly derives
-  //     width from the MIN gap: if a refresh brings two close strikes the min-gap
-  //     collapses → all bars ~0-wide = invisible (the "vanish after 12s" bug, only
-  //     lines/shapes remain). Explicit = deterministic, no collapse.
-  const _sk = ks.slice().sort((a,b)=>a-b);
-  const _gaps = []; for(let i=1;i<_sk.length;i++){ const g=_sk[i]-_sk[i-1]; if(g>0) _gaps.push(g); }
-  _gaps.sort((a,b)=>a-b);
-  const _barW = (_gaps.length ? _gaps[Math.floor(_gaps.length/2)] : (_sk.length?_sk[0]*0.01:1)) * 0.85;
-
-  // IT: range x = estensione della banda + pad; l'asse Y va in AUTORANGE sui SOLI dati
-  //     di banda (le trace contengono già solo gli strike di banda) → coerente con x,
-  //     nessuna barra fuori-vista a gonfiare l'asse.
-  // EN: x range = band extent + pad; the Y axis AUTORANGES over band-only data (traces
-  //     already contain only band strikes) → consistent with x, no off-view bar
-  //     inflating the axis.
-  const _lo=Math.min(...ks), _hi=Math.max(...ks);
-  // IT: clamp left ≥0 (gli strike non sono mai negativi). Range x esplicito (banda+pad)
-  //     con autorange:false → l'asse è deterministico ad ogni refresh; la geometria del
-  //     container è gestita da plot() (width/height espliciti), non più dall'asse sticky.
-  // EN: clamp left ≥0 (strikes are never negative). Explicit x range (band+pad) with
-  //     autorange:false → the axis is deterministic each refresh; container geometry is
-  //     handled by plot() (explicit width/height), no longer a sticky-axis concern.
-  const _pad=((_hi-_lo)*0.04)||(_hi*0.05); const xr=[Math.max(0,_lo-_pad), _hi+_pad];
+  // IT: ── ASSE-X CATEGORY (non lineare) = IL FIX del bug storico "barre spariscono / si
+  //     schiacciano al cambio-tab". Causa reale (diagnosi browser 2026-06-24): su un
+  //     re-render dopo display:none→block Plotly CORROMPE la mappatura-pixel dell'asse
+  //     LINEARE numerico → le trace finiscono fuori campo (x≈−1244px) o tutta la banda
+  //     compressa in ~19px, mentre shapes/annotation paper-ref restano (firma del bug).
+  //     NESSUN rimedio via API lo recupera (newPlot, purge, replace-node, Plots.resize,
+  //     relayout, autorange, scala-x: tutti KO, verificati uno per uno). L'asse CATEGORY
+  //     posiziona per INDICE (non per scala numerica) ed è IMMUNE — coerente col fatto che
+  //     plot-greeks (già category) non ha MAI avuto il bug. Spot/Max-Pain a INDICE
+  //     FRAZIONARIO (catPos) per restare proporzionali; gli strike di banda sono
+  //     ~equispaziati → la vista category ≈ la lineare. Niente width barra esplicita:
+  //     su asse category la larghezza è in slot-categoria, auto e deterministica.
+  // EN: ── CATEGORY x-axis (not linear) = THE fix for the long-standing "bars vanish /
+  //     squash on tab switch" bug. Real cause (browser diagnosis 2026-06-24): on a
+  //     re-render after display:none→block Plotly CORRUPTS the LINEAR numeric axis pixel
+  //     mapping → traces land off-view (x≈−1244px) or the whole band is compressed into
+  //     ~19px, while paper-ref shapes/annotations remain (the bug's signature). NO API
+  //     remedy recovers it (newPlot, purge, replace-node, Plots.resize, relayout,
+  //     autorange, x-scaling: all failed, each verified). A CATEGORY axis positions by
+  //     INDEX (not numeric scale) and is IMMUNE — consistent with plot-greeks (already
+  //     category) never having the bug. Spot/Max-Pain at FRACTIONAL index (catPos) to stay
+  //     proportional; band strikes are ~evenly spaced → the category view ≈ the linear one.
+  //     No explicit bar width: on a category axis width is in category-slots, auto/deterministic.
+  const _spotX = catPos(d.spot, ks), _mpX = catPos(d.max_pain, ks);
   plot('plot-oi', [
-    {type:'bar', name:'Call OI', x:ks, y:callV, width:_barW, marker:{color:'#2ecc7199'},
-     customdata:callV, hovertemplate:`K %{x:,.0f}<br>Call OI %{customdata:,.0f} ${unit}<extra></extra>`},
-    {type:'bar', name:'Put OI', x:ks, y:putV.map(v=>-v), width:_barW, marker:{color:'#ff5c5c99'},
-     customdata:putV, hovertemplate:`K %{x:,.0f}<br>Put OI %{customdata:,.0f} ${unit}<extra></extra>`},
-    // IT: Net OI = call−put → stessa unità/scala delle barre → asse PRIMARIO
-    //     (no yaxis2 overlay, più semplice e corretto). Niente `uirevision`:
-    //     i dati si auto-aggiornano, il range x/y va ricalcolato ad ogni refresh
-    //     (react applica i range espliciti forniti = comportamento voluto).
-    // EN: Net OI = call−put → same unit/scale as the bars → PRIMARY axis (no
-    //     yaxis2 overlay, simpler and correct). No `uirevision`: data auto-
-    //     refreshes, x/y range must be recomputed each refresh (react applies
-    //     the explicit ranges provided = the intended behavior).
-    {type:'scatter', name:'Net OI', mode:'lines', x:ks, y:netV,
-     line:{color:'#f0a020',width:1.6}, hovertemplate:`K %{x:,.0f}<br>Net %{y:,.0f} ${unit}<extra></extra>`},
+    {type:'bar', name:'Call OI', x:ksStr, y:callV, marker:{color:'#2ecc7199'},
+     customdata:callV, hovertemplate:`K %{x}<br>Call OI %{customdata:,.0f} ${unit}<extra></extra>`},
+    {type:'bar', name:'Put OI', x:ksStr, y:putV.map(v=>-v), marker:{color:'#ff5c5c99'},
+     customdata:putV, hovertemplate:`K %{x}<br>Put OI %{customdata:,.0f} ${unit}<extra></extra>`},
+    // IT: Net OI = call−put → stessa unità/scala delle barre → asse PRIMARIO (no yaxis2).
+    // EN: Net OI = call−put → same unit/scale as the bars → PRIMARY axis (no yaxis2).
+    {type:'scatter', name:'Net OI', mode:'lines', x:ksStr, y:netV,
+     line:{color:'#f0a020',width:1.6}, hovertemplate:`K %{x}<br>Net %{y:,.0f} ${unit}<extra></extra>`},
   ], Object.assign({}, PL_DARK, {
     dragmode:'pan',
     barmode:'relative', showlegend:true,
     legend:{font:{color:'#7d8aa0'},orientation:'h',y:1.08,x:0},
     hovermode:'x unified',
-    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Strike',range:xr,autorange:false}),
-    yaxis:Object.assign({},PL_DARK.yaxis,{title:`Puts ▼ / Calls ▲ / Net (${unit})`,zeroline:true,zerolinecolor:'#3a465c'}),
+    // IT: asse category + tick diradati (~1 ogni n/9) per non sovrapporre 40+ strike.
+    // EN: category axis + thinned ticks (~1 every n/9) to avoid overlapping 40+ strikes.
+    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Strike',type:'category',
+      tickmode:'linear',tick0:0,dtick:Math.max(1,Math.round(ks.length/9))}),
+    yaxis:Object.assign({},PL_DARK.yaxis,{title:`Puts ▼ / Calls ▲ / Net (${unit})`,autorange:true,zeroline:true,zerolinecolor:'#3a465c'}),
     shapes:[
-      {type:'line',x0:d.spot,x1:d.spot,y0:0,y1:1,yref:'paper',line:{color:'#4aa3ff',width:1.5}},
-      {type:'line',x0:d.max_pain,x1:d.max_pain,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.5,dash:'dash'}},
+      {type:'line',x0:_spotX,x1:_spotX,y0:0,y1:1,yref:'paper',line:{color:'#4aa3ff',width:1.5}},
+      {type:'line',x0:_mpX,x1:_mpX,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.5,dash:'dash'}},
     ],
     annotations:[
-      {x:d.spot,y:1,yref:'paper',text:'Spot',showarrow:false,font:{color:'#4aa3ff',size:10},yanchor:'bottom'},
-      {x:d.max_pain,y:1,yref:'paper',text:'Max Pain',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
+      {x:_spotX,y:1,yref:'paper',text:'Spot',showarrow:false,font:{color:'#4aa3ff',size:10},yanchor:'bottom'},
+      {x:_mpX,y:1,yref:'paper',text:'Max Pain',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
     ],
-  // IT: range x già fissato nel layout (range:xr, autorange:false).
-  // EN: x range already pinned in the layout (range:xr, autorange:false).
   }), PL_CFG_2D);
 }
 
@@ -1156,49 +1200,50 @@ function renderPayoff(t){
     const pf=amt*Math.abs(S-K)/S;
     ys.push(side>0 ? pf-cost : cost-pf); xs.push(S);
   }
-  // IT: range ESPLICITI x/y (come renderOI) — non affidarsi all'autorange, che con
-  //     il div in una tab appena attivata (reflow) può collassare e non disegnare la
-  //     curva (restavano solo gli shapes = le 2 linee verticali). | EN: EXPLICIT x/y
-  //     ranges (like renderOI) — don't rely on autorange, which with the div in a
-  //     just-activated tab (reflow) can collapse and skip the curve (only the shapes
-  //     = the 2 vertical lines remained).
-  const _xpad=(hi-lo)*0.03; let _xr=[lo-_xpad, hi+_xpad];
-  let _ymin=Math.min(...ys), _ymax=Math.max(...ys);
-  if(t.pnl_btc!=null){ _ymin=Math.min(_ymin,t.pnl_btc); _ymax=Math.max(_ymax,t.pnl_btc); }
-  const _ypad=((_ymax-_ymin)*0.10)||0.01; let _yr=[_ymin-_ypad, _ymax+_ypad];
-  // IT: guard range NON-finiti (strike/settle anomali → NaN da |S−K|/S): senza,
-  //     la curva NON si disegna ma gli shapes sì = il bug "solo 2 linee verticali".
-  //     null → autorange. | EN: guard NON-finite ranges (anomalous strike/settle →
-  //     NaN from |S−K|/S): otherwise the curve won't draw but shapes do = the
-  //     "only 2 vertical lines" bug. null → autorange.
-  if(!_xr.every(Number.isFinite)) _xr=null;
-  if(!_yr.every(Number.isFinite)) _yr=null;
-  const traces=[{type:'scatter',mode:'lines',x:xs,y:ys,line:{color:'#4aa3ff',width:2},
-    hovertemplate:'S %{x:,.0f}<br>PnL %{y:+,.4f} BTC<extra></extra>'}];
+  // IT: ── ASSE-X CATEGORY anche qui (STESSO fix di renderOI). Causa (diagnosi browser
+  //     2026-06-24): l'asse LINEARE numerico, ri-renderizzato dopo display:none→block,
+  //     CORROMPE la mappatura-pixel e schiaccia la curva in una verticale a sinistra
+  //     (≈1px), restano solo gli shapes = le 2 verticali strike/entry. xs è una griglia
+  //     REGOLARE (linspace) → come categorie resta equispaziata e la V del payoff è
+  //     IDENTICA alla vista lineare. Strike/Entry a indice FRAZIONARIO (catPos); il marker
+  //     settlement è agganciato alla categoria più vicina (curva fitta, errore di snap
+  //     ~(hi−lo)/120 trascurabile) così resta SULLA curva. L'asse-Y resta numerico in
+  //     autorange (il bug è solo dell'asse ORIZZONTALE; la Y ha sempre reso bene).
+  // EN: ── CATEGORY x-axis here too (SAME fix as renderOI). Cause (browser diagnosis
+  //     2026-06-24): the LINEAR numeric axis, re-rendered after display:none→block,
+  //     CORRUPTS the pixel mapping and squashes the curve into a left vertical line
+  //     (≈1px), leaving only the shapes = the 2 strike/entry verticals. xs is a REGULAR
+  //     grid (linspace) → as categories it stays evenly spaced and the payoff V is
+  //     IDENTICAL to the linear view. Strike/Entry at FRACTIONAL index (catPos); the
+  //     settlement marker snaps to the nearest category (dense curve, snap error
+  //     ~(hi−lo)/120 negligible) so it stays ON the curve. The Y axis stays numeric
+  //     autorange (the bug is HORIZONTAL-axis only; Y has always rendered fine).
+  const xsStr = xs.map(s=>String(Math.round(s)));
+  const _idxNear = (v)=>{ let bi=0,bd=1e18; for(let j=0;j<xs.length;j++){const dd=Math.abs(xs[j]-v); if(dd<bd){bd=dd;bi=j;}} return bi; };
+  const _kX = catPos(K, xs), _eX = catPos(t.entry_spot, xs);
+  const traces=[{type:'scatter',mode:'lines',x:xsStr,y:ys,line:{color:'#4aa3ff',width:2},
+    hovertemplate:'S %{x}<br>PnL %{y:+,.4f} BTC<extra></extra>'}];
   if(t.delivery_price!=null && t.pnl_btc!=null){
-    traces.push({type:'scatter',mode:'markers',x:[t.delivery_price],y:[t.pnl_btc],
+    traces.push({type:'scatter',mode:'markers',x:[xsStr[_idxNear(t.delivery_price)]],y:[t.pnl_btc],
       marker:{color:(t.pnl_btc>=0?'#2ecc71':'#ff5c5c'),size:12,symbol:'diamond'},
-      hovertemplate:'settle %{x:,.0f}<br>PnL %{y:+,.4f} BTC<extra></extra>'});
+      hovertemplate:'settle %{x}<br>PnL %{y:+,.4f} BTC<extra></extra>'});
   }
   document.getElementById('payoff-title').textContent =
     `${t.side>0?'LONG':'SHORT'} straddle · K ${fmt0(K)} · cost ${fmt(cost,4)} BTC`;
-  // IT: render via plot() (size-guard + width/height espliciti): la curva non collassa
-  //     più sul reflow della tab .grid2 (prima restavano solo gli shapes = 2 linee
-  //     verticali). Range x/y espliciti già nel layout → asse deterministico.
-  // EN: render via plot() (size-guard + explicit width/height): the curve no longer
-  //     collapses on the .grid2 tab reflow (previously only the shapes = 2 vertical
-  //     lines remained). Explicit x/y ranges already in the layout → deterministic axis.
+  // IT: render via plot() (size-guard + rebuild on re-entry); asse-x category (vedi sopra).
+  // EN: render via plot() (size-guard + rebuild on re-entry); category x-axis (see above).
   plot('plot-payoff', traces, Object.assign({}, PL_DARK, {
     dragmode:'pan', showlegend:false,
-    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Underlying at expiry (USD)',range:_xr,autorange:!_xr}),
-    yaxis:Object.assign({},PL_DARK.yaxis,{title:'PnL (BTC)',range:_yr,autorange:!_yr,zeroline:true,zerolinecolor:'#3a465c'}),
+    xaxis:Object.assign({},PL_DARK.xaxis,{title:'Underlying at expiry (USD)',type:'category',
+      tickmode:'linear',tick0:0,dtick:Math.max(1,Math.round(N/7))}),
+    yaxis:Object.assign({},PL_DARK.yaxis,{title:'PnL (BTC)',autorange:true,zeroline:true,zerolinecolor:'#3a465c'}),
     shapes:[
-      {type:'line',x0:K,x1:K,y0:0,y1:1,yref:'paper',line:{color:'#7d8aa0',width:1,dash:'dot'}},
-      {type:'line',x0:t.entry_spot,x1:t.entry_spot,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.2}},
+      {type:'line',x0:_kX,x1:_kX,y0:0,y1:1,yref:'paper',line:{color:'#7d8aa0',width:1,dash:'dot'}},
+      {type:'line',x0:_eX,x1:_eX,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.2}},
     ],
     annotations:[
-      {x:K,y:1,yref:'paper',text:'Strike',showarrow:false,font:{color:'#7d8aa0',size:10},yanchor:'bottom'},
-      {x:t.entry_spot,y:1,yref:'paper',text:'Entry',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
+      {x:_kX,y:1,yref:'paper',text:'Strike',showarrow:false,font:{color:'#7d8aa0',size:10},yanchor:'bottom'},
+      {x:_eX,y:1,yref:'paper',text:'Entry',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},
     ],
   }), PL_CFG_2D);
 }

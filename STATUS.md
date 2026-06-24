@@ -5,7 +5,26 @@
 
 ---
 
-## 🟢 RISOLTO 2026-06-24 — DASHBOARD rendering: meccanismo di render unificato (`plot()`)
+## 🟢 RISOLTO (definitivo) 2026-06-24 — DASHBOARD rendering: la causa era l'asse LINEARE; fix = asse CATEGORY
+
+Chiuso **per davvero** il bug "barre OI + curva payoff spariscono/si schiacciano al cambio-tab", dopo che il primo tentativo (helper `plot()` con size-guard + width/height espliciti, sezione sotto) si è rivelato **necessario ma NON sufficiente** (riverificato col browser: barre ancora KO al rientro-tab). Diagnosi browser sistematica (Playwright + `getBoundingClientRect`, ~14 esperimenti) → **root cause vera trovata e fix verificato indipendentemente su 3 restart freschi.**
+
+**Root cause (definitiva):** su un **re-render dopo `display:none→block`** (qualsiasi rientro-tab) Plotly **CORROMPE la mappatura-pixel dell'asse X LINEARE numerico**. Sintomo a due facce, stesso bug: (a) le trace finiscono **fuori campo** (barre a `x≈−1244px`) oppure (b) tutta la banda **compressa in ~19px**; restano solo shapes/annotation `yref:'paper'` (scala-indipendenti) → "spariscono". `_fullLayout` (range/offset/length/margin) risultava **identico** tra primo render OK e re-render KO: la corruzione è nel rendering SVG, non nei dati. **Asimmetria chiave:** il PRIMO render di ogni plot è sempre OK; ogni successivo è KO. **Solo l'asse X è colpito** (la Y numerica rende sempre bene).
+
+**Cosa NON lo risolve (provato uno per uno, tutti KO):** `Plotly.react`, `Plotly.newPlot`, `Plotly.purge`+newPlot, `purge`+`innerHTML=''`+newPlot, **sostituzione del nodo DOM**, `Plotly.Plots.resize`, `Plotly.relayout` (width-toggle / range-toggle), `Plotly.redraw`, evento `resize`, **autorange** (sposta solo off-screen→crammato), rimozione width-barra, scala-x ÷1000, hiding via `visibility`/`position` invece di `display:none`, purge-on-leave. **Nessun rimedio via API recupera l'asse lineare corrotto.**
+
+**Fix (verificato):** **asse X = `type:'category'`** sui due grafici colpiti (`plot-oi`, `plot-payoff`). Un asse category posiziona per **INDICE** (non per scala numerica) ed è **IMMUNE** alla corruzione — coerente col fatto che `plot-greeks` (già category) non ha MAI avuto il bug. Dettagli:
+- **`renderOI`:** strike di banda → **categorie stringa** (ordinate ascendenti); via `catPos(v, ks)` (nuovo helper) Spot e Max-Pain a **indice FRAZIONARIO** così le linee restano proporzionali fra gli strike; tick diradati (`dtick≈n/9`); niente più width-barra esplicita (su category è in slot, auto). Gli strike di banda sono ~equispaziati → vista category ≈ lineare.
+- **`renderPayoff`:** prezzi `xs` (linspace regolare) → categorie; Strike/Entry a indice frazionario (`catPos`); marker settlement agganciato alla categoria più vicina (curva fitta, snap trascurabile) → resta SULLA curva; Y resta numerica autorange.
+- Helper `catPos(v, arr)` aggiunto (posizione frazionaria su asse category).
+
+**Verifica (fan-out subagent, 3 restart freschi × 6 cambi-tab):** OI bars `spanPx=1467` su **OGNI** step risk inclusi i rientri (s2/s4); payoff curve `spanPx=685` su **OGNI** step trades inclusi i rientri (s3/s5); identico su a1/a2/a3, zero flicker. Screenshot ispezionati a mano: barre call/put complete + Net OI + Spot/Max-Pain ben posizionati; V del payoff completa + marker sulla curva + linee strike/entry. `py_compile` OK; HTML servito 40381 byte (`type:'category'`×2, `catPos`×9).
+
+**Lezione metodologica (oro):** misurare il **pixel SCHERMO reale** (`getBoundingClientRect` dentro l'area di plot **+ confronto con lo screenshot**), MAI `getBBox` né il count dei path SVG (coord user-space, ignorano transform/clip → falsi positivi: riportavano "71 barre" su una tab VUOTA). Il primo "fix" sembrava ok a metriche deboli ed era rotto. **La verità è lo screenshot.**
+
+## 🟡 (SUPERATO il 2026-06-24 — vedi sopra) RISOLTO 2026-06-24 — DASHBOARD rendering: meccanismo di render unificato (`plot()`)
+
+> ⚠ Questa sezione descrive il PRIMO tentativo: necessario (l'helper `plot()` resta, con size-guard + rebuild-on-re-entry) ma **NON sufficiente** — il bug persisteva al rientro-tab. La causa vera (asse lineare) e il fix definitivo (asse category) sono nella sezione sopra. Lasciata come record del percorso.
 
 Chiusi i 2 problemi residui ("OI by strike" e "Risk profile dei trade" che sparivano al cambio-tab `risk`/`trades`). Come da nota del 06-23 ("NON fare altri patch per-grafico: affrontare il MECCANISMO in modo olistico"), **rimosse TUTTE le patch per-grafico accumulate** e sostituite con **un solo helper `plot(id, traces, layout, cfg)`** in `scripts/06_dashboard.py`.
 

@@ -1,40 +1,95 @@
 # QUANTSYS — Changelog
 
-## Iterazione 10 — Dashboard: meccanismo di render Plotly unificato (corrente, 2026-06-24)
+## Iterazione 10 — Dashboard: fix definitivo rendering — asse category (causa: asse lineare corrotto al re-render dopo display:none) (corrente, 2026-06-24)
 
-### Helper `plot()` unico — `scripts/06_dashboard.py`
+### Asse X `type:'category'` su `plot-oi` e `plot-payoff` — `scripts/06_dashboard.py`
 
-Tutti e 7 i render della SPA (surface, smile, term, OI by strike, greeks, PCR,
-payoff) ora passano per un singolo helper `plot(id, traces, layout, cfg)`. Unico
-punto di controllo della geometria del grafico, in sostituzione delle patch
-per-grafico accumulate nelle iterazioni di debug precedenti.
+🇮🇹 **Il bug**: "OI by strike" (`plot-oi`) e il "profilo di rischio/payoff" dei
+trade (`plot-payoff`) sparivano o si schiacciavano in una banda sottile uscendo
+e rientrando da una tab del browser (risk↔trades).
 
-**Root cause unificante**: Plotly disegnava su geometria errata quando il container
-era a dimensione 0 o appena riflowato (tab `display:none→block`): barre e curve
-nascevano fuori vista o sub-pixel → sparivano, restando solo linee e shapes
-(scala-indipendenti). I sintomi "OI by strike" e "Risk profile dei trade" erano
-la stessa classe di bug (container non misurabile al momento del render async).
+🇮🇹 **Root cause (diagnosi browser, 2026-06-24)**: ad ogni re-render dopo
+`display:none→block` (qualunque rientro in tab) Plotly **corrompe la mappatura in
+pixel di un asse X numerico LINEARE** — le tracce finiscono fuori vista
+(x≈−1244px) oppure l'intera banda si comprime a ~19px, mentre le shapes paper-ref
+restano corrette. Il **primo** render è sempre buono, ogni render **successivo**
+è rotto; colpito **solo l'asse X** (Y numerico ok). `_fullLayout`
+(range/offset/length/margin) è identico tra primo render buono e re-render rotto →
+corruzione di rendering SVG, **non** dei dati.
 
-**Fix deterministico in due passi**:
-- **Size-guard**: se `offsetWidth===0` (tab nascosta o reflow non flushato) il
-  render ritenta al frame successivo (`requestAnimationFrame`, cap 60 ≈1s, poi
-  rinuncia — il prossimo `switchTab` ridisegna). Leggere `offsetWidth` forza già
-  il reflow sincrono.
-- **Dimensioni esplicite**: `width`/`height` dai pixel reali del container +
-  `autosize:false` → Plotly non rimisura da solo (era la sua misura transitoria
-  durante il reflow a corrompere la geometria).
+🇮🇹 **Rimedi falliti (provati e scartati)**: `Plotly.react`, `newPlot`,
+`purge+newPlot`, sostituzione del nodo, `Plots.resize`, `relayout`
+(toggle width/range), `redraw`, evento `resize` della finestra, `autorange` (gira
+solo il fuori-schermo in schiacciato), rimozione larghezza barra esplicita,
+scaling x verso il basso, nascondere via `visibility`/`position` invece di
+`display:none`, purge-on-leave.
 
-**Pulizia (rimosso il cruft per-grafico)**: eliminati `PL_CFG_2D_STATIC`
-(responsive:false), contatore di debug `__roi`, `console.log` diagnostici,
-retry-rAF locale in `renderOI`, doppio-rAF resize in `switchTab`, `Plotly.purge`
-di test in `loadRisk`, `.then(relayout+resize)` in `renderPayoff`. Mantenuti i
-guard utili: anti-race async↔tab in `loadRisk`, guard dati degradati,
-`Plotly.purge('plot-payoff')` quando non ci sono trade.
+🇮🇹 **Il fix (verificato su 3 restart server puliti)**: asse X di `plot-oi` e
+`plot-payoff` passato a **`type:'category'`** (il posizionamento per-indice è
+immune alla corruzione — coerente con `plot-greeks`, già category, che il bug non
+l'ha mai avuto). Nuovo helper `catPos(value, sortedArr)` colloca le linee di
+riferimento (Spot/Max-Pain su OI; Strike/Entry su payoff) a un **indice di
+categoria frazionario**, restando proporzionali tra le categorie. OI: gli strike
+di banda diventano categorie stringa (ordinate crescenti), tick diradati
+(`dtick≈n/9`), nessuna larghezza barra esplicita. Payoff: i prezzi del linspace
+diventano categorie (V-curve identica, griglia regolare), il marker di settlement
+aggancia la categoria più vicina, Y resta numerico autorange.
 
-**Verifica**: `py_compile` OK; smoke server fresco su :8050 → HTML con `plot()`
-presente e zero residui (`PL_CFG_2D_STATIC`/`__roi`/`console.log` = 0),
-`/api/risk` HTTP 200 con chain reale. La verifica finale resta il browser
-dell'utente con hard reload (Ctrl+Shift+R).
+🇮🇹 **Storia (sotto-passo precedente, stesso 2026-06-24)**: l'helper unico
+`plot(id, traces, layout, cfg)` aveva già unificato i 7 render con **size-guard**
+(`offsetWidth===0` → ritenta al frame successivo via `requestAnimationFrame`,
+cap ~1s) + dimensioni esplicite/`autosize:false`. Era contesto **necessario ma NON
+sufficiente** — non fermava la corruzione al rientro in tab. L'helper resta
+(size-guard + rebuild-al-rientro); il dettaglio width-esplicito/`autosize:false` è
+stato rimosso e il fix risolutivo è l'asse category.
+
+🇮🇹 **Verifica**: `py_compile` OK; 3 restart server freschi su :8050 con hard
+reload (Ctrl+Shift+R) → `plot-oi` e `plot-payoff` stabili su ogni rientro in tab,
+linee di riferimento proporzionali. La verità finale resta il browser dell'utente
+con hard reload.
+
+**EN** **The bug**: "OI by strike" (`plot-oi`) and the trades "risk/payoff profile"
+(`plot-payoff`) vanished or got crammed into a thin strip when leaving and
+re-entering a browser tab (risk↔trades).
+
+**EN** **Root cause (browser-diagnosed, 2026-06-24)**: on every re-render after
+`display:none→block` (any tab re-entry) Plotly **corrupts the pixel mapping of a
+LINEAR numeric X axis** — traces land off-view (x≈−1244px) or the whole band
+compresses to ~19px, while the paper-ref shapes stay correct. The **first** render
+is always fine, every **subsequent** one is broken; **only the X axis** is affected
+(numeric Y renders fine). `_fullLayout` (range/offset/length/margin) is identical
+between the good first render and the broken re-render → an SVG-render corruption,
+**not** data.
+
+**EN** **Failed remedies (tried and rejected)**: `Plotly.react`, `newPlot`,
+`purge+newPlot`, node replacement, `Plots.resize`, `relayout` (width/range toggle),
+`redraw`, window `resize` event, `autorange` (only turns off-screen into crammed),
+removing explicit bar width, scaling x down, hiding via `visibility`/`position`
+instead of `display:none`, purge-on-leave.
+
+**EN** **The fix (verified across 3 fresh server restarts)**: the X axis of
+`plot-oi` and `plot-payoff` switched to **`type:'category'`** (index-based
+positioning is immune to the corruption — consistent with `plot-greeks`, already a
+category axis, which never had the bug). A new helper `catPos(value, sortedArr)`
+places the reference lines (Spot/Max-Pain on OI; Strike/Entry on payoff) at a
+**fractional category index**, so they stay proportional between categories. OI:
+band strikes become string categories (sorted ascending), thinned ticks
+(`dtick≈n/9`), no explicit bar width. Payoff: the linspace prices become categories
+(V-curve identical since the grid is regular), the settlement marker snaps to the
+nearest category, Y stays numeric autorange.
+
+**EN** **History (preceding sub-step, same 2026-06-24)**: the single
+`plot(id, traces, layout, cfg)` helper had already unified the 7 renders with a
+**size-guard** (`offsetWidth===0` → retry next frame via `requestAnimationFrame`,
+~1s cap) + explicit dimensions/`autosize:false`. That was **necessary but NOT
+sufficient** context — it did not stop the re-entry corruption. The helper remains
+(size-guard + rebuild-on-re-entry); the explicit-width/`autosize:false` detail was
+removed and the real fix is the category axis.
+
+**EN** **Verification**: `py_compile` OK; 3 fresh server restarts on :8050 with a
+hard reload (Ctrl+Shift+R) → `plot-oi` and `plot-payoff` stable on every tab
+re-entry, reference lines proportional. The final truth remains the user's browser
+with a hard reload.
 
 ---
 
