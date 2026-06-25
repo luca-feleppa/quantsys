@@ -5,6 +5,32 @@
 
 ---
 
+## 🟢 SESSIONE 2026-06-25 — BACKTEST STORICO SHORT-VOL (FHS GJR-GARCH) + validazione premio → edge strutturale CONFERMATO
+
+**Contesto:** lo short-vol arm live è limitato da `n≈4` (chain 12gg, code mai viste). Bypassato il tempo con un backtest STRUTTURALE su 7 anni di candele orarie, senza aspettare metà luglio.
+
+**Vincolo dati (chiave):** non esiste superficie IV implicita storica BTC (solo 12gg raccolti). Quindi NON "ho venduto al mark reale" ma **studio strutturale tail + sweep del VRP**: lato payoff REALE dalle candele (code incluse), lato premio = fair-value fat-tailed × (1+VRP), VRP swept. **Kernel = FHS su GJR-GARCH(1,1)** (scelto dall'utente vs Black-Scholes: BS a vol piatta sbaglia smile/code = dove vive il payoff OTM). Residui standardizzati REALI bootstrappati → code/asimmetria/clustering empirici; tutto CAUSALE (params/residui ≤ entry, refit expanding 90gg, finestra fit 2y, no lookahead). Script `scripts/vol/short_vol_hist_backtest.py`.
+
+**Risultato (n=2538 scadenze daily 08:00 UTC, 2019→2026):** break-even VRP = **0% per TUTTE** le strutture. Il fair-value FHS a VRP=0 atterra vicino all'IV reale (mediana `mark_iv` 12gg ≈ 44%, ~= conditional vol GARCH) → *VRP=0 ≈ "vendo al mark"*, e il PnL medio positivo È la raccolta del VRP storico (realized 30h < implied).
+
+| struttura | mean PnL@VRP0 | hit | Sharpe ann | worst-5 trade | p05 |
+|---|---|---|---|---|---|
+| straddle ATM | +0.00772 BTC | 67% | 0.73 | −1.10 BTC | −0.041 |
+| strangle 4% | +0.00596 | 87% | 0.59 | −1.01 | −0.021 |
+| strangle 6% | +0.00572 | 94% | 0.58 | −0.93 | −0.003 |
+| strangle 8% | +0.00547 | 97% | 0.57 | −0.84 | +0.000 |
+| strangle 10% | +0.00523 | 98% | 0.56 | −0.74 | +0.000 |
+
+Le **code ci sono entrate** (worst-5/p05 quantificano i crash 2020/21/22) ma NON ribaltano il segno su 2538 scadenze. Allargando lo strangle: hit↑ (94→98%), coda↓ (−0.93→−0.74), mean↓ → trade-off rischio/rendimento; **strangle 8-10% = struttura tail-safe**.
+
+**Verifica robustezza (`scripts/vol/short_vol_premium_validate.py`):** FHS fair-value vs mark/bid Deribit REALE sull'overlap candele↔chain. **FHS/mark mediano = 1.05×** (ATM/strangle6-8% a ±5% → premio storico AFFIDABILE, il break-even non è artefatto). **Half-spread (haircut bid) mediano = 16%** (ATM 3.5%, ali 16-22%). Applicando l'haircut: straddle +0.0066, strangle6% +0.0044, strangle8% +0.0040 → **edge sopravvive al bid**. ⚠ n=3 scadenze (overlap candele 06-22↔chain) = check di BIAS, non large-sample.
+
+**Cosa È / NON È:** È conferma strutturale a priori (n=2538 vs n=4) + selezione struttura (strangle 8-10%). NON è un PASS del gate: il gate vero resta il LIVE (n≥20, fill bid reali, regime corrente). Non tocca `04b`. Premio modellato (no IV storica): nei regimi a IV esplosa (2021/22) il mark vero era > GARCH → PnL assoluto INDICATIVO, non esatto.
+
+**▶️ NEXT:** (a) lasciar maturare il gate live n≥20 (~metà luglio), struttura = strangle 8-10%; (b) deploy collector 24/7 su **VPS Hetzner Cloud** (deciso: CAX11 ARM ~€3.79/mo EU, sblocca B1 + n pulito + protegge IV) — utente sta valutando/creando il VPS, script di deploy `01c`+`01d` da preparare al via. **Working tree NON committato** (2 script vol nuovi + STATUS): decidere commit. Memoria: [[project_short_vol_arm]], [[project_247_collector_decision]].
+
+---
+
 ## 🕒 FINE SESSIONE 2026-06-24 — esiti + ripartenza domani
 
 **Fatto oggi (2 idee "while we collect data", fan-out):**
