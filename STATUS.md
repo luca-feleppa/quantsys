@@ -393,7 +393,7 @@ Salute: contare i processi LOGICI (ParentProcessId, vedi lezione sopra) = atteso
 
 **Scopo (paper "Are price and volume enough?"):** la claim "i momenti dispari sono impredicibili" è finora dimostrata solo per il NN. Per attribuirla all'INFORMAZIONE (e non alla classe di modello) servono le baseline econometriche direzionali sullo stesso perimetro. Aspettativa pre-dichiarata: **nessuna baseline mostra skill OOS** (|Spearman| < 2/√n, signDA ≈ 0.5) — esito atteso, ma va misurato; un esito contrario falsificherebbe la tesi del paper (e andrebbe riportato com'è).
 
-**Design (`scripts/paper_01_dir_baselines.py`, stesso pattern dei giudici vol):**
+**Design (`scripts/research/paper_01_dir_baselines.py`, stesso pattern dei giudici vol):**
 - **Perimetro:** 1h, raw candles su disco (immutate dal run rs, 65.191), target raw `y = Σ log-ret prossime h=30 barre` (stessa formula dei giudici); split ricostruito ESATTAMENTE replicando il path di 01 (build 04b-wiring → canonico 104 → maschera finestre NaN su T=120 → temporal_split 0.8/0.1/0.1) con assert sui conteggi noti (51130/6391/6392) — se l'assert fallisce, si riporta lo scostamento.
 - **Baseline:** (a) **OLS "HAR-mean"** `y ~ [1, r_h, r_7d→h, r_30d→h]` (analogo mean-equation dell'HAR, fit train-only); (b) **logit sul segno** stessi regressori; (c) **momentum persistence** `ŷ = r_h trailing`; (d) **train-mean costante** (null).
 - **Metriche:** Spearman, sign-DA, MSE su val E test (riportati entrambi com'è: è conferma di claim negativa, non model selection). Report `results/paper/dir_baselines_1h_{val,test}.json`. NO backtest, NO iterazioni.
@@ -482,7 +482,7 @@ Salute: contare i processi LOGICI (ParentProcessId, vedi lezione sopra) = atteso
 - **Stato disco post-probe:** `models/itransformer/` = modelli **rs-ratio 1h (FAIL)**; vol-1h PASS in `models/backup_1h_vols/`; vol-1m FAIL in `models/backup_1m_vols/`; direzionale 1m in `models/backup_1m/`+`data/backup_1m/`. Config `target_type: log_rs_ratio`. Report: `results/vols/rs_report_1h_{val,test}.json`; log `logs/rs_{01,macro_append,02_train,judge_val,judge_test}.log`.
 
 **▶️ AZIONE ESATTA ALLA RIPRESA (checklist in ordine di priorità):**
-1. **Poller IV Deribit (S, sblocca il tempo-calendario):** scrivere `scripts/iv_poller.py` (o numerazione coerente) — loop 5-15 min, 2 req non-auth (`get_book_summary_by_currency` BTC options + ultimo DVOL), append parquet `data/iv/`, ATM IV 3-4 expiry vicine + interpolazione tenor 30h. Dettagli verificati nella sezione RICOGNIZIONE sopra. Prima parte, prima si accumula lo storico per il gate **NN-RV vs IV**.
+1. **Poller IV Deribit (S, sblocca il tempo-calendario):** scrivere il poller [realizzato poi come `scripts/01c_iv_poller.py`] — loop 5-15 min, 2 req non-auth (`get_book_summary_by_currency` BTC options + ultimo DVOL), append parquet `data/iv/`, ATM IV 3-4 expiry vicine + interpolazione tenor 30h. Dettagli verificati nella sezione RICOGNIZIONE sopra. Prima parte, prima si accumula lo storico per il gate **NN-RV vs IV**.
 2. **Smoke chain IBIT su Alpaca (S, 1 call autenticata):** `GET /v2/options/contracts?underlying_symbols=IBIT` con le key dell'utente → conferma perimetro di esecuzione paper (long straddle/strangle mleg L3).
 3. **Backfill DVOL storico (S):** ~46 call `get_volatility_index_data` orario 2021→oggi → serie di controllo 30d.
 4. Poi: **B1 order-book L2** (alpha direzionale, progetto-dati a sé) e/o **paper** "Are price and volume enough?" (memoria `paper-idea-price-volume-enough`; la dicotomia momenti pari/dispari di oggi è il risultato centrale; mancano 1-2 baseline econometriche direzionali, effort S).
@@ -506,7 +506,7 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 - **Dati:** 1h, 2019-01-01→oggi (restore da `models/backup_1h_vols/{raw_candles_1h,regime_probs_1h}.parquet`), stesso split, `window_stride: 1`.
 - **Target:** `features.target_type: log_rs_ratio` → `target_ret = log((RS⁺_fwd+ε)/(RS⁻_fwd+ε))`, ε=1e-12, con `RS±_fwd = Σᵢ₌₁..ₕ r²ₜ₊ᵢ·1[rₜ₊ᵢ≷0]`, h=30 barre 1h; `target_dir = 1[RS⁺_fwd > RS⁻_fwd]` (causale).
 - **Modello:** iTrans 5-seed, hyperparam INVARIATI (lr 3e-5, dropout 0.3, drop_path 0.2, wd 3e-3). Zero tuning.
-- **Baseline (giudice `scripts/dev_vols_rs_judge.py`, OLS train-only):** (a) **HAR-RS** stile Patton–Sheppard: regressori `[1, lratio_h, lratio_7d, lratio_30d, log_rv_h]` trailing; (b) **naive persistence** = lratio trailing h; (c) **train-mean** (null di non-informatività del segno).
+- **Baseline (giudice `scripts/vol/dev_vols_rs_judge.py`, OLS train-only):** (a) **HAR-RS** stile Patton–Sheppard: regressori `[1, lratio_h, lratio_7d, lratio_30d, log_rv_h]` trailing; (b) **naive persistence** = lratio trailing h; (c) **train-mean** (null di non-informatività del segno).
 - **Metrica primaria: MSE sul log-ratio** (il QLIKE non si applica: il log-ratio non è positivo-definito). Secondarie descrittive: Spearman, sign-DA su `target_dir`.
 - **Inversione z→raw:** completa, `μ·IQR + centro` dal RobustScaler persistito (lezione log_rv); sanity sul centro: |c| < 2 (il log-ratio è quasi-centrato, ≠ log-RV c≈−7.2).
 - **Protocollo:** val-first (sanity: MSE_NN ≤ MSE_HAR-RS su val), test toccato UNA volta. **Zero iterazioni** in caso di fallimento. NO backtest trading.
@@ -554,7 +554,7 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 - Metriche modello su test: Spearman **+0.4532** (p≈0), DA 71.3%, IC +0.377, **ICIR +3.56** su 5 sotto-periodi (stabilissimo), coverage 95.2%.
 - Artefatti: `results/vols/qlike_report_{val,test}.json`; log `logs/vols_02_train.log`; modello vol in `models/itransformer/` (⚠ è il modello VOL, non direzionale — NO backtest trading su questo).
 
-**Implementazione (tutta reversibile):** `features.target_type: log_rv` in config (default codice `ret` = path direzionale bit-invariato; ValueError su valori ignoti) → `FeatureBuilder._returns` target `log(Σr²+1e-12)` con `target_dir`=vol-up/down causale; `scripts/dev_vols_macro_append.py` (ri-appende X_macro senza rifare il walk-forward regime, ~5s vs 3h); `scripts/dev_vols_qlike.py` (giudice: HAR-RV OLS chiuso fit su train, naive, NN con inversione z→raw **centro+scala** — NB `denormalize_predictions` da sola è SBAGLIATA per log-RV, mediana ≈ −7.2, serve `μ·IQR + centro`).
+**Implementazione (tutta reversibile):** `features.target_type: log_rv` in config (default codice `ret` = path direzionale bit-invariato; ValueError su valori ignoti) → `FeatureBuilder._returns` target `log(Σr²+1e-12)` con `target_dir`=vol-up/down causale; `scripts/vol/dev_vols_macro_append.py` (ri-appende X_macro senza rifare il walk-forward regime, ~5s vs 3h); `scripts/vol/dev_vols_qlike.py` (giudice: HAR-RV OLS chiuso fit su train, naive, NN con inversione z→raw **centro+scala** — NB `denormalize_predictions` da sola è SBAGLIATA per log-RV, mediana ≈ −7.2, serve `μ·IQR + centro`).
 
 **Significato:** B2 (pivot volatilità) **chiusa POSITIVA**: la pipeline NN estrae segnale vol genuino sopra la baseline econometrica seria. La vol resta NON tradabile sul perimetro spot/perp attuale (nessuno strumento di varianza) — il valore immediato è il **follow-up pre-dichiarato: jump/no-trade gate difensivo** (usare la predizione vol per filtrare/ridurre l'esposizione del modello direzionale nei picchi previsti); il valore strategico è l'opzione futura Deribit/varianza (progetto a sé, > B1).
 
@@ -647,7 +647,7 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 
 ## 🔴 PROBE CROSS-SECTIONAL IC — ESEGUITO → VERDETTO **KILL**
 
-- **Implementato e girato** (fan-out 3 subagent + orchestrazione): `quantsys/data/universe.py` (PerpUniverse top-N), `scripts/xs_01_download.py` (16 perp USDT scaricati: ADA AVAX BNB BTC DOGE ENA ETH FIL LINK LTC NEAR SOL SUI WLD XRP ZEC, raw+funding, stesso span), `scripts/xs_02_panel_signals.py` (applica l'ensemble esistente per-asset, denormalize z→raw, grid 30 candele → `data/xs/mu_panel.parquet`, 261.900 righe/16 simboli), `scripts/xs_03_ic_report.py` (Spearman cross-sezionale, sub-periodi non sovrapposti, verdetto pre-registrato). Report: `results/xs/ic_report.json`.
+- **Implementato e girato** (fan-out 3 subagent + orchestrazione): `quantsys/data/universe.py` (PerpUniverse top-N), `scripts/archive/xs_01_download.py` (16 perp USDT scaricati: ADA AVAX BNB BTC DOGE ENA ETH FIL LINK LTC NEAR SOL SUI WLD XRP ZEC, raw+funding, stesso span), `scripts/archive/xs_02_panel_signals.py` (applica l'ensemble esistente per-asset, denormalize z→raw, grid 30 candele → `data/xs/mu_panel.parquet`, 261.900 righe/16 simboli), `scripts/archive/xs_03_ic_report.py` (Spearman cross-sezionale, sub-periodi non sovrapposti, verdetto pre-registrato). Report: `results/xs/ic_report.json`.
 - **Risultato OOS:** mean cross-sectional IC **+0.0138**, t-stat **+1.86** (<2), ICIR 0.035, sub-periodi [+0.043, −0.016, +0.0002, +0.036, +0.005] = **4/5 positivi**. Tradability: spread lordo top-bottom **+1.5 bps/step**, **netto −0.00245/step** (~−43 ann, 13bps/leg).
 - **VERDETTO KILL** (gate: |t|≥2 FALSE, ≥4/5 TRUE, net>0 FALSE → serve tutti e 3). **Non costruire il portfolio layer.**
 - **Lettura:** μ ha skill di rango cross-sezionale **debolmente positiva** (direzione giusta, NON anti-predittiva come nel single-asset WR 29%), ma l'effetto (~1.5 bps) è **~17× sotto il costo** (~26 bps round-trip long-short). **Il muro è la MAGNITUDINE, non il segno.** Stesso pattern strutturale: rank reale ma troppo debole per le fee. Il de-risk economico ha risparmiato il build M.
@@ -668,7 +668,7 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 ## ✅ Sotto-sessione 2026-06-06 (doc bilingue fuse)
 
 - **Fusi i 4 file `.md` gemelli IT/EN in un unico file bilingue paragrafo-per-paragrafo.** Coppie fuse → file base, gemelli eliminati: `AVVIO.md`(+`AVVIO.en.md`), `README.md`(+`README.it.md`), `TEORIA.md`(+`TEORIA.en.md`), `docs/MODEL_IMPROVEMENTS.md`(+`.en.md`). Formato: heading bilingue `IT · EN`; corpo con paragrafo IT (prefisso `🇮🇹`) seguito da EN (prefisso `**EN**`); blocchi di codice emessi una volta, tabelle duplicate IT/EN; puntatori "versione X in Y" rimossi; cross-reference `.en.md`/`.it.md` reindirizzati ai file base (le menzioni storiche dentro MODEL_IMPROVEMENTS restano come record).
-- **Metodo:** script one-shot `scripts/_merge_bilingual.py` (poi rimosso) con allineamento **sezione-per-sezione via difflib** su chiave heading language-neutral (numeri/date/emoji/`Step X` + ancora primaria `Stage|Phase|Fase|Step|Fix #N`) e **resync corpo** via ancore inline-code/numeri. Validato con check di adiacenza marker: AVVIO 38/38 e README 26/26 perfetti; TEORIA ha 1 blocco IT-only legittimo (`Perché T=120`, assente nell'EN); MODEL ha la sola sezione IT-only `RESUME 2026-06-04` + Stage 4 con heading `✅ COMPLETATO · 🚧 IN PROGRESS` (l'EN era stale, drift pre-esistente reso esplicito).
+- **Metodo:** script one-shot `_merge_bilingual.py` (mai committato, rimosso dopo l'uso — NON cercarlo su disco) con allineamento **sezione-per-sezione via difflib** su chiave heading language-neutral (numeri/date/emoji/`Step X` + ancora primaria `Stage|Phase|Fase|Step|Fix #N`) e **resync corpo** via ancore inline-code/numeri. Validato con check di adiacenza marker: AVVIO 38/38 e README 26/26 perfetti; TEORIA ha 1 blocco IT-only legittimo (`Perché T=120`, assente nell'EN); MODEL ha la sola sezione IT-only `RESUME 2026-06-04` + Stage 4 con heading `✅ COMPLETATO · 🚧 IN PROGRESS` (l'EN era stale, drift pre-esistente reso esplicito).
 - **Doc-convention aggiornata in `CLAUDE.md`** (direttiva #2 + nomenclatura): single-file bilingue, NON ricreare i gemelli.
 - ⚠ **Drift residuo da sanare (non bloccante):** l'EN di alcune sezioni era più vecchio dell'IT (evidente in `MODEL_IMPROVEMENTS` Stage 4). Ora visibile nello stesso file → riallineare le due lingue alla prossima modifica di quelle sezioni.
 
@@ -680,9 +680,18 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 - **Fix cp1252 in `scripts/02_train.py`** (3ª occorrenza, aveva causato l'exit 1 "failed" del distill in background — il modello era comunque salvato): reconfigure UTF-8 stdout/stderr in `main()`.
 - Recon roadmap A1 (2 subagent): catch-up candele + meccanismo funding. FundingRatePoller (Stage 4.4) resta come miglioria minore (funding cambia ogni 8h, ffill'd → workaround adeguato).
 - **B2 esplorato e CHIUSO negativo (2 step de-risk):**
-  - **Step 0** (`scripts/dev_step0_regime_sigma.py`, no-training): la mixture-of-universes (σ regime-condizionata) **accantonata** — aggiunge solo +0.0155 nats sopra una ricalibrazione σ globale; R1 Trend resta NLL 2.05 con σ-oracolo = μ-error irriducibile. MA ha scoperto che **σ è ~3× troppo grande** (std(z)=0.37/0.665/0.41, scale globale ottimo 0.33).
+  - **Step 0** (`scripts/archive/dev_step0_regime_sigma.py`, no-training): la mixture-of-universes (σ regime-condizionata) **accantonata** — aggiunge solo +0.0155 nats sopra una ricalibrazione σ globale; R1 Trend resta NLL 2.05 con σ-oracolo = μ-error irriducibile. MA ha scoperto che **σ è ~3× troppo grande** (std(z)=0.37/0.665/0.41, scale globale ottimo 0.33).
   - **Step 0.5** (flag `QUANTSYS_SIGMA_SCALE` in `03_backtest.py`, sweep val): ricalibrare σ verso il basso **peggiora monotonicamente** il backtest (return 4.03%→1.33%, PF 1.88→1.16). La σ larga disabilita di fatto gli stop → hold-to-horizon, migliore per edge debole. **NLL-calibrazione e PnL in conflitto; ottimo trading ≈1.0.** Flag inerte.
   - **Bilancio:** tutti i lever model/backtest-side sono esauriti (distill, ensemble, pesi, rank-harvest, mixture, σ-recal). Restano solo **A (paper-trading = verità forward, pronto)** e **B1 (order-book L2 = informazione nuova, progetto-dati a sé, accantonato)**.
+
+---
+
+# 📚 STORICO ESPERIMENTI · EXPERIMENT LOG (≤ 2026-06-05) — superato, kill-record conservati
+
+> 🇮🇹 Da qui in giù = log archiviato delle sessioni più vecchie (BLOCKER #1, Tier-1 rank-harvest, edge Quiet). **Tutto già superato** dalle sessioni in cima; conservato integralmente perché contiene i **kill-record** (esiti negativi pre-registrati = vaccino anti re-test). ⚠ L'**azione di ripartenza CORRENTE è in cima al file** (sessione più recente), NON le "Azione esatta da cui ripartire" qui sotto, che sono storiche/2026-06-06.
+> **EN** Below this line = archived log of the oldest sessions (BLOCKER #1, Tier-1 rank-harvest, Quiet edge). **All superseded** by the sessions at the top; kept verbatim for the **kill-records** (pre-registered negative outcomes). ⚠ The **current restart action is at the TOP of the file**, NOT the historical "restart action" entries below (dated 2026-06-06).
+
+---
 
 ## 🕒 2026-06-05 (BLOCKER #1 Stage 5 CHIUSO + Tier-1 rank esaurito)
 
@@ -756,7 +765,7 @@ Confronto su `QUANTSYS_BACKTEST_SPLIT=val`, ensemble eterogeneo 3 archi, `cadenc
 2. **BLOCKER #1 (live) — RISOLTO 2026-06-05 (parity codice chiusa).** Resta solo il residuo OPERATIVO: smoke test live via WS Binance reale (Stage 4.10, non eseguito in questa sessione — richiede connessione) + avvio paper-trading. ⚠ I segnali ora riflettono il backtest, ma **il backtest è negativo OOS** (l'edge a soglia/rank è esaurito): il paper-trading serve ad accumulare trade reali, non c'è aspettativa di Sharpe>0 a priori.
 3. **`dashboard_results.json`/`metrics.json` di `models/itransformer`** restano dell'ultima run di **test** (production); i nuovi file `*_val.*` sono separati. Se serve uno stato test production-clean fresco, rilanciare il backtest senza env sperimentali (comando sotto).
 
-## ▶️ Azione esatta da cui ripartire
+## ▶️ Azione esatta da cui ripartire — STORICA 2026-06-06 (SUPERATA: l'azione corrente è in cima al file)
 
 **STATO al 2026-06-06: TUTTI i lever model/backtest-side esauriti e dimostrati negativi OOS** (distill≡baseline, ensemble corr 0.995, pesi dinamici anti-correlano, rank-harvest fallito, mixture-of-universes non vale, ricalibrazione σ peggiora). L'infrastruttura è SOLIDA: BLOCKER #1 chiuso (parity bit-perfect), live engine robusto (catch-up A1.1, smoke test superato, 3 cp1252 fixati), `run_all.py` aggiornato (`--arch`→5 / `--distill`→1). **Non restano tweak di modello con prior non-nullo.**
 

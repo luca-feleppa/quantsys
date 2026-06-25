@@ -1,6 +1,71 @@
 # QUANTSYS — Changelog
 
-## Iterazione 10 — Dashboard: fix definitivo rendering — asse category (causa: asse lineare corrotto al re-render dopo display:none) (corrente, 2026-06-24)
+🇮🇹 Ordine cronologico inverso (la voce più recente in alto). Le "Iterazioni" 1-10 sono il blocco direzionale storico (1m); dal pivot 1h in poi le voci sono datate per sessione e tracciate in dettaglio in `STATUS.md` (lab notebook append-only). Questo file riassume i milestone; `STATUS.md` è la fonte canonica.
+
+**EN** Reverse chronological order (newest on top). "Iterations" 1-10 are the historical directional block (1m); from the 1h pivot onward entries are dated per session and tracked in detail in `STATUS.md` (append-only lab notebook). This file summarizes milestones; `STATUS.md` is the canonical source.
+
+---
+
+## 2026-06-25 — Short-vol arm: backtest storico strutturale FHS GJR-GARCH + validazione premio · Short-vol arm: structural historical backtest
+
+🇮🇹 Secondo braccio della linea vol (short-vol systematic). Backtest strutturale su 7 anni di candele orarie (`scripts/vol/short_vol_hist_backtest.py`): payoff REALE dalle candele (code incluse), premio = fair-value fat-tailed FHS su GJR-GARCH(1,1) × (1+VRP), VRP swept, tutto CAUSALE (refit expanding 90gg, no lookahead). Risultato (n=2538 scadenze daily 08:00 UTC): break-even VRP = **0% per tutte le strutture** → il PnL medio positivo è la raccolta del VRP storico (realized 30h < implied). Strangle 8-10% = struttura tail-safe (hit 97-98%, maxDD −0.33 BTC, Calmar 33.8). Validazione premio (`short_vol_premium_validate.py`): FHS/mark mediano 1.05×, edge sopravvive all'haircut bid 16%. Decomposizione regime/anno (`short_vol_regime_decomp.py`): edge concentrato nell'alta-vol (2020+2021 = 90% del PnL), always-short, NON filtrare il regime. **NON è un PASS del gate** (resta il live n≥20). Vedi `STATUS.md` 2026-06-25.
+
+**EN** Second arm of the vol line (systematic short-vol). Structural backtest over 7 years of hourly candles (`scripts/vol/short_vol_hist_backtest.py`): REAL payoff from candles (tails included), premium = fat-tailed FHS fair-value on GJR-GARCH(1,1) × (1+VRP), VRP swept, fully CAUSAL (90d expanding refit, no lookahead). Result (n=2538 daily 08:00 UTC expiries): break-even VRP = **0% for all structures** → positive mean PnL is the historical VRP harvest (realized 30h < implied). Strangle 8-10% = tail-safe structure (hit 97-98%, maxDD −0.33 BTC, Calmar 33.8). Premium validation (`short_vol_premium_validate.py`): median FHS/mark 1.05×, edge survives the 16% bid haircut. Regime/year decomposition (`short_vol_regime_decomp.py`): edge concentrated in high-vol (2020+2021 = 90% of PnL), always-short, do NOT filter regime. **NOT a gate PASS** (the live n≥20 gate stands). See `STATUS.md` 2026-06-25.
+
+---
+
+## 2026-06-24 — IVS relative-value → KILL net-of-cost · IVS relative-value → KILL net-of-cost
+
+🇮🇹 Probe smile-reversal Deribit (`scripts/vol/ivs_scout.py` + `scripts/vol/ivs_rv_backtest.py`): struttura reale (i residui dello smile revertono, autocorr 0.77) MA netto **−2.3/−3.8 vol-pt/leg** (gross +0.01/+0.04 vs costo round-trip 2.3/3.9 → ~50× sotto lo spread). Morta come price-taker; vivrebbe solo da market-maker. Tetto **economico**, non di dati.
+
+**EN** Deribit smile-reversal probe (`scripts/vol/ivs_scout.py` + `scripts/vol/ivs_rv_backtest.py`): real structure (smile residuals revert, autocorr 0.77) BUT net **−2.3/−3.8 vol-pt/leg** (gross +0.01/+0.04 vs round-trip cost 2.3/3.9 → ~50× below the spread). Dead as a price-taker; would only live as a market-maker. **Economic** ceiling, not a data one.
+
+---
+
+## 2026-06-22 — Robustezza vol: purged k-fold + gate HAR-per-fold + diversità cross-arch · Vol robustness
+
+🇮🇹 Conferma OOS della linea vol oltre il single-split. Purged k-fold QLIKE per arch (`scripts/02b_walkforward_validate.py`, embargo 168h) + baseline HAR fit-per-fold (`scripts/vol/wf_har_baseline.py`, helper in `quantsys/model/vol_metrics.py`): TCN+Mamba batte HAR di ~14% OOS (ratio 0.863, 4/5 fold), tutti gli archi falliscono solo il fold più antico data-starved (strutturale). Kill-check diversità cross-arch sugli errori vol (`scripts/vol/step0_xarch_corr.py`): ρ_err medio 0.83 (vs ≈0.995 direzionale) → la diversità è anch'essa un oggetto pari-specifico. Numeri in `docs/paper/RESULTS_MAP.md` CLAIM 2b/2c.
+
+**EN** OOS confirmation of the vol line beyond the single split. Purged k-fold QLIKE per arch (`scripts/02b_walkforward_validate.py`, 168h embargo) + HAR fit-per-fold baseline (`scripts/vol/wf_har_baseline.py`, helpers in `quantsys/model/vol_metrics.py`): TCN+Mamba beats HAR by ~14% OOS (ratio 0.863, 4/5 folds), all archs fail only the oldest data-starved fold (structural). Cross-arch error-diversity kill-check (`scripts/vol/step0_xarch_corr.py`): mean ρ_err 0.83 (vs ≈0.995 directional) → diversity is itself an even-moment-specific object. Numbers in `docs/paper/RESULTS_MAP.md` CLAIM 2b/2c.
+
+---
+
+## 2026-06-12 — Riorientamento vol-1h + paper "Are price and volume enough?" · Vol-1h reorientation + paper
+
+🇮🇹 Lo stato production diventa la linea vol-1h (`models/itransformer/` = PASS vol-1h, `target_type: log_rv`). Aggiunte le baseline econometriche direzionali come negative-control del paper (`scripts/research/paper_01_dir_baselines.py`): nessuna skill coerente, ρ flippano segno val→test come il NN → il risultato è dell'informazione, non del modello. Cleanup disco ~4.7 GB (dataset/modelli 1m rigenerabili). Documenti paper avviati: `docs/paper/OUTLINE.md`, `docs/paper/RESULTS_MAP.md`. Riorganizzazione script per-linea in sottocartelle (`vol/`, `research/`, `archive/`): mappa in `scripts/README.md`.
+
+**EN** Production state becomes the vol-1h line (`models/itransformer/` = vol-1h PASS, `target_type: log_rv`). Added directional econometric baselines as the paper's negative-control (`scripts/research/paper_01_dir_baselines.py`): no coherent skill, ρ sign-flip val→test like the NN → the result is about information, not the model. ~4.7 GB disk cleanup (regenerable 1m dataset/models). Paper documents started: `docs/paper/OUTLINE.md`, `docs/paper/RESULTS_MAP.md`. Per-line script reorg into subfolders (`vol/`, `research/`, `archive/`): map in `scripts/README.md`.
+
+---
+
+## 2026-06-11 — Probe semivarianza firmata → FAIL · Signed semivariance probe → FAIL
+
+🇮🇹 Target `log(RS⁺/RS⁻)` fwd (signed jump variation, Patton–Sheppard; giudice `scripts/vol/dev_vols_rs_judge.py`): su test NN/HAR-RS MSE 0.9952 (gate ≤0.95), signDA 0.459, e HAR-RS fa peggio della costante → **l'asimmetria è impredicibile per tutti**. Sintesi chiave: i momenti PARI generalizzano OOS, i momenti DISPARI no. Filone HD-firmato chiuso.
+
+**EN** Forward `log(RS⁺/RS⁻)` target (signed jump variation, Patton–Sheppard; judge `scripts/vol/dev_vols_rs_judge.py`): on test NN/HAR-RS MSE 0.9952 (gate ≤0.95), signDA 0.459, and HAR-RS underperforms the constant → **asymmetry is unpredictable for everyone**. Key synthesis: EVEN moments generalize OOS, ODD moments do not. Signed-HD line closed.
+
+---
+
+## 2026-06-10 — VOL-S PASS + pivot 1m→1h KILLED · VOL-S PASS + 1m→1h pivot KILLED
+
+🇮🇹 **VOL-S PASS (B2 positiva):** target `features.target_type: log_rv`, il NN batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive 0.807), val→test coerenti (l'anti-correlazione è specifica del target direzionale). Giudice `scripts/vol/dev_vols_qlike.py`. Verifica cross-risoluzione 1m: FAIL su val (NN/HAR 1.013) → edge vol SPECIFICO della risoluzione 1h. **Pivot 1h KILLED:** il 1h sfonda il muro dei costi (|μ|≈43bps ≫ 26bps) ma NON c'è skill direzionale OOS, anti-correlazione val→test confermata anche a 1h, gate 4/4 fallito a 13 E 23 bps → filone "stesso metodo, altro timeframe" chiuso.
+
+**EN** **VOL-S PASS (B2 positive):** target `features.target_type: log_rv`, the NN beats HAR-RV by **30% in QLIKE on test** (0.257 vs 0.368; naive 0.807), val→test coherent (the anti-correlation is specific to the directional target). Judge `scripts/vol/dev_vols_qlike.py`. 1m cross-resolution check: FAIL on val (NN/HAR 1.013) → the vol edge is SPECIFIC to 1h resolution. **1h pivot KILLED:** 1h breaks the cost wall (|μ|≈43bps ≫ 26bps) but there is NO directional OOS skill, val→test anti-correlation confirmed also at 1h, gate 4/4 failed at both 13 and 23 bps → the "same method, other timeframe" line is closed.
+
+---
+
+## 2026-06-05 — BLOCKER #1 (live parity) risolto · BLOCKER #1 (live parity) resolved
+
+🇮🇹 Path live = `LiveCandleBuffer`(50k) → `FeatureAssembler` → `FeatureBuilder.build(fit=False)` (104 canoniche) → `LiveEngine._deterministic_predict` → `denormalize_predictions` → `SignalGenerator`. Parity feature E segnale bit-perfect (`tests/test_live_training_parity.py`; replay `scripts/99_replay_live_vs_training.py`: Δfeature=0, Δμ=Δσ=0). Residuo operativo: smoke WS + paper-trading. (Backtest direzionale negativo OOS — vedi sopra.)
+
+**EN** Live path = `LiveCandleBuffer`(50k) → `FeatureAssembler` → `FeatureBuilder.build(fit=False)` (104 canonical) → `LiveEngine._deterministic_predict` → `denormalize_predictions` → `SignalGenerator`. Feature AND signal parity bit-perfect (`tests/test_live_training_parity.py`; replay `scripts/99_replay_live_vs_training.py`: Δfeature=0, Δμ=Δσ=0). Operational residue: WS smoke + paper-trading. (Directional backtest negative OOS — see above.)
+
+---
+
+> 🇮🇹 **Blocco storico — linea direzionale 1m (Iterazioni 1-10).** Conservato come record: l'alpha direzionale 1m non sopravvive OOS (vedi voci 2026-06 sopra), ma le iterazioni di pipeline/fix restano il fondamento del motore condiviso.
+> **EN** **Historical block — directional 1m line (Iterations 1-10).** Kept as record: the 1m directional alpha does not survive OOS (see the 2026-06 entries above), but the pipeline/fix iterations remain the foundation of the shared engine.
+
+## Iterazione 10 — Dashboard: fix definitivo rendering — asse category (causa: asse lineare corrotto al re-render dopo display:none) (2026-06-24)
 
 ### Asse X `type:'category'` su `plot-oi` e `plot-payoff` — `scripts/06_dashboard.py`
 
@@ -327,7 +392,7 @@ Abilitato automaticamente su CUDA (kernel fused → ~30% speedup attention).
 - `non_blocking=True` nei `.to(device)` durante eval
 - Validazione ogni 2 epoche: dimezza il costo eval sul dataset di val
 
-## Iterazione 3 — Fix 5-10 (corrente)
+## Iterazione 3 — Fix 5-10
 
 ### Fix 5 — Logging su file (`quantsys/utils/__init__.py`)
 `setup_logging()` ora aggiunge un `FileHandler` con timestamp nel nome
