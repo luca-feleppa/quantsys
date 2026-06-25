@@ -242,6 +242,7 @@ class RiskManager:
         # EN: Kelly corrected for trade-return autocorrelation (Vince 1992).
         self.autocorr_window  = autocorr_window
         self._recent_trade_returns: list[float] = []
+        self._autocorr_cache: Optional[float] = None  # IT: memo fattore autocorr (A5) | EN: autocorr-factor memo (A5)
         # IT: Barre/anno per annualizzare Sharpe/Sortino (525_600 a 1m, 8_760 a 1h).
         # EN: Bars/year used to annualize Sharpe/Sortino (525_600 at 1m, 8_760 at 1h).
         self.bars_per_year    = bars_per_year
@@ -334,6 +335,16 @@ class RiskManager:
     # IT: Fattore di sconto Kelly per autocorrelazione dei trade returns (Fix 11).
     # EN: Kelly discount factor for trade-return autocorrelation (Fix 11).
     def _autocorr_kelly_factor(self) -> float:
+        # IT: memoizza il fattore: dipende SOLO da _recent_trade_returns, che muta solo a
+        #     close_position → ricalcolarlo ad ogni entry è sprecato (A5). Cache invalidata lì.
+        # EN: memoize the factor: it depends ONLY on _recent_trade_returns, which mutates only at
+        #     close_position → recomputing it per entry is wasted (A5). Cache invalidated there.
+        if self._autocorr_cache is not None:
+            return self._autocorr_cache
+        self._autocorr_cache = self._compute_autocorr_kelly_factor()
+        return self._autocorr_cache
+
+    def _compute_autocorr_kelly_factor(self) -> float:
         """
         Fix 11 — Kelly corretto per autocorrelazione dei trade returns.
 
@@ -594,10 +605,17 @@ class RiskManager:
         # EN: Recovery evaluated ONCE only (avoids race between 2 _size calls).
         self._check_circuit_recovery()
         if self.circuit_breaker or (self.position and self.position.is_open): return None
-        # IT: Pre-size per stimare slippage (sqrt-law dipende da trade_size).
-        # EN: Pre-size to estimate slippage (sqrt-law depends on trade_size).
-        sz_usd_est, _ = self._size(dist, price, atr, side=side)
-        slip_rate = self._compute_slippage(price, sz_usd_est, adv_1m)
+        # IT: Solo lo slippage "sqrt" (Almgren-Chriss) dipende da trade_size → richiede il pre-size.
+        #     Il modello "fixed" (default) è size-independent → salta la pre-size, niente _size 2× (A4).
+        #     Bit-identico: in tutti i casi non-sqrt _compute_slippage ritorna comunque self.slip.
+        # EN: Only "sqrt" slippage (Almgren-Chriss) depends on trade_size → needs the pre-size.
+        #     "fixed" (default) is size-independent → skip pre-size, no double _size (A4).
+        #     Bit-identical: in every non-sqrt case _compute_slippage returns self.slip anyway.
+        if self.slip_model == "sqrt" and adv_1m > 0.0:
+            sz_usd_est, _ = self._size(dist, price, atr, side=side)
+            slip_rate = self._compute_slippage(price, sz_usd_est, adv_1m)
+        else:
+            slip_rate = self._compute_slippage(price, 0.0, adv_1m)
         exec_p = price + price*slip_rate*(1 if side==Side.LONG else -1)
         sz_usd, sz_base = self._size(dist, exec_p, atr, side=side)
         if sz_usd < 10: return None
@@ -700,6 +718,7 @@ class RiskManager:
         self._recent_trade_returns.append(trade.pnl_pct)
         if len(self._recent_trade_returns) > self.autocorr_window * 2:
             self._recent_trade_returns = self._recent_trade_returns[-self.autocorr_window:]
+        self._autocorr_cache = None  # IT: invalida la memo: lo storico è cambiato (A5) | EN: invalidate memo: history changed (A5)
         return trade
 
     # ── Metrics ───────────────────────────────────────────────────────────────

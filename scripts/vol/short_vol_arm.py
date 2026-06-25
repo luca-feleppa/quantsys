@@ -26,6 +26,9 @@ import numpy as np
 import pandas as pd
 import urllib.request
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _chain_io import load_chain  # noqa: E402  (loader chain condiviso, A3 | shared chain loader)
+
 ROOT = Path(__file__).resolve().parents[2]
 CHAIN_DIR = ROOT / "data" / "iv" / "chain"
 FC_PATH = ROOT / "results" / "vol_paper" / "forecasts.parquet"
@@ -62,16 +65,6 @@ def fetch_delivery(date_key: str, cache: dict) -> float | None:
     except Exception as e:
         print(f"  ! delivery fetch fail {date_key}: {e}")
         return None
-
-
-def load_chain() -> pd.DataFrame:
-    files = sorted(CHAIN_DIR.glob("*.parquet"))
-    if not files:
-        sys.exit("no chain parquet in data/iv/chain")
-    df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
-    df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"], utc=True)
-    df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
-    return df
 
 
 def settle_payoff(opt_type: str, K: float, S_del: float) -> float:

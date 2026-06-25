@@ -216,8 +216,10 @@ class FeatureBuilder:
         df["typical_price"] = (df["high"] + df["low"] + df["close"]) / 3
         df["pv"]            = df["typical_price"] * df["volume"]
         df["date_utc"]      = df["open_time"].dt.date
-        df["cum_pv"]        = df.groupby("date_utc")["pv"].cumsum()
-        df["cum_vol"]       = df.groupby("date_utc")["volume"].cumsum()
+        # IT: un solo groupby (una factorization) per entrambe le cumsum (A8). | EN: single groupby for both cumsums (A8).
+        _g = df.groupby("date_utc")
+        df["cum_pv"]        = _g["pv"].cumsum()
+        df["cum_vol"]       = _g["volume"].cumsum()
         df["vwap"]          = df["cum_pv"] / df["cum_vol"].replace(0, np.nan)
         df["vwap_dev"]      = (df["close"] - df["vwap"]) / df["vwap"]
         for w in [20, 60]:
@@ -438,13 +440,18 @@ class FeatureBuilder:
           vwap_ret_skew   Asimmetria dei rendimenti pesata per volume (pressione)
         """
         hl = (df["high"] - df["low"]).replace(0, np.nan)
+        # IT: fillna(1) una volta sola + max/min open-close vettoriali (ufunc), non sub-frame (A12).
+        # EN: fillna(1) once + vectorized open-close max/min (ufunc), not a sub-frame reduce (A12).
+        hl_f   = hl.fillna(1)
+        oc_max = np.maximum(df["open"], df["close"])
+        oc_min = np.minimum(df["open"], df["close"])
 
         # ── Candle anatomy (zero-lag microstructure) | Anatomia candela (zero-lag)
-        df["body_ratio"]    = (df["close"] - df["open"]).abs() / hl.fillna(1)
-        df["upper_shadow"]  = (df["high"] - df[["open","close"]].max(axis=1)) / hl.fillna(1)
-        df["lower_shadow"]  = (df[["open","close"]].min(axis=1) - df["low"])   / hl.fillna(1)
+        df["body_ratio"]    = (df["close"] - df["open"]).abs() / hl_f
+        df["upper_shadow"]  = (df["high"] - oc_max) / hl_f
+        df["lower_shadow"]  = (oc_min - df["low"])  / hl_f
         df["close_vs_open"] = (df["close"] - df["open"]) / df["open"].replace(0, np.nan)
-        df["intraday_pos"]  = (df["close"] - df["low"])  / hl.fillna(1)
+        df["intraday_pos"]  = (df["close"] - df["low"])  / hl_f
 
         # ── Velocity & acceleration | Velocità e accelerazione del prezzo ────
         velocity             = df["close"].diff(3) / 3 / df["close"].shift(3).replace(0, np.nan)

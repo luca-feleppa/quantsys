@@ -158,8 +158,21 @@ def fee_btc(leg_premium):
 # ─────────────────────────────────────────────────────────────────────────────
 # Backtest
 # ─────────────────────────────────────────────────────────────────────────────
-def run(width, struct, n_paths, refit_days, min_train, seed):
-    rng = np.random.default_rng(seed)
+# IT: cache della serie causale: dipende SOLO da (refit_days, min_train) → identica tra le config
+#     (struct/width) → evita di ri-rifittare il GARCH 7-anni N volte (A1 della code review).
+# EN: causal-series cache: depends ONLY on (refit_days, min_train) → identical across configs
+#     (struct/width) → avoids re-fitting the 7y GARCH N times (review item A1).
+_CAUSAL_CACHE = {}
+
+
+def precompute_causal(refit_days, min_train):
+    # IT: calcola UNA volta candele, log-ret, σ_t e residui z_t CAUSALI + indici scadenza.
+    #     Pesante (refit GJR expanding) ma indipendente da struct/width → cache-abile.
+    # EN: computes ONCE candles, log-ret, causal σ_t and residuals z_t + expiry indices.
+    #     Heavy (expanding GJR refit) but independent of struct/width → cacheable.
+    key = (refit_days, min_train)
+    if key in _CAUSAL_CACHE:
+        return _CAUSAL_CACHE[key]
     df = pd.read_parquet(CANDLES)[["open_time", "close"]].copy()
     df["open_time"] = pd.to_datetime(df["open_time"], utc=True)
     df = df.sort_values("open_time").reset_index(drop=True)
@@ -170,8 +183,7 @@ def run(width, struct, n_paths, refit_days, min_train, seed):
 
     # IT: indici delle barre 08:00 UTC = scadenze daily; entry = TENOR_H barre prima.
     # EN: indices of 08:00-UTC bars = daily expiries; entry = TENOR_H bars earlier.
-    is_exp = (times.dt.hour == EXPIRY_HOUR).to_numpy()
-    exp_idx = np.where(is_exp)[0]
+    exp_idx = np.where((times.dt.hour == EXPIRY_HOUR).to_numpy())[0]
 
     # IT: σ_t e residui standardizzati z_t CAUSALI: refit params ogni refit_days su finestra
     #     espandente, propaga la recursion in avanti coi params correnti (no look-ahead).
@@ -203,8 +215,22 @@ def run(width, struct, n_paths, refit_days, min_train, seed):
             sig[t] = np.sqrt(max(v, 1e-12))
     z = np.where(np.isfinite(sig) & (sig > 0), r / sig, np.nan)  # residui standardizzati | std residuals
 
+    pre = {"times": times, "close": close, "sig": sig, "z": z,
+           "params_at": params_at, "exp_idx": exp_idx, "min_train": min_train}
+    _CAUSAL_CACHE[key] = pre
+    return pre
+
+
+def price_trades(pre, width, struct, n_paths, rng):
+    # IT: prezza le scadenze su una serie causale GIÀ calcolata (varia solo strike/FHS-pricing).
+    #     rng resta PER-CONFIG (passato dal chiamante) → path FHS bit-identici al comportamento legacy.
+    # EN: prices expiries on an ALREADY-computed causal series (only strike/FHS-pricing vary).
+    #     rng stays PER-CONFIG (caller-supplied) → FHS paths bit-identical to legacy behaviour.
+    times, close = pre["times"], pre["close"]
+    sig, z, params_at = pre["sig"], pre["z"], pre["params_at"]
+    min_train = pre["min_train"]
     trades = []
-    for ei in exp_idx:
+    for ei in pre["exp_idx"]:
         entry = ei - TENOR_H
         if entry < min_train or not np.isfinite(sig[entry]):
             continue
@@ -226,8 +252,14 @@ def run(width, struct, n_paths, refit_days, min_train, seed):
         trades.append({"t_entry": times.iloc[entry].isoformat(), "spot": spot, "S_del": S_del,
                        "fair_value": fv, "realized_payoff": rp,
                        "moved_pct": 100 * (S_del / spot - 1), "sig_entry": float(sig[entry])})
-
     return pd.DataFrame(trades)
+
+
+def run(width, struct, n_paths, refit_days, min_train, seed):
+    # IT: wrapper retro-compatibile: precompute (cache) + pricing per-config. | EN: back-compat wrapper.
+    rng = np.random.default_rng(seed)
+    pre = precompute_causal(refit_days, min_train)
+    return price_trades(pre, width, struct, n_paths, rng)
 
 
 def vrp_table(tr, struct, width):
@@ -238,8 +270,8 @@ def vrp_table(tr, struct, width):
     rp = tr["realized_payoff"].to_numpy()
     for vrp in VRP_GRID:
         prem = fv * (1.0 + vrp)
-        # IT: fee su 2 leg ≈ premio/2 ciascuna (cap 12.5%) | EN: fee on 2 legs ≈ premium/2 each (12.5% cap)
-        fees = np.array([2 * fee_btc(p / 2) for p in prem])
+        # IT: fee su 2 leg ≈ premio/2 ciascuna (cap 12.5%), vettoriale | EN: fee on 2 legs ≈ premium/2 each (12.5% cap), vectorized
+        fees = 2.0 * np.minimum(FEE_PER_LEG, FEE_CAP_FRAC * np.maximum(prem / 2.0, 0.0))
         pnl = prem - rp - fees
         mean, sd = float(pnl.mean()), float(pnl.std(ddof=1)) if len(pnl) > 1 else 0.0
         sharpe = float(mean / sd * np.sqrt(ANNUAL_BARS / TENOR_H)) if sd > 0 else 0.0

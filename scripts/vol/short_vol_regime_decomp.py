@@ -33,7 +33,9 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from short_vol_hist_backtest import run, fee_btc, TENOR_H, ANNUAL_BARS  # noqa: E402
+from short_vol_hist_backtest import (  # noqa: E402
+    precompute_causal, price_trades, TENOR_H, ANNUAL_BARS, FEE_PER_LEG, FEE_CAP_FRAC,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 REGIME = ROOT / "data" / "regime_probs.parquet"
@@ -50,7 +52,8 @@ def pnl_series(tr, struct, vrp, haircut):
     # EN: per-trade NET-of-bid PnL (BTC). premium received = fair_value·(1+VRP)·(1−haircut);
     #     fee on 2 legs ≈ premium/2 each (12.5% cap). PnL = premium − real_payoff − fee.
     prem = tr["fair_value"].to_numpy() * (1.0 + vrp) * (1.0 - haircut)
-    fees = np.array([2 * fee_btc(p / 2) for p in prem])
+    # IT: fee 2 leg ≈ premio/2 (cap 12.5%), vettoriale | EN: 2-leg fee ≈ premium/2 (12.5% cap), vectorized
+    fees = 2.0 * np.minimum(FEE_PER_LEG, FEE_CAP_FRAC * np.maximum(prem / 2.0, 0.0))
     return prem - tr["realized_payoff"].to_numpy() - fees
 
 
@@ -110,9 +113,14 @@ def main():
           f"strangle {BID_HAIRCUT['strangle']:.1%} | n_paths={args.n_paths}\n")
 
     report = {"meta": {"vrp": args.vrp, "bid_haircut": BID_HAIRCUT}, "configs": []}
+    # IT: serie causale GARCH calcolata UNA volta, riusata dalle 3 config (A1). rng fresco per-config
+    #     → path FHS bit-identici al comportamento legacy (un run() separato per config).
+    # EN: causal GARCH series computed ONCE, reused by the 3 configs (A1). Fresh per-config rng
+    #     → FHS paths bit-identical to legacy (one separate run() per config).
+    pre = precompute_causal(args.refit_days, 24 * 180)
     for struct, w in configs:
         tag = f"strangle {w:.0%}" if struct == "strangle" else "straddle ATM"
-        tr = run(w, struct, args.n_paths, args.refit_days, 24 * 180, 42)
+        tr = price_trades(pre, w, struct, args.n_paths, np.random.default_rng(42))
         hc = BID_HAIRCUT[struct]
         tr["pnl"] = pnl_series(tr, struct, args.vrp, hc)
         m = tag_regime(tr)

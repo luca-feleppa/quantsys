@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from short_vol_hist_backtest import (  # noqa: E402  (riuso kernel identico al backtest | reuse identical kernel)
     fit_gjr, fhs_fair_value, TENOR_H, EXPIRY_HOUR,
 )
+from _chain_io import load_chain  # noqa: E402  (loader chain condiviso, A3 | shared chain loader)
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDLES = ROOT / "data" / "raw_candles.parquet"
@@ -42,16 +43,6 @@ CHAIN_DIR = ROOT / "data" / "iv" / "chain"
 OUT = ROOT / "results" / "vols" / "short_vol_premium_validate.json"
 ENTRY_TOL_H = 6.0
 N_PATHS = 6000
-
-
-def load_chain():
-    files = sorted(CHAIN_DIR.glob("*.parquet"))
-    if not files:
-        sys.exit("no chain parquet in data/iv/chain")
-    df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
-    df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"], utc=True)
-    df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
-    return df
 
 
 def pick_leg(snap, opt_type, target_K):

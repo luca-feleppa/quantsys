@@ -27,7 +27,7 @@
 
 | Cartella / Folder | Contenuto / Content | Linea / Line |
 |---|---|---|
-| `vol/` | `dev_vols_macro_append.py` (ri-appende X_macro), `dev_vols_qlike.py` (giudice QLIKE vs HAR-RV), `dev_vols_rs_judge.py` (giudice MSE semivarianza), `step0_xarch_corr.py` (STEP 0 kill-check correlazione cross-arch), `wf_har_baseline.py` (baseline HAR per-fold del walk-forward) | **vol** |
+| `vol/` | **Forecasting/giudici:** `dev_vols_macro_append.py` (ri-appende X_macro), `dev_vols_qlike.py` (giudice QLIKE vs HAR-RV), `dev_vols_rs_judge.py` (giudice MSE semivarianza), `step0_xarch_corr.py` (STEP 0 kill-check correlazione cross-arch), `wf_har_baseline.py` (baseline HAR per-fold del walk-forward). **Short-vol arm:** `short_vol_arm.py` (sim offline forward test), `short_vol_hist_backtest.py` (backtest storico strutturale FHS-GJR-GARCH 2019→2026), `short_vol_premium_validate.py` (robustness del premio VRP), `short_vol_regime_decomp.py` (decomposizione regime/anno + equity/drawdown). **IVS relative-value:** `ivs_scout.py` (scouting smile IV Deribit), `ivs_rv_backtest.py` (backtest net-of-cost reversione residui smile — KILL). **Helper condiviso:** `_chain_io.py` (lettura option-chain `data/iv/chain/` con cache LRU). | **vol** |
 | `research/` | `paper_01_dir_baselines.py` (baseline econometriche direzionali = negative-control del paper) | direzionale / paper |
 | `archive/` | probe chiusi: `xs_*` (cross-sectional KILL), `dev_step0_regime_sigma.py` | morti / dead |
 

@@ -91,10 +91,13 @@ def residuals_at(snap: pd.DataFrame) -> pd.DataFrame:
         g["half_volpt"] = half_price / vega_per_volpt   # half-spread in vol-pt
         # IT: scarta i low-vega non tradabili su IV (half-spread esploso) | EN: drop untradeable low-vega legs
         g = g[g["half_volpt"] <= HALF_CAP]
-        for _, r in g.iterrows():
-            out.append({"hour": hour, "inst": r["instrument_name"],
-                        "resid": float(r["resid"]), "half_volpt": float(r["half_volpt"])})
-    return pd.DataFrame(out)
+        # IT: costruzione colonnare invece di iterrows (A2) — stessi valori. | EN: columnar build, not iterrows (A2).
+        out.append(pd.DataFrame({"hour": hour, "inst": g["instrument_name"].to_numpy(),
+                                 "resid": g["resid"].to_numpy(float),
+                                 "half_volpt": g["half_volpt"].to_numpy(float)}))
+    if not out:
+        return pd.DataFrame(columns=["hour", "inst", "resid", "half_volpt"])
+    return pd.concat(out, ignore_index=True)
 
 
 def main():
@@ -126,15 +129,22 @@ def main():
                     continue                  # buco di copertura → salta | coverage gap → skip
                 e0, e1 = by_hour[h0], by_hour[h1]
                 common = e0.index.intersection(e1.index)
-                for inst in common:
-                    r0 = e0.at[inst, "resid"]
-                    if abs(r0) <= TH:
-                        continue
-                    r1 = e1.at[inst, "resid"]
-                    gross = np.sign(r0) * (r0 - r1)            # reversione del residuo (vol-pt)
-                    cost = 2.0 * e0.at[inst, "half_volpt"]     # round-trip half-spread
-                    legs_gross.append(gross)
-                    legs_net.append(gross - cost)
+                if len(common) == 0:
+                    continue
+                # IT: lookup vettoriale .loc[common] invece di .at[inst] in loop (A2) — bit-identico,
+                #     stessa soglia |r0|>TH, stessi gross/cost; mean/sum/std sono order-invariant.
+                # EN: vectorized .loc[common] instead of per-inst .at[] (A2) — bit-identical, same
+                #     |r0|>TH filter, same gross/cost; mean/sum/std are order-invariant.
+                r0 = e0.loc[common, "resid"].to_numpy()
+                r1 = e1.loc[common, "resid"].to_numpy()
+                hv = e0.loc[common, "half_volpt"].to_numpy()
+                sel = np.abs(r0) > TH                          # reversione del residuo (vol-pt)
+                if not sel.any():
+                    continue
+                gross = np.sign(r0[sel]) * (r0[sel] - r1[sel])
+                cost = 2.0 * hv[sel]                           # round-trip half-spread
+                legs_gross.extend(gross.tolist())
+                legs_net.extend((gross - cost).tolist())
             n = len(legs_net)
             if n < 10:
                 continue

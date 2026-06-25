@@ -5,6 +5,7 @@ paginazione automatica e rispetto del rate limit weight-based di Binance.
 Fallback a requests puro se python-binance non è installato.
 """
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -422,7 +423,6 @@ async def stream_klines(
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
                 async for msg in ws:
-                    import json
                     data = json.loads(msg)
                     if "k" in data:
                         if asyncio.iscoroutinefunction(callback):

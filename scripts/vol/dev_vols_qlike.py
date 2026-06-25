@@ -103,7 +103,7 @@ def main():
     rv_h = lr2.rolling(h).sum()                      # IT: RV trailing su h barre | EN: trailing h-bar RV
     rv_w = lr2.rolling(7 * bars_day).sum() / 7       # IT: media giornaliera su 7gg | EN: 7d daily mean
     rv_m = lr2.rolling(30 * bars_day).sum() / 30     # IT: media giornaliera su 30gg | EN: 30d daily mean
-    rv_fwd = lr2.rolling(h).sum().shift(-h)          # IT/EN: target (stessa formula del FeatureBuilder)
+    rv_fwd = rv_h.shift(-h)                          # IT/EN: target = rolling già calcolato, shiftato (A-minor)
 
     har = pd.DataFrame({
         "open_time": raw["open_time"],

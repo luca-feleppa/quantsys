@@ -34,6 +34,19 @@ Altri filoni: (a) gate live short-vol n≥20 (~metà luglio), struttura = strang
 
 ---
 
+## 🔧 BACKLOG B-FIXES (code review 2026-06-25, fan-out 4 subagent) — RISCHIO, fare la prossima volta con test numerico
+
+> Ottimizzazioni ad alto impatto che **cambiano i bit** → NON [SAFE]: ognuna richiede golden test / confronto output bit-contro-bit PRIMA di promuovere. I fix [SAFE] (batch A) sono stati applicati questa sessione. La review completa ha confermato causalità e invarianti INTATTI ovunque (nessun lookahead). DA NON TOCCARE: `tcn_mamba.py` chunked scan (FP32 nei pesi trained → invalida checkpoint), `regime.py:761` loop Hamilton per-barra (vettorizzarlo = smoothed = rompe causalità), AMP-off inference, denorm/guard/safety-net.
+
+- **B1 — float32 pipeline feature** (`features/__init__.py`): tutta la pipeline gira float64, downcast solo a `create_windows`. **~600 MB RAM** (il guadagno più grande) ma rompe bit-identità feature → rigenerare dataset + golden + PipelineState. **Progetto a sé**, non un fix puntuale.
+- **B2 — VP rolling min/max** (`features/__init__.py:~266`): `lo[sl].min()/hi[sl].max()` ricalcolati per finestra (~605M op = collo CPU n.1 del FeatureBuilder). Fix = rolling-min/max precomputato, ma va allineato ESATTAMENTE allo slice `[i-lookback:i]` → golden test sulle 4 feature VP.
+- **B3 — `df.copy()` intermedio** (`features/__init__.py:~996`, `if i==4`): defrag ridondante (una copia full-frame). Value-identico ma da coprire con golden snapshot. (Nota: già incluso in modo SAFE nel batch A se il golden regge; se no resta qui.)
+- **B4 — recursion GARCH Python** (`vol/short_vol_hist_backtest.py:~187`): ~58k iterazioni/run; mitigato da A1 (rimosso il 3×). Eventuale `@njit` = zona protetta FHS/GARCH → validare bit-contro-bit. Lasciare finché A1 basta.
+- **B5 — CRPS pairwise O(n_mc²)** (`model/__init__.py:~77`): matrice n×n; forma chiusa via sort = equivalente in aspettativa, non bit-identica. n_mc=20 piccolo → basso ROI.
+- **B6 — sort full-history su update incrementale** (`data:~280`) / **`groupby(date)` vs `resample`** (`regime:~683`): corretti solo con check monotonia / gestione gap-days. Basso-medio.
+
+---
+
 ## 🕒 FINE SESSIONE 2026-06-24 — esiti + ripartenza domani
 
 **Fatto oggi (2 idee "while we collect data", fan-out):**

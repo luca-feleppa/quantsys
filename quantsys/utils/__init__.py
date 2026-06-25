@@ -492,17 +492,21 @@ class PipelineState:
             missing = [c for c in cols if c not in result.columns]
 
             if present:
-                col_idx = [cols.index(c) for c in present]
+                # IT: lookup colonna O(1) via dict invece di cols.index in loop (A9).
+                # EN: O(1) column lookup via dict instead of cols.index in a loop (A9).
+                idx_map = {c: i for i, c in enumerate(cols)}
+                col_idx = [idx_map[c] for c in present]
                 X = result[present].values.astype(_np.float64)
                 nan_mask = _np.isnan(X)
                 X_imp = _np.where(nan_mask, 0.0, X)
 
-                from sklearn.preprocessing import RobustScaler as _RS
-                sub_scaler = _RS()
-                sub_scaler.center_        = self.scaler.center_[col_idx]
-                sub_scaler.scale_         = self.scaler.scale_[col_idx]
-                sub_scaler.n_features_in_ = len(col_idx)
-                X_scaled = sub_scaler.transform(X_imp)
+                # IT: RobustScaler.transform = (X − center_)/scale_ → applico diretto, niente oggetto
+                #     ricostruito ad ogni chiamata (A9). Bit-identico (with_centering/scaling=True).
+                # EN: RobustScaler.transform = (X − center_)/scale_ → apply directly, no object rebuilt
+                #     per call (A9). Bit-identical (with_centering/scaling=True).
+                center = self.scaler.center_[col_idx]
+                scale  = self.scaler.scale_[col_idx]
+                X_scaled = (X_imp - center) / scale
                 X_scaled[nan_mask] = _np.nan
 
                 for i, col in enumerate(present):
@@ -542,10 +546,12 @@ class PipelineState:
         """
         if self.macro_normalizer is None:
             raise RuntimeError("MacroNormalizer non presente nello stato.")
-        # Aggiunge colonne mancanti come zero prima di trasformare
-        for col in self.macro_feature_cols:
-            if col not in df.columns:
-                df = df.copy()
+        # IT: copia UNA volta sola se mancano colonne (era df.copy() per ogni mancante) (A-minor).
+        # EN: copy ONCE if any column is missing (was df.copy() per missing one) (A-minor).
+        missing = [c for c in self.macro_feature_cols if c not in df.columns]
+        if missing:
+            df = df.copy()
+            for col in missing:
                 df[col] = 0.0
         return self.macro_normalizer.transform(df)
 

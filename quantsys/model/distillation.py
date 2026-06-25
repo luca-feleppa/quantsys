@@ -266,22 +266,26 @@ def generate_teacher_predictions(teacher, dataloader, device, has_macro=False,
                         ls2_acc = ls2_acc + out[1]
                         lnu_acc = lnu_acc + out[2]
 
+            # IT: accumula i tensori SUL DEVICE (no .cpu() per-batch): un solo GPU→CPU finale (A10)
+            #     dopo il cat. Output (N,) o (N,Q) → memoria GPU trascurabile.
+            # EN: accumulate tensors ON DEVICE (no per-batch .cpu()): a single final GPU→CPU (A10)
+            #     after the cat. Outputs are (N,) or (N,Q) → negligible GPU memory.
             if loss_type == "quantile":
                 qp = q_acc / mc_samples
-                all_outputs["quantiles"].append(qp.cpu())
-                all_outputs["mu"].append(qp[:, 2].cpu())
+                all_outputs["quantiles"].append(qp)
+                all_outputs["mu"].append(qp[:, 2])
                 sig = (qp[:, 4] - qp[:, 0]).clamp(min=1e-6)
-                all_outputs["ls2"].append(sig.cpu())
-                all_outputs["lnu"].append(torch.full((len(qp),), 5.0))
+                all_outputs["ls2"].append(sig)
+                all_outputs["lnu"].append(torch.full((len(qp),), 5.0, device=qp.device))
             else:
-                all_outputs["mu"].append((mu_acc  / mc_samples).cpu())
-                all_outputs["ls2"].append((ls2_acc / mc_samples).cpu())
-                all_outputs["lnu"].append((lnu_acc / mc_samples).cpu())
+                all_outputs["mu"].append(mu_acc  / mc_samples)
+                all_outputs["ls2"].append(ls2_acc / mc_samples)
+                all_outputs["lnu"].append(lnu_acc / mc_samples)
 
     result = {}
     for k, v in all_outputs.items():
         if v:
-            result[k] = torch.cat(v, dim=0)
+            result[k] = torch.cat(v, dim=0).cpu()   # IT: unico trasferimento GPU→CPU (A10) | EN: single GPU→CPU transfer (A10)
     return result
 
 

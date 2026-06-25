@@ -579,6 +579,7 @@ class RegimeMarkovSwitching:
 
         current_params  = None
         current_pca     = None
+        pc1_cache       = None   # IT: proiezione PC1 di tutto X_norm sotto la PCA corrente (A6) | EN: PC1 of all X_norm under current PCA (A6)
         prev_components = None
         last_filtered   = np.full(self.n_regimes, 1.0 / self.n_regimes)
         last_retrain    = -1
@@ -607,8 +608,16 @@ class RegimeMarkovSwitching:
                                 pca_t.components_[0] *= -1
                         prev_components = pca_t.components_.copy()
                         current_pca = pca_t
+                        # IT: proietta TUTTO X_norm una volta per retrain (A6): tra due retrain la PCA
+                        #     è fissa → pc1_cache[t] == transform(X_norm[t:t+1]) bit-identico, ma evita
+                        #     ~n chiamate sklearn riga-per-riga. CAUSALE: si indicizza solo [t] (≤ futuro
+                        #     calcolato ma MAI usato), la PCA è fittata su [:t].
+                        # EN: project ALL X_norm once per retrain (A6): between retrains the PCA is fixed
+                        #     → pc1_cache[t] == transform(X_norm[t:t+1]) bit-identical, but avoids ~n
+                        #     row-by-row sklearn calls. CAUSAL: only [t] is indexed, PCA fit on [:t].
+                        pc1_cache = current_pca.transform(X_norm)[:, 0]
 
-                        pc1_train = pca_t.transform(X_norm[:t])[:, 0]
+                        pc1_train = pc1_cache[:t]
 
                         result = self._fit_single(pc1_train)
                         if result is not None:
@@ -630,7 +639,7 @@ class RegimeMarkovSwitching:
                         )
 
             if current_params is not None and current_pca is not None:
-                pc1_t = current_pca.transform(X_norm[t:t+1])[0, 0]
+                pc1_t = pc1_cache[t]   # IT: lookup O(1) dalla cache (A6) | EN: O(1) cache lookup (A6)
                 last_filtered = self._hamilton_filter_step(
                     pc1_t, current_params, last_filtered
                 )

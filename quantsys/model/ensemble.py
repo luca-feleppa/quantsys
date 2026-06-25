@@ -332,6 +332,20 @@ class EnsembleModel:
         return cls(models, device, arch_names,
                    arch_weights=dyn_weights if dyn_weights else None)
 
+    # IT: Tensore pesi cache-ato per (device,dtype) — i pesi non cambiano dopo l'init.
+    # EN: (device,dtype)-cached weights tensor — weights don't change after init.
+    def _weights_tensor(self, device, dtype):
+        cache = getattr(self, "_weights_cache", None)
+        if cache is None:
+            cache = {}
+            self._weights_cache = cache
+        key = (device, dtype)
+        t = cache.get(key)
+        if t is None:
+            t = torch.tensor(self._weights, device=device, dtype=dtype).view(-1, 1)
+            cache[key] = t
+        return t
+
     # IT: Forward su tutti i membri + fusione con legge della varianza totale.
     # EN: Forward across all members + total-variance-law fusion.
     def __call__(self, *args, **kwargs):
@@ -363,9 +377,11 @@ class EnsembleModel:
         sigs_t = torch.stack(sigs,     dim=0)
         nus_t  = torch.stack(nus_list, dim=0)
 
-        # IT: Pesi broadcast su (N,1) per fusione tensor-friendly.
-        # EN: Weights broadcast to (N,1) for tensor-friendly fusion.
-        w = torch.tensor(self._weights, device=mus_t.device, dtype=mus_t.dtype).view(-1, 1)
+        # IT: Pesi broadcast su (N,1) per fusione tensor-friendly. Cache-ati per (device,dtype):
+        #     i pesi sono immutabili post-init → evita di ricostruire il tensore ad ogni forward (A7).
+        # EN: Weights broadcast to (N,1) for tensor-friendly fusion. Cached per (device,dtype):
+        #     weights are immutable post-init → avoids rebuilding the tensor on every forward (A7).
+        w = self._weights_tensor(mus_t.device, mus_t.dtype)
 
         mu_ens = (w * mus_t).sum(dim=0)
         nu_ens = (w * nus_t).sum(dim=0)
