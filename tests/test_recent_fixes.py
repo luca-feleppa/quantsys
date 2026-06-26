@@ -16,6 +16,7 @@ import pytest
 from sklearn.preprocessing import RobustScaler
 
 from quantsys.features import FeatureBuilder
+from quantsys.trading import DistributionParams, RiskManager, Side
 from quantsys.utils import PipelineState
 
 
@@ -345,3 +346,104 @@ class TestStaleMembersWarning:
         # EN: (d) only the single best, no numbered members → None
         self._touch(tmp_path / "best_model.pt", self.BASE_MTIME)
         assert _stale_members_warning(tmp_path) is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IT: Fix batch-A (A4, 2026-06-25) — pre-size dello slippage saltato quando inutile.
+#     In open_position il pre-size (_size chiamato 2×) serve SOLO al modello "sqrt"
+#     (Almgren-Chriss), l'unico in cui _compute_slippage dipende dalla trade size.
+#     Negli altri casi (slip_model != "sqrt", o "sqrt" ma adv_1m==0) _compute_slippage
+#     ritorna self.slip indipendentemente dalla size → passare 0.0 è BIT-IDENTICO al
+#     passare la size pre-stimata, e il pre-size si può saltare. Questi test provano
+#     la size-independence che giustifica il salto.
+# EN: Fix batch-A (A4, 2026-06-25) — slippage pre-size skipped when redundant.
+#     In open_position the pre-size (_size called 2×) is needed ONLY by the "sqrt"
+#     (Almgren-Chriss) model, the only one where _compute_slippage depends on trade
+#     size. In every other case (slip_model != "sqrt", or "sqrt" with adv_1m==0)
+#     _compute_slippage returns self.slip regardless of size → passing 0.0 is
+#     BIT-IDENTICAL to passing the pre-estimated size, so the pre-size can be skipped.
+#     These tests prove the size-independence that justifies the skip.
+# ─────────────────────────────────────────────────────────────────────────────
+class TestSlippagePresizeSkip:
+    """
+    IT: Regression sull'invariante A4: lo slippage è size-independent in tutti i
+        rami in cui open_position salta il pre-size, ed è size-DEPENDENT solo nel
+        ramo "sqrt"+adv>0 dove il pre-size viene mantenuto.
+    EN: Regression on the A4 invariant: slippage is size-independent in every branch
+        where open_position skips the pre-size, and size-DEPENDENT only in the
+        "sqrt"+adv>0 branch where the pre-size is retained.
+    """
+
+    PRICE = 70_000.0          # IT: prezzo arbitrario | EN: arbitrary price
+    BIG_SIZE = 1.0e9          # IT: size enorme per stressare la dipendenza | EN: huge size to stress dependence
+    ADV = 5.0e6              # IT: ADV_1m fittizio (>0) | EN: dummy ADV_1m (>0)
+    SLIP = 0.0003            # IT: base slippage rate | EN: base slippage rate
+
+    def test_fixed_model_slippage_is_size_independent(self):
+        # IT: slip_model="fixed" (default) → _compute_slippage ignora la size e
+        #     ritorna sempre self.slip: 0.0 == BIG_SIZE == self.slip (ramo else di A4).
+        # EN: slip_model="fixed" (default) → _compute_slippage ignores size and
+        #     always returns self.slip: 0.0 == BIG_SIZE == self.slip (A4 else branch).
+        rm = RiskManager(slippage_model="fixed", slippage_rate=self.SLIP)
+        s_zero = rm._compute_slippage(self.PRICE, 0.0, self.ADV)
+        s_big  = rm._compute_slippage(self.PRICE, self.BIG_SIZE, self.ADV)
+        assert s_zero == s_big == self.SLIP == rm.slip
+
+    def test_default_model_is_fixed_and_size_independent(self):
+        # IT: il default del costruttore è "fixed" → stessa size-independence
+        #     (conferma che il path production di default salta il pre-size).
+        # EN: constructor default is "fixed" → same size-independence
+        #     (confirms the default production path skips the pre-size).
+        rm = RiskManager(slippage_rate=self.SLIP)
+        assert rm.slip_model == "fixed"
+        assert rm._compute_slippage(self.PRICE, 0.0, self.ADV) == \
+               rm._compute_slippage(self.PRICE, self.BIG_SIZE, self.ADV) == rm.slip
+
+    def test_sqrt_model_with_zero_adv_is_size_independent(self):
+        # IT: slip_model="sqrt" ma adv_1m==0 → la guardia `adv_1m > 0.0` fa cadere
+        #     nel return self.slip: size-independent → ramo else di A4 bit-identico.
+        # EN: slip_model="sqrt" but adv_1m==0 → the `adv_1m > 0.0` guard falls through
+        #     to return self.slip: size-independent → A4 else branch is bit-identical.
+        rm = RiskManager(slippage_model="sqrt", slippage_rate=self.SLIP)
+        s_zero = rm._compute_slippage(self.PRICE, 0.0, 0.0)
+        s_big  = rm._compute_slippage(self.PRICE, self.BIG_SIZE, 0.0)
+        assert s_zero == s_big == self.SLIP == rm.slip
+
+    def test_sqrt_model_with_adv_is_size_dependent(self):
+        # IT: controprova — "sqrt"+adv>0 è l'UNICO ramo size-dependent: il pre-size
+        #     resta necessario lì. size=4·ADV → slip=base·√4=2·base; size piccola → < base.
+        # EN: counter-proof — "sqrt"+adv>0 is the ONLY size-dependent branch: the
+        #     pre-size stays necessary there. size=4·ADV → slip=base·√4=2·base; small size → < base.
+        rm = RiskManager(slippage_model="sqrt", slippage_rate=self.SLIP)
+        s_big   = rm._compute_slippage(self.PRICE, 4.0 * self.ADV, self.ADV)
+        s_small = rm._compute_slippage(self.PRICE, 0.01 * self.ADV, self.ADV)
+        assert s_big == pytest.approx(2.0 * self.SLIP)   # IT: √4=2 | EN: √4=2
+        assert s_small < self.SLIP                       # IT: size<ADV → slip<base | EN: size<ADV → slip<base
+        assert s_big != s_small                          # IT: dipende dalla size | EN: depends on size
+
+    def test_open_position_bit_identity_fixed_model(self):
+        # IT: prova end-to-end del ramo else: con slip_model="fixed" il salto del
+        #     pre-size NON cambia exec_p/size/SL/TP. Riproduciamo il ramo sqrt-preservato
+        #     manualmente (pre-size→slip) e verifichiamo che lo slip coincida con quello
+        #     calcolato dal nuovo codice a size=0.0 → posizione bit-identica.
+        # EN: end-to-end check of the else branch: with slip_model="fixed" skipping the
+        #     pre-size does NOT change exec_p/size/SL/TP. We reproduce the old preserved
+        #     branch (pre-size→slip) and check the slip matches the new size=0.0 call →
+        #     bit-identical position.
+        dist = DistributionParams(mu=0.004, sigma=0.01, nu=6.0, prob_up=0.7, conviction=0.8)
+        atr = 350.0
+        rm = RiskManager(slippage_model="fixed", slippage_rate=self.SLIP)
+        # IT: slip "vecchio codice" (sempre pre-size) vs "nuovo codice" (size 0.0)
+        # EN: "old code" slip (always pre-size) vs "new code" slip (size 0.0)
+        sz_pre, _ = rm._size(dist, self.PRICE, atr, side=Side.LONG)
+        slip_old = rm._compute_slippage(self.PRICE, sz_pre, self.ADV)
+        slip_new = rm._compute_slippage(self.PRICE, 0.0, self.ADV)
+        assert slip_old == slip_new   # IT: bit-identico | EN: bit-identical
+        # IT: e l'apertura reale produce una posizione valida e deterministica
+        # EN: and the real open yields a valid, deterministic position
+        rm2 = RiskManager(slippage_model="fixed", slippage_rate=self.SLIP)
+        pos = rm2.open_position(Side.LONG, self.PRICE, 0, atr, dist, adv_1m=self.ADV)
+        assert pos is not None
+        # IT: exec_p coerente con lo slip fisso applicato in LONG (price·(1+slip))
+        # EN: exec_p consistent with the fixed slip applied on LONG (price·(1+slip))
+        assert pos.entry_price == pytest.approx(self.PRICE * (1 + self.SLIP))

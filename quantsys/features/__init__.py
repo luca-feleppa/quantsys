@@ -263,10 +263,23 @@ class FeatureBuilder:
         # EN: Sampled indices every vp_stride starting from `lookback`.
         sampled_indices = list(range(lookback, df_len, max(1, vp_stride)))
 
+        # IT: B2 — rolling min/max precomputati UNA volta per scala (erano ricalcolati per finestra:
+        #     ~605M op a scala 1440 = collo CPU n.1 del FeatureBuilder). roll[i-1] copre ESATTAMENTE
+        #     lo_arr[i-lookback:i]; min/max selezionano un elemento (nessun accumulo float, nessun
+        #     riordino) → bit-identico al .min()/.max() per-finestra. (Prezzi senza NaN ⇒ semantica
+        #     rolling.min skipna == numpy.min.)
+        # EN: B2 — rolling min/max precomputed ONCE per scale (were recomputed per window: ~605M ops
+        #     at scale 1440 = FeatureBuilder CPU bottleneck #1). roll[i-1] spans EXACTLY
+        #     lo_arr[i-lookback:i]; min/max select one element (no float accumulation, no reorder)
+        #     → bit-identical to the per-window .min()/.max(). (No-NaN prices ⇒ rolling.min skipna
+        #     semantics == numpy.min.)
+        roll_lo = pd.Series(lo_arr).rolling(lookback, min_periods=lookback).min().to_numpy()
+        roll_hi = pd.Series(hi_arr).rolling(lookback, min_periods=lookback).max().to_numpy()
+
         for i in sampled_indices:
             sl  = slice(i - lookback, i)
             tp  = tp_arr[sl]; vol = vl_arr[sl]
-            lo_ = lo_arr[sl].min(); hi_ = hi_arr[sl].max()
+            lo_ = roll_lo[i - 1]; hi_ = roll_hi[i - 1]
             if hi_ <= lo_:
                 continue
 
@@ -999,8 +1012,10 @@ class FeatureBuilder:
             for i, (name, fn) in enumerate(steps):
                 log.info(f"  → {name}")
                 df = fn(df)
-                if i == 4:
-                    df = df.copy()
+                # IT: B3 — rimossa la df.copy() di defrag intermedia (i==4): value-identica (una copia
+                #     non cambia i valori) e ridondante con la defrag finale prima della normalizzazione.
+                # EN: B3 — removed the intermediate defrag df.copy() (i==4): value-identical (a copy
+                #     doesn't change values) and redundant with the final defrag before normalization.
             log.info("  → volume profile (multi-scale, ~30-60s) ...")
             df = self._volume_profile(df)
 

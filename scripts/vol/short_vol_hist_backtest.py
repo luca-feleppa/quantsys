@@ -33,6 +33,42 @@ IT: Deliverable = curva di BREAK-EVEN VRP per (struct × width): "lo strangle W%
 EN: Deliverable = BREAK-EVEN VRP curve per (struct × width): "the W% strangle over 2019-26 is net
     positive iff implied/realized ≥ X", with tail distribution and worst-trade contribution.
 
+IT: SIGNIFICATIVITÀ (FIX ①+②, 2026-06-26). Scadenze DAILY (24h) ma tenor 30h ⇒ finestre sovrapposte
+    e vol-clustering condiviso ⇒ PnL NON i.i.d.: lo SE della media è sottostimato. (a) Sharpe ora
+    annualizzato con sqrt(trades/anno) dai timestamp REALI (≈365/yr), non con sqrt(8760/30)≈sqrt(292);
+    (b) la statistica ONESTA è il MOVING BLOCK BOOTSTRAP (block≈21 trade≈1 mese, B=2000) → CI 5–95%
+    di mean e Sharpe + N_eff = N·(1−ρ₁)/(1+ρ₁). Esito misurato: ρ₁ del PnL ≈ −0.01 (quasi nullo) ⇒
+    N_eff ≈ N e i CI restano lontani da 0 (es. straddle VRP=0: mean [+0.003,+0.014], Sharpe [+0.7,+2.4])
+    → l'edge sopravvive alla correzione per overlap. ⚠ Caveat: il bootstrap NON cattura la
+    concentrazione TEMPORALE (2020-21 ≈90% del PnL); il vero gate resta il live n≥20.
+EN: SIGNIFICANCE (FIX ①+②, 2026-06-26). DAILY expiries (24h) but 30h tenor ⇒ overlapping windows and
+    shared vol-clustering ⇒ NON-i.i.d. PnL: the mean's SE is understated. (a) Sharpe now annualized
+    with sqrt(trades/year) from REAL timestamps (≈365/yr), not sqrt(8760/30)≈sqrt(292); (b) the HONEST
+    statistic is the MOVING BLOCK BOOTSTRAP (block≈21 trades≈1 month, B=2000) → 5–95% CI of mean and
+    Sharpe + N_eff = N·(1−ρ₁)/(1+ρ₁). Measured: PnL ρ₁ ≈ −0.01 (near-zero) ⇒ N_eff ≈ N and CIs stay
+    away from 0 (e.g. straddle VRP=0: mean [+0.003,+0.014], Sharpe [+0.7,+2.4]) → the edge survives the
+    overlap correction. ⚠ Caveat: the bootstrap does NOT capture TEMPORAL concentration (2020-21 ≈90%
+    of PnL); the real gate remains live n≥20.
+
+IT: MARTINGALE CORRECTION (FIX ⑤, flag-inerte --mart-correct, default OFF). Il drift gaussiano −0.5σ²
+    impone E[S_T]=spot solo per z normale; con residui FHS fat-tailed il flag sostituisce il drift con
+    la correzione via cumulanti del pool −(½σ²+skew·σ³/6+exkurt·σ⁴/24). ESITO MISURATO (atteso ~1e-4,
+    SMENTITO): Δmean@VRP=0 ≈ +5e-3 (64–85% del fair value!), NON trascurabile. Causa diagnosticata
+    (NON un bug): i residui z BTC hanno exkurt≈19.7; pur essendo la correzione all'entry-vol ~1e-7,
+    dentro la sim var_t evolve via GJR e i path ad alta vol (che DOMINANO il fair value tail-driven
+    dello strangle OTM) ricevono shift di drift fino a ~0.4 — il termine σ⁴ esplode proprio dove la
+    troncatura cumulanti al 4° ordine è INVALIDA. Conclusione: la correzione SOVRA-corregge su dati a
+    coda estrema ⇒ default OFF confermato corretto; il flag resta inerte/documentato.
+EN: MARTINGALE CORRECTION (FIX ⑤, inert flag --mart-correct, default OFF). The Gaussian drift −0.5σ²
+    enforces E[S_T]=spot only for normal z; with fat-tailed FHS residuals the flag swaps the drift for
+    the cumulant correction −(½σ²+skew·σ³/6+exkurt·σ⁴/24). MEASURED OUTCOME (expected ~1e-4, REFUTED):
+    Δmean@VRP=0 ≈ +5e-3 (64–85% of fair value!), NOT negligible. Diagnosed cause (NOT a bug): BTC z
+    residuals have exkurt≈19.7; though the entry-vol correction is ~1e-7, inside the sim var_t evolves
+    via GJR and the high-vol paths (which DOMINATE the OTM strangle's tail-driven fair value) get drift
+    shifts up to ~0.4 — the σ⁴ term explodes exactly where the 4th-order cumulant truncation is INVALID.
+    Conclusion: the correction OVER-corrects on extreme-tail data ⇒ default OFF confirmed correct; the
+    flag stays inert/documented.
+
 Uso / usage:  python scripts/vol/short_vol_hist_backtest.py
               python scripts/vol/short_vol_hist_backtest.py --n-paths 6000 --refit-days 60
 """
@@ -121,13 +157,22 @@ def fit_gjr(r, warm=None):
 # Pricing FHS: fair value P-measure dello strangle/straddle inverso a 30h
 # FHS pricing: P-measure fair value of the 30h inverse strangle/straddle
 # ─────────────────────────────────────────────────────────────────────────────
-def fhs_fair_value(spot, Kc, Kp, sig_entry, z_pool, params, n_paths, rng):
+def fhs_fair_value(spot, Kc, Kp, sig_entry, z_pool, params, n_paths, rng,
+                   mart_correct=False, skew=0.0, exkurt=0.0):
     # IT: simula n_paths × TENOR_H passi. Ad ogni step ε=σ·z (z bootstrap dai residui REALI ≤ entry),
     #     drift = −0.5σ² (martingala: E[S]≈spot), poi aggiorna la varianza GJR. Fair value = media
     #     dei payoff inversi sul terminale. Opzione inversa ⇒ payoff in BTC = intrinsic/S_T.
     # EN: simulate n_paths × TENOR_H steps. Each step ε=σ·z (z bootstrap from REAL residuals ≤ entry),
     #     drift = −0.5σ² (martingale: E[S]≈spot), then GJR variance update. Fair value = mean inverse
     #     payoff at terminal. Inverse option ⇒ BTC payoff = intrinsic/S_T.
+    # IT: FIX ⑤ (flag-inerte, default OFF). Il drift gaussiano −0.5σ² impone E[exp(ε)]=1 SOLO per z
+    #     normale; con residui bootstrap fat-tailed/skew (il punto stesso dell'FHS) E[S_T]≠spot. La
+    #     correzione empirica via cumulanti del pool sottrae i termini di skew/kurtosi → E[S_T]≈spot
+    #     anche fuori dalla normale. skew/exkurt = cumulanti standardizzati del pool z CAUSALE (≤entry).
+    # EN: FIX ⑤ (inert flag, default OFF). The Gaussian drift −0.5σ² enforces E[exp(ε)]=1 ONLY for
+    #     normal z; with fat-tailed/skewed bootstrap residuals (the whole point of FHS) E[S_T]≠spot.
+    #     The empirical cumulant correction subtracts skew/kurtosis terms → E[S_T]≈spot off-normal.
+    #     skew/exkurt = standardized cumulants of the CAUSAL z pool (≤entry).
     omega, alpha, gamma, beta = params["omega"], params["alpha"], params["gamma"], params["beta"]
     var_t = np.full(n_paths, sig_entry ** 2)
     cum = np.zeros(n_paths)
@@ -135,7 +180,12 @@ def fhs_fair_value(spot, Kc, Kp, sig_entry, z_pool, params, n_paths, rng):
     for t in range(TENOR_H):
         sig = np.sqrt(var_t)
         eps = sig * z_pool[z_idx[t]]
-        cum += -0.5 * var_t + eps                      # drift martingala + shock
+        if mart_correct:
+            # IT: drift = −(½σ² + skew·σ³/6 + exkurt·σ⁴/24): espansione di Cornish-Fisher/cumulanti
+            #     di log E[exp(ε)] troncata al 4° ordine. | EN: cumulant-expansion drift to 4th order.
+            cum += -(0.5 * var_t + skew * sig ** 3 / 6.0 + exkurt * sig ** 4 / 24.0) + eps
+        else:
+            cum += -0.5 * var_t + eps                   # drift martingala gaussiano + shock | Gaussian martingale drift + shock
         neg = (eps < 0).astype(float)
         var_t = omega + (alpha + gamma * neg) * eps ** 2 + beta * var_t
         var_t = np.clip(var_t, 1e-12, 0.5 ** 2)
@@ -221,7 +271,7 @@ def precompute_causal(refit_days, min_train):
     return pre
 
 
-def price_trades(pre, width, struct, n_paths, rng):
+def price_trades(pre, width, struct, n_paths, rng, mart_correct=False):
     # IT: prezza le scadenze su una serie causale GIÀ calcolata (varia solo strike/FHS-pricing).
     #     rng resta PER-CONFIG (passato dal chiamante) → path FHS bit-identici al comportamento legacy.
     # EN: prices expiries on an ALREADY-computed causal series (only strike/FHS-pricing vary).
@@ -241,13 +291,29 @@ def price_trades(pre, width, struct, n_paths, rng):
         zp = zp[np.isfinite(zp)]
         if len(zp) < 200:                               # pool residui insufficiente | thin residual pool
             continue
+        # IT: FIX ⑤. Cumulanti standardizzati del pool z CAUSALE (≤entry): skew + excess kurtosis
+        #     calcolati UNA volta per scadenza dal pool, passati al drift-correction (no look-ahead).
+        # EN: FIX ⑤. Standardized cumulants of the CAUSAL z pool (≤entry): skew + excess kurtosis
+        #     computed ONCE per expiry from the pool, fed to the drift correction (no look-ahead).
+        if mart_correct:
+            zc = zp - zp.mean()
+            m2 = float(np.mean(zc ** 2))
+            skew = float(np.mean(zc ** 3) / m2 ** 1.5) if m2 > 0 else 0.0
+            exkurt = float(np.mean(zc ** 4) / m2 ** 2 - 3.0) if m2 > 0 else 0.0
+        else:
+            skew = exkurt = 0.0
         spot = close[entry]
-        S_del = close[ei]                               # IT: proxy delivery = close 08:00 UTC | EN: delivery proxy
+        # IT: proxy delivery = singolo close 08:00 UTC. Il delivery Deribit reale è una TWAP a 30-min
+        #     → rumore non distorsivo (media-zero rispetto al close), non un bias sistematico.
+        # EN: delivery proxy = single 08:00-UTC close. Real Deribit delivery is a 30-min TWAP →
+        #     non-distorting noise (zero-mean vs the close), not a systematic bias.
+        S_del = close[ei]
         if struct == "strangle":
             Kc, Kp = spot * (1 + width), spot * (1 - width)
         else:                                           # straddle ATM
             Kc = Kp = spot
-        fv = fhs_fair_value(spot, Kc, Kp, sig[entry], zp, prm, n_paths, rng)
+        fv = fhs_fair_value(spot, Kc, Kp, sig[entry], zp, prm, n_paths, rng,
+                            mart_correct=mart_correct, skew=skew, exkurt=exkurt)
         rp = realized_payoff(Kc, Kp, S_del)
         trades.append({"t_entry": times.iloc[entry].isoformat(), "spot": spot, "S_del": S_del,
                        "fair_value": fv, "realized_payoff": rp,
@@ -255,11 +321,53 @@ def price_trades(pre, width, struct, n_paths, rng):
     return pd.DataFrame(trades)
 
 
-def run(width, struct, n_paths, refit_days, min_train, seed):
+def run(width, struct, n_paths, refit_days, min_train, seed, mart_correct=False):
     # IT: wrapper retro-compatibile: precompute (cache) + pricing per-config. | EN: back-compat wrapper.
     rng = np.random.default_rng(seed)
     pre = precompute_causal(refit_days, min_train)
-    return price_trades(pre, width, struct, n_paths, rng)
+    return price_trades(pre, width, struct, n_paths, rng, mart_correct=mart_correct)
+
+
+def block_bootstrap_ci(pnl, ann_factor, block=21, B=2000, seed=12345):
+    # IT: FIX ①. Le scadenze sono DAILY (spacing 24h) ma il tenor è 30h → finestre sovrapposte e
+    #     vol-clustering condiviso ⇒ i PnL NON sono i.i.d.: lo SE della media (e quindi Sharpe/hit)
+    #     è sottostimato, la significatività sovrastimata (l'n nominale ≫ N effettivo; 2020-21 ≈90%
+    #     del PnL). Moving block bootstrap sul PnL ORDINATO PER TEMPO: ricampiona ceil(N/block) blocchi
+    #     contigui di lunghezza `block` (≈21 trade ≈ 1 mese, preserva il clustering intra-blocco) con
+    #     rimpiazzo, taglia a N, ricalcola mean e Sharpe annualizzato; B ripetizioni → CI 5–95%.
+    #     N_eff = N·(1−ρ₁)/(1+ρ₁) (ρ₁ = autocorr lag-1 del PnL) = correzione scalare per inflazione.
+    # EN: FIX ①. Expiries are DAILY (24h spacing) but tenor is 30h → overlapping windows and shared
+    #     vol-clustering ⇒ PnL are NOT i.i.d.: the mean's SE (hence Sharpe/hit) is understated and
+    #     significance overstated (nominal n ≫ effective N; 2020-21 ≈90% of PnL). Moving block bootstrap
+    #     on TIME-ORDERED PnL: resample ceil(N/block) contiguous blocks of length `block` (≈21 trades
+    #     ≈1 month, preserves intra-block clustering) with replacement, trim to N, recompute mean and
+    #     annualized Sharpe; B repeats → 5–95% CI. N_eff = N·(1−ρ₁)/(1+ρ₁) (ρ₁ = lag-1 PnL autocorr).
+    pnl = np.asarray(pnl, dtype=float)
+    n = len(pnl)
+    # IT: lag-1 autocorr del PnL ordinato → N effettivo (clamp [1,N]). | EN: lag-1 autocorr → N_eff (clamp [1,N]).
+    xc = pnl - pnl.mean()
+    denom = float(np.sum(xc * xc))
+    rho1 = float(np.sum(xc[1:] * xc[:-1]) / denom) if (n > 1 and denom > 0) else 0.0
+    n_eff = n * (1.0 - rho1) / (1.0 + rho1) if (1.0 + rho1) > 0 else float(n)
+    n_eff = float(min(max(n_eff, 1.0), n))
+    if n < 2:
+        m = float(pnl.mean()) if n else 0.0
+        return {"mean_ci": [m, m], "sharpe_ci": [0.0, 0.0], "n_eff": float(n), "rho1": rho1}
+    blk = int(min(block, n))                              # IT: blocco ≤ N | EN: block ≤ N
+    n_blocks = int(np.ceil(n / blk))
+    max_start = n - blk                                  # IT: ultimo start ammesso per blocco intero | EN: last valid block start
+    rng = np.random.default_rng(seed)
+    # IT: campiona TUTTI i B×n_blocks start in una volta → indici (B, n_blocks·blk) tagliati a N (vettoriale).
+    # EN: draw ALL B×n_blocks starts at once → indices (B, n_blocks·blk) trimmed to N (vectorized).
+    starts = rng.integers(0, max_start + 1, size=(B, n_blocks))
+    idx = (starts[:, :, None] + np.arange(blk)[None, None, :]).reshape(B, n_blocks * blk)[:, :n]
+    samp = pnl[idx]                                      # (B, N) repliche bootstrap | bootstrap replicates
+    means = samp.mean(axis=1)
+    sds = samp.std(axis=1, ddof=1)
+    sharpes = np.where(sds > 0, means / sds * ann_factor, 0.0)
+    return {"mean_ci": [float(np.percentile(means, 5)), float(np.percentile(means, 95))],
+            "sharpe_ci": [float(np.percentile(sharpes, 5)), float(np.percentile(sharpes, 95))],
+            "n_eff": n_eff, "rho1": rho1}
 
 
 def vrp_table(tr, struct, width):
@@ -268,17 +376,41 @@ def vrp_table(tr, struct, width):
     out = []
     fv = tr["fair_value"].to_numpy()
     rp = tr["realized_payoff"].to_numpy()
+    # IT: FIX ②. trades/anno dai timestamp REALI (cadenza DAILY ≈365/anno), NON i 292 cicli da 30h
+    #     impliciti in sqrt(ANNUAL_BARS/TENOR_H): quel fattore è incoerente con lo spacing reale.
+    #     Annualizzazione i.i.d. = sqrt(trades_per_year). ⚠ L'overlap (tenor 30h > spacing 24h) induce
+    #     autocorrelazione positiva che GONFIA il Sharpe i.i.d. → la statistica ONESTA è il Sharpe-CI
+    #     del block-bootstrap (FIX ①), non questo punto-stima. ANNUAL_BARS resta definita (import esterni).
+    # EN: FIX ②. trades/year from REAL timestamps (DAILY cadence ≈365/yr), NOT the 292 30h-cycles
+    #     implied by sqrt(ANNUAL_BARS/TENOR_H), which is inconsistent with the real spacing. i.i.d.
+    #     annualization = sqrt(trades_per_year). ⚠ Overlap (30h tenor > 24h spacing) induces positive
+    #     autocorrelation that INFLATES the i.i.d. Sharpe → the HONEST statistic is the block-bootstrap
+    #     Sharpe-CI (FIX ①), not this point estimate. ANNUAL_BARS kept defined (external imports).
+    t_entry = pd.to_datetime(tr["t_entry"], utc=True)
+    span_years = (t_entry.max() - t_entry.min()).total_seconds() / (365.25 * 24 * 3600.0)
+    trades_per_year = (len(tr) / span_years) if span_years > 0 else (ANNUAL_BARS / TENOR_H)
+    ann_factor = float(np.sqrt(trades_per_year))
     for vrp in VRP_GRID:
         prem = fv * (1.0 + vrp)
-        # IT: fee su 2 leg ≈ premio/2 ciascuna (cap 12.5%), vettoriale | EN: fee on 2 legs ≈ premium/2 each (12.5% cap), vectorized
+        # IT: fee su 2 leg ≈ premio/2 ciascuna (cap 12.5%), vettoriale. NB: lo split prem/2 ignora lo
+        #     skew tra i due strike (call/put a IV diverse) → irrilevante: fee minuscole e cappate al
+        #     12.5% del premio/leg. | EN: fee on 2 legs ≈ premium/2 each (12.5% cap), vectorized. The
+        #     prem/2 split ignores the inter-strike skew (call/put at different IVs) → negligible:
+        #     fees are tiny and capped at 12.5% of premium/leg.
         fees = 2.0 * np.minimum(FEE_PER_LEG, FEE_CAP_FRAC * np.maximum(prem / 2.0, 0.0))
         pnl = prem - rp - fees
         mean, sd = float(pnl.mean()), float(pnl.std(ddof=1)) if len(pnl) > 1 else 0.0
-        sharpe = float(mean / sd * np.sqrt(ANNUAL_BARS / TENOR_H)) if sd > 0 else 0.0
+        sharpe = float(mean / sd * ann_factor) if sd > 0 else 0.0
         worst = float(np.sort(pnl)[:5].sum())           # somma 5 trade peggiori | sum of 5 worst
+        # IT: CI robusta a overlap/clustering + N effettivo (FIX ①). | EN: overlap/clustering-robust CI + N_eff (FIX ①).
+        boot = block_bootstrap_ci(pnl, ann_factor)
         out.append({"vrp": vrp, "n": int(len(pnl)), "tot": float(pnl.sum()), "mean": mean,
                     "hit": float(100 * (pnl > 0).mean()), "sharpe_ann": sharpe,
-                    "worst5_sum": worst, "p05": float(np.percentile(pnl, 5))})
+                    "worst5_sum": worst, "p05": float(np.percentile(pnl, 5)),
+                    "trades_per_year": float(trades_per_year),
+                    "mean_ci05": boot["mean_ci"][0], "mean_ci95": boot["mean_ci"][1],
+                    "sharpe_ci05": boot["sharpe_ci"][0], "sharpe_ci95": boot["sharpe_ci"][1],
+                    "n_eff": boot["n_eff"], "rho1": boot["rho1"]})
     return out
 
 
@@ -325,22 +457,28 @@ def main():
     ap.add_argument("--refit-days", type=int, default=90, help="cadenza refit GJR-GARCH (giorni)")
     ap.add_argument("--min-train", type=int, default=24 * 180, help="barre minime prima del 1° trade")
     ap.add_argument("--seed", type=int, default=42)
+    # IT: FIX ⑤ (flag-inerte, default OFF): correzione empirica del drift via cumulanti del pool z.
+    # EN: FIX ⑤ (inert flag, default OFF): empirical cumulant drift correction from the z pool.
+    ap.add_argument("--mart-correct", action="store_true",
+                    help="correzione martingala empirica (cumulanti pool z); default OFF, numeri invariati")
     args = ap.parse_args()
 
     anchor = empirical_vrp_anchor()
     print("=== SHORT-VOL HISTORICAL BACKTEST (FHS GJR-GARCH · 2019→2026) ===")
     print(f"  n_paths={args.n_paths} refit_days={args.refit_days} tenor={TENOR_H}h | "
-          f"VRP grid={['%d%%' % (v*100) for v in VRP_GRID]}")
+          f"VRP grid={['%d%%' % (v*100) for v in VRP_GRID]} | mart_correct={args.mart_correct}")
     if anchor:
         print(f"  àncora IV reale (12gg): mediana mark_iv ≈ {anchor['mean_mark_iv_pct']:.1f}%")
     print()
 
     configs = [("straddle", 0.0)] + [("strangle", w) for w in (0.04, 0.06, 0.08, 0.10)]
     report = {"meta": {"n_paths": args.n_paths, "refit_days": args.refit_days, "tenor_h": TENOR_H,
-                       "vrp_grid": VRP_GRID, "iv_anchor": anchor}, "configs": []}
+                       "vrp_grid": VRP_GRID, "iv_anchor": anchor,
+                       "mart_correct": bool(args.mart_correct)}, "configs": []}
 
     for struct, w in configs:
-        tr = run(w, struct, args.n_paths, args.refit_days, args.min_train, args.seed)
+        tr = run(w, struct, args.n_paths, args.refit_days, args.min_train, args.seed,
+                 mart_correct=args.mart_correct)
         if tr.empty:
             print(f"  {struct} {w:.0%}: n=0 (skip)")
             continue
@@ -348,11 +486,19 @@ def main():
         be = breakeven_vrp(table)
         tag = f"strangle {w:.0%}" if struct == "strangle" else "straddle ATM"
         be_s = f"{be:.1%}" if be is not None else ">50% (mai)"
-        print(f"  ── {tag} | n={table[0]['n']} scadenze | break-even VRP = {be_s}")
+        row0 = table[0]                                  # IT: riga VRP=0 per il blocco CI | EN: VRP=0 row for the CI block
+        print(f"  ── {tag} | n={row0['n']} scadenze | break-even VRP = {be_s} | "
+              f"trades/yr≈{row0['trades_per_year']:.0f} N_eff≈{row0['n_eff']:.0f} (ρ₁={row0['rho1']:+.3f})")
         print(f"     {'VRP':>5} {'totPnL':>10} {'mean':>10} {'hit':>5} {'Sharpe':>7} {'p05':>9} {'worst5':>10}")
         for row in table:
             print(f"     {row['vrp']:>4.0%} {row['tot']:>+10.4f} {row['mean']:>+10.5f} "
                   f"{row['hit']:>4.0f}% {row['sharpe_ann']:>7.2f} {row['p05']:>+9.5f} {row['worst5_sum']:>+10.4f}")
+        # IT: FIX ①. Block-bootstrap CI (5–95%) per VRP=0 = statistica ONESTA su PnL non-i.i.d.:
+        #     mean-CI che include 0 ⇒ edge non distinguibile dal rumore al netto dell'overlap.
+        # EN: FIX ①. Block-bootstrap CI (5–95%) at VRP=0 = the HONEST statistic on non-i.i.d. PnL:
+        #     a mean-CI spanning 0 ⇒ edge indistinguishable from noise once overlap is accounted for.
+        print(f"     └─ block-boot CI(5-95%) @VRP=0: mean [{row0['mean_ci05']:+.5f}, {row0['mean_ci95']:+.5f}] "
+              f"Sharpe [{row0['sharpe_ci05']:+.2f}, {row0['sharpe_ci95']:+.2f}]")
         report["configs"].append({"struct": struct, "width": w, "n": table[0]["n"],
                                   "breakeven_vrp": be, "table": table,
                                   "moved_pct_p99": float(np.percentile(tr["moved_pct"].abs(), 99)),
