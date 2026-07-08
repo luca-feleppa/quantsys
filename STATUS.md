@@ -5,6 +5,26 @@
 
 ---
 
+## 🟢 SESSIONE 2026-07-08 (sera) — DASHBOARD: audit + fix trades-layer + posizione aperta visibile
+
+**Contesto:** audit completo di `scripts/06_dashboard.py` su richiesta ("studia, aggiusta, migliora"). Tutti gli endpoint rispondevano 200 con chain reale; i bug trovati erano nel layer Trades e nella formattazione. Nessun impatto su 04b/modelli/config trading.
+
+**Bug fixati (`scripts/06_dashboard.py`):**
+- **Posizione APERTA invisibile.** `trades.jsonl` è scritto da `maybe_settle` SOLO al settlement → il trade in essere (LONG K=64000 9JUL26) non compariva mai; lo status `open` del frontend era codice morto. Fix: `/api/trades` legge anche `results/vol_paper/position.json` (stesso schema, senza campi settlement) e lo appende come riga `open`; summary con `n_open`.
+- **`_safe` schiacciava None→0.0 sui campi di settlement** → su un trade open il frontend avrebbe visto `delivery_price=0` (passa `!=null` in JS) → `payoff=|0−K|/0` = **divisione per zero** nel profilo di rischio, e "0"/"+0.0000" in tabella invece di "—". Fix: nuovo helper `_optf` (None/NaN/inf → JSON null) per `delivery_price/payoff_btc/pnl_btc` + guard `delivery_price>0` sul marker ◆.
+- **Segno fee sbagliato sugli SHORT in `renderPayoff`.** La vecchia calibrazione `cost = pf ∓ pnl` dava `premio+fee−payoff` per gli short (04b: `pnl = side·(payoff−premium) − fee` → `premio−fee−payoff`): errore 2·fee, latente (finora tutti LONG) ma il segnale è direction-neutral. Fix: curva calcolata con la **formula di settlement esatta di 04b** → il marker ◆ giace sulla curva per costruzione (verificato: trade 1 pnl −0.010013 esatto).
+- **Selezione trade resettata dal refresh 12s** (il click veniva sovrascritto tornando all'ultimo trade). Fix: selezione tracciata per `entry_ts`, ripristinata al reload.
+- **`ensureExpiries` mai invalidata** → dopo le scadenze daily 08:00 UTC il menu Chain restava stale fino al reload pagina. Fix: TTL 10 min con selezione preservata.
+- **DVOL/ATM-IV/PCR falliti mostravano "0.0%"** invece di "—" (NaN→_safe→0.0). Fix: `_optf` + `fmtPct` null-safe (header + card DVOL).
+
+**Migliorie:** breakeven espliciti sul payoff (m\*=premio+side·fee/amt → S±=K/(1∓m\*); linee verdi tratteggiate + `debit/credit` e `BE lo/hi` nel titolo, tag `OPEN`); `fmtK` esteso a M/B (card vega/theta: era "+19088.1k", ora "+19.1M"); card hit-rate neutra quando n_settled=0; card Trades mostra `· N open`.
+
+**Verifica (protocollo 06-24: la verità è lo schermo):** py_compile OK; endpoint 7/7 HTTP 200; `/api/trades` n=13 (12 settled + 1 open, settlement `null` sull'open); **Playwright** su sequenza con rientri-tab (surface→risk→trades→risk→trades): OI spanPx=1467 e payoff spanPx=685 IDENTICI su ingresso E rientro (fix category-axis intatto), **zero errori JS**, riga open con `—`, titolo `LONG straddle · K 64,000 · debit 0.0211 · BE 62.7k / 65.4k · OPEN` (BE verificati a mano), persistenza selezione dopo reload confermata. Screenshot ispezionati (tab Trades + Risk). Doc sync: README §6.2 + AVVIO §5.4 + docstring modulo. Dashboard lasciata live su :8050 — **hard reload (Ctrl+Shift+R)** se la pagina era già aperta.
+
+**▶️ NEXT:** invariato dalla sessione mattutina (VPS collector 24/7; gate live n≥20; v2 delta-hedged post-gate).
+
+---
+
 ## 🟢 SESSIONE 2026-07-08 — A6 IMPLEMENTATO (exec-diag in `04b`) + processo riavviato
 
 **Contesto:** esecuzione dell'unico item "SUBITO" della roadmap (`docs/ROADMAP_VOL_BOOK.md`, sequencing B3 step 1). Costanti/regola pre-registrate **INTATTE** — solo logging diagnostico additivo, zero input al trading.

@@ -9,14 +9,18 @@ IT: Terminale istituzionale per l'analisi delle opzioni crypto. Si connette ai
     le Greche in tempo reale (Black-Scholes forward-measure) sull'intera option
     chain e visualizza la Superficie di Volatilità (3D), gli smile per scadenza,
     la term structure ATM e la distribuzione del rischio (OI/Greche aggregate).
+    La tab Trades mostra il forward test vol di 04b: storico settled da
+    results/vol_paper/trades.jsonl + posizione APERTA da position.json.
     NON usa i modelli ML del progetto: è un risk terminal di mercato, GPU-free.
 EN: Institutional crypto-options analytics terminal. Connects to Deribit public
     data (REST, no-auth) for BTC spot + full option chain (mark/bid/ask, mark_iv,
     open interest, volume, per-expiry forward), computes Greeks in real time
     (Black-Scholes forward-measure) over the whole chain, and renders the
     Volatility Surface (3D), per-expiry smiles, the ATM term structure and the
-    risk distribution (OI / aggregate Greeks). Does NOT touch the project's ML
-    models: it is a market risk terminal, GPU-free.
+    risk distribution (OI / aggregate Greeks). The Trades tab shows 04b's vol
+    forward test: settled history from results/vol_paper/trades.jsonl + the OPEN
+    position from position.json. Does NOT touch the project's ML models: it is
+    a market risk terminal, GPU-free.
 """
 import gzip as _gzip
 import hmac
@@ -290,6 +294,22 @@ def _safe(v, default=0.0):
         return default
 
 
+def _optf(v):
+    # IT: come _safe ma PRESERVA l'assenza: None/NaN/inf → None (JSON null).
+    #     Per i campi opzionali (delivery_price, DVOL, …) dove 0.0 è un valore
+    #     FUORVIANTE: il frontend mostra '—' su null, e un delivery_price=0.0
+    #     fantasma manderebbe il profilo payoff in divisione-per-zero.
+    # EN: like _safe but PRESERVES absence: None/NaN/inf → None (JSON null).
+    #     For optional fields (delivery_price, DVOL, …) where 0.0 is a MISLEADING
+    #     value: the frontend renders '—' on null, and a phantom delivery_price=0.0
+    #     would drive the payoff profile into a division-by-zero.
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
+
+
 def build_market(currency: str = CURRENCY) -> dict:
     # IT: stato di mercato completo da 1 snapshot chain + index: righe
     #     per-strumento con greche calcolate, più la lista delle expiry vive.
@@ -389,15 +409,19 @@ def build_summary(market: dict) -> dict:
         rows_e = [r for r in rows if r["expiry_ts"] == target["ts"]]
         atm30 = _atm_iv_for_expiry(rows_e)
 
+    # IT: dvol/atm/pcr sono opzionali (fetch fallito / chain vuota): null → '—' nel
+    #     frontend, non un fuorviante 0.0%.
+    # EN: dvol/atm/pcr are optional (failed fetch / empty chain): null → '—' in the
+    #     frontend, not a misleading 0.0%.
     return {
         "spot": _safe(market["spot"]),
-        "dvol": _safe(fetch_dvol(market.get("currency", CURRENCY))),
-        "atm_iv_30d": _safe(atm30),
+        "dvol": _optf(fetch_dvol(market.get("currency", CURRENCY))),
+        "atm_iv_30d": _optf(atm30),
         "total_oi": _safe(total_oi),
         "total_volume": _safe(total_vol),
         "call_oi": _safe(call_oi),
         "put_oi": _safe(put_oi),
-        "put_call_ratio": _safe(pcr),
+        "put_call_ratio": _optf(pcr),
         "n_instruments": len(rows),
         "n_expiries": len(market["expiries"]),
         "ts": market["ts"],
@@ -455,7 +479,7 @@ def build_term_structure(market: dict) -> dict:
                     "atm_iv": _safe(_atm_iv_for_expiry(rs)),
                     "forward": _safe(np.median([r["forward"] for r in rs]) if rs else float("nan")),
                     "oi": _safe(sum(r["oi"] for r in rs))})
-    return {"term": out, "dvol": _safe(fetch_dvol(market.get("currency", CURRENCY)))}
+    return {"term": out, "dvol": _optf(fetch_dvol(market.get("currency", CURRENCY)))}
 
 
 def build_chain_table(market: dict, expiry_ts) -> dict:
@@ -536,56 +560,85 @@ def build_risk(market: dict) -> dict:
         "max_pain": _safe(max_pain),
         "spot": _safe(spot),
         "agg_greeks": {k: _safe(v) for k, v in agg.items()},
-        "dvol": _safe(fetch_dvol(market.get("currency", CURRENCY))),
+        "dvol": _optf(fetch_dvol(market.get("currency", CURRENCY))),
     }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IT: 3b) FORWARD TEST — trade dello straddle vol (04b_vol_paper.py) da trades.jsonl.
-#     Per ogni trade: lato (LONG/SHORT straddle = long/short vol), strike, spot di
-#     ingresso, premio, prezzo di settlement, payoff e PnL (BTC) + sintesi aggregata.
-# EN: 3b) FORWARD TEST — vol straddle trades (04b_vol_paper.py) from trades.jsonl.
-#     Per trade: side (LONG/SHORT straddle = long/short vol), strike, entry spot,
-#     premium, settlement price, payoff and PnL (BTC) + aggregated summary.
+# IT: 3b) FORWARD TEST — trade dello straddle vol (04b_vol_paper.py): storico settled
+#     da trades.jsonl (append-only al settlement) + posizione APERTA da position.json
+#     (04b la scrive all'open e la azzera al settle). Per ogni trade: lato (LONG/SHORT
+#     straddle = long/short vol), strike, spot di ingresso, premio, prezzo di
+#     settlement, payoff e PnL (BTC) + sintesi aggregata. I campi di settlement sono
+#     null finché il trade è aperto (_optf, MAI 0.0 fantasma).
+# EN: 3b) FORWARD TEST — vol straddle trades (04b_vol_paper.py): settled history from
+#     trades.jsonl (append-only at settlement) + OPEN position from position.json
+#     (04b writes it on open, clears it on settle). Per trade: side (LONG/SHORT
+#     straddle = long/short vol), strike, entry spot, premium, settlement price,
+#     payoff and PnL (BTC) + aggregated summary. Settlement fields stay null while
+#     the trade is open (_optf, NEVER a phantom 0.0).
 # ═══════════════════════════════════════════════════════════════════════════════
 TRADES_PATH = Path("results/vol_paper/trades.jsonl")
+POSITION_PATH = Path("results/vol_paper/position.json")
+
+
+def _trade_row(t: dict) -> dict:
+    # IT: normalizza un record 04b (riga trades.jsonl O position.json — stesso schema,
+    #     la posizione aperta è semplicemente senza campi di settlement).
+    # EN: normalize a 04b record (trades.jsonl line OR position.json — same schema,
+    #     the open position simply lacks the settlement fields).
+    prem = float(t.get("prem_call", 0) or 0) + float(t.get("prem_put", 0) or 0)
+    return {
+        "entry_ts": t.get("entry_ts"), "settled_ts": t.get("settled_ts"),
+        "side": int(t.get("side", 1)),                 # IT/EN: 1 LONG straddle, -1 SHORT
+        "executed": bool(t.get("executed", False)),
+        "settled": t.get("settled_ts") is not None,
+        "strike": _safe(t.get("strike")),
+        "entry_spot": _safe(t.get("index_at_entry")),
+        "delivery_price": _optf(t.get("delivery_price")),
+        "prem_call": _safe(t.get("prem_call")), "prem_put": _safe(t.get("prem_put")),
+        "premium": _safe(prem), "fee_btc": _safe(t.get("fee_btc")),
+        "amount": _safe(t.get("amount", 1.0)),
+        "payoff_btc": _optf(t.get("payoff_btc")), "pnl_btc": _optf(t.get("pnl_btc")),
+        "edge": _safe(t.get("edge")), "rv_pred": _safe(t.get("rv_pred")),
+        "var_iv": _safe(t.get("var_iv")), "t_hours": _safe(t.get("t_hours_at_entry")),
+        "expiry_ms": _optf(t.get("expiry_ms")),
+        "call": t.get("call"), "put": t.get("put"),
+    }
 
 
 def build_trades() -> dict:
-    if not TRADES_PATH.exists():
-        return {"trades": [], "summary": {"n": 0, "n_settled": 0, "gate_trades": 30,
-                                          "note": "nessun trade (forward test 04b non avviato)"}}
     rows = []
-    for line in TRADES_PATH.read_text(encoding="utf-8").strip().splitlines():
-        if not line.strip():
-            continue
+    if TRADES_PATH.exists():
+        for line in TRADES_PATH.read_text(encoding="utf-8").strip().splitlines():
+            if not line.strip():
+                continue
+            try:
+                rows.append(_trade_row(json.loads(line)))
+            except Exception:
+                continue
+    # IT: posizione aperta in coda (è sempre la più recente): status 'open' nel
+    #     frontend, profilo di rischio dal premio (nessun settlement da calibrare).
+    # EN: open position appended last (always the most recent): 'open' status in the
+    #     frontend, risk profile from the premium (no settlement to calibrate).
+    n_open = 0
+    if POSITION_PATH.exists():
         try:
-            t = json.loads(line)
+            pos = json.loads(POSITION_PATH.read_text(encoding="utf-8"))
+            if isinstance(pos, dict) and pos.get("strike") is not None:
+                rows.append(_trade_row(pos))
+                n_open = 1
         except Exception:
-            continue
-        prem = float(t.get("prem_call", 0) or 0) + float(t.get("prem_put", 0) or 0)
-        rows.append({
-            "entry_ts": t.get("entry_ts"), "settled_ts": t.get("settled_ts"),
-            "side": int(t.get("side", 1)),                 # IT/EN: 1 LONG straddle, -1 SHORT
-            "executed": bool(t.get("executed", False)),
-            "settled": t.get("settled_ts") is not None,
-            "strike": _safe(t.get("strike")),
-            "entry_spot": _safe(t.get("index_at_entry")),
-            "delivery_price": _safe(t.get("delivery_price")),
-            "prem_call": _safe(t.get("prem_call")), "prem_put": _safe(t.get("prem_put")),
-            "premium": _safe(prem), "fee_btc": _safe(t.get("fee_btc")),
-            "amount": _safe(t.get("amount", 1.0)),
-            "payoff_btc": _safe(t.get("payoff_btc")), "pnl_btc": _safe(t.get("pnl_btc")),
-            "edge": _safe(t.get("edge")), "rv_pred": _safe(t.get("rv_pred")),
-            "var_iv": _safe(t.get("var_iv")), "t_hours": _safe(t.get("t_hours_at_entry")),
-            "call": t.get("call"), "put": t.get("put"),
-        })
+            log.warning("position.json illeggibile — riga open omessa / unreadable, open row skipped")
+    if not rows:
+        return {"trades": [], "summary": {"n": 0, "n_settled": 0, "n_open": 0, "gate_trades": 30,
+                                          "note": "nessun trade (forward test 04b non avviato)"}}
     settled = [r for r in rows if r["settled"] and r["pnl_btc"] is not None]
     pnls = [r["pnl_btc"] for r in settled]
     n_s = len(settled)
     wins = sum(1 for p in pnls if p > 0)
     summary = {
-        "n": len(rows), "n_settled": n_s,
+        "n": len(rows), "n_settled": n_s, "n_open": n_open,
         "n_executed": sum(1 for r in rows if r["executed"]),
         "total_pnl": _safe(sum(pnls)) if pnls else 0.0,
         "hit_rate": _safe(wins / n_s) if n_s else None,
@@ -752,7 +805,7 @@ HTML = r"""<!DOCTYPE html>
     <div class="panel">
       <h3>Risk Profile <span id="payoff-title" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
       <div id="plot-payoff" class="plot tall"></div>
-      <div class="legend">PnL (BTC) a scadenza vs prezzo del sottostante. ◆ = settlement reale. Linee: Strike (punteggiata) · Entry spot (ambra). Opzioni inverse Deribit: payoff = |S−K|/S.</div>
+      <div class="legend">PnL (BTC) a scadenza vs prezzo del sottostante. ◆ = settlement reale. Linee: Strike (punteggiata) · Entry spot (ambra) · Breakeven (verde tratteggiata). Opzioni inverse Deribit: PnL = side·(|S−K|/S − premio) − fee.</div>
     </div>
   </div>
 </div>
@@ -831,7 +884,12 @@ function plot(id, traces, layout, cfg, _t){
 }
 function fmt(v,d=2){ if(v==null||isNaN(v)) return '—'; return Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); }
 function fmt0(v){ return fmt(v,0); }
-function fmtK(v){ if(v==null||isNaN(v)) return '—'; if(Math.abs(v)>=1e3) return (v/1e3).toFixed(1)+'k'; return fmt(v,0); }
+function fmtK(v){ if(v==null||isNaN(v)) return '—'; const a=Math.abs(v);
+  if(a>=1e9) return (v/1e9).toFixed(1)+'B'; if(a>=1e6) return (v/1e6).toFixed(1)+'M';
+  if(a>=1e3) return (v/1e3).toFixed(1)+'k'; return fmt(v,0); }
+// IT: percentuale null-safe: '—' senza suffisso % (il backend manda null se il dato manca).
+// EN: null-safe percentage: '—' without the % suffix (backend sends null when data is missing).
+function fmtPct(v,d=1){ return (v==null||isNaN(v)) ? '—' : fmt(v,d)+'%'; }
 function cls(v){ return v>=0?'pos':'neg'; }
 // IT: formatter con SEGNO esplicito (+ per positivi; i negativi hanno già −) per le greche.
 // EN: explicit-SIGN formatter (+ for positives; negatives already carry −) for the greeks.
@@ -867,8 +925,8 @@ async function loadSummary(){
   try{
     const s = await (await fetch('/api/summary')).json();
     document.getElementById('h-spot').textContent = '$'+fmt0(s.spot);
-    document.getElementById('h-dvol').textContent = fmt(s.dvol,1)+'%';
-    document.getElementById('h-atm').textContent  = fmt(s.atm_iv_30d,1)+'%';
+    document.getElementById('h-dvol').textContent = fmtPct(s.dvol,1);
+    document.getElementById('h-atm').textContent  = fmtPct(s.atm_iv_30d,1);
     document.getElementById('h-oi').textContent   = fmtK(s.total_oi);
     document.getElementById('h-vol').textContent  = fmtK(s.total_volume);
     document.getElementById('h-pcr').textContent  = fmt(s.put_call_ratio,2);
@@ -945,14 +1003,26 @@ function renderTerm(){
 
 // ─── Option Chain ─────────────────────────────────────────────────────────────
 let CHAIN_EXPIRIES = [];
+let CHAIN_EXP_AT = 0;
 async function ensureExpiries(){
-  if(CHAIN_EXPIRIES.length) return;
+  // IT: TTL 10 min — le daily spirano alle 08:00 UTC e ne quotano di nuove: senza
+  //     refresh il menu resta stale (expiry morte selezionabili, nuove assenti).
+  //     La selezione corrente è preservata se l'expiry esiste ancora.
+  // EN: 10-min TTL — dailies expire at 08:00 UTC and new ones get listed: without a
+  //     refresh the menu goes stale (dead expiries selectable, new ones missing).
+  //     Current selection is preserved if the expiry still exists.
+  if(CHAIN_EXPIRIES.length && (Date.now()-CHAIN_EXP_AT) < 600e3) return;
   const m = await (await fetch('/api/expiries')).json();
-  CHAIN_EXPIRIES = m.expiries;
+  if(!m.expiries || !m.expiries.length) return;      // fetch degradata: tieni la lista corrente / degraded fetch: keep current list
+  CHAIN_EXPIRIES = m.expiries; CHAIN_EXP_AT = Date.now();
   const sel = document.getElementById('chain-sel');
+  const cur = sel.value;
   sel.innerHTML = CHAIN_EXPIRIES.map(e=>`<option value="${e.ts}">${e.label} · ${Math.round(e.days)}d</option>`).join('');
-  let best=0,bd=1e9; CHAIN_EXPIRIES.forEach((e,i)=>{const d=Math.abs(e.days-30);if(d<bd){bd=d;best=i;}});
-  sel.selectedIndex = best;
+  if(cur && CHAIN_EXPIRIES.some(e=>String(e.ts)===cur)){ sel.value = cur; }
+  else {
+    let best=0,bd=1e9; CHAIN_EXPIRIES.forEach((e,i)=>{const d=Math.abs(e.days-30);if(d<bd){bd=d;best=i;}});
+    sel.selectedIndex = best;
+  }
 }
 const CH_COLS = ['oi','vol','Θ','ν','Γ','Δ','IV','bid','mark','ask'];
 async function loadChain(){
@@ -1124,7 +1194,7 @@ async function loadRisk(){
       {l:'Net OI Γ (Gamma)', v:fmtS(g.gamma,4), s:'OI-weighted', c:cls(g.gamma)},
       {l:'Net OI ν (Vega)', v:fmtKS(g.vega), s:'per +1% vol', c:cls(g.vega)},
       {l:'Net OI Θ (Theta)', v:fmtKS(g.theta), s:'OI-weighted · USD/day', c:cls(g.theta)},
-      {l:'DVOL', v:fmt(d.dvol,1)+'%', s:'30d implied', c:'amb'},
+      {l:'DVOL', v:fmtPct(d.dvol,1), s:'30d implied', c:'amb'},
     ].map(c=>`<div class="card"><div class="lbl">${c.l}</div><div class="val ${c.c||''}">${c.v}</div><div class="sub">${c.s}</div></div>`).join('');
 
     renderOI(d);
@@ -1145,6 +1215,7 @@ async function loadRisk(){
 
 // ─── Trades (forward test vol-paper) ────────────────────────────────────────────
 let TRADES = [];
+let SEL_TS = null;   // IT: entry_ts del trade selezionato (sopravvive al refresh 12s) | EN: selected trade entry_ts (survives the 12s refresh)
 async function loadTrades(){
   try{
     const d = await (await fetch('/api/trades')).json();
@@ -1152,9 +1223,9 @@ async function loadTrades(){
     const s = d.summary||{};
     document.getElementById('trades-cards').innerHTML = [
       {l:'Total PnL (BTC)', v:fmtS(s.total_pnl,4), s:`${s.n_settled||0} settled / gate ${s.gate_trades||30}`, c:cls(s.total_pnl||0)},
-      {l:'Hit-rate', v:(s.hit_rate==null?'—':fmt(s.hit_rate*100,0)+'%'), s:'PnL > 0', c:(s.hit_rate>=0.5?'pos':'neg')},
+      {l:'Hit-rate', v:(s.hit_rate==null?'—':fmt(s.hit_rate*100,0)+'%'), s:'PnL > 0', c:(s.hit_rate==null?'amb':(s.hit_rate>=0.5?'pos':'neg'))},
       {l:'Avg PnL/trade', v:(s.avg_pnl==null?'—':fmtS(s.avg_pnl,4)), s:'BTC', c:cls(s.avg_pnl||0)},
-      {l:'Trades', v:fmt0(s.n||0), s:`${s.n_executed||0} eseguiti (real)`, c:'amb'},
+      {l:'Trades', v:fmt0(s.n||0), s:`${s.n_executed||0} eseguiti (real) · ${s.n_open||0} open`, c:'amb'},
       {l:'Best / Worst', v:(s.best==null?'—':fmtS(s.best,4))+' / '+(s.worst==null?'—':fmtS(s.worst,4)), s:'BTC', c:'amb'},
     ].map(c=>`<div class="card"><div class="lbl">${c.l}</div><div class="val ${c.c||''}">${c.v}</div><div class="sub">${c.s}</div></div>`).join('');
 
@@ -1172,34 +1243,49 @@ async function loadTrades(){
         <td class="${cls(t.pnl_btc||0)}">${t.pnl_btc==null?'—':fmtS(t.pnl_btc,4)}</td>
         <td>${fmt(t.edge,2)}</td><td>${stat}</td></tr>`;
     }).join('');
-    if(TRADES.length){ selectTrade(TRADES.length-1); }
+    // IT: ripristina la selezione dell'utente per entry_ts (il refresh 12s ricostruisce
+    //     la tabella: senza questo, il click veniva sovrascritto tornando all'ultimo).
+    // EN: restore the user's selection by entry_ts (the 12s refresh rebuilds the table:
+    //     without this, the click was overwritten back to the last trade).
+    if(TRADES.length){
+      let i = TRADES.findIndex(t=>t.entry_ts===SEL_TS);
+      selectTrade(i>=0 ? i : TRADES.length-1);
+    }
     else { document.getElementById('payoff-title').textContent='(nessun trade)'; Plotly.purge('plot-payoff'); }
     setConn(true);
   }catch(e){ setConn(false); }
 }
 function selectTrade(i){
   const t=TRADES[i]; if(!t) return;
+  SEL_TS = t.entry_ts;
   document.querySelectorAll('#trades-body tr').forEach((r,j)=>r.classList.toggle('atm-row', j===i));
   renderPayoff(t);
 }
-// IT: profilo di rischio dello straddle — PnL (BTC) a scadenza vs sottostante.
-//     Opzioni inverse Deribit: payoff(S)=amount·|S−K|/S. Il costo totale è calibrato
-//     dal trade realizzato (payoff@settle − pnl) così la curva passa per il marker ◆.
-// EN: straddle risk profile — PnL (BTC) at expiry vs underlying. Inverse Deribit
-//     options: payoff(S)=amount·|S−K|/S. Total cost is calibrated from the realized
-//     trade (payoff@settle − pnl) so the curve passes through the ◆ marker.
+// IT: profilo di rischio dello straddle — PnL (BTC) a scadenza vs sottostante,
+//     con la STESSA formula di settlement di 04b (maybe_settle):
+//       pnl(S) = side·amt·(|S−K|/S − premium) − fee    (opzioni inverse Deribit)
+//     → il marker ◆ del settlement cade ESATTAMENTE sulla curva (niente calibrazione
+//     a posteriori: la vecchia `cost = pf ∓ pnl` sbagliava il segno della fee sugli
+//     SHORT e divideva per delivery_price=0 sui trade aperti). Breakeven espliciti:
+//     |S−K|/S = premium + side·fee/amt → S± = K/(1∓m*).
+// EN: straddle risk profile — PnL (BTC) at expiry vs underlying, using the SAME
+//     settlement formula as 04b (maybe_settle):
+//       pnl(S) = side·amt·(|S−K|/S − premium) − fee    (inverse Deribit options)
+//     → the settlement ◆ marker lands EXACTLY on the curve (no ex-post calibration:
+//     the old `cost = pf ∓ pnl` got the fee sign wrong on SHORTs and divided by
+//     delivery_price=0 on open trades). Explicit breakevens:
+//     |S−K|/S = premium + side·fee/amt → S± = K/(1∓m*).
 function renderPayoff(t){
   const K=t.strike, amt=t.amount||1, side=t.side>0?1:-1;
-  let cost=(t.premium||0)*amt+(t.fee_btc||0);
-  if(t.delivery_price!=null && t.pnl_btc!=null){
-    const pf=amt*Math.abs(t.delivery_price-K)/t.delivery_price;
-    cost = side>0 ? (pf - t.pnl_btc) : (pf + t.pnl_btc);
-  }
+  const prem=t.premium||0, fee=t.fee_btc||0;
+  const pnlAt = S => side*amt*(Math.abs(S-K)/S - prem) - fee;
   const lo=K*0.80, hi=K*1.20, N=121, xs=[], ys=[];
-  for(let j=0;j<N;j++){ const S=lo+(hi-lo)*j/(N-1);
-    const pf=amt*Math.abs(S-K)/S;
-    ys.push(side>0 ? pf-cost : cost-pf); xs.push(S);
-  }
+  for(let j=0;j<N;j++){ const S=lo+(hi-lo)*j/(N-1); xs.push(S); ys.push(pnlAt(S)); }
+  // IT: breakeven m* = |S−K|/S a PnL=0; S⁺=K/(1−m*) (sopra strike), S⁻=K/(1+m*).
+  // EN: breakeven m* = |S−K|/S at PnL=0; S⁺=K/(1−m*) (above strike), S⁻=K/(1+m*).
+  const mStar = prem + side*fee/amt;
+  const beUp = (mStar>0 && mStar<1) ? K/(1-mStar) : null;
+  const beDn = (mStar>0) ? K/(1+mStar) : null;
   // IT: ── ASSE-X CATEGORY anche qui (STESSO fix di renderOI). Causa (diagnosi browser
   //     2026-06-24): l'asse LINEARE numerico, ri-renderizzato dopo display:none→block,
   //     CORROMPE la mappatura-pixel e schiaccia la curva in una verticale a sinistra
@@ -1223,13 +1309,22 @@ function renderPayoff(t){
   const _kX = catPos(K, xs), _eX = catPos(t.entry_spot, xs);
   const traces=[{type:'scatter',mode:'lines',x:xsStr,y:ys,line:{color:'#4aa3ff',width:2},
     hovertemplate:'S %{x}<br>PnL %{y:+,.4f} BTC<extra></extra>'}];
-  if(t.delivery_price!=null && t.pnl_btc!=null){
+  // IT: marker settlement solo su trade chiusi con delivery valido (>0: da flat il
+  //     backend manda null, mai 0 fantasma — doppia difesa qui).
+  // EN: settlement marker only on closed trades with a valid delivery (>0: the
+  //     backend sends null when open, never a phantom 0 — double defense here).
+  if(t.delivery_price!=null && t.delivery_price>0 && t.pnl_btc!=null){
     traces.push({type:'scatter',mode:'markers',x:[xsStr[_idxNear(t.delivery_price)]],y:[t.pnl_btc],
       marker:{color:(t.pnl_btc>=0?'#2ecc71':'#ff5c5c'),size:12,symbol:'diamond'},
       hovertemplate:'settle %{x}<br>PnL %{y:+,.4f} BTC<extra></extra>'});
   }
+  // IT: debit (long: premio+fee) / credit (short: premio−fee) + breakeven nel titolo.
+  // EN: debit (long: premium+fee) / credit (short: premium−fee) + breakevens in title.
+  const netCash = prem*amt + side*fee;
   document.getElementById('payoff-title').textContent =
-    `${t.side>0?'LONG':'SHORT'} straddle · K ${fmt0(K)} · cost ${fmt(cost,4)} BTC`;
+    `${t.side>0?'LONG':'SHORT'} straddle · K ${fmt0(K)} · ${t.side>0?'debit':'credit'} ${fmt(netCash,4)} BTC`
+    + (beDn&&beUp ? ` · BE ${fmtK(beDn)} / ${fmtK(beUp)}` : '')
+    + (t.settled ? '' : ' · OPEN');
   // IT: render via plot() (size-guard + rebuild on re-entry); asse-x category (vedi sopra).
   // EN: render via plot() (size-guard + rebuild on re-entry); category x-axis (see above).
   plot('plot-payoff', traces, Object.assign({}, PL_DARK, {
@@ -1240,7 +1335,17 @@ function renderPayoff(t){
     shapes:[
       {type:'line',x0:_kX,x1:_kX,y0:0,y1:1,yref:'paper',line:{color:'#7d8aa0',width:1,dash:'dot'}},
       {type:'line',x0:_eX,x1:_eX,y0:0,y1:1,yref:'paper',line:{color:'#f0a020',width:1.2}},
+      // IT: breakeven (PnL=0) tratteggiati, solo se dentro la finestra ±20%.
+      // EN: dashed breakevens (PnL=0), only when inside the ±20% window.
+      ...[beDn,beUp].filter(b=>b!=null && b>=lo && b<=hi).map(b=>{
+        const x=catPos(b,xs);
+        return {type:'line',x0:x,x1:x,y0:0,y1:1,yref:'paper',line:{color:'#2ecc71',width:1,dash:'dash'}};
+      }),
     ],
+    // IT: niente label 'BE' (collidono coi tick sotto e con la V dentro): i valori
+    //     sono nel titolo, la legenda spiega il verde tratteggiato.
+    // EN: no 'BE' labels (they collide with ticks below and the V inside): values
+    //     are in the title, the legend explains the dashed green.
     annotations:[
       {x:_kX,y:1,yref:'paper',text:'Strike',showarrow:false,font:{color:'#7d8aa0',size:10},yanchor:'bottom'},
       {x:_eX,y:1,yref:'paper',text:'Entry',showarrow:false,font:{color:'#f0a020',size:10},yanchor:'bottom',xanchor:'right'},

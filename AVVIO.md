@@ -459,7 +459,7 @@ python run_all.py --only-dashboard # idem (no ML, no feed live · no ML, no live
 1. **Volatility Surface** — superficie IV 3D (moneyness K/F × giorni), smile per scadenza, term structure ATM
 2. **Option Chain** — chain call/put a doppio lato, Greche live (Black-Scholes forward: Δ, Γ, ν per +1% vol, Θ/giorno), strike ATM evidenziato
 3. **Risk & Greeks** — OI per strike (call vs put), max-pain, Greche aggregate pesate per OI, put/call ratio, DVOL
-4. **Trades** — storico trade del forward test vol (`04b`): lato LONG/SHORT straddle, prezzo ingresso/settlement, premio/payoff/PnL, profilo di rischio/payoff (click su una riga). Endpoint `/api/trades` (legge `results/vol_paper/trades.jsonl`)
+4. **Trades** — forward test vol (`04b`): storico settled + **posizione aperta** (status `open`, campi settlement a `—`): lato LONG/SHORT straddle, prezzo ingresso/settlement, premio/payoff/PnL, profilo di rischio/payoff (click su una riga; formula di settlement identica a `04b`, **breakeven** nel titolo e in verde tratteggiato; la selezione sopravvive al refresh ~12s). Endpoint `/api/trades` (legge `results/vol_paper/trades.jsonl` + `position.json`)
 
 Header live: spot BTC (index), DVOL 30d, ATM IV 30d, OI/volume totali, put/call ratio. Auto-refresh ~12s. Underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH); `auth_token` opzionale (constant-time, `X-Auth-Token` o `?token=`).
 
@@ -467,7 +467,7 @@ Header live: spot BTC (index), DVOL 30d, ATM IV 30d, OI/volume totali, put/call 
 1. **Volatility Surface** — 3D IV surface (moneyness K/F × days), per-expiry smile, ATM term structure
 2. **Option Chain** — two-sided call/put chain, live Greeks (Black-Scholes forward: Δ, Γ, ν per +1% vol, Θ/day), ATM strike highlighted
 3. **Risk & Greeks** — OI by strike (call vs put), max-pain, OI-weighted aggregate Greeks, put/call ratio, DVOL
-4. **Trades** — vol forward-test (`04b`) trade history: LONG/SHORT straddle side, entry/settlement price, premium/payoff/PnL, risk/payoff profile (click a row). `/api/trades` endpoint (reads `results/vol_paper/trades.jsonl`)
+4. **Trades** — vol forward test (`04b`): settled history + **open position** (status `open`, settlement fields as `—`): LONG/SHORT straddle side, entry/settlement price, premium/payoff/PnL, risk/payoff profile (click a row; settlement formula identical to `04b`, **breakevens** in the title and as dashed green lines; selection survives the ~12s refresh). `/api/trades` endpoint (reads `results/vol_paper/trades.jsonl` + `position.json`)
 
 Live header: BTC spot (index), 30d DVOL, 30d ATM IV, total OI/volume, put/call ratio. Auto-refresh ~12s. Underlying via `config/default.yaml → dashboard.options_currency` (BTC|ETH); optional `auth_token` (constant-time, `X-Auth-Token` header or `?token=`).
 
