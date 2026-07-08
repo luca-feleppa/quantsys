@@ -1279,7 +1279,14 @@ function renderPayoff(t){
   const K=t.strike, amt=t.amount||1, side=t.side>0?1:-1;
   const prem=t.premium||0, fee=t.fee_btc||0;
   const pnlAt = S => side*amt*(Math.abs(S-K)/S - prem) - fee;
-  const lo=K*0.80, hi=K*1.20, N=121, xs=[], ys=[];
+  // IT: finestra K±20%, ESTESA a includere il settlement se cade fuori (audit MINOR-5:
+  //     prima un delivery off-range veniva snappato al bordo con ascissa fuorviante).
+  // EN: K±20% window, EXTENDED to include the settlement when it falls outside (audit
+  //     MINOR-5: an off-range delivery used to snap to the edge with a misleading x).
+  const dp = (t.delivery_price!=null && t.delivery_price>0) ? t.delivery_price : null;
+  let lo=K*0.80, hi=K*1.20;
+  if(dp!=null){ lo=Math.min(lo, dp*0.97); hi=Math.max(hi, dp*1.03); }
+  const N=121, xs=[], ys=[];
   for(let j=0;j<N;j++){ const S=lo+(hi-lo)*j/(N-1); xs.push(S); ys.push(pnlAt(S)); }
   // IT: breakeven m* = |S−K|/S a PnL=0; S⁺=K/(1−m*) (sopra strike), S⁻=K/(1+m*).
   // EN: breakeven m* = |S−K|/S at PnL=0; S⁺=K/(1−m*) (above strike), S⁻=K/(1+m*).
