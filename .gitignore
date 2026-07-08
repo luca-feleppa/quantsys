@@ -66,8 +66,11 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
-# ── Local Claude Code metadata (auto-memory, transcripts) ────
-.claude/
+# ── Claude Code: config di progetto VERSIONATA (settings.json, hooks/, agents/,
+#    skills/), metadata locale IGNORATO / project config VERSIONED, local metadata IGNORED
+.claude/settings.local.json
+.claude/plans/
+.claude/tasks/
 
 # ── Log a root (i log normali stanno in logs/) ───────────────
 *.log

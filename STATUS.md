@@ -5,6 +5,19 @@
 
 ---
 
+## 🟢 2026-07-08 (sera, 3) — TOOLING: config Claude Code di progetto (hook + agent + skill)
+
+**Contesto:** setup strutturato di Claude Code per il repo (plugin claude-code-setup → raccomandazioni → implementate tutte). Novità: la config di progetto ora è **versionata** (`.gitignore` non ignora più l'intera `.claude/` — solo `settings.local.json`, `plans/`, `tasks/`).
+
+- **Hook (`.claude/settings.json` + script in `.claude/hooks/`, tutti pipe-testati + sentinella verificata):** ① `guard_assets.py` (PreToolUse Edit|Write → `permissionDecision: ask` su `data/iv/`, `trades.jsonl`, `position.json`, `pipeline_state.pkl` — gli asset intoccabili ora sono un vincolo meccanico, non prosa); ② `inject_status.py` (SessionStart → prime 70 righe di STATUS.md iniettate in contesto: direttiva #3 automatizzata); ③ `pycompile.py` (PostToolUse su `*.py` → py_compile automatico, `decision: block` col traceback su sintassi rotta).
+- **Permessi:** allowlist curata in `.claude/settings.json` (10 regole read-only, quasi tutte PowerShell: `Get-Content/ChildItem/NetTCPConnection`, `git status/log/diff`, `curl -s localhost:8050`) via scan dei transcript (29 sessioni). Interpreti (`python *`) ESCLUSI dalla project-allowlist per policy anti-esecuzione-arbitraria (resta nel `settings.local.json` personale, che è pieno di one-off obsoleti → potabile a piacere).
+- **Agent (`.claude/agents/`):** `causality-auditor` (review econometrica read-only: lookahead, filtered-vs-smoothed, invariante z-score↔raw, contratto interval, zone DA-NON-TOCCARE) e `doc-sync-checker` (verifica direttiva #2 sui .md).
+- **Skill (`.claude/skills/`):** `/smoke-dashboard` (protocollo completo con trappola :8050 e check Playwright con rientri-tab) e `/preregister` (scaffold del gate sperimentale in STATUS.md, template + regole non negoziabili).
+
+**▶️ Uso:** gli hook sono GIÀ vivi (watcher ha caricato senza restart). Gli agent si invocano nei fan-out di review (`causality-auditor` al posto del prompt ad-hoc); le skill con `/smoke-dashboard` e `/preregister`.
+
+---
+
 ## 🟡 2026-07-08 (sera, 2) — HEDGE DRY-RUN retrospettivo (pre-studio B2/A1) su exec_diag A6
 
 **Contesto:** primo dry-run offline della leg delta-hedge (perp) sui dati A6 raccolti — richiesto dall'utente, è il pre-studio previsto dal sequencing B3 (dimensiona il design v2 senza toccare `04b`). Script permanente nuovo: `scripts/vol/hedge_dry_run.py` (read-only su `exec_diag.jsonl`, PnL perp inverse ESATTO `H_usd·(1/s0−1/s1)`, due convenzioni δ a confronto, OLS Δm~r con SE, fee parametrica `--fee` default 5bps). Report → `results/vols/hedge_dry_run.json`. Mappato in `scripts/README.md`.
