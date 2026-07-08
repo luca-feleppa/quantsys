@@ -5,6 +5,39 @@
 
 ---
 
+## 🟢 SESSIONE 2026-07-08 — A6 IMPLEMENTATO (exec-diag in `04b`) + processo riavviato
+
+**Contesto:** esecuzione dell'unico item "SUBITO" della roadmap (`docs/ROADMAP_VOL_BOOK.md`, sequencing B3 step 1). Costanti/regola pre-registrate **INTATTE** — solo logging diagnostico additivo, zero input al trading.
+
+**Cosa è stato fatto (`scripts/04b_vol_paper.py`):**
+- `DeribitTestnet.ticker()` (ticker completo), `_leg_snapshot()` (bid/ask/size, mark, mark/bid/ask-IV, underlying, greeks Deribit — delta teorico convenzione venue inverse), `log_exec_diag()` chiamata a fine `tick()` (DOPO l'eventuale open → cattura l'half-spread di entry reale).
+- **Output nuovo:** `results/vol_paper/exec_diag.jsonl`, append-only, 1 riga/tick orario: con posizione aperta → le 2 leg in essere (serie del delta lungo l'holding → stima offline del valore dell'hedge, alimenta A1); da flat → lo straddle ATM che `open_straddle` sceglierebbe ORA (serie half-spread di entry → rilettura PnL net-of-half-spread a gate chiuso). Aggregati: `straddle_delta`, `net_delta = side×struttura`, `half_spread_btc/frac`.
+- **Fail-soft totale:** ogni errore REST/campo mancante → `log.warning`, MAI un raise verso `tick()`; campi illiquidi → `None` (il delta si ricalcola offline dal mark_iv).
+- **Verifica:** py_compile OK; smoke end-to-end su path scratch (REST testnet reale, production intatta) → riga valida, valori sensati (half-spread 18.7% ≈ haircut ~16% della validazione premi 06-25). Processo `04b --execute` **riavviato** col codice nuovo (kill 3716/11724 → nuova coppia 17160/14548, tra due tick, `position.json` ripreso pulito): bootstrap OK (5 membri, center −7.175, 104 feature), primo tick 11:44 → HOLD, **prima riga production scritta** (LONG K=64000 9JUL26 in essere, Δ_netto=−0.87 put-ITM, half-spread 18.2%).
+- **Doc sync:** header `04b` (lista output), `AVVIO.md` (tree results/), `ROADMAP_VOL_BOOK.md` (A6 marcato ✅ IMPLEMENTATO). README/TEORIA non impattati (nessuna architettura cambiata).
+
+**Refresh macro ESEGUITO (stessa sessione):** `macro_features.parquet` era vecchio di 28g → rifatta la **sola sezione macro** di `01b` (step 1-3 replicati verbatim in scratch: FRED 38 serie + yfinance 9 + `MacroFeatureBuilder`): 3083→3111 righe, ultima data **2026-07-08**, **schema identico (90 col, verificato pre-write — l'assert di 04b richiede il match)**; backup del parquet 06-10 in scratchpad. **Deliberatamente NON toccati** (fuori scope, evita ore di walkforward e clobber di artefatti coerenti col training): `regime_probs.parquet`, `regime_hmm.pkl`, `macro_normalizer.pkl`, `lstm_dataset.npz` (X_macro_* resta su macro 06-10 — al prossimo retrain rilanciare `01b` completo o `dev_vols_macro_append`), `PipelineState`. `04b` riavviato di nuovo: snapshot `90 feature, ultima data 2026-07-08 (0g fa)`, warning sparito. ⚠ Nota di rigore: il refit del MacroNormalizer in 04b ora avviene su 4 settimane in più di storia rispetto al fit del training — drift second-order su mediana/IQR di 8 anni daily, accettato in cambio di livelli macro correnti (il pattern di 04b prevede esattamente questo refresh).
+
+**Note operative:** (a) hiccup connettività Binance transitorio ~11:42-11:55 (recorder L2 + primo tick del 04b riavviato, `ConnectTimeout` su klines) — self-healing, il loop ritenta al tick orario successivo; (b) commit+push di questa sessione in corso su richiesta utente.
+
+**▶️ NEXT:** (1) invariato — deploy collector 24/7 su VPS OVH (sblocca B1 + protegge IV); (2) gate live short-vol n≥20 (~metà luglio) matura da solo, ora CON la serie exec-diag che si accumula; (3) post-gate: `04b` v2 delta-hedged (B3 step 2, pre-registrare hedged vs unhedged) usando la serie delta di A6 per il design.
+
+---
+
+## 🟢 SESSIONE 2026-07-07 — Audit anti-overfit architetture + verdetto book futures/opzioni → ROADMAP scritta
+
+**Contesto:** sessione advisory, ZERO modifiche a codice/config. Due deliverable: (1) audit delle strategie di generalizzazione (purged CV / FrAug / RevIN / internals iTransformer-TCNMamba-NHiTS) contro il codice reale; (2) analisi strategica "futures con leva + opzioni".
+
+**Output → `docs/ROADMAP_VOL_BOOK.md`** (backlog prioritizzato A1-A10 + verdetti B1-B3). Punti chiave:
+- **Verdetti chiusi (non ri-testare):** FrAug canonica NO (rompe coerenza cross-feature delle 104 engineered); RevIN resta OFF sulla linea vol (il livello locale di vol È il segnale HAR; denorm inconsistente con target log_rv); MC-dropout NON rientra nel path live (ensemble variance law superiore + parity); interpolazione gerarchica N-HiTS non applicabile (target scalare).
+- **B1 ❌ futures direzionali con leva:** NO dimostrato (momenti dispari falsificati OOS; leva moltiplica edge≈0 e costi certi; opzioni-a-copertura pagherebbero il VRP che l'altro braccio raccoglie).
+- **B2 ✅ perp Deribit come DELTA-HEDGE del book opzioni:** upgrade più giustificato del progetto — PnL hedgiato = ∫½ΓS²(σ²impl−σ²real)dt = puro harvest VRP (la quantità che il NN predice), varianza per trade ↓↓ → gate n≥20 con più potere, ipotesi Trending-driven testabile pulita. Post-gate, mai a campione aperto.
+- **Unico item eseguibile SUBITO: A6** — logging bid/ask + delta teorico in `04b_vol_paper.py` come colonne diagnostiche (costanti pre-registrate INTATTE).
+
+**▶️ NEXT:** (1) implementare **A6** (logging diagnostico in `04b`, non tocca la regola pre-registrata); (2) invariato dal 06-26: deploy collector 24/7 su VPS OVH + gate live short-vol n≥20 (~metà luglio); (3) post-gate: `04b` v2 delta-hedged secondo sequencing B3 della roadmap. Riferimento completo: `docs/ROADMAP_VOL_BOOK.md`.
+
+---
+
 ## 🟢 SESSIONE 2026-06-26 — AUDIT statistico/logico + fan-out fix (3 subagent) → 1 conclusione 06-25 CORRETTA, 1 prior SMENTITO
 
 **Contesto:** audit del codice nuovo del branch `vol/short-vol-hist-backtest` (i 3 script short-vol + i fix perf batch-A). Causalità/lookahead **verificati PULITI** ovunque (inclusa la cache PC1 di `regime.py` A6, che indicizza solo `[t]`/`[:t]` → bit-identica e causale). 5 problemi statistici/logici risolti via fan-out (file-ownership disgiunta, 2 ondate per la dipendenza di import). Nessun commit; default su disco ripristinati a stato production.

@@ -13,9 +13,11 @@
 #     di fill); --execute piazza ordini market REALI sul testnet (OAuth2 da
 #     config/secrets.yaml, blocco deribit_testnet). NO mainnet: il base URL
 #     viene da secrets e DEVE contenere "test.deribit.com" (assert).
-#     Output: results/vol_paper/{forecasts.parquet, trades.jsonl, position.json}.
-#     Il log forecasts è scritto ANCHE quando flat: serve alle baseline
-#     always-long/short-vol sull'intero calendario (gate pre-registrato).
+#     Output: results/vol_paper/{forecasts.parquet, trades.jsonl, position.json,
+#     exec_diag.jsonl}. Il log forecasts è scritto ANCHE quando flat: serve alle
+#     baseline always-long/short-vol sull'intero calendario (gate pre-registrato).
+#     exec_diag.jsonl (A6, ROADMAP_VOL_BOOK) = bid/ask reali + greeks per tick,
+#     SOLO diagnostico: nessun input alla regola pre-registrata.
 # EN: VOL-PAPER FORWARD TEST (pre-registered in STATUS.md 2026-06-12) — hourly loop:
 #       1. NN-RV 30h forecast with the PASS vol-1h model (FULL z→raw inversion:
 #          μ_z·scale + center from the persisted RobustScaler — QLIKE-judge
@@ -31,9 +33,11 @@
 #     noise); --execute places REAL market orders on the testnet (OAuth2 from
 #     config/secrets.yaml, deribit_testnet block). NO mainnet: the base URL
 #     comes from secrets and MUST contain "test.deribit.com" (assert).
-#     Output: results/vol_paper/{forecasts.parquet, trades.jsonl, position.json}.
-#     The forecasts log is written EVEN when flat: it feeds the always-long/
-#     short-vol baselines over the full calendar (pre-registered gate).
+#     Output: results/vol_paper/{forecasts.parquet, trades.jsonl, position.json,
+#     exec_diag.jsonl}. The forecasts log is written EVEN when flat: it feeds the
+#     always-long/short-vol baselines over the full calendar (pre-registered gate).
+#     exec_diag.jsonl (A6, ROADMAP_VOL_BOOK) = real bid/ask + greeks per tick,
+#     diagnostic ONLY: no input to the pre-registered rule.
 import argparse
 import json
 import logging
@@ -62,6 +66,9 @@ FORECASTS_PATH = OUT_DIR / "forecasts.parquet"
 TRADES_PATH = OUT_DIR / "trades.jsonl"
 POSITION_PATH = OUT_DIR / "position.json"
 IV_PATH = Path("data/iv/atm_30h.parquet")
+# IT: A6 (ROADMAP_VOL_BOOK) — log diagnostico esecuzione (bid/ask + delta), append-only.
+# EN: A6 (ROADMAP_VOL_BOOK) — execution diagnostic log (bid/ask + delta), append-only.
+EXEC_DIAG_PATH = OUT_DIR / "exec_diag.jsonl"
 
 # IT: costanti PRE-REGISTRATE (STATUS.md 2026-06-12) — non toccarle a risultati visti.
 # EN: PRE-REGISTERED constants (STATUS.md 2026-06-12) — do not touch after seeing results.
@@ -134,6 +141,11 @@ class DeribitTestnet:
     def mark_price(self, instrument: str) -> float:
         return float(self.get("public/ticker",
                               {"instrument_name": instrument})["mark_price"])
+
+    # IT: ticker completo (bid/ask/mark/IV/greeks) — base del logging diagnostico A6.
+    # EN: full ticker (bid/ask/mark/IV/greeks) — basis of the A6 diagnostic logging.
+    def ticker(self, instrument: str) -> dict:
+        return self.get("public/ticker", {"instrument_name": instrument})
 
     # IT: ordine market sul testnet; ritorna il prezzo medio di fill (BTC/contratto).
     # EN: testnet market order; returns the average fill price (BTC/contract).
@@ -385,6 +397,101 @@ def fee_btc(premium: float) -> float:
     return min(FEE_PER_CONTRACT, FEE_CAP_FRAC * premium) * SIZE_CONTRACTS
 
 
+# ──────────────────────── diagnostica esecuzione (A6) ────────────────────────
+def _leg_snapshot(db: DeribitTestnet, instrument: str) -> dict:
+    # IT: snapshot per-leg dal ticker: bid/ask reali (metà-spread = il costo che il
+    #     fill al mark ignora), mark, IV e greeks Deribit (delta teorico BS della
+    #     venue — stessa convenzione inverse/coin-settled del margin engine).
+    # EN: per-leg ticker snapshot: real bid/ask (half-spread = the cost mark-price
+    #     fills ignore), mark, IV and Deribit greeks (venue BS theoretical delta —
+    #     same inverse/coin-settled convention as the margin engine).
+    t = db.ticker(instrument)
+    g = t.get("greeks") or {}
+
+    def _f(v):
+        # IT: float finito o None (il testnet può dare campi assenti/null su strike
+        #     illiquidi — mai crashare, il delta si ricalcola offline dal mark_iv).
+        # EN: finite float or None (testnet may return missing/null fields on
+        #     illiquid strikes — never crash, delta is recomputable offline from mark_iv).
+        try:
+            v = float(v)
+            return v if np.isfinite(v) else None
+        except (TypeError, ValueError):
+            return None
+
+    return {"instrument": instrument,
+            "bid": _f(t.get("best_bid_price")), "ask": _f(t.get("best_ask_price")),
+            "bid_size": _f(t.get("best_bid_amount")), "ask_size": _f(t.get("best_ask_amount")),
+            "mark": _f(t.get("mark_price")), "mark_iv": _f(t.get("mark_iv")),
+            "bid_iv": _f(t.get("bid_iv")), "ask_iv": _f(t.get("ask_iv")),
+            "underlying": _f(t.get("underlying_price")),
+            "delta": _f(g.get("delta")), "gamma": _f(g.get("gamma")),
+            "vega": _f(g.get("vega")), "theta": _f(g.get("theta"))}
+
+
+def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
+    # IT: A6 (ROADMAP_VOL_BOOK, sequencing B3 step 1) — colonne SOLO diagnostiche,
+    #     la regola pre-registrata resta INTATTA (nessun input al trading). A ogni
+    #     tick orario logga bid/ask reali + delta teorico: (a) posizione aperta →
+    #     le 2 leg in essere (serie del delta lungo l'holding → stima offline del
+    #     valore dell'hedge, alimenta A1); (b) flat → lo straddle ATM che
+    #     open_straddle sceglierebbe ORA (serie half-spread di entry → rilettura
+    #     PnL net-of-half-spread a gate chiuso). Fail-soft: MAI un raise verso tick().
+    # EN: A6 (ROADMAP_VOL_BOOK, B3 sequencing step 1) — diagnostic-ONLY columns,
+    #     the pre-registered rule stays UNTOUCHED (no input to trading). Each hourly
+    #     tick logs real bid/ask + theoretical delta: (a) open position → its 2 live
+    #     legs (delta series over the holding → offline hedge-value estimate, feeds
+    #     A1); (b) flat → the ATM straddle open_straddle would pick NOW (entry
+    #     half-spread series → post-gate net-of-half-spread PnL re-read). Fail-soft:
+    #     NEVER raises into tick().
+    try:
+        pos = load_position()
+        if pos is not None:
+            src, side = "position", int(pos["side"])
+            strike, expiry_ms = float(pos["strike"]), int(pos["expiry_ms"])
+            call, put = pos["call"], pos["put"]
+        else:
+            pick = db.pick_straddle(TENOR_HOURS)
+            src, side = "atm_pick", 0
+            strike, expiry_ms = float(pick["strike"]), int(pick["expiry_ms"])
+            call, put = pick["call"], pick["put"]
+        legs = [_leg_snapshot(db, call), _leg_snapshot(db, put)]
+
+        # IT: delta della struttura (1 straddle long) + delta netto della posizione
+        #     (side×struttura; 0 da flat È il dato corretto); None se greeks assenti.
+        # EN: structure delta (1 long straddle) + net position delta (side×structure;
+        #     0 when flat IS the correct datum); None if greeks are missing.
+        straddle_delta = net_delta = None
+        if all(l["delta"] is not None for l in legs):
+            straddle_delta = sum(l["delta"] for l in legs)
+            net_delta = side * straddle_delta
+
+        # IT: half-spread aggregato della struttura, in BTC e in frazione del mark —
+        #     il "haircut" che l'IVS ha dimostrato essere decision-relevant.
+        # EN: aggregate structure half-spread, in BTC and as a mark fraction —
+        #     the "haircut" the IVS work proved decision-relevant.
+        hs_btc = hs_frac = None
+        if all(l["bid"] is not None and l["ask"] is not None and l["mark"] is not None
+               for l in legs):
+            hs_btc = sum((l["ask"] - l["bid"]) / 2.0 for l in legs)
+            mark_sum = sum(l["mark"] for l in legs)
+            hs_frac = hs_btc / mark_sum if mark_sum > 0 else None
+
+        rec = {"ts": str(pd.Timestamp.now(tz="UTC").floor("s")),
+               "source": src, "side": side, "strike": strike, "expiry_ms": expiry_ms,
+               "t_hours": round((expiry_ms - time.time() * 1000) / 3.6e6, 3),
+               "straddle_delta": straddle_delta, "net_delta": net_delta,
+               "half_spread_btc": hs_btc, "half_spread_frac": hs_frac,
+               "legs": legs}
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, default=str) + "\n")
+    except Exception as e:
+        # IT: la diagnostica non deve mai costare un tick di trading.
+        # EN: diagnostics must never cost a trading tick.
+        log.warning(f"exec-diag (A6) fallito/failed — tick NON impattato: "
+                    f"{type(e).__name__}: {e}")
+
+
 # ──────────────────────────── ciclo di trade ────────────────────────────
 def maybe_settle(db: DeribitTestnet, pos: dict) -> bool:
     # IT: se l'expiry è passata e il delivery price è pubblicato: P&L cash-settled
@@ -473,6 +580,12 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool):
         open_straddle(db, +1 if row["action"] == "LONG" else -1,
                       {"edge": row["edge"], "rv_pred": f["rv_pred"],
                        "var_iv": row["var_iv"]}, execute)
+
+    # IT: A6 — dopo l'eventuale open, così la riga cattura le leg della posizione
+    #     appena aperta al momento dell'ingresso (half-spread di entry reale).
+    # EN: A6 — after any open, so the row captures the just-opened position's legs
+    #     at entry time (real entry half-spread).
+    log_exec_diag(db)
 
 
 def main():

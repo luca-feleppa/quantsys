@@ -514,7 +514,7 @@ quantsys_project/
 ├── results/
 │   ├── {arch}/                  # dashboard_results.json, live_signals.jsonl
 │   ├── vols/                    # report giudici vol
-│   └── vol_paper/               # forecasts.parquet, trades.jsonl, position.json, baseline_report.json
+│   └── vol_paper/               # forecasts.parquet, trades.jsonl, position.json, baseline_report.json, exec_diag.jsonl (A6: bid/ask+greeks diagnostici / diagnostic)
 ├── tests/                       # pytest (test_recent_fixes.py, test_live_training_parity.py)
 ├── scripts/
 │   ├── 00_*..99_*              # spine numerato (fase pipeline) + 99_replay
