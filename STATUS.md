@@ -5,6 +5,23 @@
 
 ---
 
+## 🟡 2026-07-08 (sera, 2) — HEDGE DRY-RUN retrospettivo (pre-studio B2/A1) su exec_diag A6
+
+**Contesto:** primo dry-run offline della leg delta-hedge (perp) sui dati A6 raccolti — richiesto dall'utente, è il pre-studio previsto dal sequencing B3 (dimensiona il design v2 senza toccare `04b`). Script permanente nuovo: `scripts/vol/hedge_dry_run.py` (read-only su `exec_diag.jsonl`, PnL perp inverse ESATTO `H_usd·(1/s0−1/s1)`, due convenzioni δ a confronto, OLS Δm~r con SE, fee parametrica `--fee` default 5bps). Report → `results/vols/hedge_dry_run.json`. Mappato in `scripts/README.md`.
+
+**⚠ Campione: 8 intervalli orari (~7h, 1 sola struttura: LONG K=64000 9JUL26 put-ITM)** — A6 è live da stamattina. TUTTO ciò che segue è direzionale/metodologico, NON conclusivo.
+
+**Esiti (val nominale, n=8):**
+- **Riduzione varianza per-intervallo: −86.7%** (σ 0.00218→0.00080 BTC) con δ_raw del venue; −83.2% con δ_adj. Conferma direzionale del beneficio-chiave di B2 (il gate n≥20 hedged avrebbe molto più potere). Media per-intervallo quasi invariata (+0.00022→+0.00018, fee escluse).
+- **🔴→🟢 Gap di convenzione delta — TROVATO e RISOLTO (stessa sera):** slope empirico OLS di Δm su r sui mark TESTNET = **−0.679 ± 0.048** vs δ_raw −0.896 / δ_adj −0.929 (gap ≈ 4.5 SE). **Verifica discriminante sui mark MAINNET** (snapshot poller 01c `data/iv/chain/btc_options_20260708.parquet`, stessi 2 strumenti, stessa finestra 09:44-17:01 UTC): slope **−0.98 ± 0.01** (R²=0.996, identico a cadenza 10min e 1h) = coerente col **δ teorico BTC-adjusted** (venue −0.967 a fine giornata, put sempre più ITM → δ_adj≈−1.0). **Conclusione: il gap è un artefatto dei mark testnet** (aggiornamento sticky sulle leg deep-ITM; le quote statiche testnet≈mainnet, è la DINAMICA che differisce). **Implicazioni design v2:** (a) hedge ratio = **δ teorico del venue (BTC-adjusted)**, NON stimato empiricamente dai mark testnet; (b) il mark-to-market della leg opzioni nel confronto hedged-vs-unhedged va fatto sui **mark mainnet del poller** (già raccolti!) o a granularità di settlement — mai sui mark testnet. Diagnostico: scratchpad `mainnet_vs_testnet_delta.py` (one-off, non promosso a script).
+- **Fee:** 0.00052 BTC totali, ma ~87% è l'APERTURA della leg (|h₀|≈0.9); il ribilanciamento steady-state è ~7e-5 su 7 intervalli → il drag ricorrente è trascurabile a questa Γ; la no-trade band serve più contro il churn di delta che contro le fee.
+
+**Cosa NON include (dichiarato nel report):** funding perp (serie troppo corta), tenor completi (solo la finestra A6-attiva), separazione theta/vega dentro Δm.
+
+**▶️ NEXT (filone hedge):** la domanda-convenzione è CHIUSA (δ teorico venue, mark-to-market su mainnet). Resta per il gate (~metà luglio): rilanciare `hedge_dry_run.py` sulla serie A6 piena (più strutture/moneyness) per varianza hedged/unhedged per trade + funding → parametri del gate pre-registrato hedged-vs-unhedged della v2.
+
+---
+
 ## 🟢 SESSIONE 2026-07-08 (sera) — DASHBOARD: audit + fix trades-layer + posizione aperta visibile
 
 **Contesto:** audit completo di `scripts/06_dashboard.py` su richiesta ("studia, aggiusta, migliora"). Tutti gli endpoint rispondevano 200 con chain reale; i bug trovati erano nel layer Trades e nella formattazione. Nessun impatto su 04b/modelli/config trading.
