@@ -31,6 +31,8 @@
 
 **Cosa NON include (dichiarato nel report):** funding perp (serie troppo corta), tenor completi (solo la finestra A6-attiva), separazione theta/vega dentro Δm.
 
+**Audit causality-auditor (stessa sera, primo run del nuovo agent):** 0 blocker, 5 MINOR — 4 applicati subito su `hedge_dry_run.py`: ① SE slope → `None` (non nan silenzioso) a k<3; ② fee di CHIUSURA della leg hedge a fine struttura + `total_net` nel report (fee 0.00052→0.00099, tot net hedged +0.00042); ③ medie δ sided sullo STESSO campione della regressione (no-op a 1 struttura, rilevante a più); ④ caveat basis perp↔forward dichiarato. MINOR-5 (marker settlement off-scale nel payoff dashboard, pre-esistente) non applicato — cosmetico, backlog.
+
 **▶️ NEXT (filone hedge):** la domanda-convenzione è CHIUSA (δ teorico venue, mark-to-market su mainnet). Resta per il gate (~metà luglio): rilanciare `hedge_dry_run.py` sulla serie A6 piena (più strutture/moneyness) per varianza hedged/unhedged per trade + funding → parametri del gate pre-registrato hedged-vs-unhedged della v2.
 
 ---

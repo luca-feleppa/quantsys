@@ -91,9 +91,25 @@ def simulate(ticks: list, fee: float) -> dict:
     #     NEVER across two different positions.
     n = len(ticks)
     d_opt, d_hraw, d_hadj, rets, fees_raw, fees_adj = [], [], [], [], [], []
+    # IT: δ sided accumulati sullo STESSO campione della regressione (audit MINOR-3:
+    #     con più strutture le medie su tutti i tick divergerebbero dagli intervalli usati).
+    # EN: sided δ accumulated on the SAME sample as the regression (audit MINOR-3:
+    #     with multiple structures whole-tick means would diverge from the used intervals).
+    delta_raw_sided, delta_adj_sided = [], []
     prev_h_raw = prev_h_adj = None
+
+    def _close_hedge_fees():
+        # IT: fee di CHIUSURA della leg hedge a fine struttura (audit MINOR-2: senza,
+        #     fees_total sottostima di ~1 ribilanciamento per struttura).
+        # EN: hedge-leg CLOSING fee at structure end (audit MINOR-2: without it,
+        #     fees_total understates by ~1 rebalance per structure).
+        if prev_h_raw is not None:
+            fees_raw.append(fee * abs(prev_h_raw))
+            fees_adj.append(fee * abs(prev_h_adj))
+
     for a, b in zip(ticks[:-1], ticks[1:]):
         if (a["side"], a["strike"], a["expiry_ms"]) != (b["side"], b["strike"], b["expiry_ms"]):
+            _close_hedge_fees()
             prev_h_raw = prev_h_adj = None
             continue
         side = a["side"]
@@ -106,11 +122,14 @@ def simulate(ticks: list, fee: float) -> dict:
         d_hraw.append(dm + perp_pnl_btc(h_raw, a["S"], b["S"]))
         d_hadj.append(dm + perp_pnl_btc(h_adj, a["S"], b["S"]))
         rets.append(b["S"] / a["S"] - 1.0)
+        delta_raw_sided.append(side * a["delta_raw"])
+        delta_adj_sided.append(side * (a["delta_raw"] - a["m"]))
         # IT: fee sul nozionale RIBILANCIATO (|Δh|; il primo tick paga l'apertura piena).
         # EN: fee on the REBALANCED notional (|Δh|; first tick pays the full opening).
         fees_raw.append(fee * abs(h_raw - (prev_h_raw or 0.0)))
         fees_adj.append(fee * abs(h_adj - (prev_h_adj or 0.0)))
         prev_h_raw, prev_h_adj = h_raw, h_adj
+    _close_hedge_fees()                               # IT/EN: chiusura serie / end of series
 
     d_opt, d_hraw, d_hadj = map(np.asarray, (d_opt, d_hraw, d_hadj))
     rets = np.asarray(rets)
@@ -126,11 +145,15 @@ def simulate(ticks: list, fee: float) -> dict:
     slope, intercept = np.polyfit(rets, d_opt, 1)
     r2 = float(np.corrcoef(rets, d_opt)[0, 1] ** 2)
     # IT: SE dello slope (OLS classico) — con n piccolo decide se lo scarto tra
-    #     slope empirico e convenzioni δ è segnale o rumore.
+    #     slope empirico e convenzioni δ è segnale o rumore. A k=2 i gradi di
+    #     libertà sono 0 → SE indefinita: None, non un nan silenzioso (audit MINOR-1).
     # EN: slope SE (classic OLS) — with small n it decides whether the gap between
-    #     the empirical slope and the δ conventions is signal or noise.
-    resid = d_opt - (slope * rets + intercept)
-    slope_se = float(np.sqrt(np.sum(resid ** 2) / (k - 2) / np.sum((rets - rets.mean()) ** 2)))
+    #     the empirical slope and the δ conventions is signal or noise. At k=2 the
+    #     degrees of freedom are 0 → SE undefined: None, not a silent nan (audit MINOR-1).
+    slope_se = None
+    if k >= 3:
+        resid = d_opt - (slope * rets + intercept)
+        slope_se = float(np.sqrt(np.sum(resid ** 2) / (k - 2) / np.sum((rets - rets.mean()) ** 2)))
 
     def stats(x):
         return {"mean": float(np.mean(x)), "std": float(np.std(x, ddof=1)),
@@ -142,11 +165,15 @@ def simulate(ticks: list, fee: float) -> dict:
         "perp_fee_assumed": fee,
         "empirical": {"slope_dm_on_r": float(slope), "slope_se": slope_se,
                       "intercept": float(intercept), "r2": r2,
-                      "mean_delta_raw_sided": float(np.mean([t["side"] * t["delta_raw"] for t in ticks[:-1]])),
-                      "mean_delta_adj_sided": float(np.mean([t["side"] * (t["delta_raw"] - t["m"]) for t in ticks[:-1]]))},
+                      "mean_delta_raw_sided": float(np.mean(delta_raw_sided)),
+                      "mean_delta_adj_sided": float(np.mean(delta_adj_sided))},
         "unhedged": stats(d_opt),
-        "hedged_raw": {**stats(d_hraw), "fees_total": float(np.sum(fees_raw))},
-        "hedged_adj": {**stats(d_hadj), "fees_total": float(np.sum(fees_adj))},
+        # IT: total_net = PnL hedged al netto delle fee (apertura+ribilanci+chiusura).
+        # EN: total_net = hedged PnL net of fees (open+rebalances+close).
+        "hedged_raw": {**stats(d_hraw), "fees_total": float(np.sum(fees_raw)),
+                       "total_net": float(np.sum(d_hraw) - np.sum(fees_raw))},
+        "hedged_adj": {**stats(d_hadj), "fees_total": float(np.sum(fees_adj)),
+                       "total_net": float(np.sum(d_hadj) - np.sum(fees_adj))},
         "variance_reduction": {
             "raw": 1.0 - float(np.var(d_hraw, ddof=1) / np.var(d_opt, ddof=1)),
             "adj": 1.0 - float(np.var(d_hadj, ddof=1) / np.var(d_opt, ddof=1))},
@@ -155,6 +182,7 @@ def simulate(ticks: list, fee: float) -> dict:
             "Δm include theta decay e Δvega (non solo delta) / Δm includes theta decay and vega moves",
             "funding perp NON incluso (serie troppo corta) / perp funding NOT included (series too short)",
             "fee = assunzione parametrica, non costante pre-registrata / fee = parametric assumption",
+            "S = forward per-expiry delle opzioni usato anche come prezzo del perp: basis perp-forward NON modellata / options per-expiry forward also used as the perp price: perp-forward basis NOT modeled",
         ],
     }
     return out
@@ -186,11 +214,14 @@ def main():
     e, u, hr, ha = res["empirical"], res["unhedged"], res["hedged_raw"], res["hedged_adj"]
     log.info("═" * 72)
     log.info(f"  HEDGE DRY-RUN — {res['n_intervals']} intervalli orari, span {res['span'][0]} → {res['span'][1]}")
-    log.info(f"  delta efficace (OLS Δm~r): {e['slope_dm_on_r']:+.4f} ± {e['slope_se']:.4f}  (R²={e['r2']:.3f})")
+    _se = f"± {e['slope_se']:.4f}" if e["slope_se"] is not None else "(SE indefinita, k<3 / SE undefined)"
+    log.info(f"  delta efficace (OLS Δm~r): {e['slope_dm_on_r']:+.4f} {_se}  (R²={e['r2']:.3f})")
     log.info(f"  convenzioni: δ_raw={e['mean_delta_raw_sided']:+.4f} · δ_adj={e['mean_delta_adj_sided']:+.4f}")
     log.info(f"  per-intervallo (BTC):  unhedged μ={u['mean']:+.5f} σ={u['std']:.5f}")
-    log.info(f"                        hedged_raw μ={hr['mean']:+.5f} σ={hr['std']:.5f} (fee {hr['fees_total']:.5f})")
-    log.info(f"                        hedged_adj μ={ha['mean']:+.5f} σ={ha['std']:.5f} (fee {ha['fees_total']:.5f})")
+    log.info(f"                        hedged_raw μ={hr['mean']:+.5f} σ={hr['std']:.5f} "
+             f"(fee {hr['fees_total']:.5f} → tot net {hr['total_net']:+.5f})")
+    log.info(f"                        hedged_adj μ={ha['mean']:+.5f} σ={ha['std']:.5f} "
+             f"(fee {ha['fees_total']:.5f} → tot net {ha['total_net']:+.5f})")
     log.info(f"  riduzione varianza: raw {res['variance_reduction']['raw']*100:.1f}% · "
              f"adj {res['variance_reduction']['adj']*100:.1f}%")
     log.info(f"  report → {OUT_PATH}")
