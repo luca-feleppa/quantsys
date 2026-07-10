@@ -1,0 +1,47 @@
+{
+  "n_ticks": 33,
+  "n_intervals": 30,
+  "span": [
+    "2026-07-08 09:44:50+00:00",
+    "2026-07-10 17:01:33+00:00"
+  ],
+  "perp_fee_assumed": 0.0005,
+  "empirical": {
+    "slope_dm_on_r": 0.1650473899892675,
+    "slope_se": 0.11183205548619868,
+    "intercept": -0.00044503765909968,
+    "r2": 0.0721759180043254,
+    "mean_delta_raw_sided": -0.23600766666666662,
+    "mean_delta_adj_sided": -0.2572443333333333
+  },
+  "unhedged": {
+    "mean": -0.0003433333333333336,
+    "std": 0.0023348459793156454,
+    "total": -0.010300000000000009
+  },
+  "hedged_raw": {
+    "mean": -0.00012575049463136757,
+    "std": 0.001326277000079714,
+    "total": -0.003772514838941027,
+    "fees_total": 0.0027740200000000003,
+    "total_net": -0.0065465348389410274
+  },
+  "hedged_adj": {
+    "mean": -0.00011789478640574812,
+    "std": 0.0013393625549872413,
+    "total": -0.0035368435921724435,
+    "fees_total": 0.0028229200000000005,
+    "total_net": -0.006359763592172444
+  },
+  "variance_reduction": {
+    "raw": 0.6773348937827599,
+    "adj": 0.6709364096979011
+  },
+  "caveats": [
+    "campione = soli intervalli con A6 attivo (NON il tenor completo) / sample = A6-active intervals only",
+    "\u0394m include theta decay e \u0394vega (non solo delta) / \u0394m includes theta decay and vega moves",
+    "funding perp NON incluso (serie troppo corta) / perp funding NOT included (series too short)",
+    "fee = assunzione parametrica, non costante pre-registrata / fee = parametric assumption",
+    "S = forward per-expiry delle opzioni usato anche come prezzo del perp: basis perp-forward NON modellata / options per-expiry forward also used as the perp price: perp-forward basis NOT modeled"
+  ]
+}

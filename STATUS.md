@@ -5,6 +5,22 @@
 
 ---
 
+## 🟢 2026-07-10 — HEDGE DRY-RUN su serie A6 piena (30 intervalli, 3 strutture): varianza ↓68%, media invariata, churn ATM = drag puro
+
+**Contesto:** rilancio di `scripts/vol/hedge_dry_run.py` sulla serie A6 accumulata (33 tick, 2026-07-08→07-10, 3 strutture LONG: 9JUL26 K=64k put-ITM · 10JUL26 K=63k · 11JUL26 K=64k quasi-ATM) — era il NEXT dichiarato il 07-08. Report sovrascritto in `results/vols/hedge_dry_run.json` (comportamento inteso). Decomposizione per-struttura via one-off scratchpad (non promosso).
+
+**Verdetto (domanda: "opzioni+perp hedge migliora vs solo opzioni?"): SÌ sulla varianza, NO sulla media — come da teoria B2.**
+- **Varianza per-intervallo: −67.7%** pooled (σ 0.00233→0.00133 BTC; F-test var-ratio 0.323, k=30, p≈0.0016 one-sided, caveat intervalli non-iid). Δmedia hedged−unhedged **+0.00022 ± 0.00036 SE → indistinguibile da zero** (il delta-hedge è mean-zero ex-fee/funding by design; il tot net hedged −0.00655 vs unhedged −0.01030 in finestra è fortuna direzionale, non struttura).
+- **🔑 La riduzione di varianza è MONOTONA in |δ| della struttura:** deep-ITM (|δ|med 0.92) **−86.8%** · mid (0.29) **−66.2%** · quasi-ATM (0.17) **−0.1%**. Sull'ATM il PnL è Γ/vega/theta-driven: il delta-hedge non riduce nulla e paga comunque fee.
+- **Fee (5bps parametrica): 0.00277 BTC tot — il churn di ribilanciamento ora è il 48%** (0.00133), non più trascurabile: la conclusione 07-08 "drag ricorrente ~0" era specifica della struttura deep-ITM (Γ bassa); le strutture ATM daily hanno Γ alta → il delta flippa attorno a 0 e churna (fee_reb 0.00062 su 9 intervalli per la 11JUL26, contro varRed 0.1% = **drag puro senza beneficio**).
+- **Implicazione design v2 (delta-hedge post-gate):** hedge **condizionato a |net_delta| ≥ soglia** (no-trade band attorno a δ=0), NON ribilanciamento incondizionato a ogni tick: 04b apre ATM (δ≈0) → la posizione nasce nella zona dove l'hedge è inutile e costa, e matura verso ITM dove vale −87%. La band va dimensionata sul trade-off churn-vs-varianza quando la serie A6 avrà più strutture.
+- **Regressione pooled Δm~r: NON più informativa** (slope +0.165±0.112, R²=0.07 — mischia moneyness eterogenee su mark testnet sticky). Irrilevante: la domanda-convenzione era già CHIUSA il 07-08 (δ teorico venue, MtM su mark mainnet); il Δm di questo run resta su mark testnet → i numeri di varianza portano quell'artefatto (verosimilmente il −87% ITM è un lower bound: su mainnet la leg opzioni risponde di più allo spot, l'hedge cattura di più).
+- **Sempre esclusi (dichiarati nel report):** funding perp, tenor completi, basis perp↔forward.
+
+**▶️ NEXT:** invariato il critical path (VPS collector; gate live n≥20 ~metà luglio). Per la v2: al gate, ripetere questo dry-run (serie più lunga, più strutture) per dimensionare la no-trade band |net_delta| e stimare il funding; la pre-registrazione hedged-vs-unhedged della v2 deve includere il vincolo "hedge solo oltre soglia δ".
+
+---
+
 ## 🟢 2026-07-08 (sera, 3) — TOOLING: config Claude Code di progetto (hook + agent + skill)
 
 **Contesto:** setup strutturato di Claude Code per il repo (plugin claude-code-setup → raccomandazioni → implementate tutte). Novità: la config di progetto ora è **versionata** (`.gitignore` non ignora più l'intera `.claude/` — solo `settings.local.json`, `plans/`, `tasks/`).
