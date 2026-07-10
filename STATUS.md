@@ -26,6 +26,17 @@
 
 **Conseguenze pre-dichiarate:** PASS → il q90 NN-conforme diventa il candidato sizing/kill-switch della v2 delta-hedged (conferma one-shot su test SOLO alla pre-registrazione v2, post-gate live n≥20; nessuna promozione prima). FAIL → **HAR-q90 confermato DEFINITIVAMENTE come stimatore di coda per il sizing v2; il filone A2 chiude del tutto** (niente A2c, niente ulteriori ricalibrazioni), scritto comunque.
 
+### ⚫ ESITO A2-CONFORME — FAIL (val, 2026-07-10 stesso giorno, zero iterazioni post-risultato)
+
+**FAIL su ① E ②** (`results/vols/quantile_conformal_report_1h_val.json`, calib 3210 / giudizio 3210, run CPU per non contendere CUDA ai processi live):
+- **① Coverage post-conforme sul suffisso:** q50 **0.676** (target [0.45,0.55]), q10 0.154 (marginale, target ≤0.15), q90 0.947 ✓. Meccanismo: **il bias di locazione del NN NON è stazionario dentro val** — lo shift costante δ_τ fittato sul prefisso (δ_q50 −0.288) sotto-corregge il suffisso: il bias cresce nel tempo. Controprova: HAR-conforme ha q50 coverage **0.5305** (quasi perfetta) → HAR è location-stabile sul periodo, il NN deriva.
+- **② Pinball q90 a parità di ricalibrazione:** NN-conf **0.1387** > HAR-conf **0.1334** — la coda destra resta di HAR anche dopo il trattamento fair.
+- **Diagnostiche (non decisionali):** NN-conf DOMINA pinball su q10/q25/q50 (0.103/0.219/0.299 vs 0.144/0.256/0.322) → l'informazione condizionale del NN vive nel centro/coda sinistra della distribuzione di RV; per lo short-vol l'errore costoso è la coda DESTRA, dove vince HAR. Larghezza q10-q90: 2.205→1.968 post-shift.
+
+**Conseguenza (pre-dichiarata, applicata):** **HAR-q90 = stimatore di coda DEFINITIVO per il sizing/kill-switch della v2; filone A2 CHIUSO del tutto** (niente A2c/ricalibrazioni ulteriori). Nota di design v2 (dalla diagnostica, senza nuovo esperimento): l'eventuale uso del NN resta legittimo per μ (QLIKE PASS, che è centro-distribuzione) — coerente col PASS B2 — mentre il rischio di coda va prezzato con HAR-q90.
+
+**Igiene protocollo:** checkpoint production READ-ONLY (inference-only); env sperimentali solo nella shell del run (nessun residuo); test split NON toccato; giudice A2a bit-identico senza flag (report A2a intatto); processi live MAI fermati (run su CPU).
+
 ---
 
 ## 🟢 2026-07-10 — HEDGE DRY-RUN su serie A6 piena (30 intervalli, 3 strutture): varianza ↓68%, media invariata, churn ATM = drag puro

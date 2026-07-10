@@ -61,6 +61,14 @@ def main():
     ap.add_argument("--arch", default="itransformer",
                     choices=["itransformer", "nhits", "tcnmamba", "lstm"],
                     help="architettura del modello vol (models/{arch}) / vol model arch")
+    # IT: A2-CONFORME (pre-registrato STATUS.md 2026-07-10) — inerte di default:
+    #     senza flag il giudice A2a resta bit-identico e il suo report non è toccato.
+    # EN: A2-CONFORMAL (pre-registered STATUS.md 2026-07-10) — inert by default:
+    #     without the flag the A2a judge stays bit-identical, its report untouched.
+    ap.add_argument("--conformal", action="store_true",
+                    help="ricalibrazione split-conformal (fit prefisso, giudizio suffisso; "
+                         "report separato) / split-conformal recalibration (prefix fit, "
+                         "suffix judgment; separate report)")
     args = ap.parse_args()
     model_dir = models_root() / args.arch
     log.info(f"dir modelli effettiva / effective model dir: {model_dir} (arch={args.arch})")
@@ -157,6 +165,78 @@ def main():
     qp_ens = qp_ens[sel]
     y = ev["y"].values
 
+    out_dir = Path("results/vols"); out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.conformal:
+        # ── A2-CONFORME: split temporale prefisso/suffisso di ev (già in ordine ────
+        #    cronologico: har.index è monotono e sel lo preserva) ──────────────────
+        # IT: shift additivo per livello δ_τ = quantile_τ(y − q_τ) stimato sul
+        #     prefisso (calibrazione), applicato IDENTICAMENTE a NN e HAR-quantile
+        #     (stesso information set → confronto fair); giudizio SOLO sul suffisso.
+        #     UNICA formula primaria pre-registrata: niente sweep di varianti.
+        # EN: per-level additive shift δ_τ = quantile_τ(y − q_τ) fit on the prefix
+        #     (calibration), applied IDENTICALLY to NN and HAR-quantile (same
+        #     information set → fair comparison); judged on the suffix ONLY.
+        #     Single pre-registered primary formula: no variant sweeps.
+        assert ev.index.is_monotonic_increasing, "ev non cronologico — split conforme invalido"
+        n_cal = len(y) // 2
+        y_cal, y_jud = y[:n_cal], y[n_cal:]
+        conf = {"n_calib": int(n_cal), "n_judge": int(len(y) - n_cal),
+                "delta_nn": {}, "delta_har": {},
+                "coverage_raw": {}, "coverage_conf": {}, "coverage_har_conf": {},
+                "pinball_nn_conf": {}, "pinball_har_conf": {}}
+        for j, tau in enumerate(QUANTILES):
+            t = str(tau)
+            d_nn = float(np.quantile(y_cal - qp_ens[:n_cal, j], tau))
+            d_har = float(np.quantile(y_cal - har_q[tau][:n_cal], tau))
+            conf["delta_nn"][t], conf["delta_har"][t] = d_nn, d_har
+            q_nn = qp_ens[n_cal:, j] + d_nn
+            q_har = har_q[tau][n_cal:] + d_har
+            conf["coverage_raw"][t] = float(np.mean(y_jud <= qp_ens[n_cal:, j]))
+            conf["coverage_conf"][t] = float(np.mean(y_jud <= q_nn))
+            conf["coverage_har_conf"][t] = float(np.mean(y_jud <= q_har))
+            conf["pinball_nn_conf"][t] = pinball(y_jud, q_nn, tau)
+            conf["pinball_har_conf"][t] = pinball(y_jud, q_har, tau)
+        # IT: diagnostica NON decisionale: larghezza q90−q10 pre/post sul suffisso.
+        # EN: NON-decisional diagnostic: q90−q10 width pre/post on the suffix.
+        conf["width_q10_q90"] = {
+            "raw": float(np.mean(qp_ens[n_cal:, -1] - qp_ens[n_cal:, 0])),
+            "conf": float(np.mean(qp_ens[n_cal:, -1] + conf["delta_nn"]["0.9"]
+                                  - qp_ens[n_cal:, 0] - conf["delta_nn"]["0.1"]))}
+
+        cc = conf["coverage_conf"]
+        gate = {
+            "split": split, "n_judge": conf["n_judge"],
+            "cov_q90_ok": bool(0.85 <= cc["0.9"] <= 0.95),
+            "cov_q10_ok": bool(0.05 <= cc["0.1"] <= 0.15),
+            "cov_q50_ok": bool(0.45 <= cc["0.5"] <= 0.55),
+            "pinball_q90_beats_har": bool(conf["pinball_nn_conf"]["0.9"]
+                                          <= conf["pinball_har_conf"]["0.9"]),
+            "n_ok": bool(conf["n_judge"] >= 3000),
+        }
+        gate["verdict"] = "PASS" if all(gate[k] for k in
+                                        ("cov_q90_ok", "cov_q10_ok", "cov_q50_ok",
+                                         "pinball_q90_beats_har", "n_ok")) else "FAIL"
+
+        out_path = out_dir / f"quantile_conformal_report_{interval}_{split}.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump({"quantiles": QUANTILES, "conformal": conf, "gate": gate,
+                       "scaler": {"center": c, "scale": s}}, f, indent=2)
+
+        print(f"\n══════ A2-CONFORME [{interval}·{split}] — calib {conf['n_calib']} / "
+              f"giudizio {conf['n_judge']} ══════")
+        print(f"  {'τ':>5s}  {'cov raw':>8s}  {'cov conf':>9s}  {'cov HARc':>9s}  "
+              f"{'δ_NN':>8s}  {'pinb NNc':>9s}  {'pinb HARc':>10s}")
+        for tau in QUANTILES:
+            t = str(tau)
+            print(f"  {tau:>5.2f}  {conf['coverage_raw'][t]:>8.4f}  {cc[t]:>9.4f}  "
+                  f"{conf['coverage_har_conf'][t]:>9.4f}  {conf['delta_nn'][t]:>+8.4f}  "
+                  f"{conf['pinball_nn_conf'][t]:>9.5f}  {conf['pinball_har_conf'][t]:>10.5f}")
+        print(f"  width q10-q90 raw {conf['width_q10_q90']['raw']:.4f} → "
+              f"conf {conf['width_q10_q90']['conf']:.4f} (diagnostica)")
+        print(f"  VERDETTO [{split}]: {gate['verdict']}   → {out_path}")
+        return
+
     # ── Metriche: coverage + pinball (NN vs HAR-quantile) ───────────────────────
     res = {"coverage": {}, "pinball_nn": {}, "pinball_har": {}}
     for j, tau in enumerate(QUANTILES):
@@ -178,7 +258,6 @@ def main():
                                     ("cov_q90_ok", "cov_q10_ok", "cov_q50_ok",
                                      "pinball_q90_beats_har", "n_ok")) else "FAIL"
 
-    out_dir = Path("results/vols"); out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"quantile_report_{interval}_{split}.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"quantiles": QUANTILES, "metrics": res, "gate": gate,
