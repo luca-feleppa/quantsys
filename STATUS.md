@@ -5,6 +5,29 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — A2-CONFORME (ricalibrazione split-conformal quantili log-RV) · 2026-07-10
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Segue il FAIL di A2a (2026-07-08): coverage sopra target a TUTTI i livelli = **bias di locazione** (q50 al 73° percentile empirico), il difetto che una ricalibrazione conforme corregge per costruzione. Inference-only, checkpoint production READ-ONLY, zero retrain.
+
+**Ipotesi/prior onesto (pre-dichiarato):** la coverage post-conforme passa quasi meccanicamente (lo shift additivo per livello azzera il bias di locazione sul segmento di calibrazione; sul suffisso regge se il bias è stazionario dentro val). Il criterio genuinamente incerto è il ② (pinball q90): in A2a raw il NN perdeva 0.160 vs 0.144 (−10%) e parte del gap era locazione — ma **HAR riceve la STESSA ricalibrazione sullo stesso prefisso** (fairness: stesso information set), quindi lo shift non basta da solo: il NN deve avere informazione di coda *condizionale* che HAR non ha. Esito negativo plausibile; se perde anche post-conforme, A2 chiude definitivamente.
+
+**Metodo (UNICA formula primaria, niente sweep):** split temporale di val in prefisso (calibrazione, prima metà) / suffisso (giudizio, seconda metà) — stesso pattern anti val-selection di A5. Per ogni livello τ: correzione additiva `δ_τ = quantile_τ(y − q_τ)` sul prefisso → `q'_τ = q_τ + δ_τ`, applicata IDENTICAMENTE a NN (quantili Vincentization ensemble) e a HAR-quantile (punto OLS train + quantili residui train). Nessuna temperatura/width-scaling/varianti a risultati visti.
+
+**Script/giudice:** `scripts/vol/dev_vols_quantile_judge.py` esteso con flag CLI `--conformal` (inerte di default: senza flag il giudice A2a resta bit-identico). Report separato `results/vols/quantile_conformal_report_{interval}_{split}.json` (NON clobbera l'artefatto A2a).
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test solo a gate val superato, one-shot.
+**Leva sperimentale:** flag `--conformal` (CLI, inerte di default); nessun env nuovo; nessun training → sandbox non necessaria.
+
+**Diagnostiche pre-dichiarate (loggature, NON decisionali — pattern A5):** coverage post-conforme su tutti e 5 i livelli (il gate usa solo q10/q50/q90); larghezza intervallo q90−q10 pre/post shift; coverage della HAR-conforme; δ_τ per livello (stabilità del bias di locazione). Niente varianti di formula/soglia/split a risultati visti: un'eventuale variante suggerita dalle diagnostiche = NUOVO esperimento pre-registrato.
+
+**Condizioni di PASS (tutte, AND, misurate sul SUFFISSO di val):**
+1. Coverage post-conforme NN: `P(y≤q'90) ∈ [0.85, 0.95]` **E** `P(y≤q'10) ∈ [0.05, 0.15]` **E** `P(y≤q'50) ∈ [0.45, 0.55]`.
+2. Coda monetizzabile a parità di trattamento: `pinball_NN-conf(q90) ≤ pinball_HAR-conf(q90)` (entrambi ricalibrati sullo stesso prefisso).
+3. Campione: `n_suffisso ≥ 3000` (val A2a era 6420 → suffisso atteso ~3210); sotto soglia NESSUNA conclusione.
+
+**Conseguenze pre-dichiarate:** PASS → il q90 NN-conforme diventa il candidato sizing/kill-switch della v2 delta-hedged (conferma one-shot su test SOLO alla pre-registrazione v2, post-gate live n≥20; nessuna promozione prima). FAIL → **HAR-q90 confermato DEFINITIVAMENTE come stimatore di coda per il sizing v2; il filone A2 chiude del tutto** (niente A2c, niente ulteriori ricalibrazioni), scritto comunque.
+
+---
+
 ## 🟢 2026-07-10 — HEDGE DRY-RUN su serie A6 piena (30 intervalli, 3 strutture): varianza ↓68%, media invariata, churn ATM = drag puro
 
 **Contesto:** rilancio di `scripts/vol/hedge_dry_run.py` sulla serie A6 accumulata (33 tick, 2026-07-08→07-10, 3 strutture LONG: 9JUL26 K=64k put-ITM · 10JUL26 K=63k · 11JUL26 K=64k quasi-ATM) — era il NEXT dichiarato il 07-08. Report sovrascritto in `results/vols/hedge_dry_run.json` (comportamento inteso). Decomposizione per-struttura via one-off scratchpad (non promosso).
