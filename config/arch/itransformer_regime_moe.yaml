@@ -1,0 +1,61 @@
+# IT: A3 — Regime-MoE (mixture-of-universes): override d'ESEMPIO, MAI addestrato.
+#     Attivazione: $env:QUANTSYS_ARCH="itransformer_regime_moe" (load_config carica
+#     questo overlay sopra default.yaml) + QUANTSYS_MODELS_ROOT sandbox per NON
+#     toccare il modello vol PASS di produzione (models/itransformer READ-ONLY).
+#     La chiave model.head_type NON va mai attivata in config/default.yaml: assente
+#     = "single" = path storico bit-identico. PRIMA del primo run: pre-registrare
+#     il gate QLIKE in STATUS.md (protocollo sperimentale, passo 1).
+# EN: A3 — Regime-MoE (mixture-of-universes): EXAMPLE override, NEVER trained.
+#     Activate via QUANTSYS_ARCH="itransformer_regime_moe" (load_config merges this
+#     overlay on top of default.yaml) + a QUANTSYS_MODELS_ROOT sandbox so the
+#     production PASS vol model is NOT touched (models/itransformer READ-ONLY).
+#     The model.head_type key must never be enabled in config/default.yaml: absent
+#     = "single" = bit-identical legacy path. BEFORE the first run: pre-register
+#     the QLIKE gate in STATUS.md (experimental protocol, step 1).
+
+model:
+  # IT: il backbone resta l'iTransformer production (regime_moe è iTransformer-only).
+  # EN: backbone stays the production iTransformer (regime_moe is iTransformer-only).
+  architecture: "itransformer"
+  tft_d_model: 128
+  tft_n_heads: 4
+  tft_n_layers: 3
+  tft_dropout: 0.3
+  patch_size: 5
+  drop_path_rate: 0.2
+
+  # IT: A3 — backbone condiviso + 3 teste-regime (R0 Quiet / R1 Trending / R2 Stress),
+  #     soft-gate ESTERNO CAUSALE = filtered probs di data/regime_probs.parquet
+  #     (mai appreso — proprietà anti-overfit chiave). Loss sulla MISCELA:
+  #     Vincentization dei quantili (loss_type=quantile) o legge della varianza
+  #     totale (t_student). Burn-in/gap → gate uniforme (1/3,1/3,1/3).
+  # EN: A3 — shared backbone + 3 regime heads (R0 Quiet / R1 Trending / R2 Stress),
+  #     EXTERNAL CAUSAL soft-gate = filtered probs from data/regime_probs.parquet
+  #     (never learned — key anti-overfit property). Loss on the MIXTURE:
+  #     quantile Vincentization (loss_type=quantile) or total variance law
+  #     (t_student). Burn-in/gaps → uniform gate (1/3,1/3,1/3).
+  head_type: "regime_moe"
+
+  # IT: OBBLIGATORIO: il MoE appreso (n_output_experts>1) è mutuamente esclusivo
+  #     col regime-MoE (02_train e il ctor fail-fastano altrimenti). Anche RevIN
+  #     deve restare OFF (vietato dal ctor; comunque OFF sulla linea vol).
+  # EN: MANDATORY: the learned MoE (n_output_experts>1) is mutually exclusive
+  #     with the regime-MoE (02_train and the ctor fail fast otherwise). RevIN
+  #     must stay OFF too (forbidden by the ctor; OFF on the vol line anyway).
+  n_output_experts: 1
+  use_revin: false
+
+# IT: iperparametri training ereditati dal tuning 1h pre-registrato (itransformer.yaml).
+# EN: training hyper-params inherited from the pre-registered 1h tuning (itransformer.yaml).
+training:
+  learning_rate: 3.0e-5
+  weight_decay: 3.0e-03
+  grad_clip_norm: 0.5
+  # IT: output isolato — MAI models/itransformer (checkpoint production).
+  # EN: isolated output — NEVER models/itransformer (production checkpoints).
+  output_dir: "./models/itransformer_regime_moe"
+
+backtest:
+  # IT: NO backtest trading sui modelli vol (regola VOL-S); dir tenuta per coerenza.
+  # EN: NO trading backtest on vol models (VOL-S rule); dir kept for consistency.
+  output_dir: "./results/itransformer_regime_moe"

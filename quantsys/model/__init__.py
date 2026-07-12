@@ -51,6 +51,12 @@ def set_sn_on_mu_only(flag: bool) -> None:
 # EN: Quantiles for pinball loss (10/25/50/75/90 percentile).
 QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]
 
+# IT: A3 regime-MoE — numero di regimi del gate esterno (R0 Quiet / R1 Trending /
+#     R2 Stress, colonne regime_prob_0/1/2 di data/regime_probs.parquet).
+# EN: A3 regime-MoE — number of regimes of the external gate (R0 Quiet / R1 Trending /
+#     R2 Stress, columns regime_prob_0/1/2 of data/regime_probs.parquet).
+N_REGIMES = 3
+
 
 # ─── Loss ────────────────────────────────────────────────────────────────────
 
@@ -285,6 +291,120 @@ class StructuralEncoder(nn.Module):
         flat     = x_struct.reshape(B * T, -1)
         enc      = self.net(flat)
         return enc.reshape(B, T, -1)
+
+
+# ─── A3 — Regime Mixture-of-Universes head (config-gated, iTransformer-only) ─
+
+# IT: Inversa numericamente stabile di softplus: x = y + log(-expm1(-y)).
+#     Serve a ri-codificare la varianza mixata (spazio naturale) nello spazio
+#     raw ls2 che il downstream decodifica con softplus(ls2)+1e-6 — il contratto
+#     forward (mu, ls2, lnu) resta così invariato.
+# EN: Numerically stable softplus inverse: x = y + log(-expm1(-y)).
+#     Re-encodes the mixed variance (natural space) into the raw ls2 space that
+#     downstream decodes via softplus(ls2)+1e-6 — keeping the forward contract
+#     (mu, ls2, lnu) unchanged.
+def _softplus_inverse(y: torch.Tensor) -> torch.Tensor:
+    y = y.clamp(min=1e-12)
+    return y + torch.log(-torch.expm1(-y))
+
+
+class RegimeMoEHead(nn.Module):
+    """
+    IT: Testa Mixture-of-Universes per-regime (design A3, memoria
+        `mixture_of_universes_design` adattata alla linea vol): 3 teste lineari
+        fisse (una per regime R0/R1/R2) mescolate da un gate ESTERNO CAUSALE
+        g(t) = [regime_prob_0, regime_prob_1, regime_prob_2] (filtered
+        probabilities di RegimeMarkovBTC — MAI apprese: proprietà anti-overfit
+        chiave). Path t_student: legge della varianza totale (stessa di
+        ensemble.py) — σ²_mix = Σ g_k·σ²_k + Σ g_k·(μ_k−μ_mix)², che INFLAZIONA
+        σ quando il regime è ambiguo (calibrazione σ regime-condizionata =
+        l'obiettivo A3). Path quantile: media pesata per livello
+        (Vincentization) + re-sort monotono di sicurezza. lnu: media pesata dal
+        gate nello spazio raw.
+    EN: Per-regime Mixture-of-Universes head (A3 design): 3 fixed linear heads
+        (one per regime R0/R1/R2) mixed by an EXTERNAL CAUSAL gate
+        g(t) = filtered regime probabilities of RegimeMarkovBTC — NEVER learned
+        (key anti-overfit property). t_student path: total variance law (same
+        as ensemble.py) — σ²_mix = Σ g_k·σ²_k + Σ g_k·(μ_k−μ_mix)², which
+        INFLATES σ when the regime is ambiguous (regime-conditional σ
+        calibration = the A3 goal). Quantile path: per-level weighted average
+        (Vincentization) + monotone safety re-sort. lnu: gate-weighted average
+        in raw space.
+
+    IT: Nessuna spectral_norm sulle teste (stesso precedente del MoE appreso
+        n_output_experts); init piccola std=0.01, bias lnu calibrato a df≈5.
+    EN: No spectral_norm on the heads (same precedent as the learned
+        n_output_experts MoE); small init std=0.01, lnu bias calibrated to df≈5.
+    """
+
+    # IT: Costruisce le n_regimes teste lineari (out = 3 t-Student o len(QUANTILES)).
+    # EN: Builds the n_regimes linear heads (out = 3 Student-t or len(QUANTILES)).
+    def __init__(self, out_dim: int, loss_type: str = "t_student",
+                 n_regimes: int = N_REGIMES):
+        super().__init__()
+        self.loss_type = loss_type
+        self.n_regimes = int(n_regimes)
+        head_out = 3 if loss_type == "t_student" else len(QUANTILES)
+        self.heads = nn.ModuleList([
+            nn.Linear(out_dim, head_out) for _ in range(self.n_regimes)
+        ])
+        for hd in self.heads:
+            nn.init.normal_(hd.weight, std=0.01)
+            nn.init.zeros_(hd.bias)
+            if loss_type == "t_student":
+                # IT: bias lnu così softplus(bias)+2 ≈ 5 (convenzione delle teste single).
+                # EN: lnu bias so softplus(bias)+2 ≈ 5 (single-head convention).
+                with torch.no_grad():
+                    hd.bias[2] = math.log(5.0 - 2.0)
+
+    # IT: Mescola le teste col gate: h (B,d), g (B,K) → stesso contratto della
+    #     testa singola: (quantile_preds,) o (mu, ls2, lnu).
+    # EN: Mixes the heads with the gate: h (B,d), g (B,K) → same contract as the
+    #     single head: (quantile_preds,) or (mu, ls2, lnu).
+    def forward(self, h: torch.Tensor, g: torch.Tensor) -> tuple:
+        if g.shape[-1] != self.n_regimes:
+            raise ValueError(
+                f"RegimeMoEHead: gate con {g.shape[-1]} colonne, attese "
+                f"{self.n_regimes} / gate has {g.shape[-1]} columns, expected "
+                f"{self.n_regimes}"
+            )
+        # IT: rinormalizza il gate al simplesso (difesa contro drift float; no-op
+        #     su gate validi, one-hot inclusi).
+        # EN: renormalize the gate onto the simplex (defence against float drift;
+        #     no-op on valid gates, one-hot included).
+        g = g.clamp(min=0.0)
+        g = g / g.sum(dim=-1, keepdim=True).clamp(min=1e-12)
+
+        outs = torch.stack([hd(h) for hd in self.heads], dim=1)   # (B, K, out)
+
+        if self.loss_type == "quantile":
+            # IT: Vincentization — media pesata per livello quantile + re-sort
+            #     monotono (i quantili mixati restano non-decrescenti per costruzione
+            #     se le teste lo sono; il sort è la cintura di sicurezza).
+            # EN: Vincentization — per-level gate-weighted average + monotone
+            #     re-sort (mixed quantiles stay non-decreasing by construction if
+            #     the heads are; the sort is the safety belt).
+            qp = (g.unsqueeze(-1) * outs).sum(dim=1)               # (B, Q)
+            qp, _ = qp.sort(dim=-1)
+            return (qp,)
+
+        # IT: path t_student — mixing nello spazio NATURALE della varianza
+        #     (softplus(ls2)+1e-6 = σ²), poi ri-codifica in ls2 raw via inversa.
+        # EN: t_student path — mixing in the NATURAL variance space
+        #     (softplus(ls2)+1e-6 = σ²), then re-encode into raw ls2 via inverse.
+        mu_k  = outs[..., 0]                                       # (B, K)
+        ls2_k = outs[..., 1]
+        lnu_k = outs[..., 2]
+        var_k = F.softplus(ls2_k) + 1e-6
+
+        mu_mix  = (g * mu_k).sum(dim=1)                            # (B,)
+        # IT: legge della varianza totale: within (Σ g σ²) + between (disagreement ≥ 0).
+        # EN: total variance law: within (Σ g σ²) + between (disagreement ≥ 0).
+        var_mix = (g * var_k).sum(dim=1) \
+                + (g * (mu_k - mu_mix.unsqueeze(1)) ** 2).sum(dim=1)
+        ls2_mix = _softplus_inverse(var_mix - 1e-6)
+        lnu_mix = (g * lnu_k).sum(dim=1)
+        return (mu_mix, ls2_mix, lnu_mix)
 
 
 # IT: Imposta clip bounds adattivi per-feature (persistenti via register_buffer).
@@ -615,8 +735,14 @@ def load_model(checkpoint: str, config_path: str = None):
             n_output_experts = cfg.get("n_output_experts", 1),
             use_revin        = cfg.get("use_revin", False),
             revin_target_idx = cfg.get("revin_target_idx", 0),
+            # IT: A3 — chiave assente nei config.json storici → "single" = path
+            #     bit-identico ai checkpoint esistenti.
+            # EN: A3 — key absent from legacy config.json → "single" = bit-identical
+            #     path for existing checkpoints.
+            head_type        = cfg.get("head_type", "single"),
         )
-        log.info(f"load_model: QuantiTransformer (F={n_feat}, T={T}, n_macro={n_mac})")
+        log.info(f"load_model: QuantiTransformer (F={n_feat}, T={T}, n_macro={n_mac}, "
+                 f"head_type={cfg.get('head_type', 'single')})")
     elif model_type == "QuantTFT":
         n_feat = cfg["n_features"]
         n_dyn  = int(cfg["n_dynamic_features"]) if cfg.get("n_dynamic_features") else n_feat
@@ -1062,6 +1188,7 @@ class QuantiTransformer(nn.Module):
         n_output_experts: int   = 1,
         use_revin:        bool  = False,
         revin_target_idx: int   = 0,
+        head_type:        str   = "single",
     ):
         # IT: Costruisce embedding multi-scala, layer iTransformer e teste output.
         # EN: Builds multi-scale embeddings, iTransformer layers and output heads.
@@ -1073,6 +1200,40 @@ class QuantiTransformer(nn.Module):
         self.n_output_experts = max(1, n_output_experts)
         self.patch_size      = max(1, patch_size)
         self.use_revin       = use_revin
+        # ── A3 regime-MoE (config-gated; default "single" = path storico invariato) ──
+        # IT: head_type="regime_moe" → 3 teste per-regime + gate esterno causale g.
+        #     DIVERSO dal MoE appreso (n_output_experts, gate softmax da h_feature):
+        #     combinazione vietata per semplicità. RevIN vietato (denorm inconsistente
+        #     col mixing in spazio varianza; RevIN è comunque OFF sulla linea vol).
+        # EN: head_type="regime_moe" → 3 per-regime heads + external causal gate g.
+        #     DIFFERENT from the learned MoE (n_output_experts, softmax gate from
+        #     h_feature): the combination is forbidden for simplicity. RevIN is
+        #     forbidden too (denorm inconsistent with variance-space mixing; RevIN
+        #     is OFF on the vol line anyway).
+        _ht = head_type if head_type else "single"
+        if _ht not in ("single", "regime_moe"):
+            raise ValueError(f"head_type sconosciuto/unknown head_type: {_ht!r} "
+                             f"(atteso/expected 'single' | 'regime_moe')")
+        self.head_type = _ht
+        if self.head_type == "regime_moe":
+            if self.n_output_experts > 1:
+                raise ValueError(
+                    "head_type='regime_moe' incompatibile con n_output_experts>1 "
+                    "(MoE appreso e regime-MoE mutuamente esclusivi) / "
+                    "incompatible with n_output_experts>1 (learned MoE and "
+                    "regime-MoE are mutually exclusive)"
+                )
+            if use_revin:
+                raise ValueError(
+                    "head_type='regime_moe' incompatibile con use_revin=True / "
+                    "incompatible with use_revin=True"
+                )
+        # IT: flag warn-once per fallback gate uniforme / gate ignorato (plain attr:
+        #     nessun impatto su state_dict né su RNG).
+        # EN: warn-once flags for uniform-gate fallback / ignored gate (plain attrs:
+        #     no impact on state_dict nor RNG).
+        self._warned_uniform_gate = False
+        self._warned_gate_ignored = False
         if use_revin:
             from quantsys.model.revin import RevIN
             self.revin = RevIN(n_features=n_features, target_idx=revin_target_idx)
@@ -1123,7 +1284,11 @@ class QuantiTransformer(nn.Module):
         out_dim = d_model
 
         # ── Output heads ─────────────────────────────────────────────────────
-        if self.n_output_experts > 1:
+        if self.head_type == "regime_moe":
+            # IT: A3 — 3 teste per-regime mescolate dal gate esterno causale.
+            # EN: A3 — 3 per-regime heads mixed by the external causal gate.
+            self.regime_head = RegimeMoEHead(out_dim, loss_type=loss_type)
+        elif self.n_output_experts > 1:
             self.expert_gate = nn.Linear(out_dim, self.n_output_experts)
             self.expert_heads = nn.ModuleList([
                 nn.Linear(out_dim, 3 if loss_type == "t_student" else len(QUANTILES))
@@ -1146,7 +1311,11 @@ class QuantiTransformer(nn.Module):
             nn.init.zeros_(self.dir_head.bias)
 
         # Initialize output heads with small weights for stable start
-        if self.n_output_experts <= 1 and loss_type == "t_student":
+        # IT: guard head_type — con regime_moe le teste single non esistono
+        #     (init/SN già gestiti dentro RegimeMoEHead).
+        # EN: head_type guard — under regime_moe the single heads do not exist
+        #     (init/SN already handled inside RegimeMoEHead).
+        if self.head_type != "regime_moe" and self.n_output_experts <= 1 and loss_type == "t_student":
             nn.init.normal_(self.out_mu.weight, std=0.01)
             nn.init.zeros_(self.out_mu.bias)
             nn.init.normal_(self.out_logsig2.weight, std=0.01)
@@ -1162,9 +1331,17 @@ class QuantiTransformer(nn.Module):
                 self.out_lognu   = spectral_norm(self.out_lognu)
 
     # IT: Forward: RevIN → multi-scala embed → attention inter-feature → testa output.
+    #     g (opzionale, in coda): gate regime causale (B, 3) per head_type="regime_moe";
+    #     g=None con regime_moe → fallback gate uniforme (warning una-tantum);
+    #     g ignorato con head_type="single" (warning una-tantum). Il contratto
+    #     forward(x, x_macro=None) resta invariato per tutti i caller esistenti.
     # EN: Forward: RevIN → multi-scale embed → inter-feature attention → output head.
+    #     g (optional, trailing): causal regime gate (B, 3) for head_type="regime_moe";
+    #     g=None under regime_moe → uniform-gate fallback (one-time warning);
+    #     g ignored under head_type="single" (one-time warning). The
+    #     forward(x, x_macro=None) contract is unchanged for all existing callers.
     def forward(self, x: torch.Tensor, x_macro: torch.Tensor = None,
-                latent: torch.Tensor = None) -> tuple:
+                latent: torch.Tensor = None, g: torch.Tensor = None) -> tuple:
         # x: (B, T, F)
         # IT: latente CAFN OPZIONALE (B,T,d_latent) concatenato come feature-token
         #     extra (inverted transformer). latent=None → path byte-identico
@@ -1218,6 +1395,45 @@ class QuantiTransformer(nn.Module):
         h_feature = h_pooled                                    # alias per leggibilità
 
         # ── Output computation ───────────────────────────────────────────────
+        if self.head_type == "regime_moe":
+            # IT: A3 — gate esterno causale; g=None → gate uniforme (burn-in /
+            #     caller legacy) con warning una-tantum. use_revin è vietato in
+            #     ctor → nessun path RevIN qui.
+            # EN: A3 — external causal gate; g=None → uniform gate (burn-in /
+            #     legacy caller) with one-time warning. use_revin is forbidden
+            #     in the ctor → no RevIN path here.
+            if g is None:
+                if not self._warned_uniform_gate:
+                    log.warning(
+                        "QuantiTransformer(regime_moe): g=None → gate uniforme "
+                        "(1/3,1/3,1/3). Passare g=regime_prob_0/1/2 per il mixing "
+                        "per-regime. / g=None → uniform gate; pass "
+                        "g=regime_prob_0/1/2 for per-regime mixing."
+                    )
+                    self._warned_uniform_gate = True
+                g = torch.full(
+                    (h_feature.shape[0], N_REGIMES), 1.0 / N_REGIMES,
+                    device=h_feature.device, dtype=h_feature.dtype,
+                )
+            head_out = self.regime_head(h_feature, g)
+            if self.use_multitask:
+                # IT: dir_head CONDIVISA tra i regimi (stesso precedente del MoE
+                #     appreso): equivale alla media pesata di logits identici.
+                # EN: dir_head SHARED across regimes (same precedent as the
+                #     learned MoE): equivalent to the gate-weighted average of
+                #     identical logits.
+                return (*head_out, self.dir_head(h_feature))
+            return head_out
+
+        # IT: head_type="single" — g non pertinente: ignorato con warning una-tantum.
+        # EN: head_type="single" — g not applicable: ignored with a one-time warning.
+        if g is not None and not self._warned_gate_ignored:
+            log.warning(
+                "QuantiTransformer(single): parametro g ignorato (head_type != "
+                "'regime_moe') / g argument ignored (head_type != 'regime_moe')."
+            )
+            self._warned_gate_ignored = True
+
         if self.n_output_experts > 1:
             gate_w      = F.softmax(self.expert_gate(h_feature), dim=-1)          # (B, E)
             expert_outs = torch.stack(
@@ -1267,11 +1483,14 @@ class QuantiTransformer(nn.Module):
             return (mu, log_sig, log_nu)
 
     # IT: Inferenza eval-mode → dict numpy (mu/sigma/nu o quantili).
+    #     g opzionale in coda (regime_moe): pass-through al forward, None = legacy.
     # EN: Eval-mode inference → numpy dict (mu/sigma/nu or quantiles).
+    #     Optional trailing g (regime_moe): passed through to forward, None = legacy.
     @torch.no_grad()
-    def predict(self, x: torch.Tensor, x_macro: torch.Tensor = None) -> dict:
+    def predict(self, x: torch.Tensor, x_macro: torch.Tensor = None,
+                g: torch.Tensor = None) -> dict:
         self.eval()
-        out = self.forward(x, x_macro)
+        out = self.forward(x, x_macro, g=g)
         if self.loss_type == "quantile":
             quantile_preds = out[0]
             quantile_preds, _ = quantile_preds.sort(dim=-1)
@@ -1289,13 +1508,13 @@ class QuantiTransformer(nn.Module):
     # IT: MC Dropout: N pass con dropout attivo → stima incertezza epistemica.
     # EN: MC Dropout: N passes with dropout on → estimates epistemic uncertainty.
     def predict_with_uncertainty(self, x: torch.Tensor, x_macro: torch.Tensor = None,
-                                  n_samples: int = 20) -> dict:
+                                  n_samples: int = 20, g: torch.Tensor = None) -> dict:
         """MC Dropout: N forward pass con dropout attivo → epistemic uncertainty."""
         self.train()
         mus, sigmas, nus = [], [], []
         with torch.no_grad():
             for _ in range(n_samples):
-                out = self.forward(x, x_macro)
+                out = self.forward(x, x_macro, g=g)
                 if self.loss_type == "quantile":
                     qp = out[0]
                     qp, _ = qp.sort(dim=-1)

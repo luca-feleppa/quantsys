@@ -149,6 +149,26 @@ def main():
 
     X = torch.tensor(d[f"X_{split}"], dtype=torch.float32)
     Xm = torch.tensor(d[f"X_macro_{split}"], dtype=torch.float32) if f"X_macro_{split}" in d.files else None
+
+    # IT: A3 regime-MoE — se il config.json del modello dichiara head_type=
+    #     "regime_moe", costruisci il gate causale allineato ai timestamp dello
+    #     split e passalo come g= (EnsembleModel inoltra i kwargs ai membri).
+    #     Chiave assente (tutti i modelli storici) → ramo inerte, call bit-identica.
+    # EN: A3 regime-MoE — if the model's config.json declares head_type=
+    #     "regime_moe", build the causal gate aligned to the split timestamps and
+    #     pass it as g= (EnsembleModel forwards kwargs to the members).
+    #     Key absent (all legacy models) → inert branch, bit-identical call.
+    _head_type = "single"
+    _mdl_cfg = model_dir / "config.json"
+    if _mdl_cfg.exists():
+        with open(_mdl_cfg, encoding="utf-8") as f:
+            _head_type = json.load(f).get("head_type", "single") or "single"
+    G = None
+    if _head_type == "regime_moe":
+        from quantsys.model.regime_gate import build_regime_gate
+        G = torch.from_numpy(build_regime_gate(d[f"t_{split}"]))
+        log.info(f"regime_moe: gate (N,3) costruito per t_{split} / gate built for t_{split}")
+
     mus = []
     # IT: EnsembleModel.__call__ → (mu_ens, sigma_ens, nu_ens) in spazio z (AMP off interno).
     # EN: EnsembleModel.__call__ → (mu_ens, sigma_ens, nu_ens) in z-space (AMP off internally).
@@ -156,7 +176,10 @@ def main():
         for i in range(0, len(X), 256):
             xb = X[i:i + 256].to(device)
             xmb = Xm[i:i + 256].to(device) if Xm is not None else None
-            mu, _, _ = model(xb, xmb)
+            if G is not None:
+                mu, _, _ = model(xb, xmb, g=G[i:i + 256].to(device))
+            else:
+                mu, _, _ = model(xb, xmb)
             mus.append(mu.detach().cpu().numpy().ravel())
     mu_z = np.concatenate(mus)
     # IT: inversione COMPLETA z→raw: μ·IQR + centro (vedi nota in testa).

@@ -168,7 +168,8 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
               input_noise_std: float = 0.0,
               use_sample_weights: bool = False,
               mixup_alpha: float = 0.0,
-              crps_distill_weight: float = 0.0):
+              crps_distill_weight: float = 0.0,
+              use_regime_gate: bool = False):
     """Training con loss asimmetrica + CRPS ausiliario + distillation + direction-value loss.
 
     Se use_distillation=True, il dataloader contiene soft labels come tensori
@@ -178,6 +179,21 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
     per-sample come ULTIMO elemento del batch. I pesi sono proporzionali a
     |target| / std(target), cosi' i grandi movimenti contribuiscono di piu'
     ai gradienti rispetto al rumore laterale.
+
+    IT: Se use_regime_gate=True (A3 regime-MoE), il dataloader contiene il gate
+        regime (N,3) come tensore extra, posizionato PRIMA degli eventuali sample
+        weights (quindi ultimo o penultimo): viene estratto col medesimo pattern
+        pop-dalla-coda e passato al forward come `g=`. La loss risultante è sulla
+        MISCELA (il forward regime_moe ritorna già l'output mixato via legge della
+        varianza totale / Vincentization) — pinball sui quantili mixati, NLL
+        t-Student sulla miscela. Default False = comportamento bit-identico.
+    EN: If use_regime_gate=True (A3 regime-MoE), the dataloader carries the (N,3)
+        regime gate as an extra tensor placed BEFORE any sample weights (i.e. last
+        or second-to-last): popped from the tail with the same pattern and passed
+        to forward as `g=`. The resulting loss is on the MIXTURE (the regime_moe
+        forward already returns the mixed output via total variance law /
+        Vincentization) — pinball on the mixed quantiles, Student-t NLL on the
+        mixture. Default False = bit-identical behaviour.
     """
     from quantsys.model.distillation import distillation_loss_t_student
     from quantsys.model import direction_value_loss
@@ -199,6 +215,13 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
             batch, sw_batch = list(batch[:-1]), batch[-1].to(device, non_blocking=True)
         else:
             batch, sw_batch = list(batch), None
+
+        # IT: gate regime (A3): tensore in coda dopo il pop dei sample weights.
+        # EN: regime gate (A3): tail tensor after the sample-weights pop.
+        if use_regime_gate:
+            batch, g_batch = list(batch[:-1]), batch[-1].to(device, non_blocking=True)
+        else:
+            g_batch = None
 
         if use_distillation:
             if has_macro:
@@ -230,8 +253,19 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
                 t_mu  = lam * t_mu  + (1.0 - lam) * t_mu[perm]
                 t_ls2 = lam * t_ls2 + (1.0 - lam) * t_ls2[perm]
                 t_lnu = lam * t_lnu + (1.0 - lam) * t_lnu[perm]
+            # IT: il gate segue il mixup degli input (combinazione convessa →
+            #     resta sul simplesso); niente input noise sul gate (è una prob).
+            # EN: the gate follows the input mixup (convex combination → stays
+            #     on the simplex); no input noise on the gate (it's a prob).
+            if g_batch is not None:
+                g_batch = lam * g_batch + (1.0 - lam) * g_batch[perm]
         with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-            out = model(Xb, Xm) if has_macro else model(Xb)
+            # IT: path regime-MoE passa g= al forward; path default INVARIATO.
+            # EN: regime-MoE path passes g= to forward; default path UNCHANGED.
+            if g_batch is not None:
+                out = model(Xb, Xm, g=g_batch)
+            else:
+                out = model(Xb, Xm) if has_macro else model(Xb)
 
             # IT: ramo loss in base alla testa di output del modello
             # EN: branch on model output head (quantile vs t-Student)
@@ -332,11 +366,19 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
 
 # IT: una epoca di eval — NLL simmetrica + raccolta mu/sigma/nu per le metriche
 # EN: one eval epoch — symmetric NLL + collect mu/sigma/nu for the metrics
-def run_eval(model, loader, device, has_macro, full_metrics: bool = False):
+def run_eval(model, loader, device, has_macro, full_metrics: bool = False,
+             use_regime_gate: bool = False):
     """Validation con loss simmetrica standard per confrontabilità tra run.
 
     Returns (loss, mu_arr, y_arr, metrics, sigma_arr, nu_arr).
     sigma_arr e nu_arr sono sempre calcolati per evitare un secondo forward pass.
+
+    IT: use_regime_gate=True (A3): il gate regime (N,3) è l'ULTIMO tensore del
+        batch di eval (val/test non hanno sample weights) e viene passato come
+        `g=` al forward. Default False = bit-identico.
+    EN: use_regime_gate=True (A3): the (N,3) regime gate is the LAST tensor of
+        the eval batch (val/test carry no sample weights) and is passed to the
+        forward as `g=`. Default False = bit-identical.
     """
     # IT: SWA AveragedModel non espone loss_type direttamente; va via .module
     # EN: SWA AveragedModel hides loss_type — resolve via .module once
@@ -349,12 +391,19 @@ def run_eval(model, loader, device, has_macro, full_metrics: bool = False):
     model.eval(); total, mus, ys, sigs, nus = 0.0, [], [], [], []
     with torch.inference_mode():
         for batch in loader:
+            # IT: pop del gate regime (A3) dalla coda del batch, se attivo.
+            # EN: pop the regime gate (A3) from the batch tail, when active.
+            if use_regime_gate:
+                g_b   = batch[-1].to(device, non_blocking=True)
+                batch = batch[:-1]
+            else:
+                g_b = None
             if has_macro:
                 Xb, Xm, yb = [x.to(device, non_blocking=True) for x in batch]
-                out = model(Xb, Xm)
+                out = model(Xb, Xm, g=g_b) if g_b is not None else model(Xb, Xm)
             else:
                 Xb, yb = [x.to(device, non_blocking=True) for x in batch]
-                out = model(Xb)
+                out = model(Xb, g=g_b) if g_b is not None else model(Xb)
 
             if loss_type == "quantile":
                 quantile_preds = out[0]
@@ -650,6 +699,58 @@ def main():
     else:
         log.info("MacroEncoder non presente — QuantLSTM standard.")
 
+    # ── A3 — Regime-MoE gate (config-gated: model.head_type, default assente) ──
+    # IT: head_type="regime_moe" attiva backbone condiviso + 3 teste-regime con
+    #     gate esterno CAUSALE g(t)=filtered probs (mai appreso). Chiave assente
+    #     o "single" → ZERO cambi di comportamento (stessa loss, stessi batch,
+    #     bit-identico). Gate allineato ai timestamp del dataset con lo stesso
+    #     merge_asof backward della stratificazione val (_load_val_regimes).
+    # EN: head_type="regime_moe" enables shared backbone + 3 regime heads with an
+    #     external CAUSAL gate g(t)=filtered probs (never learned). Key absent or
+    #     "single" → ZERO behaviour change (same loss, same batches, bit-identical).
+    #     Gate aligned to the dataset timestamps with the same backward merge_asof
+    #     as the val stratification (_load_val_regimes).
+    _head_type = mcfg.get("head_type", "single") or "single"
+    use_regime_gate = (_head_type == "regime_moe")
+    G_tr_t = G_vl_t = G_te_t = None
+    if use_regime_gate:
+        # IT: guard di scope — regime_moe è iTransformer-only (per ora), esclusivo
+        #     col MoE appreso e con la distillation (soft labels single-output).
+        # EN: scope guards — regime_moe is iTransformer-only (for now), exclusive
+        #     with the learned MoE and with distillation (single-output soft labels).
+        if mcfg.get("architecture", "lstm") != "itransformer":
+            raise ValueError(
+                "model.head_type='regime_moe' è supportato SOLO con "
+                "architecture='itransformer' / supported ONLY with "
+                "architecture='itransformer'"
+            )
+        if int(mcfg.get("n_output_experts", 1)) > 1:
+            raise ValueError(
+                "model.head_type='regime_moe' richiede n_output_experts=1 "
+                "(MoE appreso e regime-MoE mutuamente esclusivi) / requires "
+                "n_output_experts=1 (learned MoE and regime-MoE are exclusive)"
+            )
+        if use_distillation:
+            raise ValueError(
+                "model.head_type='regime_moe' incompatibile con --distill "
+                "(soft labels single-output) / incompatible with --distill"
+            )
+        for _tk in ("t_train", "t_val", "t_test"):
+            if _tk not in data.files:
+                raise KeyError(
+                    f"regime_moe: {_tk} assente dal dataset npz — rigenerare con "
+                    f"01_download_data.py / missing from the npz dataset"
+                )
+        from quantsys.model.regime_gate import build_regime_gate
+        G_tr_t = torch.from_numpy(build_regime_gate(data["t_train"]))
+        G_vl_t = torch.from_numpy(build_regime_gate(data["t_val"]))
+        G_te_t = torch.from_numpy(build_regime_gate(data["t_test"]))
+        log.info(
+            f"Regime-MoE ATTIVO (A3): gate (N,3) da regime_probs.parquet — "
+            f"medie train={np.round(G_tr_t.mean(dim=0).numpy(), 3).tolist()}  "
+            f"val={np.round(G_vl_t.mean(dim=0).numpy(), 3).tolist()}"
+        )
+
     # ── Sample weights proporzionali a |target| (large moves contribute more) ──
     # IT: pesi per-sample ∝ |y|/std(y) — i grandi movimenti pesano di più nel loss
     # EN: per-sample weights ∝ |y|/std(y) — big moves contribute more to the loss
@@ -676,19 +777,27 @@ def main():
     _bs_train = tcfg["batch_size"]
     _bs_eval  = _bs_train * 4
     # IT: sample_weights_tr è SEMPRE l'ultimo tensore del TensorDataset train;
-    #     run_train() lo estrae prima dell'unpacking del resto.
+    #     run_train() lo estrae prima dell'unpacking del resto. Il gate regime
+    #     (A3, se attivo) sta SUBITO PRIMA dei sample weights ed è l'ultimo
+    #     tensore dei dataset di eval; con head_type assente le liste sono
+    #     bit-identiche a prima.
     # EN: sample_weights_tr is ALWAYS the last tensor of the train TensorDataset;
-    #     run_train() pops it before unpacking the rest.
+    #     run_train() pops it before unpacking the rest. The regime gate (A3, if
+    #     active) sits RIGHT BEFORE the sample weights and is the last tensor of
+    #     the eval datasets; with head_type absent the lists are bit-identical.
+    _g_tr = [G_tr_t] if use_regime_gate else []
+    _g_vl = [G_vl_t] if use_regime_gate else []
+    _g_te = [G_te_t] if use_regime_gate else []
     if has_macro:
-        _tr_tensors = [X_tr, Xm_tr, y_tr] + ([sample_weights_tr] if _use_sw else [])
+        _tr_tensors = [X_tr, Xm_tr, y_tr] + _g_tr + ([sample_weights_tr] if _use_sw else [])
         train_dl = DataLoader(TensorDataset(*_tr_tensors), _bs_train, shuffle=True,  **kw)
-        val_dl   = DataLoader(TensorDataset(X_vl, Xm_vl, y_vl), _bs_eval,  shuffle=False, **kw)
-        test_dl  = DataLoader(TensorDataset(X_te, Xm_te, y_te), _bs_eval,  shuffle=False, **kw)
+        val_dl   = DataLoader(TensorDataset(X_vl, Xm_vl, y_vl, *_g_vl), _bs_eval,  shuffle=False, **kw)
+        test_dl  = DataLoader(TensorDataset(X_te, Xm_te, y_te, *_g_te), _bs_eval,  shuffle=False, **kw)
     else:
-        _tr_tensors = [X_tr, y_tr] + ([sample_weights_tr] if _use_sw else [])
+        _tr_tensors = [X_tr, y_tr] + _g_tr + ([sample_weights_tr] if _use_sw else [])
         train_dl = DataLoader(TensorDataset(*_tr_tensors), _bs_train, shuffle=True,  **kw)
-        val_dl   = DataLoader(TensorDataset(X_vl, y_vl), _bs_eval,  shuffle=False, **kw)
-        test_dl  = DataLoader(TensorDataset(X_te, y_te), _bs_eval,  shuffle=False, **kw)
+        val_dl   = DataLoader(TensorDataset(X_vl, y_vl, *_g_vl), _bs_eval,  shuffle=False, **kw)
+        test_dl  = DataLoader(TensorDataset(X_te, y_te, *_g_te), _bs_eval,  shuffle=False, **kw)
 
     _arch = mcfg.get("architecture", "lstm")
     if _arch == "itransformer":
@@ -883,8 +992,11 @@ def main():
                 n_output_experts= mcfg.get("n_output_experts", 1),
                 use_revin        = mcfg.get("use_revin", False),
                 revin_target_idx = mcfg.get("revin_target_idx", 0),
+                # IT: A3 — default "single" = path storico bit-identico.
+                # EN: A3 — default "single" = bit-identical legacy path.
+                head_type       = _head_type,
             ).to(device)
-            log.info(f"Architettura: QuantiTransformer  d_model={mcfg.get('tft_d_model', 128)}  layers={mcfg.get('tft_n_layers', 3)}  T={_T}")
+            log.info(f"Architettura: QuantiTransformer  d_model={mcfg.get('tft_d_model', 128)}  layers={mcfg.get('tft_n_layers', 3)}  T={_T}  head_type={_head_type}")
         elif architecture == "tft":
             from quantsys.model import QuantTFT
             # n_dynamic=None → single-stream: entrambi gli stream ricevono tutte le feature
@@ -1125,8 +1237,9 @@ def main():
                 use_sample_weights  = _use_sw,
                 mixup_alpha         = tcfg.get("mixup_alpha",            0.0),
                 crps_distill_weight = tcfg.get("crps_distill_weight",    0.0),
+                use_regime_gate     = use_regime_gate,
             )
-            vl_nll, _all_mu, _all_y, _val_metrics, _val_sig, _val_nu = run_eval(_model, val_dl, device, has_macro)
+            vl_nll, _all_mu, _all_y, _val_metrics, _val_sig, _val_nu = run_eval(_model, val_dl, device, has_macro, use_regime_gate=use_regime_gate)
             da = _val_metrics["directional_acc"]
             sp = _val_metrics["spearman"]
             do_val = True
@@ -1202,7 +1315,7 @@ def main():
                 torch.optim.swa_utils.update_bn(train_dl, _swa_model, device=device)
             else:
                 log.info("  SWA: nessun BatchNorm rilevato → skip update_bn (LayerNorm only)")
-            swa_vl, _, _, _, _, _ = run_eval(_swa_model, val_dl, device, has_macro)
+            swa_vl, _, _, _, _, _ = run_eval(_swa_model, val_dl, device, has_macro, use_regime_gate=use_regime_gate)
             if swa_vl < _es.best:
                 log.info(f"SWA migliore: val={swa_vl:+.5f} vs best={_es.best:+.5f} — uso SWA")
                 torch.save(_swa_model.module.state_dict(), _ckpt)
@@ -1221,7 +1334,7 @@ def main():
             n_params = sum(p.numel() for p in _model.parameters() if p.requires_grad)
             log.info(f"Modello: {model_type}  |  Parametri: {n_params:,}")
             best_val_nll = _es.best
-            _, test_mu, test_y, test_metrics, sig_a, nu_a = run_eval(_model, test_dl, device, has_macro, full_metrics=True)
+            _, test_mu, test_y, test_metrics, sig_a, nu_a = run_eval(_model, test_dl, device, has_macro, full_metrics=True, use_regime_gate=use_regime_gate)
             history = _history
             model   = _model
 
