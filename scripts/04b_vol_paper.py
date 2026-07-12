@@ -18,6 +18,16 @@
 #     baseline always-long/short-vol sull'intero calendario (gate pre-registrato).
 #     exec_diag.jsonl (A6, ROADMAP_VOL_BOOK) = bid/ask reali + greeks per tick,
 #     SOLO diagnostico: nessun input alla regola pre-registrata.
+#     V2 (B2/A1, ROADMAP_VOL_BOOK) — leg delta-hedge sul perp, dietro flag
+#     --hedge INERTE di default (senza flag: comportamento v1 bit-identico,
+#     nessun file hedge letto/scritto). Ribilanciamento SOLO oltre la no-trade
+#     band |delta_book| (dry-run 2026-07-10: churn ATM = drag puro); hedge ratio
+#     = delta teorico del venue (convenzione parametrica raw/adj, MAI stimato dai
+#     mark testnet — verdetto 2026-07-08); flatten automatico al settlement.
+#     Output v2: hedge_state.json + hedge_ledger.jsonl (fill esatti → il PnL
+#     perp inverse si ricostruisce offline: pnl = H_usd·(1/s0−1/s1)).
+#     ⚠ ATTIVARE SOLO post-gate n≥20 e SOLO dopo la pre-registrazione
+#     hedged-vs-unhedged (STATUS.md): il gate v1 chiude sul design congelato.
 # EN: VOL-PAPER FORWARD TEST (pre-registered in STATUS.md 2026-06-12) — hourly loop:
 #       1. NN-RV 30h forecast with the PASS vol-1h model (FULL z→raw inversion:
 #          μ_z·scale + center from the persisted RobustScaler — QLIKE-judge
@@ -38,9 +48,20 @@
 #     always-long/short-vol baselines over the full calendar (pre-registered gate).
 #     exec_diag.jsonl (A6, ROADMAP_VOL_BOOK) = real bid/ask + greeks per tick,
 #     diagnostic ONLY: no input to the pre-registered rule.
+#     V2 (B2/A1, ROADMAP_VOL_BOOK) — perp delta-hedge leg behind the --hedge
+#     flag, INERT by default (without it: bit-identical v1 behavior, no hedge
+#     file is read/written). Rebalance ONLY beyond the |book_delta| no-trade
+#     band (2026-07-10 dry-run: ATM churn = pure drag); hedge ratio = venue
+#     theoretical delta (parametric raw/adj convention, NEVER estimated from
+#     testnet marks — 2026-07-08 verdict); automatic flatten at settlement.
+#     V2 output: hedge_state.json + hedge_ledger.jsonl (exact fills → inverse
+#     perp PnL is reconstructable offline: pnl = H_usd·(1/s0−1/s1)).
+#     ⚠ ENABLE ONLY post-gate n≥20 and ONLY after the hedged-vs-unhedged
+#     pre-registration (STATUS.md): the v1 gate closes on the frozen design.
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -69,6 +90,32 @@ IV_PATH = Path("data/iv/atm_30h.parquet")
 # IT: A6 (ROADMAP_VOL_BOOK) — log diagnostico esecuzione (bid/ask + delta), append-only.
 # EN: A6 (ROADMAP_VOL_BOOK) — execution diagnostic log (bid/ask + delta), append-only.
 EXEC_DIAG_PATH = OUT_DIR / "exec_diag.jsonl"
+
+# IT: V2 (B2/A1) — leg delta-hedge perp: stato corrente (sopravvive ai restart) +
+#     ledger append-only dei fill (ricostruzione PnL inverse esatta offline).
+#     File toccati SOLO con --hedge attivo (default: inerti, mai creati).
+# EN: V2 (B2/A1) — perp delta-hedge leg: current state (survives restarts) +
+#     append-only fill ledger (exact offline inverse-PnL reconstruction).
+#     Files touched ONLY with --hedge active (default: inert, never created).
+HEDGE_STATE_PATH = OUT_DIR / "hedge_state.json"
+HEDGE_LEDGER_PATH = OUT_DIR / "hedge_ledger.jsonl"
+PERP_INSTRUMENT = "BTC-PERPETUAL"
+# IT: taglia contratto perp Deribit (10 USD) — gli ordini vanno arrotondati al multiplo.
+# EN: Deribit perp contract size (10 USD) — orders must be rounded to the multiple.
+PERP_CONTRACT_USD = 10.0
+# IT: default PARAMETRICI (CLI), NON costanti pre-registrate: band e convenzione
+#     delta vengono CONGELATE nella pre-registrazione hedged-vs-unhedged della v2
+#     (dimensionate sul dry-run A6 a serie matura) PRIMA di attivare --hedge.
+#     band = soglia |delta_book| in BTC-equivalenti (dry-run 07-10: sotto ~0.17 il
+#     ribilanciamento non riduce varianza e paga fee); fee = taker perp (frazione
+#     del nozionale, stessa assunzione del dry-run — dal venue al design finale).
+# EN: PARAMETRIC defaults (CLI), NOT pre-registered constants: band and delta
+#     convention get FROZEN in the v2 hedged-vs-unhedged pre-registration (sized
+#     on the matured A6 dry-run) BEFORE --hedge is ever enabled.
+#     band = |book_delta| threshold in BTC-equivalents (07-10 dry-run: below ~0.17
+#     rebalancing reduces no variance and pays fees); fee = perp taker fraction.
+DEFAULT_HEDGE_BAND = 0.20
+DEFAULT_HEDGE_FEE = 5e-4
 
 # IT: costanti PRE-REGISTRATE (STATUS.md 2026-06-12) — non toccarle a risultati visti.
 # EN: PRE-REGISTERED constants (STATUS.md 2026-06-12) — do not touch after seeing results.
@@ -154,6 +201,15 @@ class DeribitTestnet:
                                            "amount": amount, "type": "market"},
                        private=True)
         return float(res["order"]["average_price"])
+
+    # IT: posizione perp REALE sul venue (USD firmati, 0 se flat) — base della
+    #     riconciliazione dello stato hedge all'avvio (audit MINOR-1).
+    # EN: REAL venue perp position (signed USD, 0 if flat) — basis of the hedge
+    #     state reconciliation at startup (MINOR-1 audit).
+    def perp_position_usd(self, instrument: str = "BTC-PERPETUAL") -> float:
+        res = self.get("private/get_position", {"instrument_name": instrument},
+                       private=True)
+        return float(res.get("size") or 0.0)
 
     # IT: delivery price del giorno di settlement (08:00 UTC) — None se non ancora pubblicato.
     # EN: settlement-day delivery price (08:00 UTC) — None if not yet published.
@@ -492,6 +548,206 @@ def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
                     f"{type(e).__name__}: {e}")
 
 
+# ──────────────────── leg delta-hedge perp (V2, B2/A1) ────────────────────
+def load_hedge_state() -> dict | None:
+    if HEDGE_STATE_PATH.exists():
+        return json.loads(HEDGE_STATE_PATH.read_text(encoding="utf-8"))
+    return None
+
+
+def save_hedge_state(st: dict | None):
+    # IT: write atomica (.tmp + os.replace) — pattern safety-net del repo (audit
+    #     MINOR-1: un crash tra fill e write lascerebbe uno stato stale → doppio hedge).
+    # EN: atomic write (.tmp + os.replace) — repo safety-net pattern (MINOR-1
+    #     audit: a crash between fill and write would leave stale state → double hedge).
+    if st is None:
+        HEDGE_STATE_PATH.unlink(missing_ok=True)
+    else:
+        tmp = HEDGE_STATE_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(st, indent=2, default=str), encoding="utf-8")
+        os.replace(tmp, HEDGE_STATE_PATH)
+
+
+def _hedge_ledger_append(rec: dict):
+    with open(HEDGE_LEDGER_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, default=str) + "\n")
+
+
+def _perp_trade(db: DeribitTestnet, dh_usd: float, execute: bool) -> float:
+    # IT: esegue il delta-ordine perp (USD firmati: >0 buy, <0 sell) e ritorna il
+    #     prezzo di fill. Senza --execute il fill è simulato al mark del perp —
+    #     stessa convenzione zero-rumore dei fill opzioni (spread perp ~1bp).
+    # EN: executes the perp delta-order (signed USD: >0 buy, <0 sell) and returns
+    #     the fill price. Without --execute the fill is simulated at the perp mark —
+    #     same zero-noise convention as option fills (perp spread ~1bp).
+    if execute:
+        verb = "buy" if dh_usd > 0 else "sell"
+        return db.market_order(PERP_INSTRUMENT, verb, abs(dh_usd))
+    return float(db.ticker(PERP_INSTRUMENT)["mark_price"])
+
+
+def _flatten_hedge(db: DeribitTestnet, st: dict, hcfg: dict, execute: bool, reason: str):
+    # IT: chiude l'intera leg perp residua (settlement o cambio struttura sotto hedge).
+    # EN: closes the whole residual perp leg (settlement or structure change under hedge).
+    h_usd = float(st.get("h_usd", 0.0))
+    if abs(h_usd) < PERP_CONTRACT_USD:
+        save_hedge_state(None)
+        return
+    price = _perp_trade(db, -h_usd, execute)
+    _hedge_ledger_append({
+        "ts": str(pd.Timestamp.now(tz="UTC").floor("s")), "event": "flatten",
+        "reason": reason, "dh_usd": -h_usd, "h_usd_after": 0.0,
+        "fill_price": price, "fee_btc": hcfg["fee"] * abs(h_usd) / price,
+        "executed": bool(execute), "position_key": st.get("position_key")})
+    save_hedge_state(None)
+    log.info(f"HEDGE flatten ({reason}): perp {-h_usd:+,.0f} USD @ {price:,.1f}")
+
+
+def reconcile_hedge_state(db: DeribitTestnet):
+    # IT: audit MINOR-1 — all'avvio con --execute allinea lo stato locale alla
+    #     posizione perp REALE del venue: un crash tra fill e write dello stato
+    #     non può più produrre un doppio hedge al restart. Se divergono adotta
+    #     il venue (è la verità contabile) e logga l'evento nel ledger.
+    # EN: MINOR-1 audit — at --execute startup, aligns local state with the
+    #     venue's REAL perp position: a crash between fill and state write can
+    #     no longer produce a double hedge on restart. On divergence the venue
+    #     wins (it is the accounting truth) and the event is ledgered.
+    try:
+        h_venue = db.perp_position_usd(PERP_INSTRUMENT)
+    except Exception as e:
+        log.warning(f"riconciliazione hedge fallita/failed (get_position): "
+                    f"{type(e).__name__}: {e} — proseguo con lo stato locale")
+        return
+    st = load_hedge_state()
+    h_state = float(st["h_usd"]) if st else 0.0
+    if abs(h_venue - h_state) < PERP_CONTRACT_USD:
+        return
+    log.warning(f"hedge state divergente: locale {h_state:+,.0f} USD vs venue "
+                f"{h_venue:+,.0f} USD — adotto il venue / adopting venue")
+    if abs(h_venue) < PERP_CONTRACT_USD:
+        save_hedge_state(None)
+    else:
+        st = st or {}
+        st.update({"h_usd": h_venue,
+                   "updated_ts": str(pd.Timestamp.now(tz="UTC").floor("s"))})
+        save_hedge_state(st)
+    _hedge_ledger_append({
+        "ts": str(pd.Timestamp.now(tz="UTC").floor("s")), "event": "reconcile",
+        "h_usd_before": h_state, "h_usd_after": h_venue,
+        "dh_usd": 0.0, "fill_price": None, "fee_btc": 0.0, "executed": True,
+        "position_key": (st or {}).get("position_key")})
+
+
+def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
+    # IT: V2 (B2/A1) — mantiene delta_book ≈ 0 col perp inverse, MA solo oltre la
+    #     no-trade band (isteresi anti-churn, dry-run 07-10: sull'ATM il ribilancio
+    #     è drag puro). Convenzione delta dal venue (greeks del ticker), parametrica:
+    #     'raw' = Σdelta leg (∂V_usd/∂S) · 'adj' = Σdelta − Σmark (BTC-terms,
+    #     coerente con lo slope −0.98 sui mark mainnet, verdetto 07-08). Nozionale:
+    #     delta_book (BTC-eq) = side·δ_conv·size + H_usd/S → target H*_usd =
+    #     −side·δ_conv·size·S. Errori: log.error, MAI un raise verso tick()
+    #     (la leg opzioni pre-registrata non deve mai perdere un tick).
+    # EN: V2 (B2/A1) — keeps book delta ≈ 0 with the inverse perp, but ONLY beyond
+    #     the no-trade band (anti-churn hysteresis; 07-10 dry-run: ATM rebalancing
+    #     is pure drag). Venue delta convention (ticker greeks), parametric:
+    #     'raw' = Σ leg delta (∂V_usd/∂S) · 'adj' = Σdelta − Σmark (BTC-terms,
+    #     consistent with the −0.98 mainnet-mark slope, 07-08 verdict). Notional:
+    #     book_delta (BTC-eq) = side·δ_conv·size + H_usd/S → target H*_usd =
+    #     −side·δ_conv·size·S. Errors: log.error, NEVER raised into tick()
+    #     (the pre-registered options leg must never lose a tick).
+    try:
+        pos = load_position()
+        st = load_hedge_state()
+        pos_key = None
+        if pos is not None:
+            pos_key = {"side": int(pos["side"]), "strike": float(pos["strike"]),
+                       "expiry_ms": int(pos["expiry_ms"])}
+
+        # IT: audit MAJOR-1 — a expiry passata le opzioni sono MORTE (payoff
+        #     congelato al TWAP 07:30-08:00 UTC) anche se il delivery price non è
+        #     ancora pubblicato e position.json esiste ancora: tenere il perp
+        #     sarebbe delta NUDO attribuito alla leg hedge (bias sistematico
+        #     contro il gate hedged-vs-unhedged). Flatten indipendente dal
+        #     bookkeeping del settlement.
+        # EN: MAJOR-1 audit — past expiry the options are DEAD (payoff frozen at
+        #     the 07:30-08:00 UTC TWAP) even while the delivery price is not yet
+        #     published and position.json still exists: keeping the perp would be
+        #     NAKED delta charged to the hedge leg (systematic bias against the
+        #     hedged-vs-unhedged gate). Flatten independently of settlement bookkeeping.
+        expired = pos is not None and time.time() * 1000 >= float(pos["expiry_ms"])
+
+        # IT: flatten se il book è flat, la struttura è cambiata sotto l'hedge,
+        #     o la struttura è scaduta (vedi sopra).
+        # EN: flatten if the book is flat, the structure changed under the hedge,
+        #     or the structure expired (see above).
+        if st is not None and (pos is None or expired
+                               or st.get("position_key") != pos_key):
+            _flatten_hedge(db, st, hcfg, execute,
+                           reason=("settled" if pos is None else
+                                   "expired" if expired else "structure_changed"))
+            st = None
+        if pos is None or expired:
+            return
+
+        legs = [_leg_snapshot(db, pos["call"]), _leg_snapshot(db, pos["put"])]
+        if any(l["delta"] is None or l["mark"] is None or l["underlying"] is None
+               for l in legs):
+            # IT: meglio saltare un ribilancio che hedgiare con un delta sbagliato.
+            # EN: better to skip one rebalance than hedge with a wrong delta.
+            log.warning("hedge: greeks/mark assenti su una leg — ribilanciamento "
+                        "saltato questo tick / missing greeks — rebalance skipped")
+            return
+        S = float(np.mean([l["underlying"] for l in legs]))
+        d_raw = float(sum(l["delta"] for l in legs))
+        m_sum = float(sum(l["mark"] for l in legs))
+        d_conv = d_raw if hcfg["conv"] == "raw" else d_raw - m_sum
+        # IT: audit MINOR-2 — bound analitico dello straddle: |δ_raw| ≤ 1
+        #     (call∈[0,1], put∈[−1,0]), |δ_adj| ≤ 1 + Σmark; un greek testnet
+        #     numericamente assurdo dimensionerebbe un hedge macroscopico →
+        #     skip fail-soft (margine 0.10 per tolleranza di quotazione).
+        # EN: MINOR-2 audit — analytic straddle bound: |δ_raw| ≤ 1, |δ_adj| ≤
+        #     1 + Σmark; a numerically absurd testnet greek would size a
+        #     macroscopic hedge → fail-soft skip (0.10 quoting-tolerance margin).
+        d_bound = 1.0 + (m_sum if hcfg["conv"] == "adj" else 0.0) + 0.10
+        if abs(d_conv) > d_bound:
+            log.warning(f"hedge: delta implausibile |{d_conv:.3f}| > bound "
+                        f"{d_bound:.3f} — ribilanciamento saltato / implausible "
+                        f"delta — rebalance skipped")
+            return
+        side = int(pos["side"])
+        h_usd_cur = float(st["h_usd"]) if st else 0.0
+
+        # IT: delta del book in BTC-equivalenti (opzioni + perp già in essere).
+        # EN: book delta in BTC-equivalents (options + perp already on).
+        book_delta = side * d_conv * SIZE_CONTRACTS + h_usd_cur / S
+        if abs(book_delta) < hcfg["band"]:
+            return                                     # dentro la banda / inside the band
+        h_usd_target = -side * d_conv * SIZE_CONTRACTS * S
+        dh = h_usd_target - h_usd_cur
+        dh = float(np.round(dh / PERP_CONTRACT_USD) * PERP_CONTRACT_USD)
+        if abs(dh) < PERP_CONTRACT_USD:
+            return
+        price = _perp_trade(db, dh, execute)
+        h_usd_new = h_usd_cur + dh
+        save_hedge_state({"h_usd": h_usd_new, "position_key": pos_key,
+                          "conv": hcfg["conv"], "last_fill_price": price,
+                          "updated_ts": str(pd.Timestamp.now(tz="UTC").floor("s"))})
+        _hedge_ledger_append({
+            "ts": str(pd.Timestamp.now(tz="UTC").floor("s")),
+            "event": "open" if abs(h_usd_cur) < PERP_CONTRACT_USD else "rebalance",
+            "S_underlying": S, "delta_raw": d_raw, "mark_sum": m_sum,
+            "conv": hcfg["conv"], "book_delta_pre": book_delta,
+            "h_usd_before": h_usd_cur, "h_usd_after": h_usd_new, "dh_usd": dh,
+            "fill_price": price, "fee_btc": hcfg["fee"] * abs(dh) / price,
+            "executed": bool(execute), "position_key": pos_key})
+        log.info(f"HEDGE {'open' if abs(h_usd_cur) < PERP_CONTRACT_USD else 'rebalance'}: "
+                 f"Δ_book={book_delta:+.3f} → perp {dh:+,.0f} USD @ {price:,.1f} "
+                 f"(H={h_usd_new:+,.0f} USD, conv={hcfg['conv']})")
+    except Exception as e:
+        log.error(f"hedge leg fallita/failed — leg opzioni NON impattata: "
+                  f"{type(e).__name__}: {e}", exc_info=True)
+
+
 # ──────────────────────────── ciclo di trade ────────────────────────────
 def maybe_settle(db: DeribitTestnet, pos: dict) -> bool:
     # IT: se l'expiry è passata e il delivery price è pubblicato: P&L cash-settled
@@ -547,9 +803,12 @@ def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool) -> di
     return pos
 
 
-def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool):
-    # IT: un ciclo completo: settlement → forecast → IV → regola → log (sempre).
-    # EN: one full cycle: settlement → forecast → IV → rule → log (always).
+def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
+         hedge_cfg: dict | None = None):
+    # IT: un ciclo completo: settlement → forecast → IV → regola → log (sempre)
+    #     → hedge (SOLO v2, hedge_cfg non-None; default None = v1 bit-identico).
+    # EN: one full cycle: settlement → forecast → IV → rule → log (always)
+    #     → hedge (v2 ONLY, non-None hedge_cfg; default None = bit-identical v1).
     pos = load_position()
     if pos is not None and maybe_settle(db, pos):
         pos = None
@@ -587,6 +846,13 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool):
     #     at entry time (real entry half-spread).
     log_exec_diag(db)
 
+    # IT: V2 — la leg hedge gira per ULTIMA (dopo settlement/open/diagnostica):
+    #     vede lo stato book definitivo del tick. Inerte se hedge_cfg è None.
+    # EN: V2 — the hedge leg runs LAST (after settlement/open/diagnostics): it
+    #     sees the tick's final book state. Inert when hedge_cfg is None.
+    if hedge_cfg is not None:
+        maybe_hedge(db, hedge_cfg, execute)
+
 
 def main():
     # IT: boilerplate UTF-8 (checklist CLAUDE.md) | EN: UTF-8 boilerplate (CLAUDE.md checklist)
@@ -610,6 +876,32 @@ def main():
                     choices=["itransformer", "nhits", "tcnmamba", "lstm"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
+    # IT: V2 (B2/A1) — flag hedge, INERTI di default. ⚠ Attivarli SOLO post-gate
+    #     n≥20 e SOLO con band/convenzione CONGELATE dalla pre-registrazione
+    #     hedged-vs-unhedged in STATUS.md (i default qui sono placeholder di design).
+    # EN: V2 (B2/A1) — hedge flags, INERT by default. ⚠ Enable ONLY post-gate
+    #     n≥20 and ONLY with band/convention FROZEN by the hedged-vs-unhedged
+    #     pre-registration in STATUS.md (defaults here are design placeholders).
+    ap.add_argument("--hedge", action="store_true",
+                    help="attiva la leg delta-hedge perp (v2; default OFF = v1 "
+                         "bit-identico) / enable the perp delta-hedge leg (v2)")
+    # IT: audit MINOR-3 — band/conv SENZA default: con --hedge vanno passati
+    #     esplicitamente (fail-fast sotto), così un --hedge distratto non parte
+    #     coi placeholder non congelati dalla pre-registrazione.
+    # EN: MINOR-3 audit — band/conv WITHOUT defaults: with --hedge they must be
+    #     passed explicitly (fail-fast below), so a careless --hedge cannot start
+    #     on placeholders the pre-registration has not frozen.
+    ap.add_argument("--hedge-band", type=float, default=None,
+                    help="no-trade band su |delta_book| in BTC-eq (OBBLIGATORIA "
+                         f"con --hedge; riferimento design {DEFAULT_HEDGE_BAND}) / "
+                         "|book_delta| no-trade band (REQUIRED with --hedge)")
+    ap.add_argument("--hedge-conv", choices=["raw", "adj"], default=None,
+                    help="convenzione delta (OBBLIGATORIA con --hedge): raw=Σdelta "
+                         "venue, adj=Σdelta−Σmark (BTC-terms) / delta convention "
+                         "(REQUIRED with --hedge)")
+    ap.add_argument("--hedge-fee", type=float, default=DEFAULT_HEDGE_FEE,
+                    help="fee taker perp (frazione nozionale, solo contabilità "
+                         "ledger) / perp taker fee (ledger accounting only)")
     args = ap.parse_args()
 
     cfg = load_config("config/default.yaml")
@@ -621,12 +913,42 @@ def main():
     fc = VolForecaster(cfg, device, arch=args.arch)
     db = DeribitTestnet(cfg)
 
+    # IT: config hedge SOLO se --hedge (None = path v1, nessun file hedge toccato).
+    #     Fail-fast (audit MINOR-3): band e conv esplicite = valori CONGELATI
+    #     dalla pre-registrazione, mai i placeholder di design.
+    # EN: hedge config ONLY with --hedge (None = v1 path, no hedge file touched).
+    #     Fail-fast (MINOR-3 audit): explicit band and conv = values FROZEN by
+    #     the pre-registration, never the design placeholders.
+    hedge_cfg = None
+    if args.hedge:
+        if args.hedge_band is None or args.hedge_conv is None:
+            raise SystemExit(
+                "--hedge richiede --hedge-band e --hedge-conv ESPLICITI (valori "
+                "congelati dalla pre-registrazione in STATUS.md) / --hedge requires "
+                "EXPLICIT --hedge-band and --hedge-conv (frozen by the STATUS.md "
+                "pre-registration)")
+        hedge_cfg = {"band": float(args.hedge_band), "conv": args.hedge_conv,
+                     "fee": float(args.hedge_fee)}
+        log.warning(f"V2 HEDGE ATTIVO: band={hedge_cfg['band']} conv={hedge_cfg['conv']} "
+                    f"fee={hedge_cfg['fee']:.1e} — verificare che la pre-registrazione "
+                    f"hedged-vs-unhedged sia CHIUSA in STATUS.md / verify the "
+                    f"pre-registration is FROZEN in STATUS.md")
+        # IT: audit MINOR-1 (riconciliazione) — con --execute lo stato locale
+        #     viene allineato alla posizione perp REALE del venue all'avvio:
+        #     un crash tra fill e write non può più produrre doppio hedge.
+        # EN: MINOR-1 audit (reconciliation) — with --execute the local state is
+        #     aligned to the venue's REAL perp position at startup: a crash
+        #     between fill and write can no longer produce a double hedge.
+        if args.execute:
+            reconcile_hedge_state(db)
+
     log.info(f"vol-paper avviato/started — soglia edge ±{EDGE_THRESHOLD}, "
              f"size {SIZE_CONTRACTS} contratti/leg, "
-             f"{'ESECUZIONE TESTNET' if args.execute else 'SIMULAZIONE mark-price'}")
+             f"{'ESECUZIONE TESTNET' if args.execute else 'SIMULAZIONE mark-price'}"
+             f"{' + DELTA-HEDGE v2' if hedge_cfg is not None else ''}")
     while True:
         try:
-            tick(fc, db, args.execute)
+            tick(fc, db, args.execute, hedge_cfg)
         except KeyboardInterrupt:
             return
         except Exception as e:
