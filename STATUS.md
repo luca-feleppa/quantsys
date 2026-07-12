@@ -5,6 +5,47 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — V2 DELTA-HEDGED, hedged-vs-unhedged (`04b --hedge`) · 2026-07-12 · **DRAFT: attivazione SOLO post-gate v1 n≥20**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). ⚠ **Questo è un DRAFT congelabile, NON un gate attivo:** la v1 chiude sul design congelato (n≥20, ~metà luglio) e `--hedge` resta INERTE fino ad allora. Il codice della leg hedge è già in `04b_vol_paper.py` (flag CLI `--hedge`, default OFF = v1 bit-identica) ma NON è mai stato attivato. Due parametri sono deliberatamente lasciati aperti (band, convenzione δ) con la **regola di congelamento pre-dichiarata** qui sotto: verranno fissati su dati PRE-attivazione, mai a giudizio in corso.
+
+**Ipotesi/prior onesto (pre-dichiarato):** l'hedge riduce la varianza per-trade in modo sostanziale (dry-run 07-10 su 30 intervalli: −68% pooled, monotona in |δ|: −87% ITM, ~0% ATM) con media invariata ex-costi (delta-hedge mean-zero by design). Il rischio reale è che **fee di churn + funding perp** erodano il beneficio: il funding non è mai stato misurato sulla serie (escluso da entrambi i dry-run). Esito negativo plausibile: varianza ↓ ma Sharpe per-trade NON migliora net-of-costs → l'hedge non paga a size 1 contratto.
+
+**Metodo:** la leg opzioni resta IDENTICA alla v1 (stessa regola pre-registrata 2026-06-12, stessi fill al mark): il confronto hedged-vs-unhedged è **within-trade** — unhedged = PnL della sola leg opzioni (già loggato), hedged = opzioni + perp (ledger `hedge_ledger.jsonl`, PnL inverse esatto `H_usd·(1/s0−1/s1)`) − fee − funding. Nessun campione separato, nessun A/B: la differenza è esattamente il contributo della leg perp.
+
+**Regola di congelamento parametri (pre-dichiarata, eseguita PRIMA dell'attivazione):** al gate v1 chiuso, rilanciare `scripts/vol/hedge_dry_run.py` sulla serie A6 piena; **band** = il valore in {0.10, 0.15, 0.20, 0.25, 0.30} che massimizza `total_net` hedged sul dry-run (trade-off varianza-vs-churn su dati disgiunti dal giudizio forward); **convenzione δ** = quella (raw/adj) col miglior match tra slope empirico mainnet e δ medio sided (07-08: adj favorita, slope −0.98). Entrambi CONGELATI in un aggiornamento di questa sezione prima del primo tick con `--hedge`; da lì immutabili.
+
+**Script/giudice:** leg live = `scripts/04b_vol_paper.py --execute --hedge --hedge-band <frozen> --hedge-conv <frozen>`; giudice offline da scrivere al congelamento (legge `trades.jsonl` + `hedge_ledger.jsonl` + funding perp, output `results/vols/hedged_vs_unhedged.json`) — nessun numero decisionale prima del giudice.
+**Split:** forward test live (non esiste split val/test: il giudizio è sul campione forward post-attivazione; i dati pre-attivazione servono SOLO al congelamento parametri).
+**Leva sperimentale:** flag CLI `--hedge` (inerte di default; senza flag la v1 è bit-identica e nessun file hedge viene letto/scritto).
+
+**Condizioni di PASS (tutte, AND, misurate sul campione forward post-attivazione):**
+1. **Varianza per-trade:** `var(PnL_hedged) ≤ 0.6·var(PnL_unhedged)` (riduzione ≥40%; conservativo vs −68% del dry-run perché la band esclude i ribilanci ATM ad alto churn e beneficio nullo).
+2. **Costo dell'hedge sostenibile:** `mean(PnL_hedged) ≥ mean(PnL_unhedged) − 0.25·std(PnL_unhedged)/√n` (il drag fee+funding non deve superare ¼ dell'errore standard della media unhedged — l'hedge compra varianza, non può comprare PnL).
+3. **Campione:** `n ≥ 20` settlement CON hedge attivo; sotto soglia NESSUNA conclusione.
+
+**Conseguenze pre-dichiarate:** PASS → la v2 hedged diventa il design paper di produzione (sempre hedged, band congelata); si sblocca il sizing v2 (HAR-q90 per la coda, esito A2) e A7 (risk greeks-aware) entra nel critical path. FAIL → `--hedge` marcato FALLITO e disattivato, la v1 unhedged resta il design di produzione, scritto comunque; l'ipotesi B2 (hedge = purificatore del VRP) muore sul costo di realizzazione, non sulla teoria.
+
+---
+
+## 🟢 SESSIONE 2026-07-12 — "while we collect": V2 hedge + A7 greeks-risk + A3 regime-MoE, tutti INERTI, audit applicato
+
+**Contesto:** domanda utente "cosa implementare mentre i dati Deribit maturano". Fatti 3 item della roadmap, TUTTI inerti di default (zero impatto sul path production; i 3 processi live MAI toccati — gli edit su disco non riguardano il processo 04b in RAM). Trade settled a oggi: **16** (gate v1 n≥20 → mancano ~4 giorni).
+
+**① V2 delta-hedged (`04b --hedge`, B3 step 2 anticipato).** Leg perp inverse flag-gated: no-trade band |Δ_book| (isteresi anti-churn), δ venue parametrico raw/adj, `H* = −side·δ_conv·S`, flatten a settlement E expiry, ledger fill esatti (`hedge_ledger.jsonl`) + stato atomico (`hedge_state.json`) + riconciliazione venue all'avvio. Senza flag: v1 bit-identica (nessun file hedge toccato). **Pre-registrazione DRAFT in cima a questo file** (attivazione SOLO post-gate v1; band/conv congelati dal dry-run A6 con regola pre-dichiarata). Test: `tests/test_hedge_leg.py` 11/11 (FakeDB offline).
+
+**② A7 — risk layer greeks-aware (`quantsys/trading/greeks_risk.py`, skeleton NON cablato).** Cap vega/delta netti pre-trade (scaling monotono, riduzioni sempre ammesse), CB vega-loss MtM con isteresi, margin sim Deribit inverse (conservativa, da validare vs `get_account_summary`). Serve al sizing Kelly-su-edge della v2. Test: `tests/test_greeks_risk.py` 17/17.
+
+**③ CAFN/MoE — verifica richiesta:** CAFN GIÀ implementato (`quantsys/model/cafn.py` + `02d`), MoE appreso GIÀ implementato (`n_output_experts`). L'unica variante mancante era **A3 mixture-of-universes** → implementata via subagent (config-gated `model.head_type: "regime_moe"`, default assente = bit-identico): 3 teste-regime + gate esterno CAUSALE (`quantsys/model/regime_gate.py`, merge_asof backward su `regime_probs.parquet`), Vincentization (quantile) / legge varianza totale (t_student), esclusioni fail-fast (iTransformer-only, no MoE appreso, no RevIN, no distill), giudice QLIKE gate-aware, `config/arch/itransformer_regime_moe.yaml` d'esempio con sandbox. **MAI addestrato, zero risultati** — gate QLIKE da pre-registrare prima del primo run (finestra GPU: post-VPS). Test: `tests/test_regime_moe.py` 19/19. ⚠ Il subagent è morto per session-limit DOPO il codice (suite 204 verde) ma PRIMA dei doc: doc-sync completato da me.
+
+**Audit `causality-auditor` (stesso giorno, su ①②):** 0 BLOCKER; 1 MAJOR + 4 MINOR, **tutti applicati con regression test**: MAJOR-1 flatten a expiry anche senza delivery price (delta nudo post-expiry avrebbe biasato il gate hedged-vs-unhedged CONTRO il PASS); MINOR-1 write atomica stato + riconciliazione venue; MINOR-2 bound plausibilità δ (|δ_adj| ≤ 1+Σm+0.10); MINOR-3 `--hedge` fail-fast senza band/conv espliciti; MINOR-4 `_cap_scale` sign-flip oltre-cap ora scalato al bordo. Verifiche positive: inerzia v1, costanti pre-registrate intatte, segni corretti, coerenza col dry-run. ⚠ I file A3 del subagent NON sono passati dall'auditor (review manuale mia: gate causale ok, inerzia ok, `**mcfg` persiste head_type, `EnsembleModel` inoltra kwargs) — **audit formale A3 consigliato prima del primo training run**.
+
+**Doc-sync (direttiva #2):** TEORIA (§6 Regime-MoE + §10 A7), README (tree: greeks_risk + 04b --hedge), AVVIO (tree results), MODEL_IMPROVEMENTS (§3.6 A3 dal subagent + §3.7 V2+A7). **Suite completa: 206 passed, 2 skipped.** Nessun commit (decidere se committare il blocco).
+
+**▶️ NEXT (in ordine):** (1) **VPS OVH collector 24/7** — resta il critical path dichiarato (sblocca B1, protegge `data/iv/`, libera la GPU per la finestra training A3/A8/A4); appena l'utente fornisce IP+Ubuntu 24.04+chiave SSH, preparare systemd+backoff+rsync+heartbeat. (2) **Gate v1 n≥20** (~16/20, matura da solo): alla chiusura → rilanciare `hedge_dry_run.py` su serie A6 piena, congelare band/conv nella pre-registrazione V2, scrivere il giudice `hedged_vs_unhedged`, POI attivare `--hedge`. (3) A3: pre-registrare gate QLIKE + audit causality-auditor sui file A3 prima del primo run in sandbox. (4) Commit del blocco di lavoro se ok.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — A2-CONFORME (ricalibrazione split-conformal quantili log-RV) · 2026-07-10
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Segue il FAIL di A2a (2026-07-08): coverage sopra target a TUTTI i livelli = **bias di locazione** (q50 al 73° percentile empirico), il difetto che una ricalibrazione conforme corregge per costruzione. Inference-only, checkpoint production READ-ONLY, zero retrain.

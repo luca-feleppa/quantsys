@@ -434,6 +434,7 @@ quantsys_project/
 │   │   ├── cafn.py               CausalAttentionFlowNetwork (coordinatore causale, probe inerte)
 │   │   └── revin.py              Reversible Instance Normalization (opzionale)
 │   ├── trading/                  Kelly sizing, SL dinamico, trailing, circuit breaker
+│   │                             + greeks_risk.py (A7: cap vega/delta, CB vega-loss, margin sim Deribit — skeleton, non cablato / not wired)
 │   └── utils/                    config loader, device setup, logging, PipelineState
 ├── scripts/
 │   ├── 00_check_setup.py         verifica CUDA, dipendenze, connessione Binance
@@ -450,6 +451,7 @@ quantsys_project/
 │   ├── 03_backtest.py            backtest + stress test + bootstrap CI
 │   ├── 04_live_signals.py        feed live WebSocket + paper trading (direzionale)
 │   ├── 04b_vol_paper.py          forward test vol: NN-RV vs IV → straddle testnet Deribit
+│   │                             (+ leg delta-hedge perp v2 dietro --hedge, inerte di default)
 │   ├── 04c_vol_paper_baselines.py  baseline always-long/short-vol (gate pre-reg) dai chain snapshot
 │   ├── 05_analyze_signals.py     analisi sessione live
 │   ├── 06_dashboard.py           Deribit Options Risk Terminal (HTTP single-file + Plotly)
