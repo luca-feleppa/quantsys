@@ -1332,12 +1332,14 @@ class QuantiTransformer(nn.Module):
 
     # IT: Forward: RevIN → multi-scala embed → attention inter-feature → testa output.
     #     g (opzionale, in coda): gate regime causale (B, 3) per head_type="regime_moe";
-    #     g=None con regime_moe → fallback gate uniforme (warning una-tantum);
+    #     g=None con regime_moe → RuntimeError in eval (input obbligatorio, audit
+    #     MAJOR-2), fallback gate uniforme SOLO in train (warning una-tantum);
     #     g ignorato con head_type="single" (warning una-tantum). Il contratto
     #     forward(x, x_macro=None) resta invariato per tutti i caller esistenti.
     # EN: Forward: RevIN → multi-scale embed → inter-feature attention → output head.
     #     g (optional, trailing): causal regime gate (B, 3) for head_type="regime_moe";
-    #     g=None under regime_moe → uniform-gate fallback (one-time warning);
+    #     g=None under regime_moe → RuntimeError in eval (mandatory input, MAJOR-2
+    #     audit), uniform-gate fallback ONLY in train (one-time warning);
     #     g ignored under head_type="single" (one-time warning). The
     #     forward(x, x_macro=None) contract is unchanged for all existing callers.
     def forward(self, x: torch.Tensor, x_macro: torch.Tensor = None,
@@ -1396,19 +1398,35 @@ class QuantiTransformer(nn.Module):
 
         # ── Output computation ───────────────────────────────────────────────
         if self.head_type == "regime_moe":
-            # IT: A3 — gate esterno causale; g=None → gate uniforme (burn-in /
-            #     caller legacy) con warning una-tantum. use_revin è vietato in
-            #     ctor → nessun path RevIN qui.
-            # EN: A3 — external causal gate; g=None → uniform gate (burn-in /
-            #     legacy caller) with one-time warning. use_revin is forbidden
-            #     in the ctor → no RevIN path here.
+            # IT: A3 — gate esterno causale. g=None in EVAL → RuntimeError (audit
+            #     MAJOR-2): il modello è addestrato CONDIZIONATO sul gate — un
+            #     entry-point che non lo passa (03/04/04b/ensemble) valuterebbe
+            #     in covariate shift silenzioso; il burn-in è già gestito a monte
+            #     da build_regime_gate (righe uniformi nel tensore). Fallback
+            #     uniforme SOLO in train-mode (warning una-tantum). use_revin è
+            #     vietato in ctor → nessun path RevIN qui.
+            # EN: A3 — external causal gate. g=None in EVAL → RuntimeError
+            #     (MAJOR-2 audit): the model is trained CONDITIONED on the gate —
+            #     an entry-point not passing it (03/04/04b/ensemble) would
+            #     evaluate under silent covariate shift; burn-in is already
+            #     handled upstream by build_regime_gate (uniform rows in the
+            #     tensor). Uniform fallback ONLY in train mode (one-time
+            #     warning). use_revin is forbidden in the ctor → no RevIN here.
             if g is None:
+                if not self.training:
+                    raise RuntimeError(
+                        "QuantiTransformer(regime_moe): g=None in eval — il gate "
+                        "regime è input OBBLIGATORIO in inference (passare "
+                        "g=regime_prob_0/1/2 da build_regime_gate; pattern del "
+                        "guard interval/horizon) / g=None in eval — the regime "
+                        "gate is a MANDATORY inference input"
+                    )
                 if not self._warned_uniform_gate:
                     log.warning(
-                        "QuantiTransformer(regime_moe): g=None → gate uniforme "
-                        "(1/3,1/3,1/3). Passare g=regime_prob_0/1/2 per il mixing "
-                        "per-regime. / g=None → uniform gate; pass "
-                        "g=regime_prob_0/1/2 for per-regime mixing."
+                        "QuantiTransformer(regime_moe): g=None in train → gate "
+                        "uniforme (1/3,1/3,1/3). Passare g=regime_prob_0/1/2 per "
+                        "il mixing per-regime. / g=None in train → uniform gate; "
+                        "pass g=regime_prob_0/1/2 for per-regime mixing."
                     )
                     self._warned_uniform_gate = True
                 g = torch.full(

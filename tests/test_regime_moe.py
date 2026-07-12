@@ -4,15 +4,23 @@ IT: Test A3 — Regime-MoE (mixture-of-universes), 2026-07-12. CPU-only, tensori
     head_type="single" (default assente = bit-identico); (b) gate one-hot →
     output = testa k; (c) gate uniforme + teste identiche → output = testa
     singola; (d) legge della varianza totale (σ²_mix ≥ Σ g_k σ²_k); (e) quantili
-    mixati monotoni; più guard-rail (n_output_experts>1, use_revin, fallback
-    g=None) e allineamento causale del gate builder.
+    mixati monotoni; più guard-rail (n_output_experts>1, use_revin; g=None →
+    raise in eval, fallback uniforme solo in train — audit MAJOR-2) e builder
+    del gate: availability shift +1h (audit BLOCKER-1) + staleness bounded
+    (audit MAJOR-1). NB (audit MINOR-3): il test di inerzia confronta due
+    costruzioni del codice corrente — il gold standard resta un golden
+    snapshot pre-diff; verifica manuale: nessun consumo RNG sul path single.
 EN: A3 tests — Regime-MoE (mixture-of-universes), 2026-07-12. CPU-only,
     synthetic tensors, NO checkpoints/training. Covers: (a) inertia of the
     head_type="single" path (absent default = bit-identical); (b) one-hot gate →
     output = head k; (c) uniform gate + identical heads → output = single head;
     (d) total variance law (σ²_mix ≥ Σ g_k σ²_k); (e) mixed quantiles monotone;
-    plus guard rails (n_output_experts>1, use_revin, g=None fallback) and the
-    causal alignment of the gate builder.
+    plus guard rails (n_output_experts>1, use_revin; g=None → raise in eval,
+    uniform fallback in train only — MAJOR-2 audit) and the gate builder:
+    +1h availability shift (BLOCKER-1 audit) + bounded staleness (MAJOR-1
+    audit). NB (MINOR-3 audit): the inertia test compares two constructions of
+    the current code — the gold standard remains a pre-diff golden snapshot;
+    manually verified: no RNG consumption on the single path.
 """
 from __future__ import annotations
 
@@ -254,12 +262,24 @@ class TestQuantileMonotonicity:
         assert qp.shape == (64, len(QUANTILES))
         assert (qp.diff(dim=-1) >= 0).all()
 
-    def test_model_level_shapes_and_fallback_uniform(self):
-        # IT: g=None → fallback gate uniforme ≡ gate uniforme esplicito;
-        #     shape del contratto invariata (B, Q).
-        # EN: g=None → uniform-gate fallback ≡ explicit uniform gate;
-        #     contract shape unchanged (B, Q).
+    def test_gate_none_in_eval_raises(self):
+        # IT: audit MAJOR-2 — g=None in EVAL → RuntimeError: il gate è input
+        #     obbligatorio in inference (covariate shift silenzioso altrimenti).
+        # EN: MAJOR-2 audit — g=None in EVAL → RuntimeError: the gate is a
+        #     mandatory inference input (silent covariate shift otherwise).
         m = _make_model(head_type="regime_moe", loss_type="quantile", seed=21)
+        x = _make_x()
+        with pytest.raises(RuntimeError, match="regime_moe"):
+            with torch.no_grad():
+                m(x)
+
+    def test_gate_none_in_train_fallback_uniform(self):
+        # IT: in TRAIN g=None → fallback gate uniforme ≡ gate uniforme esplicito
+        #     (dropout=0 → deterministico); shape del contratto invariata (B, Q).
+        # EN: in TRAIN g=None → uniform-gate fallback ≡ explicit uniform gate
+        #     (dropout=0 → deterministic); contract shape unchanged (B, Q).
+        m = _make_model(head_type="regime_moe", loss_type="quantile", seed=21)
+        m.train()
         x = _make_x()
         g_uni = torch.full((B, N_REGIMES), 1.0 / N_REGIMES)
         with torch.no_grad():
@@ -304,13 +324,17 @@ class TestGuardsAndGateBuilder:
         with pytest.raises(ValueError):
             head(torch.randn(2, DMODEL), torch.ones(2, 4) / 4.0)
 
-    def test_build_regime_gate_backward_and_burnin(self, tmp_path):
-        # IT: parquet sintetico orario; verifica allineamento BACKWARD (ultimo
-        #     regime noto ≤ t, mai forward = causale), fallback uniforme pre-inizio
-        #     (burn-in) e ripristino dell'ordine originale dei sample.
-        # EN: synthetic hourly parquet; checks BACKWARD alignment (last known
-        #     regime ≤ t, never forward = causal), uniform fallback before start
-        #     (burn-in) and restoration of the original sample ordering.
+    def test_build_regime_gate_availability_and_burnin(self, tmp_path):
+        # IT: audit BLOCKER-1 — la riga etichettata `t` contiene la barra
+        #     [t, t+1h) → disponibile SOLO a t+1h. Il builder shifta l'indice ad
+        #     availability time: un sample ESATTAMENTE a t deve risolvere alla
+        #     riga t−1h (mai alla riga t = lookahead del return futuro).
+        #     Copre anche burn-in (pre-inizio → uniforme) e ordine originale.
+        # EN: BLOCKER-1 audit — the row labeled `t` holds bar [t, t+1h) →
+        #     available ONLY at t+1h. The builder shifts the index to
+        #     availability time: a sample EXACTLY at t must resolve to the t−1h
+        #     row (never to row t = future-return lookahead). Also covers
+        #     burn-in (pre-start → uniform) and original ordering.
         import pandas as pd
         from quantsys.model.regime_gate import build_regime_gate
 
@@ -329,26 +353,71 @@ class TestGuardsAndGateBuilder:
 
         ts = np.array(
             [
-                "2026-01-01T02:30",   # IT: tra 02:00 e 03:00 → prende 02:00 (backward) | EN: between rows → takes 02:00
+                "2026-01-01T02:30",   # IT: ultima disponibile ≤02:30 = riga 01:00 | EN: last available = the 01:00 row
                 "2025-12-31T23:00",   # IT: prima dell'inizio → uniforme | EN: before start → uniform
-                "2026-01-01T01:00",   # IT: match esatto | EN: exact match
+                "2026-01-01T02:00",   # IT: REGRESSIONE lookahead: a t esatto → riga t−1h | EN: lookahead REGRESSION: at exact t → the t−1h row
+                "2026-01-01T03:00",   # IT: riga 02:00 (disponibile a 03:00) | EN: the 02:00 row (available at 03:00)
+                "2026-01-01T00:30",   # IT: nessuna riga disponibile (la 00:00 arriva a 01:00) → uniforme | EN: none available yet → uniform
             ],
             dtype="datetime64[ms]",
         )
         G = build_regime_gate(ts, parquet_path=str(p))
-        assert G.shape == (3, 3) and G.dtype == np.float32
+        assert G.shape == (5, 3) and G.dtype == np.float32
         # IT: righe sul simplesso.
         # EN: rows on the simplex.
         assert np.allclose(G.sum(axis=1), 1.0, atol=1e-6)
-        # IT: 02:30 → riga delle 02:00 (mai quella delle 03:00 = lookahead).
-        # EN: 02:30 → the 02:00 row (never the 03:00 one = lookahead).
-        assert np.allclose(G[0], [0.2, 0.5, 0.3], atol=1e-6)
+        # IT: 02:30 → riga 01:00 (la 02:00 diventa disponibile solo alle 03:00).
+        # EN: 02:30 → the 01:00 row (02:00 becomes available only at 03:00).
+        assert np.allclose(G[0], [0.0, 1.0, 0.0], atol=1e-6)
         # IT: pre-inizio → uniforme (burn-in contract).
         # EN: before start → uniform (burn-in contract).
         assert np.allclose(G[1], [1 / 3] * 3, atol=1e-6)
-        # IT: match esatto + ordine originale preservato.
-        # EN: exact match + original ordering preserved.
+        # IT: sample a t=02:00 esatto → riga 01:00, MAI la 02:00 (=lookahead
+        #     della barra [02:00,03:00) non ancora realizzata).
+        # EN: sample at exact t=02:00 → the 01:00 row, NEVER 02:00 (=lookahead
+        #     of the not-yet-realized [02:00,03:00) bar).
         assert np.allclose(G[2], [0.0, 1.0, 0.0], atol=1e-6)
+        assert np.allclose(G[3], [0.2, 0.5, 0.3], atol=1e-6)
+        # IT: 00:30 — la prima riga (00:00) è disponibile solo dalle 01:00.
+        # EN: 00:30 — the first row (00:00) is available only from 01:00.
+        assert np.allclose(G[4], [1 / 3] * 3, atol=1e-6)
+
+    def test_build_regime_gate_staleness_bounded(self, tmp_path):
+        # IT: audit MAJOR-1 — oltre max_age dall'ultima riga disponibile il gate
+        #     DEVE tornare uniforme (mai last-known illimitato); coda stale oltre
+        #     il 20% dei sample → fail-fast RuntimeError.
+        # EN: MAJOR-1 audit — beyond max_age from the last available row the gate
+        #     MUST fall back to uniform (never unbounded last-known); stale tail
+        #     beyond 20% of samples → RuntimeError fail-fast.
+        import pandas as pd
+        from quantsys.model.regime_gate import build_regime_gate
+
+        idx = pd.date_range("2026-01-01 00:00", periods=3, freq="1h", tz="UTC")
+        df = pd.DataFrame(
+            {"regime_prob_0": [1.0] * 3, "regime_prob_1": [0.0] * 3,
+             "regime_prob_2": [0.0] * 3}, index=idx)
+        df.index.name = "open_time"
+        p = tmp_path / "regime_probs.parquet"
+        df.to_parquet(p)
+
+        # IT: 4 sample freschi + 1 stale (61h dopo l'ultima riga, max_age=48h):
+        #     stale → uniforme, freschi → riga nota; 1/5 = 20% NON supera il bound.
+        # EN: 4 fresh samples + 1 stale one (61h past the last row, max_age=48h):
+        #     stale → uniform, fresh → known row; 1/5 = 20% does NOT exceed the bound.
+        ts = np.array(
+            ["2026-01-01T01:00", "2026-01-01T02:00", "2026-01-01T03:00",
+             "2026-01-01T04:00", "2026-01-03T16:00"], dtype="datetime64[ms]")
+        G = build_regime_gate(ts, parquet_path=str(p), max_age="48h")
+        assert np.allclose(G[:4], [[1.0, 0.0, 0.0]] * 4, atol=1e-6)
+        assert np.allclose(G[4], [1 / 3] * 3, atol=1e-6)
+
+        # IT: 3 sample stale su 4 (75% > 20%) → fail-fast.
+        # EN: 3 stale samples out of 4 (75% > 20%) → fail-fast.
+        ts_bad = np.array(
+            ["2026-01-01T01:00", "2026-01-05T00:00", "2026-01-06T00:00",
+             "2026-01-07T00:00"], dtype="datetime64[ms]")
+        with pytest.raises(RuntimeError, match="stale"):
+            build_regime_gate(ts_bad, parquet_path=str(p), max_age="48h")
 
     def test_multitask_appends_dir_logits(self):
         # IT: use_multitask + regime_moe → (qp, dir_logits): contratto identico

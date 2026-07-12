@@ -158,6 +158,19 @@ def train_fold(
     _use_multitask= mcfg.get("use_multitask", False)
     if architecture == "itransformer":
         from quantsys.model import QuantiTransformer
+        # IT: guard A3 (audit MINOR-2) — il walk-forward NON threada il gate
+        #     regime: con head_type=regime_moe addestrerebbe in silenzio un
+        #     single-head divergente da 02_train → fail-fast esplicito.
+        # EN: A3 guard (MINOR-2 audit) — the walk-forward does NOT thread the
+        #     regime gate: under head_type=regime_moe it would silently train a
+        #     single-head diverging from 02_train → explicit fail-fast.
+        if (mcfg.get("head_type", "single") or "single") == "regime_moe":
+            raise ValueError(
+                "02b_walkforward_validate non supporta head_type='regime_moe' "
+                "(gate regime non threadato nei fold) — usare 02_train + giudice "
+                "dev_vols_qlike / walk-forward does not support regime_moe (gate "
+                "not threaded through the folds) — use 02_train + dev_vols_qlike"
+            )
         _n_dyn = n_dynamic if n_dynamic is not None else n_feat
         _T     = mcfg.get("window_size", 120)
         model = QuantiTransformer(
