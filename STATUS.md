@@ -17,9 +17,11 @@
 
 **④ Vincolo di protocollo scritto nel runbook:** i trade eventualmente replayati offline sulle ore PC-off (script di replay `04b` = TODO, effort S, possibile solo su dati POST-VPS) **NON entrano retroattivamente nel gate v1** — file separati (es. `trades_replay.jsonl`); alimentano analisi e pre-registrazione v2 su campione senza bias orario.
 
-**Problemi aperti:** (a) provisioning netcup in attesa; (b) caveat selezione oraria da scrivere nella chiusura del gate v1; (c) script replay `04b` non ancora scritto; (d) commit dei nuovi file non ancora fatto.
+**⑤ DEPLOY ESEGUITO (stesso giorno, pomeriggio):** VPS netcup con **Ubuntu 24.04.4 / Python 3.12.3** (parità esatta col PC di casa; reinstallato da Debian per allineare l'interprete). ⚠ **Host/IP PRIVATI: SOLO in `config/secrets.yaml` → `vps.host`** (mai in questo file, nei doc o nel repo). **Geo-test PASS 5/5** (Binance ping+depth, Deribit prod+testnet, vision fallback). Deploy key GitHub read-only id 157267773 (aggiunta via `gh api`). `setup_vps.sh` exit 0: servizi `quantsys-iv` + `quantsys-ob` **active (running)**, primo tick reale loggato (iv_30h=34.79%, chain 838 strumenti; L2 mid 63969.5). **Primo pull+merge da casa OK:** +2 tick IV, +1676 righe chain, +11 righe L2, heartbeat fresh 0.0h. Accesso: chiave `~/.ssh/id_ed25519` (senza passphrase) verso `vps.host`. Da oggi la serie IV è H24: il bias di selezione oraria muore per i dati POST-deploy.
 
-**▶️ RIPARTI DA QUI:** appena arriva la mail netcup con l'IP: (1) `scp deploy/vps/geo_test.sh root@<ip>:` + `bash geo_test.sh` → se FAIL, recesso immediato; (2) deploy key GitHub read-only; (3) `bash /opt/quantsys/deploy/vps/setup_vps.sh`; (4) `journalctl -u quantsys-iv -u quantsys-ob -f` + primo `pull_vps_data.ps1 -VpsHost quantsys@<ip>`. Sequenza completa: `deploy/vps/README.md`.
+**Problemi aperti:** (a) caveat selezione oraria (sui dati PRE-14/07) da scrivere nella chiusura del gate v1; (b) script replay `04b` non ancora scritto; (c) i collector di casa restano attivi in parallelo (ok by design, dedup nel merge); (d) promemoria disdetta netcup a ~dicembre 2026.
+
+**▶️ RIPARTI DA QUI:** (1) lanciare `scripts/vps/pull_vps_data.ps1` a inizio sessione (senza argomenti: legge `vps.host` da `config/secrets.yaml`) — è anche l'heartbeat del VPS; (2) gate v1 n≥20 a ~2 settlement dalla chiusura → alla chiusura: caveat orario + `hedge_dry_run.py` su serie A6 piena + congelamento band/conv v2; (3) valutare pubblicazione GitHub (audit fatto 14/07: nessun secret in storia, esposto tutto il research log — decisione utente).
 
 ---
 
