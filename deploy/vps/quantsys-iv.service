@@ -11,6 +11,8 @@ Wants=network-online.target
 Type=simple
 User=quantsys
 WorkingDirectory=/opt/quantsys
+# IT: post-gate v1 (STATUS 2bis-①): aggiungere --greeks per la serie greeks ATM.
+# EN: post-v1-gate (STATUS 2bis-①): add --greeks for the ATM greeks series.
 ExecStart=/opt/quantsys/.venv/bin/python scripts/01c_iv_poller.py --minutes 10
 # IT: log non bufferizzati su journald (journalctl -u quantsys-iv -f).
 # EN: unbuffered logs to journald (journalctl -u quantsys-iv -f).

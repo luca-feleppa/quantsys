@@ -10,8 +10,14 @@
 #       atm_30h.parquet                     — 1 riga/tick: ATM IV per expiry vicine
 #                                             + IV interpolata a tenor costante 30h
 #       dvol.parquet                        — serie DVOL (anche target del backfill)
+#       atm_greeks.parquet                  — (SOLO con --greeks) greeks del venue
+#                                             per lo straddle ATM ~tenor-30h
 #     Modalità: --once (smoke), --minutes N (cadenza, default 10), --backfill-dvol
-#     (punto 3 checklist: storico orario DVOL 2021-03-24→oggi, ~46 chiamate).
+#     (punto 3 checklist: storico orario DVOL 2021-03-24→oggi, ~46 chiamate),
+#     --greeks (STATUS 2bis-①, INERTE di default: +3 chiamate pubbliche/tick —
+#     index + 2 ticker — selezione identica a pick_straddle di 04b; rende la v2
+#     hedged replayabile offline e valida la convenzione δ; fail-soft: un errore
+#     greeks non costa mai il tick IV principale).
 # EN: Deribit IV poller (2026-06-11 checklist, item 1) — FORWARD collection of BTC
 #     implied volatility for the future economic gate "NN-RV vs IV": short-tenor
 #     IV history is NOT free (Tardis ≥$300), so the dataset is built from now on.
@@ -24,8 +30,14 @@
 #       atm_30h.parquet                     — 1 row/tick: ATM IV per nearby expiry
 #                                             + IV interpolated at constant 30h tenor
 #       dvol.parquet                        — DVOL series (also the backfill target)
+#       atm_greeks.parquet                  — (--greeks ONLY) venue greeks for the
+#                                             ATM ~30h-tenor straddle
 #     Modes: --once (smoke), --minutes N (cadence, default 10), --backfill-dvol
-#     (checklist item 3: hourly DVOL history 2021-03-24→today, ~46 calls).
+#     (checklist item 3: hourly DVOL history 2021-03-24→today, ~46 calls),
+#     --greeks (STATUS 2bis-①, INERT by default: +3 public calls/tick — index +
+#     2 tickers — same selection as 04b's pick_straddle; makes the hedged v2
+#     replayable offline and validates the δ convention; fail-soft: a greeks
+#     error never costs the main IV tick).
 import argparse
 import logging
 import re
@@ -52,6 +64,9 @@ IV_DIR = Path("data/iv")
 CHAIN_DIR = IV_DIR / "chain"
 ATM_PATH = IV_DIR / "atm_30h.parquet"
 DVOL_PATH = IV_DIR / "dvol.parquet"
+# IT: greeks dello straddle ATM ~tenor (SOLO con --greeks; 1 riga/tick).
+# EN: ATM ~tenor straddle greeks (--greeks ONLY; 1 row/tick).
+GREEKS_PATH = IV_DIR / "atm_greeks.parquet"
 
 # IT: tenor target in ore = forecast_horizon del modello vol (30 barre 1h).
 # EN: target tenor in hours = the vol model's forecast_horizon (30 1h bars).
@@ -210,9 +225,69 @@ def append_parquet(path: Path, new_rows: pd.DataFrame, dedup_cols: list) -> int:
     return len(merged)
 
 
-def poll_once() -> dict:
-    # IT: un tick completo: chain raw → ATM term structure → IV@30h → DVOL.
-    # EN: one full tick: raw chain → ATM term structure → IV@30h → DVOL.
+def _finite_or_nan(v) -> float:
+    # IT: float finito o NaN (campi assenti/null su strike illiquidi — pattern 04b).
+    # EN: finite float or NaN (missing/null fields on illiquid strikes — 04b pattern).
+    try:
+        v = float(v)
+        return v if np.isfinite(v) else float("nan")
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def fetch_atm_greeks(chain: pd.DataFrame, now: pd.Timestamp) -> pd.DataFrame:
+    # IT: STATUS 2bis-① — greeks del venue per lo straddle ATM al tenor ~30h.
+    #     Selezione IDENTICA a pick_straddle di 04b (così la serie descrive gli
+    #     strumenti che il forward test terrebbe): expiry viva più vicina a
+    #     TENOR_HOURS, strike più vicino all'index btc_usd (1 chiamata), poi
+    #     public/ticker per call e put (2 chiamate) → delta/gamma/vega/theta,
+    #     bid/ask/mark, mark_iv, underlying. Scopo: rendere replayabile offline
+    #     la leg hedge v2 (δ del venue, MAI stimato dai mark — verdetto 07-08)
+    #     e validare la convenzione δ raw/adj sul campo.
+    # EN: STATUS 2bis-① — venue greeks for the ATM straddle at the ~30h tenor.
+    #     Selection IDENTICAL to 04b's pick_straddle (so the series describes
+    #     the instruments the forward test would hold): nearest live expiry to
+    #     TENOR_HOURS, strike closest to the btc_usd index (1 call), then
+    #     public/ticker for call and put (2 calls) → delta/gamma/vega/theta,
+    #     bid/ask/mark, mark_iv, underlying. Purpose: make the v2 hedge leg
+    #     replayable offline (venue δ, NEVER estimated from marks — 07-08
+    #     verdict) and field-validate the raw/adj δ convention.
+    live = chain[chain["expiry"] > now]
+    if live.empty:
+        raise RuntimeError("nessuna expiry viva / no live expiry")
+    exps = live["expiry"].unique()
+    exp = min(exps, key=lambda e: abs((e - now).total_seconds() / 3600.0 - TENOR_HOURS))
+    idx = float(_get("public/get_index_price", {"index_name": "btc_usd"})["index_price"])
+    grp = live[live["expiry"] == exp]
+    strikes = grp["strike"].unique()
+    k = float(strikes[np.argmin(np.abs(strikes - idx))])
+    row = {"timestamp": now, "expiry": pd.Timestamp(exp),
+           "t_hours": (pd.Timestamp(exp) - now).total_seconds() / 3600.0,
+           "strike": k, "index_price": idx}
+    for leg, opt in (("call", "C"), ("put", "P")):
+        sel = grp[(grp["strike"] == k) & (grp["option_type"] == opt)]
+        if sel.empty:
+            raise RuntimeError(f"strumento {opt} assente allo strike {k:.0f} / "
+                               f"missing {opt} instrument at strike {k:.0f}")
+        name = str(sel["instrument_name"].iloc[0])
+        t = _get("public/ticker", {"instrument_name": name})
+        g = t.get("greeks") or {}
+        row[f"{leg}_instrument"] = name
+        for fld in ("delta", "gamma", "vega", "theta"):
+            row[f"{leg}_{fld}"] = _finite_or_nan(g.get(fld))
+        row[f"{leg}_mark"] = _finite_or_nan(t.get("mark_price"))
+        row[f"{leg}_bid"] = _finite_or_nan(t.get("best_bid_price"))
+        row[f"{leg}_ask"] = _finite_or_nan(t.get("best_ask_price"))
+        row[f"{leg}_mark_iv"] = _finite_or_nan(t.get("mark_iv"))
+        row[f"{leg}_underlying"] = _finite_or_nan(t.get("underlying_price"))
+    return pd.DataFrame([row])
+
+
+def poll_once(greeks: bool = False) -> dict:
+    # IT: un tick completo: chain raw → ATM term structure → IV@30h → DVOL
+    #     (→ greeks ATM se --greeks; fail-soft: mai un raise verso il tick).
+    # EN: one full tick: raw chain → ATM term structure → IV@30h → DVOL
+    #     (→ ATM greeks when --greeks; fail-soft: never raises into the tick).
     now = pd.Timestamp.now(tz="UTC").floor("s")
     chain = fetch_chain_snapshot(now)
     if chain.empty:
@@ -242,9 +317,27 @@ def poll_once() -> dict:
         row[f"exp{i}_forward"] = r["forward"]
     append_parquet(ATM_PATH, pd.DataFrame([row]), ["timestamp"])
 
+    # IT: greeks ATM opzionali (--greeks): errori loggati, MAI propagati — il
+    #     tick IV principale (atm_30h/chain/dvol) non deve mai saltare per una
+    #     chiamata ticker fallita.
+    # EN: optional ATM greeks (--greeks): errors logged, NEVER propagated — the
+    #     main IV tick (atm_30h/chain/dvol) must never be lost to a failed
+    #     ticker call.
+    greeks_note = ""
+    if greeks:
+        try:
+            gdf = fetch_atm_greeks(chain, now)
+            append_parquet(GREEKS_PATH, gdf, ["timestamp"])
+            greeks_note = (f" | greeks K={gdf['strike'].iloc[0]:.0f} "
+                           f"δC={gdf['call_delta'].iloc[0]:+.3f} "
+                           f"δP={gdf['put_delta'].iloc[0]:+.3f}")
+        except Exception as e:
+            log.warning(f"greeks ATM falliti/failed — tick IV NON impattato: "
+                        f"{type(e).__name__}: {e}")
+
     return {"ts": str(now), "iv_30h": iv30, "dvol": dvol_last,
             "n_instruments": len(chain), "n_expiries": len(term),
-            "chain_rows_today": n_chain}
+            "chain_rows_today": n_chain, "greeks_note": greeks_note}
 
 
 def backfill_dvol() -> None:
@@ -286,6 +379,9 @@ def main():
                     help="un solo tick e termina (smoke) / single tick then exit (smoke)")
     ap.add_argument("--backfill-dvol", action="store_true",
                     help="backfill storico DVOL orario e termina / hourly DVOL history backfill then exit")
+    ap.add_argument("--greeks", action="store_true",
+                    help="raccogli anche i greeks dello straddle ATM ~30h (STATUS 2bis-①, "
+                         "+3 chiamate/tick) / also collect the ATM ~30h straddle greeks (+3 calls/tick)")
     args = ap.parse_args()
 
     CHAIN_DIR.mkdir(parents=True, exist_ok=True)
@@ -299,13 +395,14 @@ def main():
                     f"cadence outside the recommended 5-15 range")
 
     log.info(f"Poller IV avviato/started — cadenza/cadence {args.minutes} min, "
-             f"tenor target {TENOR_HOURS}h, output {IV_DIR}/")
+             f"tenor target {TENOR_HOURS}h, output {IV_DIR}/"
+             + (" (+greeks ATM)" if args.greeks else ""))
     while True:
         try:
-            info = poll_once()
+            info = poll_once(greeks=args.greeks)
             log.info(f"tick {info['ts']}: iv_30h={info['iv_30h']:.2f}% "
                      f"dvol={info['dvol']:.2f} chain={info['n_instruments']} strumenti/instruments "
-                     f"({info['n_expiries']} expiry ATM)")
+                     f"({info['n_expiries']} expiry ATM)" + info.get("greeks_note", ""))
         except KeyboardInterrupt:
             log.info("Interrotto dall'utente / interrupted by user")
             return
