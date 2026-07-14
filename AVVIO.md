@@ -431,7 +431,8 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 🇮🇹 `01c`+`01d` girano come **servizi systemd** su un VPS EU always-on (netcup, DEPLOYED 2026-07-14; **host/IP privati: SOLO in `config/secrets.yaml` → blocco `vps:`**, mai nel repo/doc). Deploy completo: `deploy/vps/README.md` (geo-test 451 Binance → deploy key → `setup_vps.sh` one-shot → verify). Sync verso casa dalla root di progetto:
 
 ```powershell
-.\scripts\vps\pull_vps_data.ps1   # host da secrets.yaml → scp → data/vps_staging/ + merge + heartbeat
+.\avvio_sessione.ps1              # TUTTO-IN-UNO alla riaccensione: pull+merge VPS + rilancio 01c/04b (anti-dup)
+.\scripts\vps\pull_vps_data.ps1   # solo sync: host da secrets.yaml → scp → data/vps_staging/ + merge + heartbeat
 ```
 
 🇮🇹 Il merge (`scripts/vps/merge_vps_data.py`) deduplica i tick doppi (casa accesa + VPS = by design) e avvisa se l'ultimo tick VPS è stale (default 3h → collector remoto giù). La copia canonica resta `data/iv/`+`data/orderbook/` a casa; il VPS è continuità + ridondanza dell'asset IV. Con PC acceso i collector locali possono restare attivi (`04b` legge il file locale, staleness ≤30 min).

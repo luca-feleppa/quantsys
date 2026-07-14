@@ -21,7 +21,7 @@
 
 **Problemi aperti:** (a) caveat selezione oraria (sui dati PRE-14/07) da scrivere nella chiusura del gate v1; (b) script replay `04b` non ancora scritto; (c) i collector di casa restano attivi in parallelo (ok by design, dedup nel merge); (d) promemoria disdetta netcup a ~dicembre 2026.
 
-**▶️ RIPARTI DA QUI:** (1) lanciare `scripts/vps/pull_vps_data.ps1` a inizio sessione (senza argomenti: legge `vps.host` da `config/secrets.yaml`) — è anche l'heartbeat del VPS; (2) gate v1 n≥20 a ~2 settlement dalla chiusura → alla chiusura: caveat orario + `hedge_dry_run.py` su serie A6 piena + congelamento band/conv v2; (3) valutare pubblicazione GitHub (audit fatto 14/07: nessun secret in storia, esposto tutto il research log — decisione utente).
+**▶️ RIPARTI DA QUI:** (1) alla riaccensione del PC: `.\avvio_sessione.ps1` (tutto-in-uno: pull+merge dal VPS — host privato da `config/secrets.yaml` → `vps.host` — + rilancio anti-dup di 01c e 04b; `01d` NON si rilancia più a casa, vive sul VPS) — è anche l'heartbeat del VPS; (2) gate v1 n≥20 a ~2 settlement dalla chiusura → alla chiusura: caveat orario + `hedge_dry_run.py` su serie A6 piena + congelamento band/conv v2; (3) valutare pubblicazione GitHub (audit fatto 14/07: nessun secret in storia, esposto tutto il research log — decisione utente).
 
 ---
 

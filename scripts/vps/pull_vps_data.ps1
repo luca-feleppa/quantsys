@@ -87,10 +87,14 @@ foreach ($p in $pairs) {
 }
 
 # IT: 3) merge nella copia canonica + heartbeat staleness (salvo -NoMerge).
+#     Exit 2 del merge = merge OK ma heartbeat stale (warning gia' loggato,
+#     NON e' un errore del pull); solo gli altri exit != 0 sono fatali.
 # EN: 3) merge into the canonical copy + staleness heartbeat (unless -NoMerge).
+#     Merge exit 2 = merge OK but stale heartbeat (warning already logged,
+#     NOT a pull failure); only other non-zero exits are fatal.
 if (-not $NoMerge) {
     Write-Output "[pull] merge nella copia canonica / merging into canonical copy..."
     python (Join-Path $ProjRoot "scripts\vps\merge_vps_data.py")
-    if ($LASTEXITCODE -ne 0) { throw "merge_vps_data.py fallito/failed" }
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 2) { throw "merge_vps_data.py fallito/failed (exit $LASTEXITCODE)" }
 }
 Write-Output "[pull] completato / done."
