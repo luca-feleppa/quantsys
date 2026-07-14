@@ -405,16 +405,22 @@ python run_all.py --distill                       # full + distillation
 
 ### 5.3 Collector forward & vol-paper · Forward collectors & vol-paper
 
-🇮🇹 I 3 processi detached (poller IV Deribit, vol-paper, recorder order-book L2) **NON sono servizi**: dopo un riavvio muoiono e vanno rilanciati. Usa il percorso `.venv` **ESPLICITO** (evita l'ambiguità `python`→interprete base):
+🇮🇹 Dal 2026-07-14 sul PC girano **2 processi** (poller IV `01c` + vol-paper `04b`); il recorder L2 `01d` vive sul VPS (§5.3bis) e NON va più lanciato a casa. I processi locali **NON sono servizi**: dopo un riavvio muoiono. **Avvio consigliato (tutto-in-uno, anti-duplicazione):**
+
+```powershell
+.\avvio_sessione.ps1          # pull+merge VPS + rilancia 01c e 04b SOLO se non già vivi
+```
+
+🇮🇹 Avvio **manuale** equivalente (percorso `.venv` ESPLICITO — evita l'ambiguità `python`→interprete base; ⚠ senza anti-dup: verifica prima che non siano già vivi):
 
 ```powershell
 $py = "E:\quantsys_project\.venv\Scripts\python.exe"
 Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01c_iv_poller.py"
 Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/04b_vol_paper.py","--execute"
-Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01d_orderbook_recorder.py"
+# 01d SOLO in emergenza (VPS giù per giorni): scripts/01d_orderbook_recorder.py
 ```
 
-🇮🇹 **Stop** (mirato sulla command line → cattura stub+worker, non tocca altri `python.exe`; `-Force` perché `-WindowStyle Hidden`):
+🇮🇹 **Stop** (mirato sulla command line → cattura stub+worker, non tocca altri `python.exe`; `-Force` perché `-WindowStyle Hidden`; il regex include `01d` per catturare eventuali istanze residue/di emergenza):
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
@@ -422,9 +428,9 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
-🇮🇹 Per fermarne **uno solo**, restringi il regex (es. `'01d_orderbook_recorder'`). Verifica: rilancia lo stesso `Get-CimInstance ... | Select-Object ProcessId` senza il `ForEach-Object` → deve tornare vuoto. **Salute:** conta i processi **LOGICI** non OS — ogni `.venv\python.exe` è stub+worker = 2 OS, attesi 3 logici (confronta i `ParentProcessId`). Crescita attesa: `data/iv/atm_30h.parquet` ~144 righe/g, `results/vol_paper/forecasts.parquet` ~24 righe/g, `data/orderbook/l2_features_*.parquet` ~17k righe/g (a 5s). Log vivi in `logs/quantsys_*.log` (più recenti per mtime), **non** i redirect `iv_poller.log`/`vol_paper.log`. ⚠ NON girare training/inferenza GPU in parallelo a `04b` senza fermarlo.
+🇮🇹 Per fermarne **uno solo**, restringi il regex (es. `'04b_vol_paper'`). Verifica: rilancia lo stesso `Get-CimInstance ... | Select-Object ProcessId` senza il `ForEach-Object` → deve tornare vuoto. **Salute:** conta i processi **LOGICI** non OS — ogni `.venv\python.exe` è stub+worker = 2 OS, attesi **2 logici** (confronta i `ParentProcessId`). Crescita attesa locale: `data/iv/atm_30h.parquet` ~144 righe/g, `results/vol_paper/forecasts.parquet` ~24 righe/g; `data/orderbook/*` cresce via **pull dal VPS**, non da un processo locale. Log vivi in `logs/quantsys_*.log` (più recenti per mtime), **non** i redirect `iv_poller.log`/`vol_paper.log`. ⚠ NON girare training/inferenza GPU in parallelo a `04b` senza fermarlo.
 
-**EN** The 3 detached processes (Deribit IV poller, vol-paper, L2 order-book recorder) **are NOT services**: they die on reboot and must be relaunched. Use the **EXPLICIT** `.venv` path (avoids the `python`→base-interpreter ambiguity); blocks above. **Stop** all 3 (matched on the command line → catches stub+worker, leaves other `python.exe` untouched; `-Force` because `-WindowStyle Hidden`). To stop **a single one**, narrow the regex. Verify: re-run the same `Get-CimInstance ... | Select-Object ProcessId` without `ForEach-Object` → must come back empty. **Health:** count **LOGICAL** processes, not OS — each `.venv\python.exe` is stub+worker = 2 OS, expected 3 logical (compare `ParentProcessId`). Expected growth: `data/iv/atm_30h.parquet` ~144 rows/day, `results/vol_paper/forecasts.parquet` ~24 rows/day, `data/orderbook/l2_features_*.parquet` ~17k rows/day (at 5s). Live logs in `logs/quantsys_*.log` (newest by mtime), **not** the `iv_poller.log`/`vol_paper.log` redirects. ⚠ Do NOT run GPU training/inference in parallel with `04b` without stopping it.
+**EN** Since 2026-07-14 the PC runs **2 processes** (IV poller `01c` + vol-paper `04b`); the L2 recorder `01d` lives on the VPS (§5.3bis) and must NOT be launched at home anymore. Local processes **are NOT services**: they die on reboot. **Recommended startup (all-in-one, anti-duplication):** `.\avvio_sessione.ps1` (VPS pull+merge + relaunches 01c and 04b ONLY if not already alive). Manual equivalent: block above (EXPLICIT `.venv` path; ⚠ no anti-dup: check they are not already running; `01d` only as an emergency if the VPS is down for days). **Stop**: block above (command-line matched → catches stub+worker, leaves other `python.exe` untouched; the regex includes `01d` to catch residual/emergency instances). To stop **a single one**, narrow the regex. Verify: re-run the same `Get-CimInstance ... | Select-Object ProcessId` without `ForEach-Object` → must come back empty. **Health:** count **LOGICAL** processes, not OS — each `.venv\python.exe` is stub+worker = 2 OS, expected **2 logical** (compare `ParentProcessId`). Expected local growth: `data/iv/atm_30h.parquet` ~144 rows/day, `results/vol_paper/forecasts.parquet` ~24 rows/day; `data/orderbook/*` grows via the **VPS pull**, not a local process. Live logs in `logs/quantsys_*.log` (newest by mtime), **not** the `iv_poller.log`/`vol_paper.log` redirects. ⚠ Do NOT run GPU training/inference in parallel with `04b` without stopping it.
 
 #### 5.3bis Collector 24/7 su VPS · 24/7 collectors on the VPS
 
