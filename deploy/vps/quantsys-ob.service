@@ -1,0 +1,22 @@
+# IT: unit systemd — recorder order-book L2 Binance (01d), polling REST 5s,
+#     restart automatico. Install come quantsys-iv.service.
+# EN: systemd unit — Binance L2 order-book recorder (01d), 5s REST polling,
+#     automatic restart. Install like quantsys-iv.service.
+[Unit]
+Description=QUANTSYS 01d Binance L2 order-book recorder (l2_features daily parquet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quantsys
+WorkingDirectory=/opt/quantsys
+ExecStart=/opt/quantsys/.venv/bin/python scripts/01d_orderbook_recorder.py --seconds 5
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

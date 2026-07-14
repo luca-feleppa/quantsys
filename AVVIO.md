@@ -188,11 +188,11 @@ nvidia-smi -pl 215    # ripristina · restore
 
 ### 2.2 Collector forward (dato non rigenerabile) · Forward collectors (non-regenerable data)
 
-🇮🇹 Due collector raccolgono **in avanti** storico non disponibile gratis altrove. Vanno **rilanciati dopo ogni riavvio** (non sono servizi) — comandi di avvio/stop nella sezione *5.3 Collector forward*.
+🇮🇹 Due collector raccolgono **in avanti** storico non disponibile gratis altrove. Sul PC di casa vanno **rilanciati dopo ogni riavvio** (non sono servizi) — comandi di avvio/stop nella sezione *5.3 Collector forward*. Dal 2026-07-14 il percorso primario è il **VPS always-on** (kit in `deploy/vps/`, sync `scripts/vps/` — vedi *5.3bis*): elimina i buchi PC-off (coverage IV misurata al 18.6% delle ore, 2026-06-12→07-14).
 - **`01c_iv_poller.py`** — IV Deribit short-tenor → `data/iv/` (UNICO dato non rigenerabile).
 - **`01d_orderbook_recorder.py`** — order-book L2 Binance → `data/orderbook/` (Strada B1 microstruttura).
 
-**EN** Two collectors gather **forward** history not freely available elsewhere. They must be **relaunched after every reboot** (not services) — start/stop commands in *5.3 Forward collectors*.
+**EN** Two collectors gather **forward** history not freely available elsewhere. On the home PC they must be **relaunched after every reboot** (not services) — start/stop commands in *5.3 Forward collectors*. Since 2026-07-14 the primary path is the **always-on VPS** (kit in `deploy/vps/`, sync in `scripts/vps/` — see *5.3bis*): it removes the PC-off gaps (measured IV coverage 18.6% of hours, 2026-06-12→07-14).
 - **`01c_iv_poller.py`** — Deribit short-tenor IV → `data/iv/` (the ONLY non-regenerable data).
 - **`01d_orderbook_recorder.py`** — Binance L2 order-book → `data/orderbook/` (B1 microstructure track).
 
@@ -425,6 +425,18 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 🇮🇹 Per fermarne **uno solo**, restringi il regex (es. `'01d_orderbook_recorder'`). Verifica: rilancia lo stesso `Get-CimInstance ... | Select-Object ProcessId` senza il `ForEach-Object` → deve tornare vuoto. **Salute:** conta i processi **LOGICI** non OS — ogni `.venv\python.exe` è stub+worker = 2 OS, attesi 3 logici (confronta i `ParentProcessId`). Crescita attesa: `data/iv/atm_30h.parquet` ~144 righe/g, `results/vol_paper/forecasts.parquet` ~24 righe/g, `data/orderbook/l2_features_*.parquet` ~17k righe/g (a 5s). Log vivi in `logs/quantsys_*.log` (più recenti per mtime), **non** i redirect `iv_poller.log`/`vol_paper.log`. ⚠ NON girare training/inferenza GPU in parallelo a `04b` senza fermarlo.
 
 **EN** The 3 detached processes (Deribit IV poller, vol-paper, L2 order-book recorder) **are NOT services**: they die on reboot and must be relaunched. Use the **EXPLICIT** `.venv` path (avoids the `python`→base-interpreter ambiguity); blocks above. **Stop** all 3 (matched on the command line → catches stub+worker, leaves other `python.exe` untouched; `-Force` because `-WindowStyle Hidden`). To stop **a single one**, narrow the regex. Verify: re-run the same `Get-CimInstance ... | Select-Object ProcessId` without `ForEach-Object` → must come back empty. **Health:** count **LOGICAL** processes, not OS — each `.venv\python.exe` is stub+worker = 2 OS, expected 3 logical (compare `ParentProcessId`). Expected growth: `data/iv/atm_30h.parquet` ~144 rows/day, `results/vol_paper/forecasts.parquet` ~24 rows/day, `data/orderbook/l2_features_*.parquet` ~17k rows/day (at 5s). Live logs in `logs/quantsys_*.log` (newest by mtime), **not** the `iv_poller.log`/`vol_paper.log` redirects. ⚠ Do NOT run GPU training/inference in parallel with `04b` without stopping it.
+
+#### 5.3bis Collector 24/7 su VPS · 24/7 collectors on the VPS
+
+🇮🇹 `01c`+`01d` girano come **servizi systemd** su un VPS EU always-on (netcup VPS Lite 1 G12s, acquistato 2026-07-14). Deploy completo: `deploy/vps/README.md` (geo-test 451 Binance → deploy key → `setup_vps.sh` one-shot → verify). Sync verso casa dalla root di progetto:
+
+```powershell
+.\scripts\vps\pull_vps_data.ps1 -VpsHost quantsys@<ip>   # scp → data/vps_staging/ + merge + heartbeat
+```
+
+🇮🇹 Il merge (`scripts/vps/merge_vps_data.py`) deduplica i tick doppi (casa accesa + VPS = by design) e avvisa se l'ultimo tick VPS è stale (default 3h → collector remoto giù). La copia canonica resta `data/iv/`+`data/orderbook/` a casa; il VPS è continuità + ridondanza dell'asset IV. Con PC acceso i collector locali possono restare attivi (`04b` legge il file locale, staleness ≤30 min).
+
+**EN** `01c`+`01d` run as **systemd services** on an always-on EU VPS (netcup VPS Lite 1 G12s, purchased 2026-07-14). Full deploy: `deploy/vps/README.md` (Binance 451 geo-test → deploy key → one-shot `setup_vps.sh` → verify). Sync back home from the project root: block above (`scp → data/vps_staging/` + merge + heartbeat). The merge (`scripts/vps/merge_vps_data.py`) dedups double ticks (home on + VPS = by design) and warns when the latest VPS tick is stale (default 3h → remote collector down). The canonical copy stays home (`data/iv`+`data/orderbook`); the VPS provides continuity + redundancy for the IV asset. With the PC on, the local collectors may keep running (`04b` reads the local file, ≤30 min staleness).
 
 #### Poller IV Deribit · Deribit IV poller
 

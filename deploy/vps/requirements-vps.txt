@@ -1,0 +1,21 @@
+# ══════════════════════════════════════════════════════════════
+#  QUANTSYS · requirements-vps.txt — set MINIMO per i collector 24/7
+#  (01c_iv_poller + 01d_orderbook_recorder su VPS Ubuntu, no GPU)
+#
+#  IT: torch va installato PRIMA e con l'indice CPU (wheel piccolo,
+#      niente CUDA): serve solo perché quantsys/utils importa torch
+#      a livello di modulo — i collector non fanno inferenza.
+#  EN: install torch FIRST from the CPU index (small wheel, no CUDA):
+#      needed only because quantsys/utils imports torch at module
+#      level — the collectors do no inference.
+#
+#      pip install torch --index-url https://download.pytorch.org/whl/cpu
+#      pip install -r deploy/vps/requirements-vps.txt
+#      pip install -e . --no-deps
+# ══════════════════════════════════════════════════════════════
+
+numpy>=1.26.0,<3.0
+pandas>=2.1.0,<3.0
+pyarrow>=14.0.0,<22.0    # Parquet I/O
+requests>=2.31.0,<3.0
+pyyaml>=6.0.1,<7.0

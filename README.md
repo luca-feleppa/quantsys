@@ -462,8 +462,11 @@ quantsys_project/
 │   │                             (step0_xarch_corr), baseline HAR per-fold (wf_har_baseline),
 │   │                             short-vol (short_vol_*), IVS relative-value (ivs_*)
 │   ├── research/                 paper / negative-control direzionale: paper_01_dir_baselines.py
+│   ├── vps/                      sync lato casa del VPS collector (pull scp + merge dedup + heartbeat)
 │   ├── README.md                 mappa script → linea (shared / vol / direzionale)
 │   └── archive/                  probe chiusi (xs cross-sectional KILL, step0 σ-recal)
+├── deploy/
+│   └── vps/                      kit collector 24/7 su VPS (geo-test 451, setup one-shot, unit systemd)
 ├── tests/                        suite pytest (features, NLL, PipelineState, regression sui fix recenti)
 ├── data/                         generato (gitignored)
 ├── models/                       checkpoint per architettura (gitignored)

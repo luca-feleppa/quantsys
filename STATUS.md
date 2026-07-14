@@ -5,6 +5,24 @@
 
 ---
 
+## 🟢 SESSIONE 2026-07-14 — VPS collector 24/7: ACQUISTATO + kit di deploy pronto e verificato
+
+**Contesto:** domanda utente sui buchi PC-off → quantificati (GROSSI), VPS acquistato in giornata, kit preparato. Trade settled: **18/20** (gate v1 a ~2 giorni dalla chiusura).
+
+**① Quantificazione buchi PC-off (misurata su `data/iv/atm_30h.parquet`):** coverage **18.6%** delle ore (624h perse su 767, 06-12→07-14), 33 buchi >45min (peggiore 168h), tick concentrati 14–20 UTC, ore 00–05 UTC assenti. Chain: 23 file/33 giorni. **Conseguenza statistica documentata:** il campione v1 è condizionato all'orario di accensione (entry quasi solo pomeriggio/sera EU) → **caveat di selezione oraria da dichiarare alla chiusura del gate v1** (caveat qualità-dati, pre-esito, NON goalpost-move). I buchi passati NON sono ricostruibili (Deribit non espone storico mark/IV: la decisione e il premio all'ora t sono persi).
+
+**② VPS acquistato:** netcup **VPS Lite 1 G12s IV 6M** (€4.88/mese IVA incl., 2 vCore/4GB/80GB SSD, DC EU Norimberga/Vienna/Amsterdam, vincolo 6 mesi ~€29 totale — accettato, la raccolta è pluri-mensile by design). In attesa di provisioning (verifica identità netcup possibile). ⚠ Promemoria: disdetta nel pannello per evitare rinnovo automatico di altri 6 mesi.
+
+**③ Kit di deploy pronto e VERIFICATO (nuovi file):** lato server `deploy/vps/` = `geo_test.sh` (check 451 Binance + Deribit prod/testnet, PRIMA di installare; fallback informativo data-api.binance.vision), `setup_vps.sh` (one-shot root idempotente: pacchetti, utente `quantsys`, ufw solo-SSH, clone via deploy key, venv torch-CPU — obbligatorio: `quantsys/utils` importa torch a livello modulo —, smoke `--once`, unit attive), `requirements-vps.txt`, `quantsys-iv.service` + `quantsys-ob.service` (systemd `Restart=always`, `PYTHONUNBUFFERED`, hardening minimo). Lato casa `scripts/vps/` = `pull_vps_data.ps1` (scp → `data/vps_staging/`, file singoli interi + giornalieri ultimi -Days via `find -mtime`) e `merge_vps_data.py` (merge dedup → canonico, scritture atomiche, **heartbeat staleness** sui file di staging, default 3h). **Semantica merge:** `atm_30h`/`dvol` dedup su `timestamp`; `chain/*` su `snapshot_ts+instrument_name`; `orderbook/*` su `timestamp+symbol`; doppio poller casa+VPS = duplicati by design, dedup è la semantica. **Test:** no-op idempotente su copia identica (906→906, +0) + unione con overlap 100 righe su scratch (800+206→906, sorted, no dup). Nessun secret sul VPS (endpoint pubblici). Doc-sync: `deploy/vps/README.md` (runbook), AVVIO §2.2+§5.3bis, README tree, scripts/README mappa.
+
+**④ Vincolo di protocollo scritto nel runbook:** i trade eventualmente replayati offline sulle ore PC-off (script di replay `04b` = TODO, effort S, possibile solo su dati POST-VPS) **NON entrano retroattivamente nel gate v1** — file separati (es. `trades_replay.jsonl`); alimentano analisi e pre-registrazione v2 su campione senza bias orario.
+
+**Problemi aperti:** (a) provisioning netcup in attesa; (b) caveat selezione oraria da scrivere nella chiusura del gate v1; (c) script replay `04b` non ancora scritto; (d) commit dei nuovi file non ancora fatto.
+
+**▶️ RIPARTI DA QUI:** appena arriva la mail netcup con l'IP: (1) `scp deploy/vps/geo_test.sh root@<ip>:` + `bash geo_test.sh` → se FAIL, recesso immediato; (2) deploy key GitHub read-only; (3) `bash /opt/quantsys/deploy/vps/setup_vps.sh`; (4) `journalctl -u quantsys-iv -u quantsys-ob -f` + primo `pull_vps_data.ps1 -VpsHost quantsys@<ip>`. Sequenza completa: `deploy/vps/README.md`.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — V2 DELTA-HEDGED, hedged-vs-unhedged (`04b --hedge`) · 2026-07-12 · **DRAFT: attivazione SOLO post-gate v1 n≥20**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). ⚠ **Questo è un DRAFT congelabile, NON un gate attivo:** la v1 chiude sul design congelato (n≥20, ~metà luglio) e `--hedge` resta INERTE fino ad allora. Il codice della leg hedge è già in `04b_vol_paper.py` (flag CLI `--hedge`, default OFF = v1 bit-identica) ma NON è mai stato attivato. Due parametri sono deliberatamente lasciati aperti (band, convenzione δ) con la **regola di congelamento pre-dichiarata** qui sotto: verranno fissati su dati PRE-attivazione, mai a giudizio in corso.

@@ -1,0 +1,26 @@
+# IT: unit systemd — poller IV Deribit (01c), tick ogni 10 min, restart automatico.
+#     Install: cp in /etc/systemd/system/ → daemon-reload → enable --now.
+# EN: systemd unit — Deribit IV poller (01c), 10-min tick, automatic restart.
+#     Install: cp into /etc/systemd/system/ → daemon-reload → enable --now.
+[Unit]
+Description=QUANTSYS 01c Deribit IV poller (atm_30h + chain + dvol)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quantsys
+WorkingDirectory=/opt/quantsys
+ExecStart=/opt/quantsys/.venv/bin/python scripts/01c_iv_poller.py --minutes 10
+# IT: log non bufferizzati su journald (journalctl -u quantsys-iv -f).
+# EN: unbuffered logs to journald (journalctl -u quantsys-iv -f).
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=30
+# IT: hardening minimo — nessun privilegio nuovo, /tmp privato.
+# EN: minimal hardening — no new privileges, private /tmp.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
