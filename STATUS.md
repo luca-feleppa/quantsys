@@ -5,6 +5,29 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — A3 REGIME-MoE (mixture-of-universes, linea vol 1h) · 2026-07-14 · run nella finestra GPU post-gate-v1
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Il modello è implementato (commit `7c74d81` + audit `6fed11d`) e MAI addestrato: zero numeri visti. UN solo run: nessuno sweep di iperparametri; qualunque variante suggerita dai risultati = NUOVA pre-registrazione.
+
+**Ipotesi/prior onesto (pre-dichiarato):** la vol è regime-driven e la stratificazione per regime mostra spread di val_nll (0.19–0.30), quindi 3 teste specializzate con gate esterno causale *potrebbero* ridurre il QLIKE. MA: (a) le 104 feature contengono già la vol realizzata multi-scala → il gate Markov è parzialmente ridondante con l'informazione in input; (b) 3 teste ≈ 3× i parametri di head su ~51k finestre fortemente sovrapposte → rischio overfit concreto; (c) il tetto teorico del design originario era "migliora σ, non μ" — e questo gate misura μ. **Scenario base atteso: FAIL o miglioramento sotto soglia; un PASS sarebbe una sorpresa informativa.** ⚠ Nota MINOR-1 (dichiarata, vincolante per l'interpretazione): sul path production `loss_type=quantile` la Vincentization NON ha il termine di varianza between-head → il gate NON misura e NON supporta alcuna claim sulla calibrazione di σ; l'"inflazione di σ su regime ambiguo" esiste solo su t_student, fuori da questo esperimento.
+
+**Script/giudice:** training `02_train.py` con `QUANTSYS_ARCH=itransformer_regime_moe` (overlay `config/arch/itransformer_regime_moe.yaml`, iperparametri EREDITATI dal tuning 1h pre-registrato: lr 3e-5, wd 3e-3, clip 0.5, 5 seed `--n-ensemble 5`, stesso `lstm_dataset.npz`, target `log_rv`); giudice `scripts/vol/dev_vols_qlike.py` (già gate-aware: costruisce il gate causale per i timestamp dello split), **stesso run di giudice per candidato e incumbent** (stessi sample, stessa inversione completa z→raw).
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a gate val superato.
+**Leva sperimentale:** `model.head_type: "regime_moe"` SOLO nell'overlay arch (mai in default.yaml; assente = path bit-identico, verificato dai test 19/19) + sandbox `QUANTSYS_MODELS_ROOT=models_a3_moe` — `models/itransformer` (vol PASS production) READ-ONLY.
+
+**Prerequisiti (da eseguire PRIMA del run, non sono condizioni di gate):** (P1) rigenerare `data/regime_probs.parquet` con `01b` (oggi fermo al 2026-06-10; il bound di staleness 168h fail-fasterebbe correttamente); (P2) finestra GPU = post-chiusura gate v1 con `04b` fermo (contesa CUDA documentata); (P3) audit formale `causality-auditor` sui file A3 (raccomandazione della sessione 07-12, mai eseguito).
+
+**Baseline di confronto (pre-dichiarata):** l'**incumbent** = ensemble production vol-1h PASS (5 membri, `models/itransformer`), NON un baseline riaddestrato: la domanda pratica è "il MoE batte il modello in carica?", e la promozione lo sostituirebbe. Asimmetria di seed-draw accettata e dichiarata (il vantaggio/svantaggio di pesca dei 5 seed nuovi non è controllato; la soglia ①, ≥3%, assorbe parte del rumore di seed). Diagnostica non decisionale: spread QLIKE tra i 5 membri MoE come misura del rumore.
+
+**Condizioni di PASS (tutte, AND, su val):**
+1. `QLIKE_val(MoE, ensemble 5 seed) ≤ 0.97 · QLIKE_val(incumbent)` (miglioramento relativo ≥3%, stessi sample).
+2. Nessun regime distrutto: nel regime peggiore per il MoE (labels = argmax del gate causale sullo split), `QLIKE_val(MoE) ≤ 1.05 · QLIKE_val(incumbent)` in QUEL regime (un guadagno medio comprato distruggendo uno stato non è promuovibile).
+3. Campione: ≥5000 sample val valutati E ≥800 nel regime meno popoloso; sotto una delle due soglie NESSUNA conclusione.
+
+**Conseguenze pre-dichiarate:** PASS → conferma one-shot su test (stesse 3 condizioni); se regge, il regime-MoE diventa **candidato** per il ciclo forward SUCCESSIVO — MAI swap del modello live durante il forward test in corso (v1/v2): il deployment live richiederebbe una propria pre-registrazione. FAIL → `head_type: regime_moe` resta config-gated inerte marcato **FALLITO**, il filone mixture-of-universes chiude anche sulla linea vol (sul direzionale era già morto by design), e la finestra GPU si libera per A8; scritto comunque.
+
+---
+
 ## 🟢 SESSIONE 2026-07-14 — VPS collector 24/7: ACQUISTATO + kit di deploy pronto e verificato
 
 **Contesto:** domanda utente sui buchi PC-off → quantificati (GROSSI), VPS acquistato in giornata, kit preparato. Trade settled: **18/20** (gate v1 a ~2 giorni dalla chiusura).
