@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# IT: SETUP ONE-SHOT del VPS collector QUANTSYS (Ubuntu 24.04, eseguire da root
-#     su macchina APPENA provisionata, DOPO che geo_test.sh è PASS).
+# IT: SETUP ONE-SHOT del VPS collector QUANTSYS (Ubuntu 24.04 o Debian 12+,
+#     eseguire da root su macchina APPENA provisionata, DOPO che geo_test.sh
+#     è PASS). Unico requisito Python: >=3.11 (Debian 12 = 3.11, 13 = 3.13).
 #     Fa tutto: pacchetti, utente dedicato, firewall, clone repo, venv con
 #     torch-CPU, unit systemd, smoke test --once. Idempotente al meglio
 #     (ri-eseguibile senza danni). NON tocca mai secret: i collector usano
 #     solo endpoint pubblici non autenticati.
-# EN: ONE-SHOT setup of the QUANTSYS collector VPS (Ubuntu 24.04, run as root
-#     on a FRESHLY provisioned box, AFTER geo_test.sh PASSES).
+# EN: ONE-SHOT setup of the QUANTSYS collector VPS (Ubuntu 24.04 or Debian 12+,
+#     run as root on a FRESHLY provisioned box, AFTER geo_test.sh PASSES).
+#     Only Python requirement: >=3.11 (Debian 12 = 3.11, 13 = 3.13).
 #     Does everything: packages, dedicated user, firewall, repo clone, venv
 #     with CPU torch, systemd units, --once smoke test. Best-effort idempotent
 #     (safe to re-run). Never touches secrets: the collectors only use public

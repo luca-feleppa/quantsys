@@ -1,8 +1,8 @@
 # Deploy collector 24/7 su VPS · 24/7 collector VPS deploy
 
-🇮🇹 Kit per spostare i due collector leggeri (`01c_iv_poller`, `01d_orderbook_recorder`) su un VPS Ubuntu 24.04 always-on (decisione 2026-06-24; acquisto netcup VPS Lite 1 G12s 2026-07-14). Obiettivo: eliminare i buchi PC-off nella serie IV (unico dato non rigenerabile), sbloccare B1 (book L2 continuo) e rendere replayabile offline il forward test `04b`. Nessun secret sul VPS: entrambi i collector usano solo endpoint pubblici non autenticati. Training/GPU restano a casa.
+🇮🇹 Kit per spostare i due collector leggeri (`01c_iv_poller`, `01d_orderbook_recorder`) su un VPS Linux always-on (Ubuntu 24.04 o Debian 12+; l'istanza reale monta Debian) (decisione 2026-06-24; acquisto netcup VPS Lite 1 G12s 2026-07-14). Obiettivo: eliminare i buchi PC-off nella serie IV (unico dato non rigenerabile), sbloccare B1 (book L2 continuo) e rendere replayabile offline il forward test `04b`. Nessun secret sul VPS: entrambi i collector usano solo endpoint pubblici non autenticati. Training/GPU restano a casa.
 
-**EN** Kit to move the two lightweight collectors (`01c_iv_poller`, `01d_orderbook_recorder`) to an always-on Ubuntu 24.04 VPS (2026-06-24 decision; netcup VPS Lite 1 G12s purchased 2026-07-14). Goal: remove PC-off gaps in the IV series (the only non-regenerable dataset), unblock B1 (continuous L2 book) and make the `04b` forward test replayable offline. No secrets on the VPS: both collectors only hit public unauthenticated endpoints. Training/GPU stay home.
+**EN** Kit to move the two lightweight collectors (`01c_iv_poller`, `01d_orderbook_recorder`) to an always-on Linux VPS (Ubuntu 24.04 or Debian 12+; the actual instance runs Debian) (2026-06-24 decision; netcup VPS Lite 1 G12s purchased 2026-07-14). Goal: remove PC-off gaps in the IV series (the only non-regenerable dataset), unblock B1 (continuous L2 book) and make the `04b` forward test replayable offline. No secrets on the VPS: both collectors only hit public unauthenticated endpoints. Training/GPU stay home.
 
 ## Sequenza di deploy · Deploy sequence
 
