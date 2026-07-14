@@ -36,10 +36,16 @@ if (Test-Path $secretsPath) {
 if (-not $VpsHost) { throw "vps.host assente in config/secrets.yaml / missing from config/secrets.yaml" }
 
 # IT: comando remoto: pull opzionale del repo + health check server-side.
-# EN: remote command: optional repo pull + server-side health check.
+#     Il pull gira da root (la deploy key e' in /root/.ssh) su un repo di
+#     proprieta' di quantsys -> serve safe.directory (config una-tantum) e il
+#     chown post-pull ripristina l'ownership per i servizi.
+# EN: remote command: optional repo pull + server-side health check. The pull
+#     runs as root (deploy key lives in /root/.ssh) on a quantsys-owned repo ->
+#     needs safe.directory (one-time config) and the post-pull chown restores
+#     ownership for the services.
 $remote = "bash /opt/quantsys/deploy/vps/health_check.sh"
 if ($UpdateRepo) {
-    $remote = "cd /opt/quantsys; git pull --ff-only -q; " + $remote
+    $remote = "cd /opt/quantsys; git pull --ff-only -q; chown -R quantsys:quantsys /opt/quantsys; " + $remote
 }
 ssh -o ConnectTimeout=15 -o BatchMode=yes $VpsHost $remote
 $code = $LASTEXITCODE
