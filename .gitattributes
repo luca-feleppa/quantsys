@@ -2,6 +2,11 @@
 * text=auto
 
 # Force LF for source code (consistent across OS)
+# IT: sh/service girano su Linux (VPS): CRLF romperebbe bash/systemd.
+# EN: sh/service run on Linux (VPS): CRLF would break bash/systemd.
+*.sh text eol=lf
+*.service text eol=lf
+*.ps1 text eol=crlf
 *.py text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
