@@ -49,7 +49,7 @@ find /opt/quantsys/data -name '*.parquet' -newermt '-1 hour'
 **EN** **4. Sync back home** (Windows, from the project root; downloads into `data/vps_staging/` and merges+heartbeats into the canonical copy):
 
 ```powershell
-.\scripts\vps\pull_vps_data.ps1 -VpsHost quantsys@<ip>
+.\scripts\vps\pull_vps_data.ps1   # host letto da config/secrets.yaml → vps.host (privato, gitignored)
 ```
 
 ## Semantica dei dati · Data semantics

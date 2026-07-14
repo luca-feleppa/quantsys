@@ -428,15 +428,15 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 
 #### 5.3bis Collector 24/7 su VPS · 24/7 collectors on the VPS
 
-🇮🇹 `01c`+`01d` girano come **servizi systemd** su un VPS EU always-on (netcup VPS Lite 1 G12s, acquistato 2026-07-14). Deploy completo: `deploy/vps/README.md` (geo-test 451 Binance → deploy key → `setup_vps.sh` one-shot → verify). Sync verso casa dalla root di progetto:
+🇮🇹 `01c`+`01d` girano come **servizi systemd** su un VPS EU always-on (netcup, DEPLOYED 2026-07-14; **host/IP privati: SOLO in `config/secrets.yaml` → blocco `vps:`**, mai nel repo/doc). Deploy completo: `deploy/vps/README.md` (geo-test 451 Binance → deploy key → `setup_vps.sh` one-shot → verify). Sync verso casa dalla root di progetto:
 
 ```powershell
-.\scripts\vps\pull_vps_data.ps1 -VpsHost quantsys@<ip>   # scp → data/vps_staging/ + merge + heartbeat
+.\scripts\vps\pull_vps_data.ps1   # host da secrets.yaml → scp → data/vps_staging/ + merge + heartbeat
 ```
 
 🇮🇹 Il merge (`scripts/vps/merge_vps_data.py`) deduplica i tick doppi (casa accesa + VPS = by design) e avvisa se l'ultimo tick VPS è stale (default 3h → collector remoto giù). La copia canonica resta `data/iv/`+`data/orderbook/` a casa; il VPS è continuità + ridondanza dell'asset IV. Con PC acceso i collector locali possono restare attivi (`04b` legge il file locale, staleness ≤30 min).
 
-**EN** `01c`+`01d` run as **systemd services** on an always-on EU VPS (netcup VPS Lite 1 G12s, purchased 2026-07-14). Full deploy: `deploy/vps/README.md` (Binance 451 geo-test → deploy key → one-shot `setup_vps.sh` → verify). Sync back home from the project root: block above (`scp → data/vps_staging/` + merge + heartbeat). The merge (`scripts/vps/merge_vps_data.py`) dedups double ticks (home on + VPS = by design) and warns when the latest VPS tick is stale (default 3h → remote collector down). The canonical copy stays home (`data/iv`+`data/orderbook`); the VPS provides continuity + redundancy for the IV asset. With the PC on, the local collectors may keep running (`04b` reads the local file, ≤30 min staleness).
+**EN** `01c`+`01d` run as **systemd services** on an always-on EU VPS (netcup, DEPLOYED 2026-07-14; **host/IP private: ONLY in `config/secrets.yaml` → `vps:` block**, never in repo/docs). Full deploy: `deploy/vps/README.md` (Binance 451 geo-test → deploy key → one-shot `setup_vps.sh` → verify). Sync back home from the project root: block above (host from secrets → `scp → data/vps_staging/` + merge + heartbeat). The merge (`scripts/vps/merge_vps_data.py`) dedups double ticks (home on + VPS = by design) and warns when the latest VPS tick is stale (default 3h → remote collector down). The canonical copy stays home (`data/iv`+`data/orderbook`); the VPS provides continuity + redundancy for the IV asset. With the PC on, the local collectors may keep running (`04b` reads the local file, ≤30 min staleness).
 
 #### Poller IV Deribit · Deribit IV poller
 
