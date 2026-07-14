@@ -14,10 +14,14 @@ cafn:
   d_latent: 16              # IT: dim latente passato ai modelli | EN: latent dim fed downstream
   lambda_causal: 0.1        # IT: peso penalità causale nella loss congiunta | EN: causal-penalty weight in joint loss
 
-  # IT: dimensione (ridotta) dei 3 modelli a valle nel setup congiunto: tenuta
-  #     piccola per la memoria (3 modelli + CAFN insieme su 8GB → OOM a dim piene).
-  # EN: (reduced) size of the 3 downstream models in the joint setup: kept small
-  #     for memory (3 models + CAFN together on 8GB → OOM at full size).
-  cafn_downstream_d_model: 64
+  # IT: dimensione dei 3 modelli a valle nel setup congiunto. 64→128 (larghezza
+  #     production, decisione PRE-run 2026-07-14 a zero numeri visti): il probe
+  #     VRAM ha mostrato che l'OOM temuto non esiste (picco 1.5GB/8GB a batch 64
+  #     con dm=64) → si riduce il gap di transfer del gate verso i modelli veri.
+  # EN: size of the 3 downstream models in the joint setup. 64→128 (production
+  #     width, PRE-run decision 2026-07-14 with zero numbers seen): the VRAM probe
+  #     showed the feared OOM does not exist (1.5GB/8GB peak at batch 64 with
+  #     dm=64) → shrinks the gate's transfer gap toward the real models.
+  cafn_downstream_d_model: 128
   loss_type: t_student      # IT: t_student → (mu,ls2,lnu); MSE su mu nel trainer | EN: t_student → (mu,ls2,lnu); MSE on mu in the trainer
   n_output_experts: 1
