@@ -83,6 +83,16 @@ class GreeksLimits:
     max_net_delta: float = 5.0          # |Σ side·amount·delta| cap (BTC-eq per $1-rel)
     cb_max_loss_btc: float = 0.05       # trip del breaker: DD MtM book in BTC
     cb_recovery_frac: float = 0.7       # riarmo sotto questa frazione della soglia / re-arm below this fraction
+    # IT: A13b — cap sul gamma NETTO di libro (∂delta/∂S, per $1). None = nessun
+    #     cap (default, comportamento storico invariato): la convessità corta
+    #     concentrata a scadenza (Γ ATM dailies esplode nelle ultime ore) è il
+    #     rischio del braccio short-vol, non dello straddle long. Valore da
+    #     congelare alla pre-registrazione sizing v2.
+    # EN: A13b — NET book gamma cap (∂delta/∂S, per $1). None = no cap (default,
+    #     legacy behavior unchanged): expiry-concentrated short convexity (daily
+    #     ATM Γ explodes in the final hours) is the short-vol arm's risk, not the
+    #     long straddle's. Value frozen at the v2 sizing pre-registration.
+    max_net_gamma: float | None = None
 
 
 # IT: esito di un check ordine: permesso pieno, scalato, o rifiutato (scale=0).
@@ -260,4 +270,14 @@ class GreeksRiskManager:
         if s_delta < 1.0:
             reasons.append(f"net_delta_cap(scale={s_delta:.3f})")
         scale = min(s_vega, s_delta)
+        # IT: A13b — gamma cap opzionale, stessa policy _cap_scale (riduzioni
+        #     sempre ammesse); inerte con max_net_gamma=None.
+        # EN: A13b — optional gamma cap, same _cap_scale policy (reductions
+        #     always allowed); inert with max_net_gamma=None.
+        if self.limits.max_net_gamma is not None:
+            s_gamma = self._cap_scale(cur["gamma"], add["gamma"],
+                                      self.limits.max_net_gamma)
+            if s_gamma < 1.0:
+                reasons.append(f"net_gamma_cap(scale={s_gamma:.3f})")
+            scale = min(scale, s_gamma)
         return GreeksCheck(scale > 0.0, scale, reasons)

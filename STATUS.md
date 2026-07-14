@@ -28,6 +28,27 @@
 
 ---
 
+## 🟢 SESSIONE 2026-07-14 (sera) — Funzioni gamma A11-A14: attribution + 3 lever v2 INERTI
+
+**Contesto:** discussione gamma hedging → 4 funzioni gamma dalla ROADMAP (nuovi item A11-A14, `docs/ROADMAP_VOL_BOOK.md`). Tutto implementato; SOLO A11 è attivo (offline read-only), A12/A13/A14 sono lever inerti di default (v1 bit-identica, pattern MINOR-3 fail-fast sui parametri non congelati). Il processo 04b live NON è stato riavviato (il codice su disco è inerte; al prossimo restart via `avvio_sessione.ps1` il comportamento v1 resta identico).
+
+**① A11 — attribution PnL (`scripts/vol/pnl_attribution.py`, ATTIVO da subito):** decompone ogni trade chiuso in Δ/Γ/ν/Θ/residuo dalla serie A6 (Taylor per-intervallo su coppie di tick valide, gap >3h scartati, coverage dichiarata). Primo run reale: 18 record, coverage 0% sui trade pre-A6 (08/07) e 14-38% sui recenti (buchi PC-off); sul campione coperto gamma−theta ≈ 0 (non conclusivo, coverage <50% ovunque — dal deploy VPS+H24 la serie A6 futura sarà densa). Output `results/vol_paper/attribution.parquet`.
+**② A12 — banda hedge Whalley–Wilmott (INERTE):** `--hedge-band-mode ww --hedge-ww-lambda <λ>` in 04b; half-width `(3·k·S·Γ²/2λ)^(1/3)` clippata [band/4, 4·band], fail-soft a banda fissa su gamma mancante; `band_eff`/`band_mode` nel ledger. Default `fixed` = design storico bit-identico.
+**③ A13 — pin risk (INERTE):** (a) `--pin-close-hours X --pin-close-band f` = early-close quando 0<t_left≤X E |S−K|/S≤f (trade con `exit_mode: "pin_close"`; il settlement ora scrive `exit_mode: "settlement"`, campo additivo); (b) `GreeksLimits.max_net_gamma` (default None = invariato) + scaling in `check_order`.
+**④ A14 — sizing vega-normalizzato (INERTE):** `--size-mode vega --size-vega-target <USD>` (+ cap `--size-max-contracts`): amount = target/Σν all'entry, step 0.1, fallback fail-soft a size fissa. Refactor value-preserving: `maybe_settle`/`maybe_hedge`/`fee_btc` ora leggono `pos["amount"]` (fallback SIZE_CONTRACTS → bit-identico su posizioni v1).
+
+**Test:** `tests/test_gamma_fixes.py` 18/18 nuovi + regression `test_greeks_risk` 17/17 + `test_hedge_leg` 11/11 (46/46 sui moduli toccati).
+
+**⚠ SCOPERTA (dal primo run A11) + DEDUP ESEGUITO (stessa sera, su decisione utente):** `trades.jsonl` conteneva un settlement DUPLICATO byte-identico (entry `2026-07-07 16:12:32`, settled `2026-07-09 09:53:20` ×2, stesso secondo, SHA256 identico → due istanze 04b concorrenti pre-anti-dup; artefatto di scrittura, non un secondo trade). **Dedup applicato: 18 righe → 17 trade distinti** (backup pre-dedup: `results/vol_paper/trades.jsonl.pre_dedup_20260714.bak`). **Il gate v1 conta n=17: mancano 3 settlement, non 2.** Da citare nel report di chiusura.
+
+**Attivazione (pre-dichiarata):** A11 = subito, qualsiasi momento (read-only). A12 = DENTRO la pre-registrazione hedged-vs-unhedged (confronto offline fixed-vs-ww sul dry-run A6 alla regola di congelamento già scritta, λ congelata lì). A13+A14 = pre-registrazione sizing v2, post-gate v1 (cambiano regole pre-registrate: hold-to-expiry e size fissa). Nessuno di questi si attiva a gate v1 aperto.
+
+**Doc-sync:** ROADMAP_VOL_BOOK (A11-A14 nuovi + B3 sequencing), scripts/README (pnl_attribution in vol/), questo file.
+
+**▶️ RIPARTI DA QUI:** invariato rispetto alla sessione VPS (sotto) + alla chiusura del gate v1 aggiungere: (a) decisione dedup del settlement duplicato (n=17 vs 18 righe) nel report di chiusura; (b) A12 entra nel congelamento band/conv già previsto; (c) A13/A14 nella pre-registrazione sizing v2.
+
+---
+
 ## 🟢 SESSIONE 2026-07-14 — VPS collector 24/7: ACQUISTATO + kit di deploy pronto e verificato
 
 **Contesto:** domanda utente sui buchi PC-off → quantificati (GROSSI), VPS acquistato in giornata, kit preparato. Trade settled: **18/20** (gate v1 a ~2 giorni dalla chiusura).

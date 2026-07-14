@@ -70,6 +70,26 @@
 🇮🇹 Penalità entropica sulle mappe di attention di `iTransformerLayer` (F=104 token, correlazioni spurie). ⚠ Costo: materializzare la matrice rinuncia a Flash-Attention su quel path (stabilità fp16). Priorità: DropPath ≫ sparsity. Effort M.
 **EN** Entropy penalty on `iTransformerLayer` attention maps. ⚠ Cost: materializing the matrix forfeits Flash-Attention on that path (fp16 stability). Priority: DropPath ≫ sparsity. Effort M.
 
+### A11 🟢 Attribution PnL gamma/theta/vega per trade (offline, PRE-gate OK) · Per-trade gamma/theta/vega PnL attribution (offline, PRE-gate OK)
+> ✅ **IMPLEMENTATO 2026-07-14** — `scripts/vol/pnl_attribution.py`: decomposizione ex-post del PnL di ogni trade chiuso in delta/gamma/theta/vega/residuo dalla serie A6 (`exec_diag.jsonl`), con coverage dichiarata dei tick mancanti. Solo lettura, zero impatto sul forward test. · **IMPLEMENTED 2026-07-14** — read-only, zero impact on the forward test.
+🇮🇹 Il PnL dello straddle delta-hedgiato è ∫½ΓS²(σ²_real−σ²_impl)dt + repricing vega + fee. L'attribution per-intervallo (Δ·ΔS + ½Γ·ΔS² + ν·Δiv + Θ·Δt vs ΔV effettivo) verifica che i trade vincenti vincano **per il motivo giusto** (RV vs IV, non direzione/vega). Rafforza l'interpretazione del gate n≥20 senza toccarlo. Effort S.
+**EN** Delta-hedged straddle PnL is ∫½ΓS²(σ²_real−σ²_impl)dt + vega repricing + fees. Per-interval attribution (Δ·ΔS + ½Γ·ΔS² + ν·Δiv + Θ·Δt vs realized ΔV) verifies winning trades win **for the right reason** (RV vs IV, not direction/vega). Sharpens the n≥20 gate's interpretation without touching it. Effort S.
+
+### A12 🟠 Banda di hedge gamma-scalata (Whalley–Wilmott) · Gamma-scaled hedge band (Whalley–Wilmott)
+> ✅ **CODICE 2026-07-14, INERTE** — `--hedge-band-mode ww` + `--hedge-ww-lambda` in `04b` (default `fixed` = design attuale bit-identico). Attivazione: DENTRO la pre-registrazione hedged-vs-unhedged, dopo confronto offline fixed-vs-ww sul dry-run A6. · **CODE 2026-07-14, INERT** — activate INSIDE the hedged-vs-unhedged pre-registration, after the offline fixed-vs-ww comparison on the A6 dry-run.
+🇮🇹 La no-trade band ottimale sotto costi proporzionali scala con Γ^(2/3) (half-width asintotica W–W 1997: `(3·k·S·Γ²/2λ)^(1/3)`). Sulle dailies il Γ ATM cresce di ordini di grandezza verso scadenza → banda fissa = churn a inizio vita E delta nudo a fine vita. Fail-soft: greeks assenti → fallback alla banda fissa; clip a [band/4, 4·band]. Effort S (fatto), λ da congelare alla pre-registrazione.
+**EN** The optimal no-trade band under proportional costs scales with Γ^(2/3) (W–W 1997 asymptotic half-width `(3·k·S·Γ²/2λ)^(1/3)`). On dailies ATM Γ grows by orders of magnitude toward expiry → a fixed band churns early AND leaves naked delta late. Fail-soft: missing greeks → fixed-band fallback; clipped to [band/4, 4·band]. λ frozen at pre-registration.
+
+### A13 🟠 Pin risk: early-close T−x + gamma cap di libro · Pin risk: T−x early-close + book gamma cap
+> ✅ **CODICE 2026-07-14, INERTE** — (a) `--pin-close-hours`/`--pin-close-band` in `04b` (default OFF = hold-to-expiry pre-registrato intatto); (b) `max_net_gamma` in `GreeksLimits` (default None = nessun cap). Attivazione: pre-registrazione sizing v2, post-gate n≥20. · **CODE 2026-07-14, INERT** — activate at the v2 sizing pre-registration, post-gate n≥20.
+🇮🇹 Nelle ultime ore il Γ ATM esplode e il PnL marginale è pin-risk (posizione di S vs K), non più la bet RV-vs-IV. (a) early-close quando restano ≤x ore E |S−K|/S è nella pin region: incassa, rinuncia alle ore a Sharpe peggiore; (b) cap sul Γ netto di libro (pattern `_cap_scale`) contro convessità corta concentrata a scadenza — rilevante per il braccio short-vol. Entrambi cambiano regole pre-registrate → SOLO v2.
+**EN** In the final hours ATM Γ explodes and marginal PnL is pin risk (S vs K), no longer the RV-vs-IV bet. (a) early-close when ≤x hours remain AND |S−K|/S is inside the pin region; (b) net book-Γ cap (`_cap_scale` pattern) against expiry-concentrated short convexity — relevant for the short-vol arm. Both alter pre-registered rules → v2 ONLY.
+
+### A14 🟡 Sizing vega-normalizzato · Vega-normalized sizing
+> ✅ **CODICE 2026-07-14, INERTE** — `--size-mode vega` + `--size-vega-target` in `04b` (default `contracts` = 1 contratto fisso pre-registrato). Attivazione: pre-registrazione sizing v2 (con A7 nel critical path), post-gate n≥20. · **CODE 2026-07-14, INERT** — activate at the v2 sizing pre-registration (with A7 on the critical path), post-gate n≥20.
+🇮🇹 A size fissa l'esposizione di vol per trade varia col tenor all'entry (~22-30h) → bet non uniformi in spazio-vol, statistica del gate sporca. Normalizzare per la vega di struttura all'entry (`amount = target_vega/Σν`, step 0.1, cap fail-safe) rende ogni trade la stessa bet. Col ladder multi-expiry ([[idea in memoria]]) diventa quasi obbligatorio: senza, i rung corti dominano il Γ di libro. Fallback fail-soft a size fissa se greeks assenti.
+**EN** At fixed size, per-trade vol exposure varies with entry tenor (~22-30h) → non-uniform bets in vol space, noisier gate statistics. Normalizing by entry structure vega (`amount = target_vega/Σν`, 0.1 step, fail-safe cap) makes every trade the same bet. With the multi-expiry ladder it becomes near-mandatory: without it, short rungs dominate book Γ. Fail-soft fallback to fixed size when greeks are missing.
+
 ---
 
 ## B · Verdetto strategico: book a due strumenti (futures + opzioni) · Strategic verdict: two-instrument book
@@ -94,12 +114,12 @@ PnL = ∫ ½·Γ_t·S_t²·(σ²_impl − σ²_real) dt
 ### B3 Sequencing (vincolante) · Sequencing (binding)
 🇮🇹
 1. **ORA:** A6 — logging bid/ask + delta teorico in `04b` (solo colonne diagnostiche, costanti pre-registrate INTATTE, il gate n≥20 chiude sul design congelato).
-2. **POST-GATE (~metà luglio):** `04b` v2 con leg delta-hedge sul perp testnet; **pre-registrare** il confronto hedged vs unhedged (Sharpe per trade, PnL net-of-funding). In parallelo: A2 (quantili RV) + A5 (pesi QLIKE) → alimentano il sizing v2; poi A7 (risk greeks-aware) quando il sizing diventa Kelly-su-edge.
+2. **POST-GATE (~metà luglio):** `04b` v2 con leg delta-hedge sul perp testnet; **pre-registrare** il confronto hedged vs unhedged (Sharpe per trade, PnL net-of-funding) — includendo la scelta banda fixed-vs-ww (A12, confronto offline sul dry-run A6). In parallelo: A2 (quantili RV) + A5 (pesi QLIKE) → alimentano il sizing v2; poi A7 (risk greeks-aware) + A13 (pin-close/gamma cap) + A14 (sizing vega-normalizzato) quando il sizing diventa Kelly-su-edge. A11 (attribution) è offline: usabile in QUALSIASI momento.
 3. **Opportunistici (a retrain pianificato):** A4 (HAR-CJ input); quick-win A8 quando si rigira un training comunque; A3 (mixture-of-universes) come esperimento modello a sé con gate QLIKE pre-registrato.
 
 **EN**
 1. **NOW:** A6 — bid/ask + theoretical-delta logging in `04b` (diagnostic columns only, pre-registered constants UNTOUCHED, the n≥20 gate closes on the frozen design).
-2. **POST-GATE (~mid July):** `04b` v2 with a perp delta-hedge leg on testnet; **pre-register** hedged vs unhedged comparison (per-trade Sharpe, PnL net-of-funding). In parallel: A2 (RV quantiles) + A5 (QLIKE weights) → feed v2 sizing; then A7 when sizing becomes Kelly-on-edge.
+2. **POST-GATE (~mid July):** `04b` v2 with a perp delta-hedge leg on testnet; **pre-register** hedged vs unhedged comparison (per-trade Sharpe, PnL net-of-funding) — including the fixed-vs-ww band choice (A12, offline comparison on the A6 dry-run). In parallel: A2 (RV quantiles) + A5 (QLIKE weights) → feed v2 sizing; then A7 + A13 (pin-close/gamma cap) + A14 (vega-normalized sizing) when sizing becomes Kelly-on-edge. A11 (attribution) is offline: usable at ANY time.
 3. **Opportunistic (at a planned retrain):** A4 (HAR-CJ inputs); A8 quick-wins whenever a training run happens anyway; A3 (mixture-of-universes) as a standalone model experiment with a pre-registered QLIKE gate.
 
 🇮🇹 **Sintesi:** la parte finale del progetto diventa un book a due strumenti con i ruoli **opzioni = veicolo dell'edge (vol), futures = copertura che lo purifica** — mai il contrario.

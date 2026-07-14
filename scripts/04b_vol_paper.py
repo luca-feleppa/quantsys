@@ -189,6 +189,12 @@ class DeribitTestnet:
         return float(self.get("public/ticker",
                               {"instrument_name": instrument})["mark_price"])
 
+    # IT: prezzo indice BTC/USD corrente — input del check pin-risk (A13a).
+    # EN: current BTC/USD index price — input of the pin-risk check (A13a).
+    def index_price(self) -> float:
+        return float(self.get("public/get_index_price",
+                              {"index_name": "btc_usd"})["index_price"])
+
     # IT: ticker completo (bid/ask/mark/IV/greeks) — base del logging diagnostico A6.
     # EN: full ticker (bid/ask/mark/IV/greeks) — basis of the A6 diagnostic logging.
     def ticker(self, instrument: str) -> dict:
@@ -447,10 +453,12 @@ def save_position(pos: dict | None):
         POSITION_PATH.write_text(json.dumps(pos, indent=2, default=str), encoding="utf-8")
 
 
-def fee_btc(premium: float) -> float:
+def fee_btc(premium: float, amount: float = SIZE_CONTRACTS) -> float:
     # IT: fee taker per contratto, cap al 12.5% del premio (schema Deribit opzioni).
+    #     `amount` parametrico per il sizing v2 (A14); default = costante v1.
     # EN: per-contract taker fee, capped at 12.5% of premium (Deribit options schema).
-    return min(FEE_PER_CONTRACT, FEE_CAP_FRAC * premium) * SIZE_CONTRACTS
+    #     `amount` parametric for v2 sizing (A14); default = v1 constant.
+    return min(FEE_PER_CONTRACT, FEE_CAP_FRAC * premium) * amount
 
 
 # ──────────────────────── diagnostica esecuzione (A6) ────────────────────────
@@ -546,6 +554,108 @@ def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
         # EN: diagnostics must never cost a trading tick.
         log.warning(f"exec-diag (A6) fallito/failed — tick NON impattato: "
                     f"{type(e).__name__}: {e}")
+
+
+# ──────────────── funzioni gamma (A12/A13/A14 — lever v2, puri) ────────────────
+def ww_band(fee: float, S: float, gamma_struct: float, lam: float,
+            band_ref: float) -> float:
+    # IT: A12 — half-width della no-trade band asintotica di Whalley–Wilmott (1997)
+    #     sotto costi proporzionali: (3·k·S·Γ²/2λ)^(1/3), in spazio |delta_book|
+    #     BTC-eq (lo stesso della banda fissa). k = fee frazione del nozionale,
+    #     Γ = gamma di struttura in ∂δ/∂S (venue, × amount), λ = avversione al
+    #     rischio (CONGELATA alla pre-registrazione). Clip a [band_ref/4, 4·band_ref]:
+    #     un greek testnet assurdo non può né azzerare la banda (churn illimitato)
+    #     né spalancarla (delta nudo) — stesso spirito del bound MINOR-2.
+    # EN: A12 — asymptotic Whalley–Wilmott (1997) no-trade band half-width under
+    #     proportional costs: (3·k·S·Γ²/2λ)^(1/3), in |book_delta| BTC-eq space
+    #     (same as the fixed band). k = fee as notional fraction, Γ = structure
+    #     gamma in ∂δ/∂S (venue, × amount), λ = risk aversion (FROZEN at
+    #     pre-registration). Clipped to [band_ref/4, 4·band_ref]: an absurd
+    #     testnet greek can neither zero the band (unbounded churn) nor blow it
+    #     open (naked delta) — same spirit as the MINOR-2 bound.
+    h = (1.5 * fee * S * gamma_struct ** 2 / lam) ** (1.0 / 3.0)
+    return float(min(max(h, band_ref / 4.0), band_ref * 4.0))
+
+
+def pin_close_due(strike: float, s_index: float, expiry_ms: float, now_ms: float,
+                  max_hours: float, pin_band: float) -> bool:
+    # IT: A13a — True se la posizione è nella pin region a ridosso della scadenza:
+    #     0 < ore residue ≤ max_hours E |S−K|/S ≤ pin_band. A expiry passata (≤0)
+    #     ritorna False: lì il payoff è congelato, compete a maybe_settle.
+    # EN: A13a — True when the position sits in the pin region near expiry:
+    #     0 < hours left ≤ max_hours AND |S−K|/S ≤ pin_band. Past expiry (≤0)
+    #     returns False: payoff is frozen there, maybe_settle's jurisdiction.
+    t_left_h = (expiry_ms - now_ms) / 3.6e6
+    return 0.0 < t_left_h <= max_hours and abs(s_index - strike) / s_index <= pin_band
+
+
+def vega_sized_amount(vega_sum_usd: float, target_vega_usd: float,
+                      max_contracts: float) -> float:
+    # IT: A14 — contratti per portare la vega di struttura al target: round a step
+    #     0.1 (granularità opzioni Deribit), floor 0.1, cap fail-safe. Input non
+    #     finiti/≤0 → 0.0 (il chiamante fa fallback alla size fissa).
+    # EN: A14 — contracts bringing structure vega to target: rounded to the 0.1
+    #     step (Deribit options granularity), 0.1 floor, fail-safe cap. Non-finite
+    #     or ≤0 inputs → 0.0 (caller falls back to fixed size).
+    if not (np.isfinite(vega_sum_usd) and vega_sum_usd > 0.0
+            and np.isfinite(target_vega_usd) and target_vega_usd > 0.0):
+        return 0.0
+    amt = np.round(target_vega_usd / vega_sum_usd, 1)
+    return float(min(max(amt, 0.1), max_contracts))
+
+
+def maybe_pin_close(db: DeribitTestnet, pos: dict, pcfg: dict, execute: bool) -> bool:
+    # IT: A13a (V2, INERTE senza --pin-close-hours) — chiusura anticipata nella pin
+    #     region: a ≤x ore dalla scadenza con S nella banda |S−K|/S ≤ f il PnL
+    #     marginale è pin-risk (coin-flip su S vs K), non più la bet RV-vs-IV →
+    #     chiudi al market/mark e registra il trade con exit_mode="pin_close".
+    #     ⚠ Cambia la regola hold-to-expiry pre-registrata: SOLO v2. Fail-soft:
+    #     un errore lascia la posizione intatta (settlement resta il default).
+    #     Ritorna True se la posizione è stata chiusa.
+    # EN: A13a (V2, INERT without --pin-close-hours) — early close inside the pin
+    #     region: within ≤x hours of expiry with S inside |S−K|/S ≤ f, marginal
+    #     PnL is pin risk (coin-flip on S vs K), no longer the RV-vs-IV bet →
+    #     close at market/mark and record the trade with exit_mode="pin_close".
+    #     ⚠ Alters the pre-registered hold-to-expiry rule: v2 ONLY. Fail-soft:
+    #     any error leaves the position intact (settlement stays the default).
+    #     Returns True when the position was closed.
+    try:
+        s_idx = db.index_price()
+        if not pin_close_due(float(pos["strike"]), s_idx, float(pos["expiry_ms"]),
+                             time.time() * 1000, pcfg["hours"], pcfg["band"]):
+            return False
+        amt = float(pos.get("amount", SIZE_CONTRACTS))
+        if execute:
+            # IT: chiusura = verbo opposto all'entry (long chiude vendendo).
+            # EN: closing = the verb opposite to entry (a long closes by selling).
+            verb = "sell" if pos["side"] > 0 else "buy"
+            exit_c = db.market_order(pos["call"], verb, amt)
+            exit_p = db.market_order(pos["put"], verb, amt)
+        else:
+            exit_c = db.mark_price(pos["call"])
+            exit_p = db.mark_price(pos["put"])
+        exit_fee = fee_btc(exit_c, amt) + fee_btc(exit_p, amt)
+        # IT: PnL = side·(premio uscita − premio entrata)·amount − fee entry − fee exit
+        #     (stessa convenzione BTC/contratto di maybe_settle).
+        # EN: PnL = side·(exit premium − entry premium)·amount − entry fee − exit fee
+        #     (same BTC-per-contract convention as maybe_settle).
+        pnl = pos["side"] * ((exit_c + exit_p) - (pos["prem_call"] + pos["prem_put"])) \
+            * amt - pos["fee_btc"] - exit_fee
+        rec = {**pos, "exit_prem_call": exit_c, "exit_prem_put": exit_p,
+               "index_at_exit": s_idx, "exit_fee_btc": exit_fee, "pnl_btc": pnl,
+               "exit_mode": "pin_close",
+               "settled_ts": str(pd.Timestamp.now(tz="UTC").floor("s"))}
+        with open(TRADES_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, default=str) + "\n")
+        save_position(None)
+        log.info(f"PIN-CLOSE {('LONG' if pos['side'] > 0 else 'SHORT')} "
+                 f"K={pos['strike']:.0f} S={s_idx:.0f} → PnL={pnl:+.5f} BTC "
+                 f"({'ordini REALI' if execute else 'fill SIMULATO al mark'})")
+        return True
+    except Exception as e:
+        log.error(f"pin-close fallito/failed — posizione INTATTA, settlement resta "
+                  f"il default: {type(e).__name__}: {e}", exc_info=True)
+        return False
 
 
 # ──────────────────── leg delta-hedge perp (V2, B2/A1) ────────────────────
@@ -715,14 +825,32 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
                         f"delta — rebalance skipped")
             return
         side = int(pos["side"])
+        amt = float(pos.get("amount", SIZE_CONTRACTS))
         h_usd_cur = float(st["h_usd"]) if st else 0.0
+
+        # IT: A12 — banda effettiva: fissa (default, design storico) o Whalley–
+        #     Wilmott gamma-scalata (∝ Γ^(2/3), vedi ww_band). Fail-soft: greeks
+        #     gamma assenti → fallback alla banda fissa congelata.
+        # EN: A12 — effective band: fixed (default, legacy design) or gamma-scaled
+        #     Whalley–Wilmott (∝ Γ^(2/3), see ww_band). Fail-soft: missing gamma
+        #     greeks → fallback to the frozen fixed band.
+        band_eff = hcfg["band"]
+        if hcfg.get("band_mode") == "ww":
+            gammas = [l["gamma"] for l in legs]
+            if all(g is not None for g in gammas):
+                g_struct = float(sum(gammas)) * amt
+                band_eff = ww_band(hcfg["fee"], S, g_struct,
+                                   hcfg["ww_lambda"], hcfg["band"])
+            else:
+                log.warning("hedge ww: gamma assente su una leg — banda fissa "
+                            "questo tick / missing gamma — fixed band this tick")
 
         # IT: delta del book in BTC-equivalenti (opzioni + perp già in essere).
         # EN: book delta in BTC-equivalents (options + perp already on).
-        book_delta = side * d_conv * SIZE_CONTRACTS + h_usd_cur / S
-        if abs(book_delta) < hcfg["band"]:
+        book_delta = side * d_conv * amt + h_usd_cur / S
+        if abs(book_delta) < band_eff:
             return                                     # dentro la banda / inside the band
-        h_usd_target = -side * d_conv * SIZE_CONTRACTS * S
+        h_usd_target = -side * d_conv * amt * S
         dh = h_usd_target - h_usd_cur
         dh = float(np.round(dh / PERP_CONTRACT_USD) * PERP_CONTRACT_USD)
         if abs(dh) < PERP_CONTRACT_USD:
@@ -737,6 +865,7 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
             "event": "open" if abs(h_usd_cur) < PERP_CONTRACT_USD else "rebalance",
             "S_underlying": S, "delta_raw": d_raw, "mark_sum": m_sum,
             "conv": hcfg["conv"], "book_delta_pre": book_delta,
+            "band_eff": band_eff, "band_mode": hcfg.get("band_mode", "fixed"),
             "h_usd_before": h_usd_cur, "h_usd_after": h_usd_new, "dh_usd": dh,
             "fill_price": price, "fee_btc": hcfg["fee"] * abs(dh) / price,
             "executed": bool(execute), "position_key": pos_key})
@@ -760,10 +889,16 @@ def maybe_settle(db: DeribitTestnet, pos: dict) -> bool:
     if dp is None:
         log.info("expiry passata ma delivery price non ancora pubblicato — riprovo al prossimo tick")
         return False
-    payoff = abs(dp - pos["strike"]) / dp * SIZE_CONTRACTS
-    premium = (pos["prem_call"] + pos["prem_put"]) * SIZE_CONTRACTS
+    # IT: amount dalla posizione (A14-ready); fallback = costante v1 → bit-identico
+    #     per le posizioni storiche (amount è sempre stato SIZE_CONTRACTS).
+    # EN: amount from the position (A14-ready); fallback = v1 constant → bit-identical
+    #     for historical positions (amount has always been SIZE_CONTRACTS).
+    amt = float(pos.get("amount", SIZE_CONTRACTS))
+    payoff = abs(dp - pos["strike"]) / dp * amt
+    premium = (pos["prem_call"] + pos["prem_put"]) * amt
     pnl = pos["side"] * (payoff - premium) - pos["fee_btc"]
     rec = {**pos, "delivery_price": dp, "payoff_btc": payoff, "pnl_btc": pnl,
+           "exit_mode": "settlement",
            "settled_ts": str(pd.Timestamp.now(tz="UTC").floor("s"))}
     with open(TRADES_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, default=str) + "\n")
@@ -773,16 +908,33 @@ def maybe_settle(db: DeribitTestnet, pos: dict) -> bool:
     return True
 
 
-def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool) -> dict:
+def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool,
+                  size_cfg: dict | None = None) -> dict:
     # IT: apre lo straddle (LONG side=+1 compra, SHORT side=−1 vende). Senza --execute
     #     i fill sono simulati al mark price (zero rumore di fill, pre-registrato).
+    #     A14 (V2, size_cfg non-None): amount = target_vega/Σν all'entry (bet uniforme
+    #     in spazio-vol); fail-soft alla size fissa se le vega venue mancano.
     # EN: opens the straddle (LONG side=+1 buys, SHORT side=−1 sells). Without
     #     --execute, fills are simulated at mark price (zero fill noise, pre-registered).
+    #     A14 (V2, non-None size_cfg): amount = target_vega/Σν at entry (uniform bet
+    #     in vol space); fail-soft to fixed size when venue vegas are missing.
     pick = db.pick_straddle(TENOR_HOURS)
+    amount = SIZE_CONTRACTS
+    if size_cfg is not None:
+        legs = [_leg_snapshot(db, pick["call"]), _leg_snapshot(db, pick["put"])]
+        vegas = [l["vega"] for l in legs]
+        amt = vega_sized_amount(sum(v for v in vegas if v is not None)
+                                if all(v is not None for v in vegas) else 0.0,
+                                size_cfg["target_vega"], size_cfg["max_contracts"])
+        if amt > 0.0:
+            amount = amt
+        else:
+            log.warning("sizing vega (A14): vega venue assente/degenere — fallback "
+                        f"size fissa {SIZE_CONTRACTS} / missing venue vega — fixed-size fallback")
     if execute:
         verb = "buy" if side > 0 else "sell"
-        prem_c = db.market_order(pick["call"], verb, SIZE_CONTRACTS)
-        prem_p = db.market_order(pick["put"], verb, SIZE_CONTRACTS)
+        prem_c = db.market_order(pick["call"], verb, amount)
+        prem_p = db.market_order(pick["put"], verb, amount)
     else:
         prem_c = db.mark_price(pick["call"])
         prem_p = db.mark_price(pick["put"])
@@ -791,9 +943,9 @@ def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool) -> di
         "side": side, "executed": bool(execute),
         "expiry_ms": pick["expiry_ms"], "t_hours_at_entry": round(pick["t_hours"], 2),
         "strike": pick["strike"], "index_at_entry": pick["index"],
-        "call": pick["call"], "put": pick["put"], "amount": SIZE_CONTRACTS,
+        "call": pick["call"], "put": pick["put"], "amount": amount,
         "prem_call": prem_c, "prem_put": prem_p,
-        "fee_btc": fee_btc(prem_c) + fee_btc(prem_p),
+        "fee_btc": fee_btc(prem_c, amount) + fee_btc(prem_p, amount),
         "edge": sig["edge"], "rv_pred": sig["rv_pred"], "var_iv": sig["var_iv"],
     }
     save_position(pos)
@@ -804,13 +956,20 @@ def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool) -> di
 
 
 def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
-         hedge_cfg: dict | None = None):
-    # IT: un ciclo completo: settlement → forecast → IV → regola → log (sempre)
-    #     → hedge (SOLO v2, hedge_cfg non-None; default None = v1 bit-identico).
-    # EN: one full cycle: settlement → forecast → IV → rule → log (always)
-    #     → hedge (v2 ONLY, non-None hedge_cfg; default None = bit-identical v1).
+         hedge_cfg: dict | None = None, pin_cfg: dict | None = None,
+         size_cfg: dict | None = None):
+    # IT: un ciclo completo: settlement → pin-close (SOLO v2) → forecast → IV →
+    #     regola → log (sempre) → hedge (SOLO v2). Tutti i cfg=None = v1 bit-identico.
+    # EN: one full cycle: settlement → pin-close (v2 ONLY) → forecast → IV → rule
+    #     → log (always) → hedge (v2 ONLY). All cfg=None = bit-identical v1.
     pos = load_position()
     if pos is not None and maybe_settle(db, pos):
+        pos = None
+    # IT: A13a — dopo il settlement (expiry passata compete a maybe_settle) e prima
+    #     della regola di entry: un pin-close libera il libro nello stesso tick.
+    # EN: A13a — after settlement (past expiry belongs to maybe_settle) and before
+    #     the entry rule: a pin-close frees the book within the same tick.
+    if pos is not None and pin_cfg is not None and maybe_pin_close(db, pos, pin_cfg, execute):
         pos = None
 
     f = fc.forecast()
@@ -838,7 +997,7 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
     if row["action"] in ("LONG", "SHORT"):
         open_straddle(db, +1 if row["action"] == "LONG" else -1,
                       {"edge": row["edge"], "rv_pred": f["rv_pred"],
-                       "var_iv": row["var_iv"]}, execute)
+                       "var_iv": row["var_iv"]}, execute, size_cfg)
 
     # IT: A6 — dopo l'eventuale open, così la riga cattura le leg della posizione
     #     appena aperta al momento dell'ingresso (half-spread di entry reale).
@@ -902,6 +1061,45 @@ def main():
     ap.add_argument("--hedge-fee", type=float, default=DEFAULT_HEDGE_FEE,
                     help="fee taker perp (frazione nozionale, solo contabilità "
                          "ledger) / perp taker fee (ledger accounting only)")
+    # IT: A12 (V2) — modalità banda: fixed (default, design storico) o ww =
+    #     Whalley–Wilmott gamma-scalata; con ww, λ è OBBLIGATORIA (pattern MINOR-3:
+    #     il valore va CONGELATO dalla pre-registrazione hedged-vs-unhedged).
+    # EN: A12 (V2) — band mode: fixed (default, legacy design) or ww = gamma-scaled
+    #     Whalley–Wilmott; with ww, λ is REQUIRED (MINOR-3 pattern: the value must
+    #     be FROZEN by the hedged-vs-unhedged pre-registration).
+    ap.add_argument("--hedge-band-mode", choices=["fixed", "ww"], default="fixed",
+                    help="banda no-trade: fixed (default) o ww gamma-scalata "
+                         "Whalley–Wilmott / no-trade band: fixed (default) or "
+                         "gamma-scaled Whalley–Wilmott")
+    ap.add_argument("--hedge-ww-lambda", type=float, default=None,
+                    help="avversione al rischio λ della banda ww (OBBLIGATORIA con "
+                         "--hedge-band-mode ww) / ww-band risk aversion λ "
+                         "(REQUIRED with --hedge-band-mode ww)")
+    # IT: A13a (V2, INERTI) — early-close nella pin region: entrambe obbligatorie
+    #     insieme; default None = hold-to-expiry pre-registrato INTATTO.
+    # EN: A13a (V2, INERT) — pin-region early close: both required together;
+    #     default None = pre-registered hold-to-expiry UNTOUCHED.
+    ap.add_argument("--pin-close-hours", type=float, default=None,
+                    help="chiudi anticipato se restano ≤ X ore E S è nella pin band "
+                         "(v2; default OFF) / close early when ≤ X hours remain AND "
+                         "S is inside the pin band (v2; default OFF)")
+    ap.add_argument("--pin-close-band", type=float, default=None,
+                    help="pin region |S−K|/S ≤ f per l'early-close (v2, con "
+                         "--pin-close-hours) / pin region |S−K|/S ≤ f for the "
+                         "early close (v2, with --pin-close-hours)")
+    # IT: A14 (V2, INERTE) — sizing vega-normalizzato: amount = target/Σν all'entry.
+    # EN: A14 (V2, INERT) — vega-normalized sizing: amount = target/Σν at entry.
+    ap.add_argument("--size-mode", choices=["contracts", "vega"], default="contracts",
+                    help="contracts = size fissa pre-registrata (default); vega = "
+                         "amount vega-normalizzato (v2) / contracts = pre-registered "
+                         "fixed size (default); vega = vega-normalized amount (v2)")
+    ap.add_argument("--size-vega-target", type=float, default=None,
+                    help="vega di struttura target in USD/vol-pt (OBBLIGATORIA con "
+                         "--size-mode vega) / target structure vega in USD/vol-pt "
+                         "(REQUIRED with --size-mode vega)")
+    ap.add_argument("--size-max-contracts", type=float, default=10.0,
+                    help="cap fail-safe sull'amount vega-normalizzato / fail-safe "
+                         "cap on the vega-normalized amount")
     args = ap.parse_args()
 
     cfg = load_config("config/default.yaml")
@@ -927,10 +1125,19 @@ def main():
                 "congelati dalla pre-registrazione in STATUS.md) / --hedge requires "
                 "EXPLICIT --hedge-band and --hedge-conv (frozen by the STATUS.md "
                 "pre-registration)")
+        if args.hedge_band_mode == "ww" and args.hedge_ww_lambda is None:
+            raise SystemExit(
+                "--hedge-band-mode ww richiede --hedge-ww-lambda ESPLICITA (valore "
+                "congelato dalla pre-registrazione) / ww band mode requires an "
+                "EXPLICIT --hedge-ww-lambda (frozen by the pre-registration)")
         hedge_cfg = {"band": float(args.hedge_band), "conv": args.hedge_conv,
-                     "fee": float(args.hedge_fee)}
+                     "fee": float(args.hedge_fee),
+                     "band_mode": args.hedge_band_mode,
+                     "ww_lambda": (float(args.hedge_ww_lambda)
+                                   if args.hedge_ww_lambda is not None else None)}
         log.warning(f"V2 HEDGE ATTIVO: band={hedge_cfg['band']} conv={hedge_cfg['conv']} "
-                    f"fee={hedge_cfg['fee']:.1e} — verificare che la pre-registrazione "
+                    f"fee={hedge_cfg['fee']:.1e} band_mode={hedge_cfg['band_mode']} — "
+                    f"verificare che la pre-registrazione "
                     f"hedged-vs-unhedged sia CHIUSA in STATUS.md / verify the "
                     f"pre-registration is FROZEN in STATUS.md")
         # IT: audit MINOR-1 (riconciliazione) — con --execute lo stato locale
@@ -942,13 +1149,48 @@ def main():
         if args.execute:
             reconcile_hedge_state(db)
 
+    # IT: A13a — pin-close: coppia di parametri obbligatoria (fail-fast, pattern
+    #     MINOR-3); None = regola hold-to-expiry pre-registrata intatta.
+    # EN: A13a — pin close: parameter pair required together (fail-fast, MINOR-3
+    #     pattern); None = pre-registered hold-to-expiry rule untouched.
+    pin_cfg = None
+    if args.pin_close_hours is not None or args.pin_close_band is not None:
+        if args.pin_close_hours is None or args.pin_close_band is None:
+            raise SystemExit(
+                "--pin-close-hours e --pin-close-band vanno passati INSIEME (valori "
+                "congelati dalla pre-registrazione v2) / --pin-close-hours and "
+                "--pin-close-band must be passed TOGETHER (frozen by the v2 "
+                "pre-registration)")
+        pin_cfg = {"hours": float(args.pin_close_hours),
+                   "band": float(args.pin_close_band)}
+        log.warning(f"V2 PIN-CLOSE ATTIVO: hours≤{pin_cfg['hours']} "
+                    f"band={pin_cfg['band']} — la regola hold-to-expiry v1 è "
+                    f"SOSPESA / the v1 hold-to-expiry rule is SUSPENDED")
+
+    # IT: A14 — sizing vega-normalizzato (fail-fast sul target, pattern MINOR-3).
+    # EN: A14 — vega-normalized sizing (fail-fast on the target, MINOR-3 pattern).
+    size_cfg = None
+    if args.size_mode == "vega":
+        if args.size_vega_target is None:
+            raise SystemExit(
+                "--size-mode vega richiede --size-vega-target ESPLICITO (valore "
+                "congelato dalla pre-registrazione v2) / --size-mode vega requires "
+                "an EXPLICIT --size-vega-target (frozen by the v2 pre-registration)")
+        size_cfg = {"target_vega": float(args.size_vega_target),
+                    "max_contracts": float(args.size_max_contracts)}
+        log.warning(f"V2 SIZING VEGA ATTIVO: target={size_cfg['target_vega']} "
+                    f"USD/vol-pt cap={size_cfg['max_contracts']} contratti — la "
+                    f"size fissa v1 è SOSPESA / the v1 fixed size is SUSPENDED")
+
     log.info(f"vol-paper avviato/started — soglia edge ±{EDGE_THRESHOLD}, "
              f"size {SIZE_CONTRACTS} contratti/leg, "
              f"{'ESECUZIONE TESTNET' if args.execute else 'SIMULAZIONE mark-price'}"
-             f"{' + DELTA-HEDGE v2' if hedge_cfg is not None else ''}")
+             f"{' + DELTA-HEDGE v2' if hedge_cfg is not None else ''}"
+             f"{' + PIN-CLOSE v2' if pin_cfg is not None else ''}"
+             f"{' + SIZING-VEGA v2' if size_cfg is not None else ''}")
     while True:
         try:
-            tick(fc, db, args.execute, hedge_cfg)
+            tick(fc, db, args.execute, hedge_cfg, pin_cfg, size_cfg)
         except KeyboardInterrupt:
             return
         except Exception as e:
