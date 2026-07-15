@@ -71,4 +71,62 @@ foreach ($t in $targets) {
     }
 }
 
+# --- 3. Freshness regime probs (B7) / regime probs freshness (B7) ----------
+# IT: se le candele hanno >= $RegimeStaleBars barre orarie oltre il checkpoint
+#     walk-forward, lancia il refresh incrementale (01b --regime-incremental:
+#     0-1 fit MLE, minuti) in background. Con candele congelate (es. span
+#     esperimenti A3/A8) il check stampa "fresco" ed e' un no-op. L'append
+#     incrementale NON altera le righe storiche (catena causale, scaler
+#     congelato): non puo' disallineare esperimenti in corso.
+# EN: if the candles are >= $RegimeStaleBars hourly bars past the walk-forward
+#     checkpoint, launch the incremental refresh (01b --regime-incremental:
+#     0-1 MLE fits, minutes) in the background. With frozen candles (e.g. the
+#     A3/A8 experiment span) the check prints "fresh" and is a no-op. The
+#     incremental append does NOT alter historical rows (causal chain, frozen
+#     scaler): it cannot misalign running experiments.
+$RegimeStaleBars = 168  # IT: soglia = 1 settimana di barre 1h / EN: threshold = 1 week of 1h bars
+# IT: NOTA quoting: solo apici SINGOLI nel codice python — PS 5.1 strippa le
+#     doppie virgolette negli argomenti ai native exe (bug classico di quoting).
+# EN: quoting NOTE: SINGLE quotes only in the python code — PS 5.1 strips double
+#     quotes in arguments to native exes (classic quoting bug).
+$pyRegimeCheck = @'
+import pickle, sys
+from pathlib import Path
+import pandas as pd
+c = Path('data/raw_candles.parquet'); k = Path('data/regime_wf_checkpoint.pkl')
+if not c.exists() or not k.exists():
+    print(-1); sys.exit(0)
+s = pd.read_parquet(c, columns=['open_time'])['open_time']
+if not pd.api.types.is_datetime64_any_dtype(s):
+    s = pd.to_datetime(s, unit='ms', utc=True)
+t = s.max()
+t = t.tz_localize('UTC') if t.tz is None else t.tz_convert('UTC')
+with open(k, 'rb') as f:
+    ts = pickle.load(f)['last_timestamp']
+print(int((t - ts) / pd.Timedelta('1h')))
+'@
+$barsNew = & $Py -c $pyRegimeCheck 2>$null | Select-Object -Last 1
+if ($barsNew -match '^-?\d+$') {
+    $barsNew = [int]$barsNew
+    if ($barsNew -lt 0) {
+        Write-Output "[sessione] regime B7: candele o checkpoint assenti - check saltato / missing artifacts, check skipped"
+    } elseif ($barsNew -ge $RegimeStaleBars) {
+        # IT: anti-duplicazione: un 01b gia' vivo (full rebuild o incrementale) ha la precedenza.
+        # EN: anti-duplication: an already-alive 01b (full rebuild or incremental) takes precedence.
+        $alive01b = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+                      Where-Object { $_.CommandLine -match "01b_download_macro" })
+        if ($alive01b.Count -gt 0) {
+            Write-Output "[sessione] regime B7: 01b GIA' ATTIVO (pid $($alive01b[0].ProcessId)) - non rilancio / already running"
+        } else {
+            Start-Process -WindowStyle Hidden -WorkingDirectory $ProjRoot -FilePath $Py `
+                -ArgumentList @("scripts/01b_download_macro.py", "--regime-incremental")
+            Write-Output "[sessione] regime B7: STALE ($barsNew barre nuove >= $RegimeStaleBars) - refresh incrementale AVVIATO in background (esito in logs\quantsys_*.log) / incremental refresh STARTED"
+        }
+    } else {
+        Write-Output "[sessione] regime B7: fresco / fresh ($barsNew barre nuove / new bars < $RegimeStaleBars)"
+    }
+} else {
+    Write-Warning "[sessione] regime B7: check fallito/failed ($barsNew) - refresh manuale: python scripts\01b_download_macro.py --regime-incremental"
+}
+
 Write-Output "[sessione] pronto / ready. Log vivi: logs\quantsys_*.log (piu' recenti per mtime)"

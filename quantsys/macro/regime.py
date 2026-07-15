@@ -396,6 +396,11 @@ class RegimeMarkovSwitching:
         self.scaler       = RobustScaler()
         self.feature_cols: list[str] = []
         self._params_cache: dict | None = None
+        # IT: stato di catena walk-forward (B7): popolato a fine fit_predict_walkforward,
+        #     serializzato nel checkpoint per la continuazione incrementale.
+        # EN: walk-forward chain state (B7): populated at the end of fit_predict_walkforward,
+        #     serialized into the checkpoint for incremental continuation.
+        self._wf_state: dict | None = None
 
     # IT: Come la versione HMM, ma scarta anche le colonne interamente NaN (PCA non le tollera).
     # EN: Like the HMM version, but also drops all-NaN columns (PCA cannot handle them).
@@ -535,6 +540,7 @@ class RegimeMarkovSwitching:
         df_macro:     pd.DataFrame,
         burn_in_days: int = 365,
         retrain_days: int = 90,
+        _stop_at:     int | None = None,
     ) -> pd.DataFrame:
         """
         Walk-forward expanding window con Markov-Switching + PCA.
@@ -547,6 +553,11 @@ class RegimeMarkovSwitching:
           2. MarkovRegression su PC1[:t]
           3. Hamilton filter per i giorni successivi fino al prossimo retrain,
              trasformando ogni x_t con la PCA corrente
+
+        `_stop_at`: SOLO per i test di bit-parity B7 (default None = comportamento
+        production bit-invariato): tronca il loop alla barra indicata lasciando
+        scaler e storage identici al run pieno, così `continue_walkforward` può
+        essere confrontata bit-per-bit col run pieno sulle barre restanti.
         """
         if "open_time" in df_macro.columns:
             df_daily = df_macro.groupby(
@@ -590,7 +601,11 @@ class RegimeMarkovSwitching:
             f"{self.n_regimes} regimi, PCA expanding window ..."
         )
 
-        for t in range(burn_in_days, n):
+        # IT: n_eff = fine del loop (B7: _stop_at tronca per il golden test; None = n).
+        # EN: n_eff = loop end (B7: _stop_at truncates for the golden test; None = n).
+        n_eff = n if _stop_at is None else min(int(_stop_at), n)
+
+        for t in range(burn_in_days, n_eff):
             if current_params is None or (t - last_retrain) >= retrain_days:
                 if t >= 50:
                     try:
@@ -644,6 +659,28 @@ class RegimeMarkovSwitching:
                     pc1_t, current_params, last_filtered
                 )
                 probs_all[t] = last_filtered
+
+        # IT: B7 — stash dello stato di catena a fine loop (PRIMA del fit finale, che
+        #     sovrascrive self.pca/self.model col fit full-sample): è tutto ciò che serve
+        #     a continue_walkforward per riprendere l'append senza rifare la storia.
+        #     Copie difensive: il fit finale e i consumer non devono mutare lo stash.
+        # EN: B7 — chain-state stash at loop end (BEFORE the final fit, which overwrites
+        #     self.pca/self.model with the full-sample fit): everything that
+        #     continue_walkforward needs to resume appending without redoing history.
+        #     Defensive copies: the final fit and consumers must not mutate the stash.
+        self._wf_state = {
+            "params":          None if current_params is None else {
+                k: np.array(v, copy=True) for k, v in current_params.items()
+            },
+            "pca":             current_pca,
+            "prev_components": None if prev_components is None
+                               else prev_components.copy(),
+            "last_filtered":   last_filtered.copy(),
+            "last_retrain":    last_retrain,
+            "n_bars":          n_eff,
+            "burn_in_bars":    burn_in_days,
+            "retrain_bars":    retrain_days,
+        }
 
         # Fit finale su tutto lo storico (per produzione/predict_proba)
         self._pca_fit_transform(X_norm)
@@ -705,6 +742,163 @@ class RegimeMarkovSwitching:
                     f"σ²={params['variances'][r]:.3f}, "
                     f"P(stay)={params['trans'][r,r]:.2%}"
                 )
+
+    # IT: B7 — continuazione incrementale del walk-forward da uno stato di catena persistito.
+    # EN: B7 — incremental walk-forward continuation from a persisted chain state.
+    def continue_walkforward(self, df_macro: pd.DataFrame,
+                             state: dict) -> pd.DataFrame:
+        """
+        Estende il walk-forward alle sole barre nuove (append) riprendendo dallo
+        stato di catena `state` (formato di `self._wf_state`), SENZA rifare i
+        refit storici. Bit-parity garantita verso il **run originale esteso a
+        scaler CONGELATO** (è ciò che il golden test misura via `_stop_at`):
+        un full rebuild sullo span esteso rifitterebbe il RobustScaler globale
+        → X_norm diverso su tutte le barre → divergenza lieve attesa e
+        documentata (re-ancoraggio con full rebuild periodico). Lo scaler
+        congelato è strettamente causale sulle barre nuove (più del fit
+        globale del rebuild): nessun lookahead.
+
+        ⚠ MIRROR del blocco retrain+filter di `fit_predict_walkforward`: qualsiasi
+        modifica là va replicata qui (golden test in tests/test_regime_incremental.py
+        fallisce in caso di divergenza). Il passo Hamilton per-barra è lo STESSO
+        metodo (`_hamilton_filter_step`) — zona da-non-toccare, nessuna copia.
+
+        Args:
+            df_macro: storia COMPLETA (barre vecchie + nuove), stessa costruzione
+                      feature del run pieno. Serve intera: i retrain sono
+                      expanding-window su [:t].
+            state:    stato di catena (chiavi di `_wf_state`); viene AGGIORNATO
+                      in place a fine run (n_bars/last_* /params/pca) per il
+                      re-save del checkpoint.
+
+        Returns:
+            DataFrame con le SOLE righe nuove (posizionali [n_old:n)) e colonne
+            regime_prob_i / regime_dominant / regime_burn_in=False.
+        """
+        # IT: stesso pre-processing del run pieno, ma con colonne e scaler CONGELATI
+        #     dallo stato (nessun refit: è ciò che rende l'append deterministico).
+        # EN: same pre-processing as the full run, but with columns and scaler FROZEN
+        #     from the state (no refit: this is what makes the append deterministic).
+        if "open_time" in df_macro.columns:
+            df_daily = df_macro.groupby(
+                df_macro["open_time"].dt.date
+            ).first().reset_index(drop=True)
+        else:
+            df_daily = df_macro
+
+        missing = [c for c in self.feature_cols if c not in df_daily.columns]
+        if missing:
+            raise RuntimeError(
+                f"continue_walkforward: colonne mancanti nel df nuovo: {missing}"
+            )
+        X_raw = df_daily[self.feature_cols].values
+        n     = len(X_raw)
+        n_old = int(state["n_bars"])
+        if n < n_old:
+            raise RuntimeError(
+                f"continue_walkforward: storia nuova ({n} barre) più corta dello "
+                f"stato persistito ({n_old}): dati troncati o checkpoint stale."
+            )
+        if state["params"] is None or state["pca"] is None:
+            raise RuntimeError(
+                "continue_walkforward: stato senza parametri/PCA (walk-forward "
+                "originale mai riuscito a fittare): serve un full rebuild."
+            )
+        X_norm = np.clip(self.scaler.transform(
+            np.nan_to_num(X_raw, nan=0.0)
+        ), -5, 5)
+
+        retrain_days    = int(state["retrain_bars"])
+        current_params  = state["params"]
+        current_pca     = state["pca"]
+        prev_components = state["prev_components"]
+        last_filtered   = np.array(state["last_filtered"], copy=True)
+        last_retrain    = int(state["last_retrain"])
+
+        # IT: proiezione PC1 dell'intera storia sotto la PCA corrente (stesso
+        #     pattern-cache A6 del run pieno: causale, si indicizza solo [t]).
+        # EN: PC1 projection of the whole history under the current PCA (same A6
+        #     cache pattern as the full run: causal, only [t] is indexed).
+        pc1_cache = current_pca.transform(X_norm)[:, 0]
+
+        probs_new = np.full((n - n_old, self.n_regimes), 1.0 / self.n_regimes)
+        n_retrains = 0
+
+        log.info(
+            f"Walk-forward INCREMENTALE: {n - n_old} barre nuove "
+            f"(da {n_old} a {n}), ultimo retrain a t={last_retrain}, "
+            f"prossimo a t={last_retrain + retrain_days}"
+        )
+
+        for t in range(n_old, n):
+            # ── MIRROR del blocco retrain del run pieno (differenza: current_params
+            #    non è mai None, verificato sopra) ─ MIRROR of the full-run retrain block
+            if (t - last_retrain) >= retrain_days:
+                if t >= 50:
+                    try:
+                        pca_t = PCA(n_components=current_pca.n_components_,
+                                    random_state=self.random_state)
+                        pca_t.fit(X_norm[:t])
+                        if prev_components is not None:
+                            if np.dot(pca_t.components_[0],
+                                      prev_components[0]) < 0:
+                                pca_t.components_[0] *= -1
+                        prev_components = pca_t.components_.copy()
+                        current_pca = pca_t
+                        pc1_cache = current_pca.transform(X_norm)[:, 0]
+
+                        result = self._fit_single(pc1_cache[:t])
+                        if result is not None:
+                            current_params = self._extract_params(result)
+                            fmp = result.filtered_marginal_probabilities
+                            if isinstance(fmp, pd.DataFrame):
+                                last_filtered = fmp.values[-1].copy()
+                            else:
+                                last_filtered = fmp[-1].copy()
+                            last_retrain = t
+                            n_retrains += 1
+                            log.info(
+                                f"  Retrain (incrementale) a t={t}/{n}: "
+                                f"llf={result.llf:.1f}, "
+                                f"PCA var={pca_t.explained_variance_ratio_[0]:.1%}"
+                            )
+                    except Exception as e:
+                        log.warning(
+                            f"  MarkovSwitching fit fallito a t={t}: {e}"
+                        )
+
+            last_filtered = self._hamilton_filter_step(
+                pc1_cache[t], current_params, last_filtered
+            )
+            probs_new[t - n_old] = last_filtered
+
+        # IT: aggiorna lo stato in place per il re-save del checkpoint (append riuscito).
+        # EN: update the state in place for the checkpoint re-save (append succeeded).
+        state.update({
+            "params":          {k: np.array(v, copy=True)
+                                for k, v in current_params.items()},
+            "pca":             current_pca,
+            "prev_components": None if prev_components is None
+                               else prev_components.copy(),
+            "last_filtered":   last_filtered.copy(),
+            "last_retrain":    last_retrain,
+            "n_bars":          n,
+        })
+
+        result_df = pd.DataFrame(
+            probs_new,
+            index   = df_daily.index[n_old:],
+            columns = [f"regime_prob_{i}" for i in range(self.n_regimes)],
+        )
+        result_df["regime_dominant"] = probs_new.argmax(axis=1)
+        # IT: le barre nuove sono sempre post burn-in (il burn-in vive nel run originale).
+        # EN: new bars are always post burn-in (burn-in lives in the original run).
+        result_df["regime_burn_in"]  = False
+
+        log.info(
+            f"Incrementale completato: {n - n_old} barre, {n_retrains} retrain."
+        )
+        return result_df
 
     # IT: Fit finale su tutto lo storico (PCA+MS) per produzione/live; popola la cache parametri.
     # EN: Final fit on the full history (PCA+MS) for production/live; populates the param cache.
@@ -1248,6 +1442,265 @@ class RegimeMarkovBTC:
         obj.scaler = engine.scaler
         obj.feature_cols = engine.feature_cols
         return obj
+
+    # ── B7 — checkpoint walk-forward incrementale ────────────────────────────
+    # IT: Il checkpoint persiste la CATENA del walk-forward (parametri dell'ultimo
+    #     retrain, PCA sign-aligned, posteriore filtrato, cadenza, scaler congelato):
+    #     è ciò che il pkl production NON contiene (quello ha solo il fit finale
+    #     full-sample per predict_proba). Con il checkpoint, estendere il parquet
+    #     costa 0-1 fit MLE invece di ~30 (minuti vs ore).
+    # EN: The checkpoint persists the walk-forward CHAIN (last-retrain params,
+    #     sign-aligned PCA, filtered posterior, cadence, frozen scaler): what the
+    #     production pkl does NOT contain (that one only has the final full-sample
+    #     fit for predict_proba). With the checkpoint, extending the parquet costs
+    #     0-1 MLE fits instead of ~30 (minutes vs hours).
+
+    _WF_CKPT_SCHEMA = 1
+
+    # IT: Scrittura atomica del checkpoint (pattern .tmp + os.replace dei safety net).
+    # EN: Atomic checkpoint write (the safety-net .tmp + os.replace pattern).
+    @staticmethod
+    def save_wf_checkpoint(ckpt: dict, path: str) -> None:
+        import os
+        tmp = str(path) + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(ckpt, f)
+        os.replace(tmp, str(path))
+        log.info(
+            f"Checkpoint walk-forward → {path} "
+            f"(n_bars={ckpt['chain']['n_bars']}, "
+            f"last_retrain={ckpt['chain']['last_retrain']}, "
+            f"last_ts={ckpt['last_timestamp']})"
+        )
+
+    # IT: Compone il dict checkpoint dallo stato engine post-run (full o incrementale).
+    # EN: Builds the checkpoint dict from the engine state after a run (full or incremental).
+    def build_wf_checkpoint(self, chain: dict,
+                            last_timestamp: pd.Timestamp) -> dict:
+        eng = self._engine
+        return {
+            "schema_version": self._WF_CKPT_SCHEMA,
+            "chain":          chain,
+            "scaler":         eng.scaler,
+            "feature_cols":   eng.feature_cols,
+            "n_regimes":      eng.n_regimes,
+            "n_pca":          eng.n_pca,
+            "n_iter":         eng.n_iter,
+            "n_restarts":     eng.n_restarts,
+            "random_state":   eng.random_state,
+            "last_timestamp": last_timestamp,
+        }
+
+    # IT: Continuazione incrementale: candele fresche + checkpoint → SOLO righe nuove.
+    # EN: Incremental continuation: fresh candles + checkpoint → NEW rows only.
+    def continue_from_checkpoint(self, checkpoint_path: str,
+                                 expected_index: pd.Index | None = None,
+                                 ) -> tuple[pd.DataFrame, dict]:
+        """
+        Estende il walk-forward alle barre orarie successive al checkpoint.
+
+        Fail-fast (RuntimeError) su: schema/n_regimi del checkpoint, timestamp
+        di frontiera e — se `expected_index` è fornito (l'index del parquet
+        esistente) — sull'intero index dello span coperto. NESSUN fallback
+        silenzioso: un append sbagliato avvelenerebbe il parquet.
+        ⚠ La CADENZA usata è quella congelata nel checkpoint (coerenza di
+        catena); la validazione config↔checkpoint è a carico del chiamante
+        (vedi `run_regime_incremental` in 01b).
+
+        Returns:
+            (df_new, ckpt): righe nuove (index orario UTC) + checkpoint AGGIORNATO
+            (da ri-salvare via save_wf_checkpoint DOPO il salvataggio del parquet:
+            l'ordine parquet→checkpoint garantisce che un crash lasci al peggio un
+            checkpoint stale, mai un parquet avanti rispetto al checkpoint).
+        """
+        with open(checkpoint_path, "rb") as f:
+            ckpt = pickle.load(f)
+        if ckpt.get("schema_version") != self._WF_CKPT_SCHEMA:
+            raise RuntimeError(
+                f"Checkpoint schema {ckpt.get('schema_version')} ≠ "
+                f"{self._WF_CKPT_SCHEMA}: rigenera con --regime-bootstrap-checkpoint."
+            )
+        if ckpt["n_regimes"] != self.n_regimes:
+            raise RuntimeError(
+                f"n_regimes checkpoint ({ckpt['n_regimes']}) ≠ config "
+                f"({self.n_regimes}): full rebuild richiesto."
+            )
+
+        # IT: engine configurato DAL checkpoint (single source of truth: scaler
+        #     congelato, colonne, iperparametri del fit).
+        # EN: engine configured FROM the checkpoint (single source of truth:
+        #     frozen scaler, columns, fit hyper-parameters).
+        eng              = self._engine
+        eng.scaler       = ckpt["scaler"]
+        eng.feature_cols = ckpt["feature_cols"]
+        eng.n_iter       = ckpt["n_iter"]
+        eng.n_restarts   = ckpt["n_restarts"]
+        eng.random_state = ckpt["random_state"]
+
+        df_btc = self._build_btc_hourly_df()
+        n_old  = int(ckpt["chain"]["n_bars"])
+        if len(df_btc) < n_old:
+            raise RuntimeError(
+                f"Candele aggregate ({len(df_btc)} ore) meno del checkpoint "
+                f"({n_old}): storia troncata — full rebuild richiesto."
+            )
+        # IT: la frontiera DEVE combaciare: l'aggregazione oraria delle barre
+        #     vecchie è deterministica, un mismatch = candele cambiate sotto i piedi.
+        # EN: the boundary MUST match: hourly aggregation of old bars is
+        #     deterministic, a mismatch = candles changed under our feet.
+        if df_btc.index[n_old - 1] != ckpt["last_timestamp"]:
+            raise RuntimeError(
+                f"Frontiera disallineata: checkpoint @ {ckpt['last_timestamp']}, "
+                f"candele @ {df_btc.index[n_old - 1]} — full rebuild o re-bootstrap."
+            )
+        # IT: (audit MINOR-2) con expected_index valida TUTTO lo span coperto, non
+        #     solo la frontiera: intercetta revisioni in-place della storia candele
+        #     a parità di row-count e ultimo timestamp.
+        # EN: (audit MINOR-2) with expected_index validate the WHOLE covered span,
+        #     not just the boundary: catches in-place candle-history revisions with
+        #     identical row-count and last timestamp.
+        if expected_index is not None and not df_btc.index[:n_old].equals(expected_index):
+            raise RuntimeError(
+                "Index candele-aggregate ≠ index atteso sullo span coperto "
+                "(storia candele modificata in-place?) — full rebuild richiesto."
+            )
+
+        df_new = eng.continue_walkforward(df_btc, ckpt["chain"])
+        if len(df_new):
+            ckpt["last_timestamp"] = df_new.index[-1]
+        return df_new, ckpt
+
+    # IT: Bootstrap una-tantum del checkpoint da pkl+parquet ESISTENTI (nessun rebuild):
+    #     ricostruisce lo stato all'ultimo retrain con UN fit MLE e lo VALIDA replay-ando
+    #     la coda contro il parquet production (golden test integrato).
+    # EN: One-off checkpoint bootstrap from EXISTING pkl+parquet (no rebuild):
+    #     reconstructs the last-retrain state with ONE MLE fit and VALIDATES it by
+    #     replaying the tail against the production parquet (built-in golden test).
+    def bootstrap_wf_checkpoint(
+        self,
+        hmm_path:        str,
+        parquet_path:    str,
+        checkpoint_path: str,
+        burn_in_days:    int = 30,
+        retrain_days:    int = 90,
+        atol:            float = 1e-9,
+    ) -> dict:
+        """
+        Assunzioni (validate dal replay, fail-fast in caso contrario):
+          · il run originale ha usato gli stessi iperparametri di fit dell'engine
+            corrente (n_iter/n_restarts/random_state — default production);
+          · tutti i retrain schedulati sono riusciti (cadenza regolare da burn-in);
+          · lo scaler persistito nel pkl è quello del run (fit globale sul span).
+        Il sign della PCA ricostruita è allineato alla PCA finale persistita, che
+        il run originale ha allineato alla stessa catena → orientazione identica.
+        """
+        engine = RegimeMarkovSwitching.load(hmm_path)
+        if engine.n_regimes != self.n_regimes:
+            raise RuntimeError(
+                f"n_regimes pkl ({engine.n_regimes}) ≠ config ({self.n_regimes})."
+            )
+
+        df_btc    = self._build_btc_hourly_df()
+        probs_old = pd.read_parquet(parquet_path)
+        n = len(probs_old)
+        if len(df_btc) < n:
+            raise RuntimeError(
+                f"Candele ({len(df_btc)} ore) meno del parquet ({n}): "
+                f"storia troncata."
+            )
+        if not df_btc.index[:n].equals(probs_old.index):
+            raise RuntimeError(
+                "Index candele-aggregate ≠ index parquet sul span coperto: "
+                "aggregazione non riproducibile — full rebuild richiesto."
+            )
+
+        burn_in_h = burn_in_days * 24
+        retrain_h = retrain_days * 24
+        if n <= burn_in_h + retrain_h:
+            raise RuntimeError("Storia troppo corta per il bootstrap: full rebuild.")
+        # IT: ultimo retrain schedulato: primo a burn_in, poi ogni retrain_h barre.
+        # EN: last scheduled retrain: first at burn_in, then every retrain_h bars.
+        last_retrain = burn_in_h + retrain_h * ((n - 1 - burn_in_h) // retrain_h)
+
+        X_raw  = df_btc[engine.feature_cols].values[:n]
+        X_norm = np.clip(engine.scaler.transform(
+            np.nan_to_num(X_raw, nan=0.0)
+        ), -5, 5)
+
+        pca_k = PCA(n_components=engine.pca.n_components_,
+                    random_state=engine.random_state)
+        pca_k.fit(X_norm[:last_retrain])
+        if np.dot(pca_k.components_[0], engine.pca.components_[0]) < 0:
+            pca_k.components_[0] *= -1
+        pc1 = pca_k.transform(X_norm)[:, 0]
+
+        log.info(
+            f"Bootstrap checkpoint: fit MLE su [:{last_retrain}] "
+            f"(unico fit, ~minuti) + replay di {n - last_retrain} barre ..."
+        )
+        result = engine._fit_single(pc1[:last_retrain])
+        if result is None:
+            raise RuntimeError("Bootstrap: fit MLE fallito su tutti i restart.")
+        params = engine._extract_params(result)
+        fmp = result.filtered_marginal_probabilities
+        last_filtered = (fmp.values[-1] if isinstance(fmp, pd.DataFrame)
+                         else fmp[-1]).copy()
+
+        # IT: replay Hamilton della coda [last_retrain, n) e confronto col parquet:
+        #     golden test contro la produzione — se diverge, il checkpoint NON viene
+        #     scritto (nessun artefatto avvelenato).
+        # EN: Hamilton replay of the tail [last_retrain, n) compared to the parquet:
+        #     golden test against production — on divergence the checkpoint is NOT
+        #     written (no poisoned artifact).
+        prob_cols = [f"regime_prob_{i}" for i in range(engine.n_regimes)]
+        ref    = probs_old[prob_cols].values
+        replay = np.empty((n - last_retrain, engine.n_regimes))
+        lf = last_filtered
+        for i, t in enumerate(range(last_retrain, n)):
+            lf = engine._hamilton_filter_step(pc1[t], params, lf)
+            replay[i] = lf
+
+        diff     = np.abs(replay - ref[last_retrain:])
+        max_diff = float(diff.max())
+        exact    = bool((replay == ref[last_retrain:]).all())
+        if max_diff > atol:
+            raise RuntimeError(
+                f"Bootstrap golden FAIL: max|Δprob|={max_diff:.3e} > atol={atol:.0e} "
+                f"su {n - last_retrain} barre replay — checkpoint NON salvato "
+                f"(iperparametri/versioni divergenti dal run originale?): "
+                f"full rebuild richiesto."
+            )
+
+        # IT: engine mirror per build_wf_checkpoint (scaler/cols dal pkl del run).
+        # EN: engine mirror for build_wf_checkpoint (scaler/cols from the run's pkl).
+        self._engine.scaler       = engine.scaler
+        self._engine.feature_cols = engine.feature_cols
+        self._engine.n_iter       = engine.n_iter
+        self._engine.n_restarts   = engine.n_restarts
+        self._engine.random_state = engine.random_state
+
+        chain = {
+            "params":          {k: np.array(v, copy=True)
+                                for k, v in params.items()},
+            "pca":             pca_k,
+            "prev_components": pca_k.components_.copy(),
+            "last_filtered":   lf.copy(),
+            "last_retrain":    last_retrain,
+            "n_bars":          n,
+            "burn_in_bars":    burn_in_h,
+            "retrain_bars":    retrain_h,
+        }
+        ckpt = self.build_wf_checkpoint(chain, probs_old.index[-1])
+        self.save_wf_checkpoint(ckpt, checkpoint_path)
+
+        report = {"max_diff": max_diff, "exact": exact,
+                  "n_validated": n - last_retrain,
+                  "last_retrain": last_retrain, "n_bars": n}
+        log.info(
+            f"Bootstrap golden PASS: max|Δprob|={max_diff:.3e} "
+            f"(bit-exact={exact}) su {report['n_validated']} barre."
+        )
+        return report
 
 
 # ─── STADIO 2: MacroEncoder ───────────────────────────────────────────────────
