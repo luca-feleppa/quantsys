@@ -26,6 +26,18 @@ model:
   # EN: quantile + MoE supported (legacy: t_student + 1 expert).
   n_output_experts: 4
   loss_type: "quantile"
+  # IT: A9 (roadmap vol) — blocco MaxPool PARALLELO (sensore componente jump:
+  #     somma il forecast latente, backcast scartato, catena AvgPool invariata).
+  #     LEVER INERTE: false = zero parametri nuovi, checkpoint bit-compatibili.
+  #     Attivazione solo a retrain pianificato con gate QLIKE pre-registrato
+  #     (val-first). La chiave persiste in config.json via **mcfg (parity load).
+  # EN: A9 (vol roadmap) — PARALLEL MaxPool block (jump-component sensor: adds
+  #     the latent forecast, backcast discarded, AvgPool chain unchanged).
+  #     INERT LEVER: false = zero new params, bit-compatible checkpoints.
+  #     Activate only at a planned retrain with a pre-registered QLIKE gate
+  #     (val-first). The key persists to config.json via **mcfg (load parity).
+  nhits_max_pool_block: false
+  nhits_max_pool_kernel: 8
 
 # IT: Training — lr basso per stabilità, weight_decay alto, AMP off (gradient overflow).
 # EN: Training — low lr for stability, high weight_decay, AMP off (gradient overflow).

@@ -779,6 +779,10 @@ def load_model(checkpoint: str, config_path: str = None):
             n_output_experts   = cfg.get("n_output_experts", 1),
             use_revin          = cfg.get("use_revin", False),
             revin_target_idx   = cfg.get("revin_target_idx", 0),
+            # IT: A9 — dal config.json del checkpoint (parity train↔inference).
+            # EN: A9 — from the checkpoint's config.json (train↔inference parity).
+            use_max_pool_block = cfg.get("nhits_max_pool_block", False),
+            max_pool_kernel    = cfg.get("nhits_max_pool_kernel", 8),
         )
         log.info(f"load_model: QuantNHiTS (F={n_feat}, T={T}, n_macro={n_mac})")
     elif model_type == "QuantTCNMamba":

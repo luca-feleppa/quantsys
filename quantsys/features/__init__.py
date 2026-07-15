@@ -89,7 +89,8 @@ class FeatureBuilder:
                  windows: list[int] = None, lag_periods: int = 5,
                  forecast_horizon: int = 1, vp_stride: int = 1,
                  frac_diff_d: float = 0.0, use_revin: bool = False,
-                 interval_minutes: int = 1, target_type: str = "ret"):
+                 interval_minutes: int = 1, target_type: str = "ret",
+                 use_har_cj: bool = False):
         self.vp_bins             = vp_bins
         self.vp_lookback         = vp_lookback
         self.windows             = windows or [5, 10, 20, 60]
@@ -117,6 +118,13 @@ class FeatureBuilder:
         # EN: RevIN fix — exclude raw returns from the global RobustScaler so RevIN runs in
         #     raw scale and denormalize_mu yields predictions aligned to the target.
         self.use_revin           = use_revin
+        # IT: A4 (roadmap vol) — feature HAR-CJ (decomposizione bipower/jump come INPUT).
+        #     Default False = lever INERTE: lo step è saltato e le 104 feature restano
+        #     bit-invariate. Attivazione solo a retrain pianificato con gate pre-registrato.
+        # EN: A4 (vol roadmap) — HAR-CJ features (bipower/jump decomposition as INPUT).
+        #     Default False = INERT lever: the step is skipped and the 104 features stay
+        #     bit-invariant. Activation only at a planned retrain with a pre-registered gate.
+        self.use_har_cj          = use_har_cj
         self.scalers:            dict[str, RobustScaler] = {}
         self.scaler:             Optional[RobustScaler]  = None   # IT/EN: multi-column RobustScaler
         self._scale_cols:        list[str]               = []     # IT/EN: columns scaled by the multi-scaler
@@ -703,6 +711,43 @@ class FeatureBuilder:
         df["ret_kurt_20"]     = df["log_ret"].rolling(20).kurt()
         return df
 
+    # ── HAR-CJ features (A4, config-gated) ───────────────────────────────────
+    # IT: Decomposizione continua/jump della varianza realizzata come INPUT
+    #     (Andersen–Bollerslev–Diebold 2007): BV = (π/2)·mean(|r_t|·|r_{t-1}|)
+    #     stima la componente continua (robusta ai salti); J = max(RV−BV, 0) la
+    #     componente jump; jump_ratio = J/RV ∈ [0,1]. C e J hanno persistence
+    #     diverse → separarle aiuta il forecast dei momenti PARI (il probe
+    #     semivarianza è fallito come TARGET, non come input — kill ortogonale).
+    #     Scale TIME-semantic 1d/1w via _tbars (finestre HAR di calendario).
+    #     CAUSALE: solo rolling trailing su log_ret già chiusi (r_t·r_{t-1}).
+    # EN: Continuous/jump decomposition of realized variance as INPUT
+    #     (Andersen–Bollerslev–Diebold 2007): BV = (π/2)·mean(|r_t|·|r_{t-1}|)
+    #     estimates the continuous component (jump-robust); J = max(RV−BV, 0)
+    #     the jump component; jump_ratio = J/RV ∈ [0,1]. C and J have different
+    #     persistence → separating them helps EVEN-moment forecasts (the
+    #     semivariance probe failed as a TARGET, not as input — orthogonal kill).
+    #     TIME-semantic 1d/1w scales via _tbars (calendar HAR windows).
+    #     CAUSAL: trailing rollings on already-closed log_ret only (r_t·r_{t-1}).
+    def _har_cj(self, df):
+        abs_r = df["log_ret"].abs()
+        # IT: prodotto adiacente |r_t|·|r_{t-1}| — a indice t usa solo passato.
+        # EN: adjacent product |r_t|·|r_{t-1}| — at index t uses only the past.
+        bipow = abs_r * abs_r.shift(1)
+        for scale, minutes in (("1d", 1440), ("1w", 10080)):
+            w  = self._tbars(minutes)
+            rv = (df["log_ret"] ** 2).rolling(w).mean()
+            # IT: μ₁⁻² = π/2 rende BV uno stimatore unbiased di RV senza salti.
+            # EN: μ₁⁻² = π/2 makes BV an unbiased estimator of jump-free RV.
+            bv   = (np.pi / 2.0) * bipow.rolling(w).mean()
+            jump = (rv - bv).clip(lower=0.0)
+            # IT: ratio=0 dove RV=0 (barre piatte); NaN di warmup preservati.
+            # EN: ratio=0 where RV=0 (flat bars); warmup NaNs preserved.
+            ratio = (jump / rv.replace(0.0, np.nan)).mask(rv == 0.0, 0.0)
+            df[f"bv_{scale}"]         = bv
+            df[f"jump_{scale}"]       = jump
+            df[f"jump_ratio_{scale}"] = ratio
+        return df
+
     # ── Time features ─────────────────────────────────────────────────────────
     # IT: Encoding ciclico (ora/giorno/mese) + flag sessioni di trading.
     # EN: Cyclic encoding (hour/day/month) + trading-session flags.
@@ -1001,6 +1046,11 @@ class FeatureBuilder:
             ("volume",        self._volume_features),
             ("CVD",           self._cvd_features),
             ("volatility",    self._volatility),
+            # IT: A4 HAR-CJ — step presente SOLO a flag attivo: default OFF = lista
+            #     step e output bit-identici al path production (104 feature).
+            # EN: A4 HAR-CJ — step present ONLY when the flag is on: default OFF =
+            #     step list and output bit-identical to the production path (104 features).
+            *([("HAR-CJ", self._har_cj)] if self.use_har_cj else []),
             ("time",          self._time_features),
             ("lags",          self._lags),
             ("frac_diff",     self._frac_diff),           # IT/EN: López de Prado FFD

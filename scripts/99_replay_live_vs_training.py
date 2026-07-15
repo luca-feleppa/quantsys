@@ -91,6 +91,9 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         use_revin        = bool(mcfg.get("use_revin", False)),
         interval_minutes = getattr(ps, "interval_minutes", 1),
+        # IT: A4 HAR-CJ — stessa config del training (parity replay↔training).
+        # EN: A4 HAR-CJ — same config as training (replay↔training parity).
+        use_har_cj       = bool(fcfg.get("har_cj", False)),
     )
     fb.scaler             = ps.scaler
     fb._scale_cols        = list(ps.scale_cols)

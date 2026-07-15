@@ -5,6 +5,51 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — A8 QUICK-WIN MIXUP (mixup_alpha 0.0→0.2, linea vol 1h) · 2026-07-15 · run nella finestra GPU post-gate-v1
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Zero numeri visti. UN solo run: nessuno sweep su mixup_alpha; qualunque variante suggerita dai risultati = NUOVA pre-registrazione. ⚠ **La metà drop_path di A8 è OBSOLETA** (dead-doc della roadmap): l'incumbent iTransformer vol-1h già addestra con `drop_path_rate: 0.2` dal tuning pre-registrato 2026-06-10 — "aggiungere 0.05" sarebbe una RIDUZIONE della regolarizzazione in carica, cioè un'ipotesi nuova, non un quick-win. A8 si riduce al solo lever mixup.
+
+**Ipotesi/prior onesto (pre-dichiarato):** il mixup temporale (lam biasato verso l'originale, già cablato in `02_train.py`) è l'unica augmentation che preserva la coerenza cross-feature per costruzione, e su target log-RV il mix dei target = media geometrica delle RV (coerente). Con ~1.7k campioni indipendenti effettivi (51k finestre stride-1, overlap 29/30) l'augmentation *potrebbe* ridurre l'overfit residuo → QLIKE ↓. MA: l'incumbent è GIÀ fortemente regolarizzato (dropout 0.3, drop_path 0.2, wd 3e-3, lr 3e-5, tuning pre-registrato) e la guardia storica in `default.yaml` ("abilitare solo se train_nll−val_nll < −0.3") suggerisce beneficio marginale. **Scenario base atteso: nessun effetto misurabile o FAIL sotto soglia; un PASS ≥3% sarebbe informativo.**
+
+**Script/giudice:** training `02_train.py --n-ensemble 5` con `QUANTSYS_ARCH=itransformer_a8_mixup` (overlay `config/arch/itransformer_a8_mixup.yaml` = COPIA di `itransformer.yaml` + `training.mixup_alpha: 0.2`, diff verificato = solo mixup; iperparametri EREDITATI dal tuning 1h, stesso `lstm_dataset.npz`, target `log_rv`); giudice `scripts/vol/dev_vols_qlike.py`, **stesso run di giudice per candidato e incumbent** (stessi sample, stessa inversione completa z→raw).
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a gate val superato, one-shot.
+**Leva sperimentale:** `mixup_alpha` SOLO nell'overlay arch dedicato (mai in `default.yaml` né in `arch/itransformer.yaml` pre-gate: path production bit-identico) + sandbox `QUANTSYS_MODELS_ROOT=models_a8_mixup` — `models/itransformer` (vol PASS production) READ-ONLY.
+
+**Prerequisiti (non condizioni di gate):** (P1) `data/regime_probs.parquet` fresco (rigenerazione in corso 2026-07-15, serve alla condizione ②); (P2) finestra GPU post-chiusura gate v1 con `04b` fermo (contesa CUDA); (P3) sequenziamento con A3 nella stessa finestra: run INDIPENDENTI vs lo stesso incumbent, l'eventuale interazione A3×A8 = NUOVA pre-registrazione.
+
+**Baseline di confronto (pre-dichiarata):** incumbent = ensemble production vol-1h PASS (5 membri, `models/itransformer`), NON un baseline riaddestrato. Asimmetria di seed-draw accettata e dichiarata (la soglia ① ≥3% assorbe parte del rumore di seed). Diagnostica non decisionale: spread QLIKE tra i 5 membri mixup.
+
+**Condizioni di PASS (tutte, AND, su val):**
+1. `QLIKE_val(mixup, ensemble 5 seed) ≤ 0.97 · QLIKE_val(incumbent)` (miglioramento relativo ≥3%, stessi sample).
+2. Nessun regime distrutto: nel regime peggiore per il candidato (labels = argmax del gate causale sullo split), `QLIKE_val(mixup) ≤ 1.05 · QLIKE_val(incumbent)` in QUEL regime.
+3. Campione: ≥5000 sample val valutati E ≥800 nel regime meno popoloso; sotto una delle due soglie NESSUNA conclusione.
+
+**Conseguenze pre-dichiarate:** PASS → conferma one-shot su test (stesse 3 condizioni); se regge, `mixup_alpha: 0.2` diventa **candidato** per il ciclo di retrain SUCCESSIVO della linea vol (mai swap del live durante il forward test in corso). FAIL → `mixup_alpha` resta 0.0, marcato **FALLITO**, l'overlay si elimina, e A10 (attention sparsity) resta l'unico candidato training rimasto in roadmap; scritto comunque. In OGNI caso: la metà drop_path di A8 è chiusa come OBSOLETA (già in produzione a 0.2).
+
+---
+
+## 🟡 SESSIONE 2026-07-15 — Ripresa post-VS Code: P1 A3 IN CORSO + A4/A9 inerti + pre-reg A8 + GJR-1h CHIUSO
+
+**Contesto:** VS Code chiuso per errore; ripresa autonoma sui 5 item pianificati (sequenziali). Verifica processi: NESSUN duplicato — 2 processi logici sani (`01c_iv_poller` stub 13192→worker 10616; `04b --execute` stub 6260→worker 13392, avviati 07:07 da `avvio_sessione.ps1`, sopravvissuti alla chiusura). Pull+merge VPS già eseguiti alle 12:28. **Test suite completa: 259 passed + 1 skip pre-esistente.**
+
+**① P1 pre-reg A3 (MAJOR-1) — `01b --regime-only` implementato, run IN ESECUZIONE:** nuovo flag in `scripts/01b_download_macro.py` (helper `run_regime_detection` condiviso; default senza flag = pipeline completa bit-invariata): rigenera SOLO `regime_probs.parquet`+`regime_hmm.pkl`, skip macro/normalizer/npz. Run lanciato 12:33 su candele 2019→**2026-06-22** (span DELIBERATAMENTE allineato al `lstm_dataset.npz` congelato del 06-22). Log: `logs/01b_regime_only_20260715.log`, ~30 retrain a cadenza 2160h, ETA ~3h. Doc-sync: AVVIO.md tabella script + scripts/README.md.
+
+**② A4 — feature HAR-CJ come INPUT, IMPLEMENTATO INERTE:** `FeatureBuilder._har_cj` (BV=(π/2)·mean(|r_t||r_{t-1}|), J=max(RV−BV,0), jump_ratio=J/RV, scale TIME-semantic 1d/1w via `_tbars` → 6 colonne stream A), gate `features.har_cj: false` in default.yaml (OFF = step saltato, 104 feature bit-invariate), kwarg `use_har_cj` wired su 01/01-update/04/04b/99 (parity train↔live↔replay). Test nuovi `tests/test_har_cj.py` **7/7** (inerzia bit-identica OFF vs ON su colonne condivise, causalità per troncamento, bounds J≥0/ratio∈[0,1], jump detection su spike sintetico). Attivazione = rigen dataset + retrain + gate pre-registrato.
+
+**③ A9 — blocco MaxPool parallelo N-HiTS, IMPLEMENTATO INERTE:** `NHiTSBlock(pool_type="avg"|"max")` (fail-fast su valori ignoti) + `QuantNHiTS(use_max_pool_block, max_pool_kernel=8)`: ramo PARALLELO su `h` originale che somma il forecast latente, backcast scartato → catena residuale AvgPool INVARIATA. OFF (default) = zero parametri nuovi, state_dict/forward bit-identici (test con seed fisso), checkpoint compatibili. Chiavi `nhits_max_pool_block/nhits_max_pool_kernel` in `arch/nhits.yaml` (false), wired in 02_train/02b/load_model (persistono in config.json via `**mcfg`). Test nuovi `tests/test_nhits_maxpool.py` **10/10**.
+
+**④ A8 — PRE-REGISTRATO (sezione gate sopra):** solo lever `mixup_alpha 0.0→0.2`; overlay inerte `config/arch/itransformer_a8_mixup.yaml` creato e VERIFICATO (merge: mixup 0.2, iperparametri tuned ereditati, output isolati). ⚠ Scoperta: la metà drop_path di A8 era DEAD-DOC (incumbent già a 0.2 dal tuning 2026-06-10) → marcata OBSOLETA in roadmap.
+
+**⑤ GJR-GARCH 1h — TODO CHIUSO:** `scripts/vol/estimate_gjr_1h.py` (QMLE+variance targeting via `fit_gjr` condiviso, 65.450 barre 2019→2026-06-22): **ω=1.026e-6, α=0.1011, γ=0.0052, β=0.8732**, persistence 0.977 (half-life 30h), σ incond. 0.67%/barra (62% ann.). Nota empirica: γ≈0.005 → leverage effect quasi nullo a 1h. Config aggiornata (default.yaml=1h; 1m-era preservati in `config/interval/1m.yaml` per rollback); **cap σ del MC ora parametrico** `gjr_sigma_cap` (0.13 a 1h — il vecchio 0.01 hardcoded avrebbe saturato: σ cond. max 8.5%/barra), wired in 04_live_signals. Report `results/vols/gjr_params_1h.json`. Doc-sync: TEORIA §MC, MODEL_IMPROVEMENTS §2, CLAUDE.md, scripts/README.
+
+**⑥ Gate v1: n=18/20** — nuovo settlement 2026-07-15 08:01 UTC (pnl +0.0160 BTC); nessun nuovo duplicato (18 chiavi entry_ts+settled_ts uniche). Mancano **2** settlement (~2 giorni).
+
+**Problemi aperti:** (a) esito run regime da verificare (span atteso fino a 2026-06-22; distribuzione 3 regimi vs prior R0~42/R1~18/R2~40); (b) TUTTO il lavoro della sessione NON è committato (25 file M + 4 nuovi); (c) P3 pre-reg A3 (audit `causality-auditor` sui file A3) mai eseguito — da fare PRIMA del run A3.
+
+**▶️ RIPARTI DA QUI:** (1) a run regime finito: verificare log + span/distribuzione di `data/regime_probs.parquet`, poi COMMIT dell'intera sessione (01b+A4+A9+A8+GJR+doc); (2) gate v1 alla chiusura (n=20) → checklist sessione 07-14 (caveat orario, nota dedup, replay gap-filler, congelamento band/conv v2, A12-A14) + finestra GPU: P3 audit A3 → run A3 → run A8 (pre-reg sopra, stesso incumbent, run indipendenti; A3×A8 = nuova pre-reg) → eventuale retrain con A4/A9 (gate da pre-registrare); (3) i lever inerti NON si attivano a gate v1 aperto.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — A3 REGIME-MoE (mixture-of-universes, linea vol 1h) · 2026-07-14 · run nella finestra GPU post-gate-v1
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Il modello è implementato (commit `7c74d81` + audit `6fed11d`) e MAI addestrato: zero numeri visti. UN solo run: nessuno sweep di iperparametri; qualunque variante suggerita dai risultati = NUOVA pre-registrazione.

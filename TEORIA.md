@@ -106,7 +106,11 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 🇮🇹 Rolling std dei log rendimenti su 5/10/20/60 barre (BAR-semantic). ATR classico rimosso dall'input perché ridondante con `vol_std`; resta calcolato dal `RiskManager` per il sizing dinamico degli stop (§10).
 
+🇮🇹 **HAR-CJ (A4, lever inerte — `features.har_cj`, default OFF):** decomposizione continua/jump della varianza realizzata come input (Andersen–Bollerslev–Diebold 2007). Bipower variation `BV = (π/2)·mean(|r_t|·|r_{t-1}|)` (stimatore della componente continua, robusto ai salti), `J = max(RV−BV, 0)`, `jump_ratio = J/RV ∈ [0,1]`, su scale TIME-semantic 1d/1w. Con flag OFF (default production) le 104 feature restano bit-invariate; attivazione solo a retrain pianificato con gate pre-registrato.
+
 **EN** Rolling std of log returns over 5/10/20/60 bars (BAR-semantic). Classic ATR removed from the inputs (redundant with `vol_std`); still computed by the `RiskManager` for dynamic stop sizing (§10).
+
+**EN** **HAR-CJ (A4, inert lever — `features.har_cj`, default OFF):** continuous/jump decomposition of realized variance as input (Andersen–Bollerslev–Diebold 2007). Bipower variation `BV = (π/2)·mean(|r_t|·|r_{t-1}|)` (continuous-component estimator, jump-robust), `J = max(RV−BV, 0)`, `jump_ratio = J/RV ∈ [0,1]`, on TIME-semantic 1d/1w scales. With the flag OFF (production default) the 104 features stay bit-invariant; activation only at a planned retrain with a pre-registered gate.
 
 ### VWAP
 
@@ -351,6 +355,8 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 3. **Residual decomposition** stile N-BEATS: ogni stack rimuove dal residuo il pattern catturato, lasciando l'informazione non spiegata agli stack successivi
 4. **Aggregazione**: somma dei forecast latenti dei 3 stack → output heads
 
+🇮🇹 **Blocco MaxPool parallelo (A9, lever inerte — `nhits_max_pool_block`, default OFF):** il pooling degli stack è AvgPool (passa-basso); per il target di vol gli spike sono informativi (jump della RV). Con flag ON un `NHiTSBlock` con MaxPool legge lo stesso input proiettato (PRIMA che gli stack AvgPool sottraggano gli spike) e somma il suo forecast latente; il backcast è scartato → la decomposizione residuale resta invariata. OFF = zero parametri nuovi, checkpoint bit-compatibili.
+
 **EN** **Pure-MLP** (no recurrence, no attention, no convolution): maximal **inductive-bias diversity** vs the other 3. Pipeline:
 1. **Input projection**: `Linear(104, d_model)`
 2. **Three hierarchical stacks** with pooling kernel (8, 4, 1):
@@ -359,6 +365,8 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
    - Stack 3 (k=1): very short-term patterns
 3. **N-BEATS-style residual decomposition**: each stack removes from the residual the pattern it captured, leaving unexplained information for subsequent stacks
 4. **Aggregation**: sum of the 3 stacks' latent forecasts → output heads
+
+**EN** **Parallel MaxPool block (A9, inert lever — `nhits_max_pool_block`, default OFF):** stack pooling is AvgPool (low-pass); for the vol target spikes are informative (RV jumps). With the flag ON a MaxPool `NHiTSBlock` reads the same projected input (BEFORE the AvgPool stacks subtract the spikes) and adds its latent forecast; the backcast is discarded → the residual decomposition stays unchanged. OFF = zero new params, bit-compatible checkpoints.
 
 🇮🇹 Training molto rapido (~10-15 min su RTX 2070 Super vs 25 min iTransformer).
 
@@ -508,9 +516,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** For every new candle, the system generates **2000 alternative price scenarios** (`mc.n_paths` in config) over the next 30 bars (= 30 hours at the current 1h timeframe), using the ensemble's predictions as a guide and adding stochastic variability calibrated on current volatility.
 
-🇮🇹 La volatilità è stimata con **GJR-GARCH(1,1)** (params di default `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875` in `quantsys/model/forecast.py`): la variante GJR aggiunge un termine di asimmetria che amplifica l'update di volatilità in risposta a shock negativi (leverage effect), tipico dei mercati finanziari. ⚠ TODO post-pivot 1h: i parametri (in particolare ω, varianza unconditional per barra) furono stimati su rendimenti 1m e vanno **ri-stimati su rendimenti 1h** — il forecast MC non è sul critical path del backtest, quindi non blocca il gate del pivot.
+🇮🇹 La volatilità è stimata con **GJR-GARCH(1,1)**: la variante GJR aggiunge un termine di asimmetria che amplifica l'update di volatilità in risposta a shock negativi (leverage effect). **Parametri RI-STIMATI su rendimenti 1h il 2026-07-15** (`config/default.yaml → montecarlo`: `ω=1.026e-6, α=0.1011, γ=0.0052, β=0.8732`; QMLE gaussiano + variance targeting su 65.450 barre 2019→2026-06-22, script `scripts/vol/estimate_gjr_1h.py`, report `results/vols/gjr_params_1h.json`). Persistence 0.977 (half-life 30h), σ incondizionata 0.67%/barra (~62% annua). Nota empirica: a frequenza oraria γ≈0.005 — il leverage effect è quasi nullo sul campione, l'asimmetria emerge alle frequenze giornaliere. Il cap anti-esplosione della σ per barra è ora parametrico (`gjr_sigma_cap`: 0.13 a 1h, 0.01 1m-era in `config/interval/1m.yaml`); i valori 1m-era completi vivono nell'overlay 1m per il rollback.
 
-**EN** Volatility is estimated with a **GJR-GARCH(1,1)** model (default params `omega=1.2e-5, alpha=0.05, gamma=0.065, beta=0.875` in `quantsys/model/forecast.py`): the GJR variant adds an asymmetry term that amplifies the volatility update in response to negative shocks (leverage effect), typical of financial markets. ⚠ Post-1h-pivot TODO: the parameters (notably ω, per-bar unconditional variance) were estimated on 1m returns and must be **re-estimated on 1h returns** — the MC forecast is not on the backtest critical path, so it does not block the pivot gate.
+**EN** Volatility is estimated with a **GJR-GARCH(1,1)** model: the GJR variant adds an asymmetry term that amplifies the volatility update in response to negative shocks (leverage effect). **Parameters RE-ESTIMATED on 1h returns on 2026-07-15** (`config/default.yaml → montecarlo`: `ω=1.026e-6, α=0.1011, γ=0.0052, β=0.8732`; Gaussian QMLE + variance targeting on 65,450 bars 2019→2026-06-22, script `scripts/vol/estimate_gjr_1h.py`, report `results/vols/gjr_params_1h.json`). Persistence 0.977 (30h half-life), unconditional σ 0.67%/bar (~62% annualized). Empirical note: at hourly frequency γ≈0.005 — the leverage effect is near-zero on this sample; the asymmetry emerges at daily frequencies. The per-bar σ anti-explosion cap is now parametric (`gjr_sigma_cap`: 0.13 at 1h, 1m-era 0.01 in `config/interval/1m.yaml`); the full 1m-era values live in the 1m overlay for rollback.
 
 🇮🇹 Risultato: "ventola" di scenari con intervalli di confidenza. Permette di rispondere a domande come:
 - Con quale probabilità il prezzo è sopra X$ a orizzonte 30 barre?

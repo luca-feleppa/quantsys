@@ -62,6 +62,7 @@ def monte_carlo_forecast(
     gjr_alpha:           float           = 0.05,
     gjr_gamma:           float           = 0.065,
     gjr_beta:            float           = 0.875,
+    gjr_sigma_cap:       float           = 0.01,
 ) -> dict:
     """
     Genera n_paths traiettorie di n_steps passi con aggiornamento
@@ -154,7 +155,13 @@ def monte_carlo_forecast(
             + gjr_beta * (garch_vol**2),
             1e-8,
         )
-        garch_vol = np.sqrt(np.clip(garch_var, 1e-10, 0.01**2))
+        # IT: cap anti-esplosione PARAMETRICO (era 0.01 hardcoded, 1m-era): a 1h la
+        #     σ condizionata stimata arriva a ~8.5%/barra → il cap va da config
+        #     (montecarlo.gjr_sigma_cap), default 0.01 = backward-compat 1m.
+        # EN: PARAMETRIC anti-explosion cap (was hardcoded 0.01, 1m-era): at 1h the
+        #     estimated conditional σ reaches ~8.5%/bar → the cap comes from config
+        #     (montecarlo.gjr_sigma_cap), default 0.01 = 1m backward-compat.
+        garch_vol = np.sqrt(np.clip(garch_var, 1e-10, gjr_sigma_cap**2))
         mu_path[t]    = float(mu_t.mean())
         sigma_path[t] = float(sig_t.mean())
         nu_path[t]    = float(nu_t.mean())

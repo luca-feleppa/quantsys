@@ -81,9 +81,9 @@
 | `forecast_horizon` | 30 INVARIATO — ora 30 ORE · now 30 HOURS | 30 (= 30 min) |
 | `window_size` | 120 INVARIATO — ora 5 giorni · now 5 days | 120 (= 2h) |
 
-🇮🇹 **Rollback 1m:** basta `--interval 1m` (overlay 1m.yaml) + restore `data/backup_1m/*` — tutte le conversioni sono identità a 1m, il codice non va toccato. ⚠ I checkpoint `models/backup_1m/` sono stati **eliminati** col cleanup 2026-06-12: il rollback 1m ora richiede retrain. **TODO documentato:** GJR-GARCH ω da ri-stimare su rendimenti 1h (il MC non è sul critical path del backtest).
+🇮🇹 **Rollback 1m:** basta `--interval 1m` (overlay 1m.yaml) + restore `data/backup_1m/*` — tutte le conversioni sono identità a 1m, il codice non va toccato. ⚠ I checkpoint `models/backup_1m/` sono stati **eliminati** col cleanup 2026-06-12: il rollback 1m ora richiede retrain. **TODO GJR-GARCH: CHIUSO 2026-07-15** — parametri ri-stimati su rendimenti 1h (QMLE + variance targeting, `scripts/vol/estimate_gjr_1h.py` → `ω=1.026e-6, α=0.1011, γ=0.0052, β=0.8732`, persistence 0.977; report `results/vols/gjr_params_1h.json`); default.yaml porta i valori 1h, l'overlay 1m conserva i 1m-era (ω 1.2e-5 ecc.) per il rollback; cap σ del MC ora parametrico (`gjr_sigma_cap`).
 
-**EN** **1m rollback:** just `--interval 1m` (1m.yaml overlay) + restore `data/backup_1m/*` — every conversion is identity at 1m, no code changes. ⚠ The `models/backup_1m/` checkpoints were **deleted** in the 2026-06-12 cleanup: 1m rollback now requires retrain. **Documented TODO:** GJR-GARCH ω to re-estimate on 1h returns (the MC is not on the backtest critical path).
+**EN** **1m rollback:** just `--interval 1m` (1m.yaml overlay) + restore `data/backup_1m/*` — every conversion is identity at 1m, no code changes. ⚠ The `models/backup_1m/` checkpoints were **deleted** in the 2026-06-12 cleanup: 1m rollback now requires retrain. **GJR-GARCH TODO: CLOSED 2026-07-15** — parameters re-estimated on 1h returns (QMLE + variance targeting, `scripts/vol/estimate_gjr_1h.py` → `ω=1.026e-6, α=0.1011, γ=0.0052, β=0.8732`, persistence 0.977; report `results/vols/gjr_params_1h.json`); default.yaml carries the 1h values, the 1m overlay keeps the 1m-era ones (ω 1.2e-5 etc.) for rollback; the MC σ cap is now parametric (`gjr_sigma_cap`).
 
 ### 2.2 Dataset corrente · Current dataset
 

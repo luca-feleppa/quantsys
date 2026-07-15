@@ -139,6 +139,9 @@ def main():
         vp_stride        = fcfg.get("vp_stride", 1),
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         interval_minutes = interval_minutes_from_cfg(cfg),
+        # IT: A4 HAR-CJ — lever inerte (default false = 104 feature bit-invariate).
+        # EN: A4 HAR-CJ — inert lever (default false = 104 features bit-invariant).
+        use_har_cj       = bool(fcfg.get("har_cj", False)),
     )
     df_feat = builder.build(df_raw, normalize=False, fit=False, funding_df=funding_df)
     log.info(f"Fase 2 completata in {time.time()-t0:.1f}s — {len(df_feat):,} righe valide")

@@ -242,6 +242,10 @@ def train_fold(
             n_output_experts   = mcfg.get("n_output_experts", 1),
             use_revin          = mcfg.get("use_revin", False),
             revin_target_idx   = mcfg.get("revin_target_idx", 0),
+            # IT: A9 — blocco MaxPool parallelo, lever inerte (default false).
+            # EN: A9 — parallel MaxPool block, inert lever (default false).
+            use_max_pool_block = mcfg.get("nhits_max_pool_block", False),
+            max_pool_kernel    = mcfg.get("nhits_max_pool_kernel", 8),
         ).to(device)
     elif has_macro:
         from quantsys.macro.regime import QuantLSTMWithMacro

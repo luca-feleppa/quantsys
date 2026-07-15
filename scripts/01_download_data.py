@@ -119,6 +119,9 @@ def main():
         # IT: target_type da config (default "ret" = direzionale legacy; "log_rv" = vol-S).
         # EN: target_type from config (default "ret" = legacy directional; "log_rv" = vol-S).
         target_type      = fcfg.get("target_type", "ret"),
+        # IT: A4 HAR-CJ — lever inerte (default false = 104 feature bit-invariate).
+        # EN: A4 HAR-CJ — inert lever (default false = 104 features bit-invariant).
+        use_har_cj       = bool(fcfg.get("har_cj", False)),
     )
     df_feat = builder.build(df_raw, normalize=False, fit=False, funding_df=funding_df)
     log.info(f"Fase 2 completata in {time.time()-t0:.1f}s — {len(df_feat):,} righe valide")

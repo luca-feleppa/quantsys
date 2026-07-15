@@ -282,6 +282,9 @@ class VolForecaster:
             frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
             use_revin        = bool(mcfg.get("use_revin", False)),
             interval_minutes = ps.interval_minutes,
+            # IT: A4 HAR-CJ — stessa config del training (parity live↔training).
+            # EN: A4 HAR-CJ — same config as training (live↔training parity).
+            use_har_cj       = bool(fcfg.get("har_cj", False)),
         )
         self.fb.scaler             = ps.scaler
         self.fb._scale_cols        = list(ps.scale_cols)

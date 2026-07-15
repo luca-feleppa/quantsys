@@ -1056,11 +1056,16 @@ def main():
                 n_output_experts   = mcfg.get("n_output_experts", 1),
                 use_revin          = mcfg.get("use_revin", False),
                 revin_target_idx   = mcfg.get("revin_target_idx", 0),
+                # IT: A9 — blocco MaxPool parallelo, lever inerte (default false).
+                # EN: A9 — parallel MaxPool block, inert lever (default false).
+                use_max_pool_block = mcfg.get("nhits_max_pool_block", False),
+                max_pool_kernel    = mcfg.get("nhits_max_pool_kernel", 8),
             ).to(device)
             log.info(
                 f"Architettura: QuantNHiTS  d_model={mcfg.get('d_model', 128)}"
                 f"  stacks={mcfg.get('nhits_stacks', 3)}"
                 f"  kernels={mcfg.get('nhits_pool_kernels', [8, 4, 1])}"
+                f"  max_pool_block={mcfg.get('nhits_max_pool_block', False)}"
             )
         elif has_macro:
             from quantsys.macro.regime import QuantLSTMWithMacro

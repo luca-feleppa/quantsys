@@ -180,7 +180,7 @@ nvidia-smi -pl 215    # ripristina · restore
 |---|---|
 | `scripts/01_download_data.py` | download completo candele Binance + funding, rebuild dataset npz · full Binance candles + funding download, npz dataset rebuild |
 | `scripts/01_update_data.py` | aggiornamento incrementale delle candele a oggi · incremental candle update to today |
-| `scripts/01b_download_macro.py` | macro FRED/yFinance + walk-forward regime `RegimeMarkovBTC` (clock orario; su 7 anni ~3h) · FRED/yFinance macro + regime walk-forward (hourly clock; ~3h over 7 years) |
+| `scripts/01b_download_macro.py` | macro FRED/yFinance + walk-forward regime `RegimeMarkovBTC` (clock orario; su 7 anni ~3h); `--regime-only` rigenera SOLO `regime_probs.parquet`+`regime_hmm.pkl` (skip macro/normalizer/npz — il costo resta il walk-forward) · FRED/yFinance macro + regime walk-forward (hourly clock; ~3h over 7 years); `--regime-only` regenerates ONLY `regime_probs.parquet`+`regime_hmm.pkl` (skips macro/normalizer/npz — the walk-forward remains the cost) |
 
 🇮🇹 **Dati prodotti:** `data/raw_candles.parquet` = candele 1h 2019→oggi (~65k barre); `data/funding_rate.parquet` = funding completo dal lancio perp 2019-09-10; `data/macro_*.parquet` = FRED/yFinance; `data/regime_probs.parquet` = probabilità regime (index orario UTC); `data/features.parquet` + `data/lstm_dataset.npz` = feature normalizzate e finestre `X/y` per il training (104 canoniche = 86 dinamiche + 18 strutturali; `X_train ≈ (51k, 120, 104)`). ⚠ `lstm_dataset.npz` è **grande (~3 GB) e rigenerabile** da `01_download_data.py`: se assente, rigeneralo prima di train/judge.
 

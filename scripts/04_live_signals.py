@@ -303,6 +303,9 @@ class FeatureAssembler:
             frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
             use_revin        = bool(mcfg.get("use_revin", False)),
             interval_minutes = getattr(pipeline_state, "interval_minutes", 1),
+            # IT: A4 HAR-CJ — stessa config del training (parity live↔training).
+            # EN: A4 HAR-CJ — same config as training (live↔training parity).
+            use_har_cj       = bool(fcfg.get("har_cj", False)),
         )
         # IT: Inietta stato scaler pre-fittato → build(fit=False) lo riusa senza re-fittare.
         # EN: Inject pre-fitted scaler state → build(fit=False) reuses it without re-fitting.
@@ -1532,6 +1535,9 @@ class LiveEngine:
                 gjr_alpha          = mc.get("gjr_alpha", 0.05),
                 gjr_gamma          = mc.get("gjr_gamma", 0.065),
                 gjr_beta           = mc.get("gjr_beta",  0.875),
+                # IT: cap σ/barra da config (2026-07-15: parametrico, 1h=0.13).
+                # EN: per-bar σ cap from config (2026-07-15: parametric, 1h=0.13).
+                gjr_sigma_cap      = mc.get("gjr_sigma_cap", 0.01),
             )
             summary = summarize_forecast(result, price, self.cfg["montecarlo"]["n_steps"])
             log.info(summary)

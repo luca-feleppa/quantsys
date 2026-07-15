@@ -37,3 +37,14 @@ risk:
 backtest:
   min_expected_ret: 0.0005   # IT: |μ| min = 5 bps su orizzonte 30 min (valore 1m-era) | EN: min |μ| = 5 bps over the 30-min horizon (1m-era value)
   max_sigma: 0.015           # IT: σ max raw a h=30 min (safety net σ_max ≥ 0.05 resta a valle) | EN: max raw σ at h=30 min (σ_max ≥ 0.05 safety net stays downstream)
+
+# IT: Monte Carlo — parametri GJR-GARCH 1m-era (ω ha unità [varianza/passo]: NON
+#     trasferibile tra timeframe; dal 2026-07-15 default.yaml porta i valori 1h).
+# EN: Monte Carlo — 1m-era GJR-GARCH params (ω has [variance/step] units: NOT
+#     transferable across timeframes; since 2026-07-15 default.yaml carries 1h values).
+montecarlo:
+  gjr_omega: 1.2e-05
+  gjr_alpha: 0.05
+  gjr_gamma: 0.065
+  gjr_beta: 0.875
+  gjr_sigma_cap: 0.01

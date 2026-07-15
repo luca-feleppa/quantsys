@@ -76,6 +76,15 @@ features:
   #                      2026-06-11 FAIL — judge scripts/vol/dev_vols_rs_judge.py).
   #     NO trading backtest on vol models.
   target_type: log_rv
+  # IT: A4 (roadmap vol) — feature HAR-CJ bipower/jump come INPUT (bv_1d/1w,
+  #     jump_1d/1w, jump_ratio_1d/1w). LEVER INERTE: false = 104 feature
+  #     bit-invariate. Attivazione SOLO a retrain pianificato (rigen dataset +
+  #     retrain) con gate pre-registrato in STATUS.md.
+  # EN: A4 (vol roadmap) — HAR-CJ bipower/jump features as INPUT (bv_1d/1w,
+  #     jump_1d/1w, jump_ratio_1d/1w). INERT LEVER: false = 104 features
+  #     bit-invariant. Activate ONLY at a planned retrain (dataset regen +
+  #     retrain) with a pre-registered gate in STATUS.md.
+  har_cj: false
   normalize: true
 
 # IT: Configurazione modello — comune a tutte le arch; gli override stanno in arch/*.yaml.
@@ -175,16 +184,27 @@ montecarlo:
   n_paths: 2000             # IT: percorsi simulati | EN: simulated paths
   n_steps: 30
   live_forecast_every: 10   # IT: MC ogni 10 candele in live | EN: MC every 10 candles live
-  # IT: ⚠ TODO pivot 1h: parametri GJR-GARCH calibrati su rendimenti BTC 1m — ω ha unità
-  #     [varianza/passo] e va RI-STIMATO su rendimenti 1h prima di usare il MC forecast.
-  #     MC non è sul critical path del backtest (usa μ/σ del modello, non GARCH).
-  # EN: ⚠ 1h-pivot TODO: GJR-GARCH params calibrated on BTC 1m returns — ω has units
-  #     [variance/step] and must be RE-FITTED on 1h returns before using the MC forecast.
-  #     MC is not on the backtest critical path (uses model μ/σ, not GARCH).
-  gjr_omega: 1.2e-05        # IT: GJR-GARCH(1,1,1) params calibrati su BTC 1m | EN: GJR-GARCH(1,1,1) calibrated on BTC 1m
-  gjr_alpha: 0.05
-  gjr_gamma: 0.065
-  gjr_beta: 0.875
+  # IT: Parametri GJR-GARCH RI-STIMATI su rendimenti 1h il 2026-07-15 (TODO pivot-1h
+  #     chiuso): QMLE gaussiano + variance targeting su 65.450 barre 2019→2026-06-22,
+  #     script scripts/vol/estimate_gjr_1h.py, report results/vols/gjr_params_1h.json.
+  #     Persistence 0.977 (half-life 30h), σ incond. 0.67%/barra (62% ann.), γ≈0.005:
+  #     il leverage effect orario è quasi nullo sul campione. Valori 1m-era (per
+  #     rollback 1m, overlay 1m.yaml): ω 1.2e-05, α 0.05, γ 0.065, β 0.875, cap 0.01.
+  # EN: GJR-GARCH params RE-ESTIMATED on 1h returns on 2026-07-15 (1h-pivot TODO
+  #     closed): Gaussian QMLE + variance targeting on 65,450 bars 2019→2026-06-22,
+  #     script scripts/vol/estimate_gjr_1h.py, report results/vols/gjr_params_1h.json.
+  #     Persistence 0.977 (30h half-life), uncond. σ 0.67%/bar (62% ann.), γ≈0.005:
+  #     the hourly leverage effect is near-zero on this sample. 1m-era values (for
+  #     1m rollback, 1m.yaml overlay): ω 1.2e-05, α 0.05, γ 0.065, β 0.875, cap 0.01.
+  gjr_omega: 1.026e-06
+  gjr_alpha: 0.1011
+  gjr_gamma: 0.0052
+  gjr_beta: 0.8732
+  # IT: cap anti-esplosione della σ GARCH per barra (era 0.01 hardcoded, 1m-era):
+  #     a 1h la σ condizionata stimata tocca 8.5%/barra → 0.13 = ~1.5× il max storico.
+  # EN: per-bar GARCH σ anti-explosion cap (was hardcoded 0.01, 1m-era): at 1h the
+  #     estimated conditional σ reaches 8.5%/bar → 0.13 = ~1.5× the historical max.
+  gjr_sigma_cap: 0.13
 
 # IT: Risk management — Kelly sizing, ATR-based SL/TP, drawdown stop.
 # EN: Risk management — Kelly sizing, ATR-based SL/TP, drawdown stop.

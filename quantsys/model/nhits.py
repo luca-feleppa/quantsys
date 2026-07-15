@@ -40,13 +40,15 @@ class NHiTSBlock(nn.Module):
 
     Pipeline:
       x (B, T, D)
-        ─► AvgPool1d(k) along T              → (B, T_p, D)   (downsample)
+        ─► Avg/MaxPool1d(k) along T          → (B, T_p, D)   (downsample)
         ─► flatten + MLP(hidden)             → (B, hidden)
         ─► linear → backcast (B, T*D)        (subtracted from residual)
         ─► linear → forecast latent (B, D)   (summed across stacks)
 
     Pooling kernel k controlla la risoluzione: k grande = pattern a lungo
     termine (trend), k=1 = pattern a brevissimo termine.
+    pool_type: "avg" (default, passa-basso — design storico bit-invariato) o
+    "max" (A9: preserva gli spike → componente jump della RV).
     """
 
     # IT: Costruisce pool + MLP + teste backcast/forecast per un blocco a risoluzione fissa.
@@ -59,17 +61,29 @@ class NHiTSBlock(nn.Module):
         pool_kernel: int,
         n_layers:    int   = 2,
         dropout:     float = 0.1,
+        pool_type:   str   = "avg",
     ):
         super().__init__()
         self.input_len   = input_len
         self.d_model     = d_model
         self.pool_kernel = max(1, pool_kernel)
 
+        # IT: A9 — "avg" (passa-basso, default = bit-identico al design storico) o
+        #     "max" (preserva gli spike: sensore della componente jump). Fail-fast
+        #     su valori ignoti (pattern MINOR-3: mai default silenziosi su typo).
+        # EN: A9 — "avg" (low-pass, default = bit-identical to the historical design)
+        #     or "max" (spike-preserving: jump-component sensor). Fail-fast on
+        #     unknown values (MINOR-3 pattern: never silently default on typos).
+        if pool_type not in ("avg", "max"):
+            raise ValueError(f"pool_type '{pool_type}' non riconosciuto / unknown (avg|max)")
+        self.pool_type = pool_type
+        _pool_cls = nn.AvgPool1d if pool_type == "avg" else nn.MaxPool1d
+
         # IT: ceil_mode=True copre completamente T anche se k non divide T.
         # EN: ceil_mode=True covers T fully even when k does not divide T.
-        self.pool = nn.AvgPool1d(self.pool_kernel,
-                                  stride=self.pool_kernel,
-                                  ceil_mode=True)
+        self.pool = _pool_cls(self.pool_kernel,
+                              stride=self.pool_kernel,
+                              ceil_mode=True)
         pooled_len = (input_len + self.pool_kernel - 1) // self.pool_kernel
         self.pooled_len = pooled_len
 
@@ -127,6 +141,9 @@ class QuantNHiTS(nn.Module):
         loss_type: "t_student" supportato (quantile non implementato per ora).
         use_multitask: aggiunge dir_head (B, 3) come 4° output.
         n_output_experts: MoE — non implementato in questa arch (sempre 1).
+        use_max_pool_block: A9 — blocco MaxPool parallelo (sensore jump additivo
+            sul forecast latente; backcast scartato). Default False = inerte.
+        max_pool_kernel: kernel del blocco MaxPool parallelo (default 8).
     """
 
     # IT: Costruisce input proj, gli stack N-HiTS multi-risoluzione, macro embedding e teste di output.
@@ -149,6 +166,8 @@ class QuantNHiTS(nn.Module):
         n_output_experts:   int   = 1,
         use_revin:          bool  = False,
         revin_target_idx:   int   = 0,
+        use_max_pool_block: bool  = False,
+        max_pool_kernel:    int   = 8,
     ):
         super().__init__()
 
@@ -203,6 +222,32 @@ class QuantNHiTS(nn.Module):
         self.n_stacks = n_stacks
         self.pool_kernels = tuple(pool_kernels)
 
+        # IT: A9 (roadmap vol) — blocco MaxPool PARALLELO: legge lo stesso input h
+        #     (post proiezione+macro) e SOMMA il suo forecast latente; il backcast è
+        #     scartato → la catena residuale AvgPool resta INVARIATA (sensore jump
+        #     additivo, non partecipa alla decomposizione). Default False = lever
+        #     INERTE: zero parametri nuovi, state_dict e forward bit-identici
+        #     (checkpoint esistenti compatibili in entrambe le direzioni).
+        # EN: A9 (vol roadmap) — PARALLEL MaxPool block: reads the same input h
+        #     (post projection+macro) and ADDS its latent forecast; the backcast is
+        #     discarded → the AvgPool residual chain stays UNCHANGED (additive jump
+        #     sensor, does not join the decomposition). Default False = INERT lever:
+        #     zero new parameters, bit-identical state_dict and forward
+        #     (existing checkpoints compatible both ways).
+        self.use_max_pool_block = bool(use_max_pool_block)
+        if self.use_max_pool_block:
+            self.jump_block = NHiTSBlock(
+                input_len   = T,
+                d_model     = d_model,
+                hidden      = hidden,
+                pool_kernel = max_pool_kernel,
+                n_layers    = n_mlp_layers,
+                dropout     = dropout,
+                pool_type   = "max",
+            )
+        else:
+            self.jump_block = None
+
         self.head_drop = nn.Dropout(dropout)
 
         # IT: Output heads — pattern allineato alle altre arch (MoE o single).
@@ -245,6 +290,7 @@ class QuantNHiTS(nn.Module):
         log.info(
             f"QuantNHiTS init: F={n_features} T={T} d_model={d_model} "
             f"hidden={hidden} stacks={n_stacks} kernels={self.pool_kernels} "
+            f"max_pool_block={self.use_max_pool_block} "
             f"params={sum(p.numel() for p in self.parameters()):,}"
         )
 
@@ -310,6 +356,16 @@ class QuantNHiTS(nn.Module):
             backcast, forecast = block(residual)
             residual = residual - backcast
             agg_forecast = forecast if agg_forecast is None else agg_forecast + forecast
+
+        # IT: A9 — ramo jump parallelo su h ORIGINALE (non sul residuo): il MaxPool
+        #     vede gli spike prima che i blocchi AvgPool li sottraggano. Solo il
+        #     forecast è usato; backcast scartato (catena residuale invariata).
+        # EN: A9 — parallel jump branch on the ORIGINAL h (not the residual): the
+        #     MaxPool sees spikes before the AvgPool blocks subtract them. Only the
+        #     forecast is used; backcast discarded (residual chain unchanged).
+        if self.jump_block is not None:
+            _, jump_forecast = self.jump_block(h)
+            agg_forecast = agg_forecast + jump_forecast
 
         feat = self.head_drop(agg_forecast)     # (B, D)
 

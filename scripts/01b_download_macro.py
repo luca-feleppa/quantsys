@@ -13,6 +13,7 @@ API Key FRED (gratuita):
   3. Inserisci la key in config/default.yaml → macro.fred_api_key
   Senza key: funziona lo stesso ma con rate limit più stretto.
 """
+import argparse
 import logging
 from pathlib import Path
 
@@ -33,75 +34,15 @@ setup_logging()
 log = logging.getLogger("quantsys.script.01b")
 
 
-# IT: pipeline macro — download FRED/yfinance, regime MS, normalizer, merge nel dataset NN
-# EN: macro pipeline — download FRED/yfinance, MS regime, normalizer, merge into NN dataset
-def main():
-    # IT: Console Windows default cp1252 — i caratteri unicode dei banner (═, ✓, █)
-    #     crashano il print. Reconfigure UTF-8 (stesso fix di 01/02/04).
-    # EN: Windows console defaults to cp1252 — unicode banner chars (═, ✓, █)
-    #     crash the print. Reconfigure UTF-8 (same fix as 01/02/04).
-    import sys as _sys
-    for _stream in (_sys.stdout, _sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-    cfg   = load_config("config/default.yaml")
-    mcfg  = cfg.get("macro", {})
-    dcfg  = cfg["data"]
-    out   = Path(dcfg["output_dir"])
-    ensure_dirs(str(out))
-
-    fred_key  = mcfg.get("fred_api_key", None)
-    start     = mcfg.get("history_start", "2018-01-01")
+# IT: sezione regime (step 4) — condivisa fra pipeline completa e --regime-only.
+#     Il detector ignora df_macro (legge raw_candles.parquet): accetta None.
+# EN: regime section (step 4) — shared between full pipeline and --regime-only.
+#     The detector ignores df_macro (reads raw_candles.parquet): accepts None.
+def run_regime_detection(mcfg: dict, out: Path, df_macro=None) -> pd.DataFrame:
     n_regimes = mcfg.get("n_regimes", 3)
-
-    print(f"""
-{'═'*60}
-  01b · DOWNLOAD DATI MACRO
-  Periodo    : {start} → oggi
-  FRED key   : {'✓ configurata' if fred_key else '⚠ non configurata (rate limit)'}
-  N. regimi  : {n_regimes}
-{'═'*60}
-""")
-
-    # IT: 1. download delle serie macro da FRED
-    # EN: 1. download macro series from FRED
-    log.info("Download serie FRED ...")
-    fred    = FREDDownloader(api_key=fred_key)
-    df_fred = fred.fetch_all(FRED_SERIES, start=start)
-
-    fred_path = out / "macro_fred.parquet"
-    atomic_save_parquet(df_fred, fred_path)
-    log.info(f"FRED → {fred_path}  ({df_fred.shape[1]} serie, {len(df_fred)} giorni)")
-
-    # IT: 2. download dati mercato (indici, VIX, USD, ...) via yfinance
-    # EN: 2. download market data (indices, VIX, USD, ...) via yfinance
-    log.info("Download dati mercato (yfinance) ...")
-    df_yf = fetch_yfinance(YFINANCE_TICKERS, start=start)
-    yf_path = out / "macro_yfinance.parquet"
-    if not df_yf.empty:
-        atomic_save_parquet(df_yf, yf_path)
-        log.info(f"yfinance → {yf_path}  ({df_yf.shape[1]} serie)")
-    else:
-        log.warning("yfinance vuoto — controlla la connessione o installa yfinance.")
-
-    # IT: 3. feature engineering macro (combina FRED + yfinance)
-    # EN: 3. macro feature engineering (combines FRED + yfinance)
-    log.info("Costruzione macro features ...")
-    builder  = MacroFeatureBuilder()
-    df_macro = builder.build(df_fred, df_yf)
-    macro_path = out / "macro_features.parquet"
-    atomic_save_parquet(df_macro, macro_path)
-    log.info(f"Macro features → {macro_path}  ({df_macro.shape[1]} colonne)")
-
-    # IT: 4. regime detection Markov-Switching su realized vol BTC (Variante 3 MODEL_IMPROVEMENTS)
-    # EN: 4. Markov-Switching regime detection on BTC realized vol (Variant 3 MODEL_IMPROVEMENTS)
     log.info("Regime detector: Markov-Switching su realized vol BTC oraria ...")
     regime_model = RegimeMarkovBTC(n_regimes=n_regimes)
     try:
-        # IT: df_macro è ignorato dal detector — usa direttamente raw_candles.parquet.
-        # EN: df_macro is ignored by the detector — uses raw_candles.parquet directly.
         # IT: cadenza walk-forward da config (hmm_burn_in_days/hmm_retrain_days):
         #     su storie multi-anno il refit expanding è O(t) — vedi commento in default.yaml.
         # EN: walk-forward cadence from config (hmm_burn_in_days/hmm_retrain_days):
@@ -135,6 +76,116 @@ def main():
     except Exception as e:
         log.warning(f"RegimeMarkovBTC fallito ({e}) — fallback a DataFrame vuoto")
         regime_df = pd.DataFrame()
+    return regime_df
+
+
+# IT: pipeline macro — download FRED/yfinance, regime MS, normalizer, merge nel dataset NN
+# EN: macro pipeline — download FRED/yfinance, MS regime, normalizer, merge into NN dataset
+def main():
+    # IT: Console Windows default cp1252 — i caratteri unicode dei banner (═, ✓, █)
+    #     crashano il print. Reconfigure UTF-8 (stesso fix di 01/02/04).
+    # EN: Windows console defaults to cp1252 — unicode banner chars (═, ✓, █)
+    #     crash the print. Reconfigure UTF-8 (same fix as 01/02/04).
+    import sys as _sys
+    for _stream in (_sys.stdout, _sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    # IT: --regime-only rigenera SOLO regime_probs.parquet + regime_hmm.pkl (il detector
+    #     legge raw_candles.parquet, ignora df_macro). Salta download FRED/yfinance, refit
+    #     del MacroNormalizer, update PipelineState e merge npz: nessun artefatto consumato
+    #     dai modelli production viene toccato. Default (senza flag) = pipeline completa,
+    #     comportamento bit-invariato.
+    # EN: --regime-only regenerates ONLY regime_probs.parquet + regime_hmm.pkl (the detector
+    #     reads raw_candles.parquet, ignores df_macro). Skips FRED/yfinance download,
+    #     MacroNormalizer refit, PipelineState update and npz merge: no artifact consumed
+    #     by production models is touched. Default (no flag) = full pipeline, bit-identical.
+    parser = argparse.ArgumentParser(description="01b — macro download + regime detection")
+    parser.add_argument("--regime-only", action="store_true",
+                        help="rigenera solo il regime detector (skip macro/normalizer/npz) "
+                             "/ regenerate only the regime detector")
+    args = parser.parse_args()
+
+    cfg   = load_config("config/default.yaml")
+    mcfg  = cfg.get("macro", {})
+    dcfg  = cfg["data"]
+    out   = Path(dcfg["output_dir"])
+    ensure_dirs(str(out))
+
+    fred_key  = mcfg.get("fred_api_key", None)
+    start     = mcfg.get("history_start", "2018-01-01")
+    n_regimes = mcfg.get("n_regimes", 3)
+
+    print(f"""
+{'═'*60}
+  01b · DOWNLOAD DATI MACRO{' · MODE: --regime-only' if args.regime_only else ''}
+  Periodo    : {start} → oggi
+  FRED key   : {'✓ configurata' if fred_key else '⚠ non configurata (rate limit)'}
+  N. regimi  : {n_regimes}
+{'═'*60}
+""")
+
+    # IT: path --regime-only: solo step 4 (regime), poi exit. Nessun file macro/npz/state toccato.
+    # EN: --regime-only path: step 4 (regime) only, then exit. No macro/npz/state file touched.
+    if args.regime_only:
+        regime_df = run_regime_detection(mcfg, out, df_macro=None)
+        n_rows = len(regime_df)
+        last_ts = regime_df.index.max() if n_rows else "n/d"
+        print(f"""
+{'═'*60}
+  01b · REGIME-ONLY · COMPLETATO
+{'═'*60}
+  Regimi (Markov-BTC) : {n_regimes} su realized vol BTC oraria
+  Righe orarie        : {n_rows}  (ultima: {last_ts})
+
+  File generati in {out}/:
+    ✓ regime_hmm.pkl
+    ✓ regime_probs.parquet
+
+  ⚠ Macro features / normalizer / lstm_dataset.npz NON toccati (by design).
+{'═'*60}
+""")
+        return
+
+    # IT: 1. download delle serie macro da FRED
+    # EN: 1. download macro series from FRED
+    log.info("Download serie FRED ...")
+    fred    = FREDDownloader(api_key=fred_key)
+    df_fred = fred.fetch_all(FRED_SERIES, start=start)
+
+    fred_path = out / "macro_fred.parquet"
+    atomic_save_parquet(df_fred, fred_path)
+    log.info(f"FRED → {fred_path}  ({df_fred.shape[1]} serie, {len(df_fred)} giorni)")
+
+    # IT: 2. download dati mercato (indici, VIX, USD, ...) via yfinance
+    # EN: 2. download market data (indices, VIX, USD, ...) via yfinance
+    log.info("Download dati mercato (yfinance) ...")
+    df_yf = fetch_yfinance(YFINANCE_TICKERS, start=start)
+    yf_path = out / "macro_yfinance.parquet"
+    if not df_yf.empty:
+        atomic_save_parquet(df_yf, yf_path)
+        log.info(f"yfinance → {yf_path}  ({df_yf.shape[1]} serie)")
+    else:
+        log.warning("yfinance vuoto — controlla la connessione o installa yfinance.")
+
+    # IT: 3. feature engineering macro (combina FRED + yfinance)
+    # EN: 3. macro feature engineering (combines FRED + yfinance)
+    log.info("Costruzione macro features ...")
+    builder  = MacroFeatureBuilder()
+    df_macro = builder.build(df_fred, df_yf)
+    macro_path = out / "macro_features.parquet"
+    atomic_save_parquet(df_macro, macro_path)
+    log.info(f"Macro features → {macro_path}  ({df_macro.shape[1]} colonne)")
+
+    # IT: 4. regime detection Markov-Switching su realized vol BTC (Variante 3 MODEL_IMPROVEMENTS)
+    #     — df_macro è ignorato dal detector (usa raw_candles.parquet); sezione condivisa col
+    #     path --regime-only (helper run_regime_detection).
+    # EN: 4. Markov-Switching regime detection on BTC realized vol (Variant 3 MODEL_IMPROVEMENTS)
+    #     — df_macro is ignored by the detector (uses raw_candles.parquet); section shared with
+    #     the --regime-only path (run_regime_detection helper).
+    regime_df = run_regime_detection(mcfg, out, df_macro=df_macro)
 
     # IT: 5. fit del MacroNormalizer (RobustScaler con clipping)
     # EN: 5. fit the MacroNormalizer (RobustScaler with clipping)
