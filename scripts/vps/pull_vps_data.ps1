@@ -51,6 +51,16 @@ if (-not $VpsHost -or -not $RemoteRoot) {
 }
 if (-not $VpsHost) { throw "VpsHost assente: passa -VpsHost o aggiungi il blocco vps: in config/secrets.yaml / missing: pass -VpsHost or add the vps: block to config/secrets.yaml" }
 if (-not $RemoteRoot) { $RemoteRoot = "/opt/quantsys" }
+# IT: opzioni comuni ssh/scp anti-stallo: senza keepalive una TCP morta blocca
+#     per sempre (visto 2026-07-15: ssh find appeso 4+ min su comando da 0.6s).
+#     ConnectTimeout copre l'handshake, ServerAlive 10sx3 la sessione stabilita,
+#     BatchMode evita prompt interattivi (auth solo a chiave).
+# EN: shared ssh/scp anti-stall options: without keepalive a dead TCP hangs
+#     forever (seen 2026-07-15: ssh find stuck 4+ min on a 0.6s command).
+#     ConnectTimeout covers the handshake, ServerAlive 10sx3 the established
+#     session, BatchMode prevents interactive prompts (key-only auth).
+$SshOpts = @("-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=3","-o","BatchMode=yes")
+
 $Staging  = Join-Path $ProjRoot "data\vps_staging"
 New-Item -ItemType Directory -Force (Join-Path $Staging "iv\chain")   | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $Staging "orderbook")  | Out-Null
@@ -61,9 +71,9 @@ Write-Output "[pull] finestra/window: $Days giorni/days"
 
 # IT: 1) file singoli append-only (piccoli: si ricopiano interi ogni volta).
 # EN: 1) append-only single files (small: re-copied whole every time).
-scp -q "${VpsHost}:$RemoteRoot/data/iv/atm_30h.parquet" (Join-Path $Staging "iv\")
+scp -q @SshOpts "${VpsHost}:$RemoteRoot/data/iv/atm_30h.parquet" (Join-Path $Staging "iv\")
 if ($LASTEXITCODE -ne 0) { throw "scp atm_30h.parquet fallito/failed" }
-scp -q "${VpsHost}:$RemoteRoot/data/iv/dvol.parquet" (Join-Path $Staging "iv\")
+scp -q @SshOpts "${VpsHost}:$RemoteRoot/data/iv/dvol.parquet" (Join-Path $Staging "iv\")
 if ($LASTEXITCODE -ne 0) { Write-Warning "dvol.parquet non copiato (puo' non esistere ancora) / not copied (may not exist yet)" }
 
 # IT: 2) giornalieri recenti — lista remota via find -mtime, poi scp per file
@@ -76,12 +86,12 @@ $pairs = @(
 )
 foreach ($p in $pairs) {
     $listCmd = "find $($p.remote) -name '*.parquet' -mtime -$Days 2>/dev/null"
-    $files = ssh $VpsHost $listCmd
+    $files = ssh @SshOpts $VpsHost $listCmd
     if ($LASTEXITCODE -ne 0) { throw "ssh find fallito/failed su $($p.remote)" }
     $files = @($files | Where-Object { $_ -and $_.Trim() })
     Write-Output "[pull] $($p.remote): $($files.Count) file recenti/recent files"
     foreach ($f in $files) {
-        scp -q "${VpsHost}:$f" $p.local
+        scp -q @SshOpts "${VpsHost}:$f" $p.local
         if ($LASTEXITCODE -ne 0) { throw "scp fallito/failed: $f" }
     }
 }
