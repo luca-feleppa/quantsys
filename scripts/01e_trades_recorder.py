@@ -47,7 +47,7 @@ import logging
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -69,9 +69,13 @@ TRADES_DIR = Path("data/deribit_trades")
 
 # IT: retention osservata dell'endpoint pubblico (~24h): il cold start riparte
 #     da qui; con cadenza 10 min ogni tick copre ~1/144 della finestra.
+#     In ms interi: evita pd.Timedelta (DeprecationWarning numpy "generic unit"
+#     sul VPS, futuro errore → crash-loop del servizio).
 # EN: observed public endpoint retention (~24h): cold start rewinds this far;
 #     at a 10-min cadence each tick covers ~1/144 of the window.
-RETENTION_HOURS = 24.0
+#     Integer ms: avoids pd.Timedelta (numpy "generic unit" DeprecationWarning
+#     on the VPS, future error → service crash-loop).
+RETENTION_MS = 24 * 3600 * 1000
 # IT: overlap col già-salvato a ogni tick — assorbe clock skew e trade allo
 #     stesso ms del bordo pagina; i doppioni li elimina il dedup su trade_id.
 # EN: per-tick overlap with what's already saved — absorbs clock skew and
@@ -188,12 +192,12 @@ def last_saved_ms(now: pd.Timestamp) -> int:
     #     oltre non serve: la retention API è ~24h); cold start = now − retention.
     # EN: resumes from the last persisted trade (today's file, then yesterday's —
     #     no point further back: API retention is ~24h); cold start = now − retention.
-    for day in (now, now - pd.Timedelta(days=1)):
+    for day in (now, now - timedelta(days=1)):
         p = TRADES_DIR / f"option_trades_{day:%Y%m%d}.parquet"
         if p.exists():
             ts = pd.read_parquet(p, columns=["timestamp"])["timestamp"].max()
             return int(pd.Timestamp(ts).timestamp() * 1000)
-    return int((now - pd.Timedelta(hours=RETENTION_HOURS)).timestamp() * 1000)
+    return int(now.timestamp() * 1000) - RETENTION_MS
 
 
 def poll_once(currency: str) -> dict:
@@ -204,9 +208,9 @@ def poll_once(currency: str) -> dict:
     #     append into daily parquet (by the TRADE's UTC day: the window can
     #     straddle midnight).
     now = pd.Timestamp.now(tz="UTC")
-    start_ms = max(last_saved_ms(now) - OVERLAP_MS,
-                   int((now - pd.Timedelta(hours=RETENTION_HOURS)).timestamp() * 1000))
-    df = fetch_trades_window(currency, start_ms, int(now.timestamp() * 1000))
+    now_ms = int(now.timestamp() * 1000)
+    start_ms = max(last_saved_ms(now) - OVERLAP_MS, now_ms - RETENTION_MS)
+    df = fetch_trades_window(currency, start_ms, now_ms)
     n_new, files = len(df), []
     for day, grp in (df.groupby(df["timestamp"].dt.strftime("%Y%m%d"))
                      if not df.empty else []):
