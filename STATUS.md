@@ -28,6 +28,18 @@
 
 ---
 
+## 🟢 2026-07-16 sera — Collector 01e trade opzioni Deribit sul VPS (nuovo servizio) + verifica avvio_sessione/API
+
+**Verifica `avvio_sessione.ps1` (riavvio 18:16):** pull+merge OK (chain +20.954, L2 +2.868, heartbeat freschi), 01c/04b partiti singoli (coppie stub 7372→2932 / 1432→17520, zero duplicati), B7 no-op corretto (0 barre oltre checkpoint congelato 06-22), `trades.jsonl` 19 righe / 19 chiavi uniche / 0 duplicati. 04b tick → HOLD (posizione aperta BTC-17JUL26-64000).
+
+**Verifica chiave Deribit testnet (secrets.yaml):** auth OAuth2 OK (⚠ scope read_write su tutto: per un futuro key production chiedere scope minimali); `private/get_user_trades` funziona e ritorna i 2 fill dello straddle aperto oggi 09:22Z (cross-check 04b OK), MA la testnet NON ritiene storia (2 fill su finestra 40g vs ~38 eseguiti da giugno) → **`trades.jsonl` locale resta l'unico record del forward test**. Scoperta chiave sulla PRODUCTION (endpoint pubblico): retention trade opzioni ≈ **24h** (0 trade oltre, anche `include_old=true`, anche per strumento scaduto) → storico NON ricostruibile ex-post gratis (vendor: Tardis/Amberdata) → si qualifica per raccolta forward (stessa regola di IV/L2).
+
+**Nuovo collector `01e_trades_recorder.py` + servizio `quantsys-trades` DEPLOYATO e ATTIVO sul VPS** (commit `560df90` + fix `73cd538`): poll 10 min production `get_last_trades_by_currency_and_time` (BTC option, paginazione `has_more` asc, dedup `trade_id`, overlap 60s, cold-start backfill 24h) → `data/deribit_trades/option_trades_YYYYMMDD.parquet` con `price/iv/mark_price/index_price` per-fill → **spread realizzati vs mark** (costi eseguibili short-vol, uso post-gate-v1). Integrato: unit systemd, `health_check.sh` (soglia 60′), `setup_vps.sh`, `pull_vps_data.ps1`+`merge_vps_data.py` (staging+merge dedup verificati end-to-end: +2 righe su copie indipendenti casa/VPS), doc (CLAUDE.md, README vps/scripts, avvio_sessione). Primo tick VPS: 6.909 trade. Fix incluso: niente `pd.Timedelta` (DeprecationWarning numpy → futuro crash-loop). Health-check finale: **PASS 11/11** (3 servizi active, restart 0). Nota: 01e vive SOLO sul VPS (nessuna istanza casa; niente heartbeat merge per evitare falsi WARN su ore quiete).
+
+**▶️ RIPARTI DA QUI:** invariato rispetto alla voce sotto (gate v1 chiude alla 21ª riga di trades.jsonl → poi `POST_GATE_V1.md`); il dataset spread realizzati matura da solo sul VPS.
+
+---
+
 ## 🟢 2026-07-16 — Verifica sistemi PASS + definizione campione gate v1 (chiude alla 21ª riga) + cleanup doc improvement + `POST_GATE_V1.md`
 
 **Verifica processi (post `avvio_sessione.ps1` delle 11:22):** 01c (stub 9184→worker 12008) e 04b (stub 13700→worker 4152) vivi, zero duplicati; 04b all'avvio ha **settlato il 19° trade** (LONG K=64500, PnL −0.01129 BTC) e aperto lo straddle **BTC-17JUL26-64000** (edge +0.606), tick orari regolari. Chunk B7: **no-op corretto** — check rieseguito a mano: candele max = frontiera checkpoint = 2026-06-22 14:00, 0 barre nuove (congelamento A3/A8 by design). Warning atteso: macro_features 8g stale (refresh solo post-A3/A8).
