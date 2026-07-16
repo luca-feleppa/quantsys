@@ -3,6 +3,7 @@
 #       - atm_30h.parquet / dvol.parquet : concat + dedup su timestamp + sort
 #       - iv/chain/*.parquet (giornalieri): dedup su (snapshot_ts, instrument_name)
 #       - orderbook/*.parquet (giornalieri): dedup su (timestamp, symbol)
+#       - deribit_trades/*.parquet (giornalieri): dedup su trade_id
 #     Il doppio poller (casa acceso + VPS) produce tick duplicati by design:
 #     il dedup è la semantica di merge, non un workaround. Scritture atomiche
 #     (atomic_save_parquet: tmp + os.replace — safety net CLAUDE.md).
@@ -13,6 +14,7 @@
 #       - atm_30h.parquet / dvol.parquet : concat + dedup on timestamp + sort
 #       - iv/chain/*.parquet (dailies): dedup on (snapshot_ts, instrument_name)
 #       - orderbook/*.parquet (dailies): dedup on (timestamp, symbol)
+#       - deribit_trades/*.parquet (dailies): dedup on trade_id
 #     Dual polling (home on + VPS) duplicates ticks by design: dedup IS the
 #     merge semantics, not a workaround. Atomic writes (atomic_save_parquet:
 #     tmp + os.replace — CLAUDE.md safety net).
@@ -50,6 +52,10 @@ DAILY_DIRS = [
      ["snapshot_ts", "instrument_name"], "snapshot_ts"),
     (STAGING / "orderbook", ROOT / "data" / "orderbook",
      ["timestamp", "symbol"], "timestamp"),
+    # IT: trade opzioni Deribit (01e): trade_id è la chiave naturale del venue.
+    # EN: Deribit option trades (01e): trade_id is the venue's natural key.
+    (STAGING / "deribit_trades", ROOT / "data" / "deribit_trades",
+     ["trade_id"], "timestamp"),
 ]
 
 

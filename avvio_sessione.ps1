@@ -54,8 +54,8 @@ if (-not $SkipPull) {
 }
 
 # --- 2. Processi locali (anti-duplicazione) / local processes (anti-dup) -----
-# IT: pattern -> argomenti di lancio. 01d escluso: gira sul VPS (systemd).
-# EN: pattern -> launch arguments. 01d excluded: it runs on the VPS (systemd).
+# IT: pattern -> argomenti di lancio. 01d/01e esclusi: girano sul VPS (systemd).
+# EN: pattern -> launch arguments. 01d/01e excluded: they run on the VPS (systemd).
 $targets = @(
     @{ pattern = "01c_iv_poller"; args = @("scripts/01c_iv_poller.py");              name = "01c poller IV" },
     @{ pattern = "04b_vol_paper"; args = @("scripts/04b_vol_paper.py", "--execute"); name = "04b vol-paper" }

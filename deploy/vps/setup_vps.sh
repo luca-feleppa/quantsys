@@ -60,22 +60,24 @@ cd "$INSTALL_DIR"
 .venv/bin/pip install --quiet -e . --no-deps
 # IT: directory di output dei collector (path CWD-relativi, vedi 01c/01d).
 # EN: collector output directories (CWD-relative paths, see 01c/01d).
-mkdir -p data/iv/chain data/orderbook logs
+mkdir -p data/iv/chain data/orderbook data/deribit_trades logs
 chown -R "$RUN_USER":"$RUN_USER" "$INSTALL_DIR"
 
-echo "=== [6/7] Smoke test --once (entrambi i collector / both collectors) ==="
+echo "=== [6/7] Smoke test --once (tutti i collector / all collectors) ==="
 sudo -u "$RUN_USER" .venv/bin/python scripts/01c_iv_poller.py --once
 sudo -u "$RUN_USER" .venv/bin/python scripts/01d_orderbook_recorder.py --once
+sudo -u "$RUN_USER" .venv/bin/python scripts/01e_trades_recorder.py --once
 echo "--- parquet scritti / parquet written:"
-find data/iv data/orderbook -name '*.parquet' -newermt '-10 minutes' | sed 's/^/    /'
+find data/iv data/orderbook data/deribit_trades -name '*.parquet' -newermt '-10 minutes' | sed 's/^/    /'
 
 echo "=== [7/7] Unit systemd (enable --now) ==="
-cp deploy/vps/quantsys-iv.service deploy/vps/quantsys-ob.service /etc/systemd/system/
+cp deploy/vps/quantsys-iv.service deploy/vps/quantsys-ob.service \
+   deploy/vps/quantsys-trades.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now quantsys-iv.service quantsys-ob.service
+systemctl enable --now quantsys-iv.service quantsys-ob.service quantsys-trades.service
 sleep 3
-systemctl --no-pager --lines=5 status quantsys-iv.service quantsys-ob.service || true
+systemctl --no-pager --lines=5 status quantsys-iv.service quantsys-ob.service quantsys-trades.service || true
 
 echo
-echo "FATTO / DONE. Log live: journalctl -u quantsys-iv -u quantsys-ob -f"
+echo "FATTO / DONE. Log live: journalctl -u quantsys-iv -u quantsys-ob -u quantsys-trades -f"
 echo "Da casa / from home: scripts/vps/pull_vps_data.ps1 -VpsHost <user@ip>"

@@ -22,7 +22,7 @@ echo "=== QUANTSYS VPS health-check $(date -u '+%Y-%m-%d %H:%M UTC') ==="
 #     da Restart=always: il servizio risulta active ma muore di continuo).
 # EN: 1) services active + restart count (high NRestarts = crash-loop masked by
 #     Restart=always: the unit shows active but keeps dying).
-for svc in quantsys-iv quantsys-ob; do
+for svc in quantsys-iv quantsys-ob quantsys-trades; do
     state=$(systemctl is-active "$svc" 2>/dev/null || true)
     nrst=$(systemctl show "$svc" -p NRestarts --value 2>/dev/null || echo "?")
     if [ "$state" = "active" ]; then
@@ -52,6 +52,9 @@ fresh() {  # $1=path-glob  $2=soglia-minuti/threshold-min  $3=label
 fresh "$ROOT/data/iv/atm_30h.parquet"      30 "IV poller (atm_30h)"
 fresh "$ROOT/data/iv/chain/*.parquet"      30 "IV poller (chain)"
 fresh "$ROOT/data/orderbook/*.parquet"     10 "L2 recorder (orderbook)"
+# IT: 01e scrive solo se ci sono trade nuovi: soglia larga (60') anti falsi-WARN.
+# EN: 01e writes only when new trades exist: wide threshold (60') vs false WARNs.
+fresh "$ROOT/data/deribit_trades/*.parquet" 60 "Trades recorder (deribit_trades)"
 
 # IT: 3) disco e RAM (warn oltre 80% disco; RAM solo informativa).
 # EN: 3) disk and RAM (warn above 80% disk; RAM informational only).

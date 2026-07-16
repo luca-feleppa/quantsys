@@ -1,7 +1,7 @@
 # IT: PULL DATI DAL VPS COLLECTOR (lato casa, Windows PowerShell 5.1+).
 #     Scarica via scp in data/vps_staging/ i file dei collector 24/7:
 #       - file singoli append-only: atm_30h.parquet, dvol.parquet
-#       - parquet giornalieri recenti (ultimi -Days giorni): iv/chain + orderbook
+#       - parquet giornalieri recenti (ultimi -Days giorni): iv/chain + orderbook + deribit_trades
 #     Poi lancia il merge nella copia canonica (scripts/vps/merge_vps_data.py).
 #     Prerequisito: OpenSSH client di Windows (ssh/scp) + chiave autorizzata sul VPS.
 #     Host/root PRIVATI: default da config/secrets.yaml (gitignored), blocco:
@@ -12,7 +12,7 @@
 # EN: PULL DATA FROM THE COLLECTOR VPS (home side, Windows PowerShell 5.1+).
 #     Downloads the 24/7 collector files into data/vps_staging/ via scp:
 #       - append-only single files: atm_30h.parquet, dvol.parquet
-#       - recent daily parquet (last -Days days): iv/chain + orderbook
+#       - recent daily parquet (last -Days days): iv/chain + orderbook + deribit_trades
 #     Then runs the merge into the canonical copy (scripts/vps/merge_vps_data.py).
 #     Prerequisite: Windows OpenSSH client (ssh/scp) + authorized key on the VPS.
 #     PRIVATE host/root: defaults from config/secrets.yaml (gitignored), block:
@@ -62,8 +62,9 @@ if (-not $RemoteRoot) { $RemoteRoot = "/opt/quantsys" }
 $SshOpts = @("-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=3","-o","BatchMode=yes")
 
 $Staging  = Join-Path $ProjRoot "data\vps_staging"
-New-Item -ItemType Directory -Force (Join-Path $Staging "iv\chain")   | Out-Null
-New-Item -ItemType Directory -Force (Join-Path $Staging "orderbook")  | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $Staging "iv\chain")        | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $Staging "orderbook")       | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $Staging "deribit_trades")  | Out-Null
 
 # IT: mai stampare l'host (privato): solo la finestra temporale.
 # EN: never print the host (private): only the time window.
@@ -81,8 +82,9 @@ if ($LASTEXITCODE -ne 0) { Write-Warning "dvol.parquet non copiato (puo' non esi
 # EN: 2) recent dailies — remote list via find -mtime, then per-file scp
 #        (no rsync on Windows; files are a few MB, cost is negligible).
 $pairs = @(
-    @{ remote = "$RemoteRoot/data/iv/chain";  local = (Join-Path $Staging "iv\chain") },
-    @{ remote = "$RemoteRoot/data/orderbook"; local = (Join-Path $Staging "orderbook") }
+    @{ remote = "$RemoteRoot/data/iv/chain";       local = (Join-Path $Staging "iv\chain") },
+    @{ remote = "$RemoteRoot/data/orderbook";      local = (Join-Path $Staging "orderbook") },
+    @{ remote = "$RemoteRoot/data/deribit_trades"; local = (Join-Path $Staging "deribit_trades") }
 )
 foreach ($p in $pairs) {
     $listCmd = "find $($p.remote) -name '*.parquet' -mtime -$Days 2>/dev/null"

@@ -1,0 +1,26 @@
+# IT: unit systemd — recorder trade opzioni Deribit (01e), tick ogni 10 min,
+#     restart automatico. Install come quantsys-iv.service.
+# EN: systemd unit — Deribit option trades recorder (01e), 10-min tick,
+#     automatic restart. Install like quantsys-iv.service.
+[Unit]
+Description=QUANTSYS 01e Deribit option trades recorder (realized spreads, daily parquet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quantsys
+WorkingDirectory=/opt/quantsys
+ExecStart=/opt/quantsys/.venv/bin/python scripts/01e_trades_recorder.py --minutes 10
+# IT: log non bufferizzati su journald (journalctl -u quantsys-trades -f).
+# EN: unbuffered logs to journald (journalctl -u quantsys-trades -f).
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=30
+# IT: hardening minimo — nessun privilegio nuovo, /tmp privato.
+# EN: minimal hardening — no new privileges, private /tmp.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

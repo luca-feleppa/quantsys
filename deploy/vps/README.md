@@ -1,8 +1,8 @@
 # Deploy collector 24/7 su VPS · 24/7 collector VPS deploy
 
-🇮🇹 Kit per spostare i due collector leggeri (`01c_iv_poller`, `01d_orderbook_recorder`) su un VPS Linux always-on (Ubuntu 24.04 o Debian 12+; l'istanza reale monta Debian) (decisione 2026-06-24; acquisto netcup VPS Lite 1 G12s 2026-07-14). Obiettivo: eliminare i buchi PC-off nella serie IV (unico dato non rigenerabile), sbloccare B1 (book L2 continuo) e rendere replayabile offline il forward test `04b`. Nessun secret sul VPS: entrambi i collector usano solo endpoint pubblici non autenticati. Training/GPU restano a casa.
+🇮🇹 Kit per i tre collector leggeri (`01c_iv_poller`, `01d_orderbook_recorder`, `01e_trades_recorder`) su un VPS Linux always-on (Ubuntu 24.04 o Debian 12+; l'istanza reale monta Debian) (decisione 2026-06-24; acquisto netcup VPS Lite 1 G12s 2026-07-14; 01e aggiunto 2026-07-16). Obiettivo: eliminare i buchi PC-off nella serie IV (dato non rigenerabile), sbloccare B1 (book L2 continuo), rendere replayabile offline il forward test `04b` e accumulare i trade opzioni per gli spread realizzati (retention API ~24h: anche questo non ricostruibile ex-post). Nessun secret sul VPS: tutti i collector usano solo endpoint pubblici non autenticati. Training/GPU restano a casa.
 
-**EN** Kit to move the two lightweight collectors (`01c_iv_poller`, `01d_orderbook_recorder`) to an always-on Linux VPS (Ubuntu 24.04 or Debian 12+; the actual instance runs Debian) (2026-06-24 decision; netcup VPS Lite 1 G12s purchased 2026-07-14). Goal: remove PC-off gaps in the IV series (the only non-regenerable dataset), unblock B1 (continuous L2 book) and make the `04b` forward test replayable offline. No secrets on the VPS: both collectors only hit public unauthenticated endpoints. Training/GPU stay home.
+**EN** Kit for the three lightweight collectors (`01c_iv_poller`, `01d_orderbook_recorder`, `01e_trades_recorder`) on an always-on Linux VPS (Ubuntu 24.04 or Debian 12+; the actual instance runs Debian) (2026-06-24 decision; netcup VPS Lite 1 G12s purchased 2026-07-14; 01e added 2026-07-16). Goal: remove PC-off gaps in the IV series (non-regenerable data), unblock B1 (continuous L2 book), make the `04b` forward test replayable offline, and accumulate option trades for realized spreads (API retention ~24h: also not reconstructible ex-post). No secrets on the VPS: all collectors only hit public unauthenticated endpoints. Training/GPU stay home.
 
 ## Sequenza di deploy · Deploy sequence
 
@@ -40,7 +40,7 @@ bash /opt/quantsys/deploy/vps/setup_vps.sh
 **EN** **3. Verify.** Live logs and parquet presence:
 
 ```bash
-journalctl -u quantsys-iv -u quantsys-ob -f
+journalctl -u quantsys-iv -u quantsys-ob -u quantsys-trades -f
 find /opt/quantsys/data -name '*.parquet' -newermt '-1 hour'
 ```
 
@@ -54,9 +54,9 @@ find /opt/quantsys/data -name '*.parquet' -newermt '-1 hour'
 
 ## Semantica dei dati · Data semantics
 
-🇮🇹 Il doppio poller (casa accesa + VPS) produce tick duplicati **by design**: il merge deduplica (`atm_30h`/`dvol` su `timestamp`; `chain/*` su `snapshot_ts+instrument_name`; `orderbook/*` su `timestamp+symbol`) e ordina, con scritture atomiche. La copia canonica resta quella di casa (`data/iv/`, `data/orderbook/`); il VPS è la sorgente di continuità e la seconda copia di ridondanza dell'asset IV. `04b` a casa continua a leggere il file locale (staleness ≤30 min) alimentato dal poller locale quando il PC è acceso. ⚠ I trade eventualmente replayati offline sulle ore PC-off NON entrano retroattivamente nel gate v1 (campione pre-registrato): vanno in file separati.
+🇮🇹 Il doppio poller (casa accesa + VPS) produce tick duplicati **by design**: il merge deduplica (`atm_30h`/`dvol` su `timestamp`; `chain/*` su `snapshot_ts+instrument_name`; `orderbook/*` su `timestamp+symbol`; `deribit_trades/*` su `trade_id`) e ordina, con scritture atomiche. La copia canonica resta quella di casa (`data/iv/`, `data/orderbook/`, `data/deribit_trades/`); il VPS è la sorgente di continuità e la seconda copia di ridondanza dell'asset IV. `01d` e `01e` vivono SOLO sul VPS (nessuna istanza casa). `04b` a casa continua a leggere il file locale (staleness ≤30 min) alimentato dal poller locale quando il PC è acceso. ⚠ I trade eventualmente replayati offline sulle ore PC-off NON entrano retroattivamente nel gate v1 (campione pre-registrato): vanno in file separati.
 
-**EN** Dual polling (home on + VPS) duplicates ticks **by design**: the merge deduplicates (`atm_30h`/`dvol` on `timestamp`; `chain/*` on `snapshot_ts+instrument_name`; `orderbook/*` on `timestamp+symbol`) and sorts, with atomic writes. The canonical copy stays home (`data/iv/`, `data/orderbook/`); the VPS is the continuity source and the redundancy copy of the IV asset. `04b` at home keeps reading the local file (≤30 min staleness) fed by the local poller while the PC is on. ⚠ Any trades replayed offline over PC-off hours do NOT retroactively enter the v1 gate (pre-registered sample): they go to separate files.
+**EN** Dual polling (home on + VPS) duplicates ticks **by design**: the merge deduplicates (`atm_30h`/`dvol` on `timestamp`; `chain/*` on `snapshot_ts+instrument_name`; `orderbook/*` on `timestamp+symbol`; `deribit_trades/*` on `trade_id`) and sorts, with atomic writes. The canonical copy stays home (`data/iv/`, `data/orderbook/`, `data/deribit_trades/`); the VPS is the continuity source and the redundancy copy of the IV asset. `01d` and `01e` live ONLY on the VPS (no home instance). `04b` at home keeps reading the local file (≤30 min staleness) fed by the local poller while the PC is on. ⚠ Any trades replayed offline over PC-off hours do NOT retroactively enter the v1 gate (pre-registered sample): they go to separate files.
 
 ## File del kit · Kit files
 
@@ -67,5 +67,6 @@ find /opt/quantsys/data -name '*.parquet' -newermt '-1 hour'
 | `requirements-vps.txt` | Dipendenze minime collector (+ torch CPU a parte) | Minimal collector deps (+ CPU torch separately) |
 | `quantsys-iv.service` | Unit systemd 01c (tick 10 min, `Restart=always`) | 01c systemd unit (10-min tick, `Restart=always`) |
 | `quantsys-ob.service` | Unit systemd 01d (polling 5 s, `Restart=always`) | 01d systemd unit (5 s polling, `Restart=always`) |
+| `quantsys-trades.service` | Unit systemd 01e (tick 10 min, `Restart=always`) | 01e systemd unit (10-min tick, `Restart=always`) |
 | `../../scripts/vps/pull_vps_data.ps1` | Pull scp lato casa → staging | Home-side scp pull → staging |
 | `../../scripts/vps/merge_vps_data.py` | Merge dedup → canonico + heartbeat staleness | Dedup merge → canonical + staleness heartbeat |
