@@ -91,19 +91,31 @@ def heartbeat(stale_hours: float) -> bool:
     #     collector state at pull time). True = everything fresh.
     ok = True
     now = pd.Timestamp.now(tz="UTC")
-    checks = [("IV poller (atm_30h)", STAGING / "iv" / "atm_30h.parquet", "timestamp")]
+    # IT: soglia per-check: i trade 01e si scrivono solo quando il mercato stampa
+    #     fill → soglia larga (≥6h) anti falsi-WARN (audit 2026-07-16, MINOR:
+    #     senza questo check un 01e morto era invisibile al pull quotidiano,
+    #     e la retention API ~24h rende il buco NON ricostruibile).
+    # EN: per-check threshold: 01e trades are written only when the market
+    #     prints fills → wide threshold (≥6h) against false WARNs (2026-07-16
+    #     audit, MINOR: without this check a dead 01e was invisible to the
+    #     daily pull, and the ~24h API retention makes the gap unrecoverable).
+    checks = [("IV poller (atm_30h)", STAGING / "iv" / "atm_30h.parquet", "timestamp", stale_hours)]
     ob_files = sorted((STAGING / "orderbook").glob("*.parquet"))
     if ob_files:
-        checks.append(("L2 recorder (orderbook)", ob_files[-1], "timestamp"))
-    for name, path, col in checks:
+        checks.append(("L2 recorder (orderbook)", ob_files[-1], "timestamp", stale_hours))
+    tr_files = sorted((STAGING / "deribit_trades").glob("*.parquet"))
+    if tr_files:
+        checks.append(("Trades recorder (deribit_trades)", tr_files[-1], "timestamp",
+                       max(stale_hours, 6.0)))
+    for name, path, col, thresh in checks:
         if not path.exists():
             log.warning(f"HEARTBEAT {name}: file di staging assente / staging file missing")
             ok = False
             continue
         last = pd.to_datetime(pd.read_parquet(path, columns=[col])[col].max(), utc=True)
         age_h = (now - last).total_seconds() / 3600
-        if age_h > stale_hours:
-            log.warning(f"HEARTBEAT {name}: ultimo tick VPS {age_h:.1f}h fa (> {stale_hours}h) "
+        if age_h > thresh:
+            log.warning(f"HEARTBEAT {name}: ultimo tick VPS {age_h:.1f}h fa (> {thresh}h) "
                         f"— collector remoto probabilmente GIU' / remote collector likely DOWN")
             ok = False
         else:
