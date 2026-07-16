@@ -358,10 +358,10 @@ def main():
     atomic_save_parquet(df_macro, macro_path)
     log.info(f"Macro features → {macro_path}  ({df_macro.shape[1]} colonne)")
 
-    # IT: 4. regime detection Markov-Switching su realized vol BTC (Variante 3 MODEL_IMPROVEMENTS)
+    # IT: 4. regime detection Markov-Switching su realized vol BTC (Variante 3, 2026-06-03)
     #     — df_macro è ignorato dal detector (usa raw_candles.parquet); sezione condivisa col
     #     path --regime-only (helper run_regime_detection).
-    # EN: 4. Markov-Switching regime detection on BTC realized vol (Variant 3 MODEL_IMPROVEMENTS)
+    # EN: 4. Markov-Switching regime detection on BTC realized vol (Variant 3, 2026-06-03)
     #     — df_macro is ignored by the detector (uses raw_candles.parquet); section shared with
     #     the --regime-only path (run_regime_detection helper).
     regime_df = run_regime_detection(mcfg, out, df_macro=df_macro)

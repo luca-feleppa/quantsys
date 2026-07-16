@@ -53,11 +53,11 @@ def get_canonical_feature_names(npz_path: str = "data/lstm_dataset.npz") -> tupl
 # IT: Feature scartate dal set "C-funding" (single source of truth training↔live).
 #     Motivo: permutation importance 2026-05-28 → ROI ≤ 0 (rumore o dannose) E/O lookback > 30g
 #     non calcolabile nel buffer live. Si mantengono invece le 30d + funding (ROI positivo).
-#     Vedi MODEL_IMPROVEMENTS.md "Allineamento feature live↔training (2026-05-28)".
+#     Vedi TEORIA.md (filtro C-funding) e CLAUDE.md (regola "104 feature").
 # EN: Features dropped from the "C-funding" set (single source of truth training↔live).
 #     Reason: 2026-05-28 permutation importance → ROI ≤ 0 (noise or harmful) AND/OR lookback > 30d
 #     not computable in the live buffer. The 30d + funding features (positive ROI) are kept instead.
-#     See MODEL_IMPROVEMENTS.md "Allineamento feature live↔training (2026-05-28)".
+#     See TEORIA.md (C-funding filter) and CLAUDE.md ("104 feature" rule).
 LIVE_DROP_FEATURES = frozenset({
     "dist_ath_90d", "dist_atl_90d", "price_pos_90d",
     "dist_ath_365d", "dist_atl_365d", "price_pos_365d",

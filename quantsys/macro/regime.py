@@ -1208,11 +1208,11 @@ class RegimeSession:
 
 # ─── STADIO 1d: MARKOV-SWITCHING SU REALIZED VOL BTC (intraday) ─────────────
 
-# IT: Markov-Switching su realized vol BTC oraria — Variante 3 di MODEL_IMPROVEMENTS.md.
+# IT: Markov-Switching su realized vol BTC oraria — "Variante 3" (decisione 2026-06-03, vedi TEORIA.md §regime).
 #     Sostituisce RegimeSession allineando il timescale del regime (switch ogni 3-8h)
 #     col timeframe trading. Il clock del regime è ORARIO by design, a prescindere
 #     dall'intervallo candele (≤1h, aggregate a 1h). Usa SOLO dati BTC, non più macro USA.
-# EN: Markov-Switching on hourly BTC realized volatility — Variant 3 of MODEL_IMPROVEMENTS.md.
+# EN: Markov-Switching on hourly BTC realized volatility — "Variant 3" (2026-06-03 decision, see TEORIA.md §regime).
 #     Replaces RegimeSession by aligning the regime timescale (switches every 3-8h)
 #     with the trading timeframe. The regime clock is HOURLY by design, regardless of the
 #     candle interval (≤1h, aggregated to 1h). Uses BTC data ONLY, no more US macro.
@@ -1232,8 +1232,8 @@ class RegimeMarkovBTC:
          · Hamilton filter O(1) tra un retrain e l'altro
 
     Razionale:
-      - Variante 3 di `MODEL_IMPROVEMENTS.md` (§"NEW — Sostituire MS macro con
-        regime intraday su BTC"). Il MS su macro era degenere (regimi mensili
+      - "Variante 3" della decisione 2026-06-03 (sostituire il MS macro con
+        regime intraday su BTC). Il MS su macro era degenere (regimi mensili
         vs trading 1m); il session-based era informativamente vuoto. La realized
         vol BTC oraria cambia 3-8 volte/giorno → match col forecast horizon h=30.
 

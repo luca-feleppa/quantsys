@@ -28,6 +28,22 @@
 
 ---
 
+## 🟢 2026-07-16 — Verifica sistemi PASS + definizione campione gate v1 (chiude alla 21ª riga) + cleanup doc improvement + `POST_GATE_V1.md`
+
+**Verifica processi (post `avvio_sessione.ps1` delle 11:22):** 01c (stub 9184→worker 12008) e 04b (stub 13700→worker 4152) vivi, zero duplicati; 04b all'avvio ha **settlato il 19° trade** (LONG K=64500, PnL −0.01129 BTC) e aperto lo straddle **BTC-17JUL26-64000** (edge +0.606), tick orari regolari. Chunk B7: **no-op corretto** — check rieseguito a mano: candele max = frontiera checkpoint = 2026-06-22 14:00, 0 barre nuove (congelamento A3/A8 by design). Warning atteso: macro_features 8g stale (refresh solo post-A3/A8).
+
+**Verifica VPS + merge (pull rilanciato 14:17):** heartbeat IV 0.1h / L2 0.0h → servizi systemd attivi in tempo reale. Sanity sui canonici post-merge: `atm_30h` 1300 righe, 0 dup, monotono, **ore 00–05 UTC coperte** (serie H24, gap max 10'01" = cadenza); `chain/btc_options_20260716` 80.136 righe 0 dup (93 snapshot); `l2_features_20260716` 8.850 righe 0 dup (gap max 7s). Il merge dedup casa+VPS funziona come da semantica.
+
+**Gate v1: n=19 righe** (19 chiavi `entry_ts+settled_ts` uniche, nessun nuovo duplicato). Prossimo settlement: straddle aperto 09:22 UTC su expiry **17JUL26 08:00 UTC** (~10:00 locali del 07-17).
+
+**⚖️ DEFINIZIONE DI CAMPIONE DEL GATE V1 (decisa 2026-07-16 a n=19, PRE-esito aggregato — dettaglio e razionale in `POST_GATE_V1.md` §0):** (1) il trade #0 ha `executed: false` = smoke pre-lancio, designato non-campione da note contemporanee PRE-settlement (STATUS 06-12/06-13) → **campione primario = soli `executed: true` → il gate chiude alla 21ª riga di trades.jsonl (20° settlement eseguito)**, con report su ENTRAMBI i campioni e fail-safe sul verdetto peggiore (il #0 è una perdita: escluderlo favorisce il PASS, dichiarato); (2) scoperta: la pre-reg originale 06-12 fissava **≥30 trade**, il "n≥20" è drift lessicale dal gate short-vol mai ri-registrato → n=20 resta il checkpoint operativo (attivazioni v2), ma la **valutazione a ≥30 resta dovuta** sulla leg opzioni (invariata sotto `--hedge`); A13/A14 NON si attivano prima di quella.
+
+**🧹 CLEANUP DOC IMPROVEMENT (decisione utente, stessa sessione):** `docs/MODEL_IMPROVEMENTS.md` e `docs/ROADMAP_VOL_BOOK.md` SNELLITI ai soli item aperti (restano: A1/A3/A4/A7/A8-mixup/A9/A10/A12/A13/A14, B2/B3, execution-layer design, mamba-ssm kernel, audit residui low-priority). Rimossi: item applicati e documentati in TEORIA/AVVIO/README/CLAUDE o scripts/README (infra interval, C-funding, regime detector, distill target-aware, BLOCKER#1, VPS/replay/greeks/giudice, A6, A11) e item scartati (§0 verdetti, A2 FAIL, A5 FAIL, B1 KILL, multi-timeframe, kill direzionali, roadmap legacy — esiti restano QUI in STATUS + memoria). Riferimenti incrociati sistemati (TEORIA ×3 coppie, AVVIO ×3, commenti in features/regime/01b/estimate_gjr — no dead-doc). Creato **`POST_GATE_V1.md`** (root): checklist esecutiva post-chiusura (attivazioni, implementazioni, test→informazione), da eliminare a piano completato.
+
+**▶️ RIPARTI DA QUI:** il piano post-chiusura completo (fasi A-D con attivazioni, implementazioni e test→informazione) è formalizzato in **`POST_GATE_V1.md`** (root, creato 2026-07-16): eseguirlo in ordine alla chiusura del gate (21ª riga di trades.jsonl, vedi definizione di campione sopra). Fino ad allora: nessun intervento, il campione matura da solo.
+
+---
+
 ## 🟢 2026-07-15 sera — B7 IMPLEMENTATO: regime walk-forward incrementale (minuti vs ~3h) + checkpoint bootstrappato e validato bit-exact
 
 **Cosa:** dettaglio implementazione nella voce B7 del backlog (ora ✅). Sintesi operativa: `01b --regime-incremental` (append fail-fast, one-shot: appende→salva→esce), `--regime-bootstrap-checkpoint` (ricostruzione one-off con golden replay), checkpoint `data/regime_wf_checkpoint.pkl` salvato anche dal full rebuild. Chunk B7 in `avvio_sessione.ps1`: a ogni avvio confronta ultima candela vs frontiera checkpoint, se ≥168 barre nuove lancia l'incrementale in background (anti-dup 01b); con candele congelate stampa "fresco (0)" — no-op by design. ⚠ Quoting PS 5.1: il python inline nel .ps1 usa SOLO apici singoli (le doppie virgolette vengono strippate negli argomenti ai native exe).

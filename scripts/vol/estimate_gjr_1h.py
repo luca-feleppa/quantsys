@@ -2,9 +2,9 @@
 scripts/vol/estimate_gjr_1h.py
 ==============================
 Ri-stima dei parametri GJR-GARCH(1,1) del Monte Carlo su rendimenti 1h
-(TODO documentato in MODEL_IMPROVEMENTS §2 e config/default.yaml → montecarlo:
-i parametri correnti sono calibrati su rendimenti BTC 1m; ω ha unità
-[varianza/passo] e NON è trasferibile tra timeframe).
+(TODO chiuso 2026-07-15 — parametri 1h ora in config/default.yaml → montecarlo,
+i 1m-era in config/interval/1m.yaml; ω ha unità [varianza/passo] e NON è
+trasferibile tra timeframe).
 
 Metodo: QMLE gaussiano con variance targeting — riusa `fit_gjr` di
 `scripts/vol/short_vol_hist_backtest.py` (single source of truth del fitter,
