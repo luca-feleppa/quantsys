@@ -40,7 +40,6 @@
 #     error never costs the main IV tick).
 import argparse
 import logging
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -48,18 +47,17 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from quantsys.utils import setup_logging                      # noqa: E402
-from quantsys.utils.atomic_save import atomic_save_parquet    # noqa: E402
+from quantsys.utils.collect import append_parquet             # noqa: E402
+# IT: helper Deribit condivisi con 01e (estratti 2026-07-16, ex duplicati locali).
+# EN: Deribit helpers shared with 01e (extracted 2026-07-16, ex local duplicates).
+from quantsys.data.deribit import deribit_public_get as _get, parse_instrument  # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.iv_poller")
 
-# IT: endpoint pubblici Deribit (verificati con chiamate dirette, 2026-06-11).
-# EN: Deribit public endpoints (verified with direct calls, 2026-06-11).
-DERIBIT_BASE = "https://www.deribit.com/api/v2"
 IV_DIR = Path("data/iv")
 CHAIN_DIR = IV_DIR / "chain"
 ATM_PATH = IV_DIR / "atm_30h.parquet"
@@ -77,39 +75,6 @@ N_EXPIRIES = 4
 # IT: inizio disponibilità DVOL su Deribit (per il backfill).
 # EN: DVOL availability start on Deribit (for the backfill).
 DVOL_START = datetime(2021, 3, 24, tzinfo=timezone.utc)
-
-# IT: nome strumento Deribit: BTC-13JUN26-105000-C → expiry 08:00 UTC del giorno.
-# EN: Deribit instrument name: BTC-13JUN26-105000-C → expiry at 08:00 UTC that day.
-_INSTR_RE = re.compile(r"^BTC-(\d{1,2})([A-Z]{3})(\d{2})-(\d+(?:d\d+)?)-([CP])$")
-_MONTHS = {m: i + 1 for i, m in enumerate(
-    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-     "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"])}
-
-
-def _get(path: str, params: dict, timeout: int = 15) -> dict:
-    # IT: GET pubblica con error-raise; il chiamante gestisce i transient nel loop.
-    # EN: public GET with error-raise; caller handles transients in the loop.
-    r = requests.get(f"{DERIBIT_BASE}/{path}", params=params, timeout=timeout)
-    r.raise_for_status()
-    payload = r.json()
-    if "result" not in payload:
-        raise RuntimeError(f"Deribit risposta inattesa / unexpected response: {payload}")
-    return payload["result"]
-
-
-def parse_instrument(name: str):
-    # IT: estrae (expiry UTC, strike, tipo) dal nome; None se non-standard.
-    # EN: extracts (UTC expiry, strike, type) from the name; None if non-standard.
-    m = _INSTR_RE.match(name)
-    if not m:
-        return None
-    day, mon, yy, strike_s, opt = m.groups()
-    expiry = datetime(2000 + int(yy), _MONTHS[mon], int(day), 8, 0,
-                      tzinfo=timezone.utc)
-    # IT: strike decimali tipo "3d5" non esistono su BTC, ma il parse non crasha.
-    # EN: decimal strikes like "3d5" don't occur on BTC, but parsing won't crash.
-    strike = float(strike_s.replace("d", "."))
-    return expiry, strike, opt
 
 
 def fetch_chain_snapshot(now: pd.Timestamp) -> pd.DataFrame:
@@ -205,24 +170,6 @@ def fetch_dvol(start_ms: int, end_ms: int, resolution: str = "3600") -> pd.DataF
         "timestamp": pd.to_datetime(arr[:, 0].astype(np.int64), unit="ms", utc=True),
         "dvol": arr[:, 4],
     })
-
-
-def append_parquet(path: Path, new_rows: pd.DataFrame, dedup_cols: list) -> int:
-    # IT: append con dedup su chiave + scrittura atomica (tmp+os.replace, pattern
-    #     repo): un crash a metà tick non corrompe mai lo storico accumulato.
-    # EN: keyed-dedup append + atomic write (tmp+os.replace, repo pattern): a
-    #     mid-tick crash can never corrupt the accumulated history.
-    if new_rows.empty:
-        return 0
-    if path.exists():
-        old = pd.read_parquet(path)
-        merged = pd.concat([old, new_rows], ignore_index=True)
-    else:
-        merged = new_rows
-    merged = merged.drop_duplicates(subset=dedup_cols, keep="last")
-    merged = merged.sort_values(dedup_cols[0]).reset_index(drop=True)
-    atomic_save_parquet(merged, path, index=False)
-    return len(merged)
 
 
 def _finite_or_nan(v) -> float:

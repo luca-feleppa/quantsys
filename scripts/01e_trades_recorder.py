@@ -44,27 +44,25 @@
 #     Modes: --once (smoke), --minutes N (cadence, default 10), --currency.
 import argparse
 import logging
-import re
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
-import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from quantsys.utils import setup_logging                      # noqa: E402
-from quantsys.utils.atomic_save import atomic_save_parquet    # noqa: E402
+from quantsys.utils.collect import append_parquet             # noqa: E402
+# IT: helper Deribit condivisi con 01c (estratti 2026-07-16; production, no-auth:
+#     la testnet NON va usata qui — trade paper, inutili per gli spread realizzati).
+# EN: Deribit helpers shared with 01c (extracted 2026-07-16; production, no-auth:
+#     testnet must NOT be used here — paper trades, useless for realized spreads).
+from quantsys.data.deribit import deribit_public_get, parse_instrument  # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.trades_recorder")
 
-# IT: endpoint pubblico Deribit production (stesso base di 01c; la testnet NON
-#     va usata qui: i suoi trade sono paper, inutili per gli spread realizzati).
-# EN: Deribit production public endpoint (same base as 01c; testnet must NOT be
-#     used here: its trades are paper, useless for realized spreads).
-DERIBIT_BASE = "https://www.deribit.com/api/v2"
 TRADES_DIR = Path("data/deribit_trades")
 
 # IT: retention osservata dell'endpoint pubblico (~24h): il cold start riparte
@@ -85,41 +83,6 @@ OVERLAP_MS = 60_000
 # EN: API maximum per page.
 PAGE_COUNT = 1000
 
-# IT: parser nome strumento (stesso pattern di 01c): BTC-13JUN26-105000-C →
-#     (expiry 08:00 UTC, strike, C/P). Persistiamo i campi parsati per comodità
-#     downstream (groupby per expiry/strike senza ri-parsare).
-# EN: instrument-name parser (same pattern as 01c): BTC-13JUN26-105000-C →
-#     (expiry 08:00 UTC, strike, C/P). Parsed fields persisted for downstream
-#     convenience (groupby by expiry/strike without re-parsing).
-_INSTR_RE = re.compile(r"^[A-Z]+-(\d{1,2})([A-Z]{3})(\d{2})-(\d+(?:d\d+)?)-([CP])$")
-_MONTHS = {m: i + 1 for i, m in enumerate(
-    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-     "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"])}
-
-
-def parse_instrument(name: str):
-    # IT: (expiry UTC, strike, tipo) dal nome; None se non-standard.
-    # EN: (UTC expiry, strike, type) from the name; None when non-standard.
-    m = _INSTR_RE.match(name)
-    if not m:
-        return None
-    day, mon, yy, strike_s, opt = m.groups()
-    expiry = datetime(2000 + int(yy), _MONTHS[mon], int(day), 8, 0,
-                      tzinfo=timezone.utc)
-    return expiry, float(strike_s.replace("d", ".")), opt
-
-
-def _get(path: str, params: dict, timeout: int = 20) -> dict:
-    # IT: GET pubblica con error-raise; i transient li gestisce il loop chiamante.
-    # EN: public GET with error-raise; transients handled by the calling loop.
-    r = requests.get(f"{DERIBIT_BASE}/{path}", params=params, timeout=timeout)
-    r.raise_for_status()
-    payload = r.json()
-    if "result" not in payload:
-        raise RuntimeError(f"Deribit risposta inattesa / unexpected response: {payload}")
-    return payload["result"]
-
-
 def fetch_trades_window(currency: str, start_ms: int, end_ms: int,
                         max_pages: int = 200) -> pd.DataFrame:
     # IT: percorre [start_ms, end_ms] in avanti (sorting=asc) paginando su
@@ -133,11 +96,11 @@ def fetch_trades_window(currency: str, start_ms: int, end_ms: int,
     frames = []
     cur = start_ms
     for _ in range(max_pages):
-        res = _get("public/get_last_trades_by_currency_and_time", {
+        res = deribit_public_get("public/get_last_trades_by_currency_and_time", {
             "currency": currency, "kind": "option",
             "start_timestamp": cur, "end_timestamp": end_ms,
             "count": PAGE_COUNT, "sorting": "asc",
-        })
+        }, timeout=20)
         trades = res.get("trades", [])
         if not trades:
             break
@@ -169,24 +132,6 @@ def fetch_trades_window(currency: str, start_ms: int, end_ms: int,
     return df[[c for c in keep if c in df.columns]].sort_values("timestamp")
 
 
-def append_parquet(path: Path, new_rows: pd.DataFrame, dedup_cols: list) -> int:
-    # IT: append con dedup su chiave + scrittura atomica (tmp+os.replace,
-    #     pattern repo, identico a 01c/01d).
-    # EN: keyed-dedup append + atomic write (tmp+os.replace, repo pattern,
-    #     identical to 01c/01d).
-    if new_rows.empty:
-        return 0
-    if path.exists():
-        old = pd.read_parquet(path)
-        merged = pd.concat([old, new_rows], ignore_index=True)
-    else:
-        merged = new_rows
-    merged = merged.drop_duplicates(subset=dedup_cols, keep="last")
-    merged = merged.sort_values("timestamp").reset_index(drop=True)
-    atomic_save_parquet(merged, path, index=False)
-    return len(merged)
-
-
 def last_saved_ms(now: pd.Timestamp) -> int:
     # IT: riprende dall'ultimo trade persistito (file di oggi, poi ieri —
     #     oltre non serve: la retention API è ~24h); cold start = now − retention.
@@ -215,7 +160,7 @@ def poll_once(currency: str) -> dict:
     for day, grp in (df.groupby(df["timestamp"].dt.strftime("%Y%m%d"))
                      if not df.empty else []):
         path = TRADES_DIR / f"option_trades_{day}.parquet"
-        n_tot = append_parquet(path, grp, dedup_cols=["trade_id"])
+        n_tot = append_parquet(path, grp, dedup_cols=["trade_id"], sort_col="timestamp")
         files.append((path.name, len(grp), n_tot))
     return {"ts": now, "n_fetched": n_new, "files": files}
 

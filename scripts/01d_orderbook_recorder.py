@@ -45,7 +45,9 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from quantsys.utils import setup_logging                      # noqa: E402
-from quantsys.utils.atomic_save import atomic_save_parquet    # noqa: E402
+# IT: append atomico condiviso dei collector (estratto 2026-07-16, ex duplicato).
+# EN: shared collector atomic append (extracted 2026-07-16, ex local duplicate).
+from quantsys.utils.collect import append_parquet             # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.ob_recorder")
@@ -198,24 +200,6 @@ def compute_features(depth: dict, symbol: str) -> pd.DataFrame:
 
     feat["last_update_id"] = depth.get("lastUpdateId")
     return pd.DataFrame([feat])
-
-
-def append_parquet(path: Path, new_rows: pd.DataFrame, dedup_cols: list) -> int:
-    # IT: append con dedup su chiave + scrittura atomica (tmp+os.replace, pattern
-    #     repo, identico a 01c): un crash a metà tick non corrompe lo storico.
-    # EN: keyed-dedup append + atomic write (tmp+os.replace, repo pattern, identical
-    #     to 01c): a mid-tick crash never corrupts the accumulated history.
-    if new_rows.empty:
-        return 0
-    if path.exists():
-        old = pd.read_parquet(path)
-        merged = pd.concat([old, new_rows], ignore_index=True)
-    else:
-        merged = new_rows
-    merged = merged.drop_duplicates(subset=dedup_cols, keep="last")
-    merged = merged.sort_values(dedup_cols[0]).reset_index(drop=True)
-    atomic_save_parquet(merged, path, index=False)
-    return len(merged)
 
 
 def poll_once(symbol: str, levels: int) -> dict:
