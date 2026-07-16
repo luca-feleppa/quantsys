@@ -42,6 +42,8 @@
 
 **NOTA C4 (POST_GATE_V1.md, `1e38d23`):** all'attivazione `--greeks` sul poller VPS (item C4) va incluso il **sync casa** di `atm_greeks.parquet`, oggi ASSENTE da pull/merge: riga file-singolo in `pull_vps_data.ps1` + entry `SINGLE_FILES` in `merge_vps_data.py` (dedup `timestamp`) + freshness in `health_check.sh`; smoke esteso = dopo un pull cresce anche la copia canonica di casa. Chiarito inoltre (sessione): le greche `--greeks`/A6 sono quelle del VENUE (uniche decisionali, verdetto 07-08); il `bs_greeks` della dashboard è display-only — upgrade Dupire/Variance-Gamma valutato e RESPINTO (dati radi → derivate seconde instabili; delta divergerebbe dal venue; al più SVI/SABR cosmetico post-gate).
 
+**NOTA DASHBOARD (`4c3fab7`):** creato `docs/DASHBOARD_IMPROVEMENTS.md` — backlog D1-D6 (VRP monitor, Trades da elenco ad analisi + attribution A11, spread realizzati da 01e, pannello infra/pin, δ venue vs BS post-C4, igiene parser/SVI) con ordine pratico (D2+D4 primi, post-gate) e non-goal espliciti (ML nella dashboard, Dupire/VG, WebSocket). Nessun item tocca path pre-registrati; nessuna implementazione avviata. La dashboard resta CPU-only by design (GPU = contesa CUDA con training/04b senza alcun workload che la giustifichi).
+
 **▶️ RIPARTI DA QUI:** domani `.\avvio_sessione.ps1` (unica azione; rilancia 01c/04b col codice rifattorizzato se il PC è stato spento). Lo straddle BTC-17JUL26-64000 settla alle 08:00 UTC → 20° trade eseguito = **21ª riga = gate v1 CHIUDE** → valutazione pre-registrata sui 2 campioni (fail-safe sul verdetto peggiore) e poi `POST_GATE_V1.md` in ordine. Il dataset spread realizzati (01e) matura da solo sul VPS.
 
 ---
