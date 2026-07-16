@@ -31,35 +31,19 @@ $ErrorActionPreference = "Stop"
 # EN: project root = two levels above this script (scripts/vps/ → root).
 $ProjRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 
-# IT: parser minimale del blocco `vps:` in secrets.yaml (niente modulo yaml in
-#     PS 5.1): estrae `host:` e `remote_root:` dalle righe indentate del blocco.
-#     I valori NON vengono mai stampati (restano privati anche nei log/chat).
-# EN: minimal parser of the `vps:` block in secrets.yaml (no yaml module in
-#     PS 5.1): pulls `host:` and `remote_root:` from the block's indented lines.
-#     Values are NEVER printed (they stay private in logs/chat too).
+# IT: parser secrets + opzioni ssh anti-stallo condivisi (common.ps1, step 3
+#     refactor 2026-07-16): i valori restano privati, mai stampati.
+# EN: shared secrets parser + anti-stall ssh options (common.ps1, refactor
+#     step 3, 2026-07-16): values stay private, never printed.
+. (Join-Path $PSScriptRoot "common.ps1")
 if (-not $VpsHost -or -not $RemoteRoot) {
-    $secretsPath = Join-Path $ProjRoot "config\secrets.yaml"
-    if (Test-Path $secretsPath) {
-        $inVps = $false
-        foreach ($line in (Get-Content $secretsPath)) {
-            if ($line -match '^vps:\s*$') { $inVps = $true; continue }
-            if ($inVps -and $line -match '^\S') { $inVps = $false }
-            if ($inVps -and $line -match '^\s+host:\s*(\S+)' -and -not $VpsHost) { $VpsHost = $Matches[1] }
-            if ($inVps -and $line -match '^\s+remote_root:\s*(\S+)' -and -not $RemoteRoot) { $RemoteRoot = $Matches[1] }
-        }
-    }
+    $vpsCfg = Get-VpsConfig -SecretsPath (Join-Path $ProjRoot "config\secrets.yaml")
+    if (-not $VpsHost)    { $VpsHost    = $vpsCfg.Host }
+    if (-not $RemoteRoot) { $RemoteRoot = $vpsCfg.RemoteRoot }
 }
 if (-not $VpsHost) { throw "VpsHost assente: passa -VpsHost o aggiungi il blocco vps: in config/secrets.yaml / missing: pass -VpsHost or add the vps: block to config/secrets.yaml" }
 if (-not $RemoteRoot) { $RemoteRoot = "/opt/quantsys" }
-# IT: opzioni comuni ssh/scp anti-stallo: senza keepalive una TCP morta blocca
-#     per sempre (visto 2026-07-15: ssh find appeso 4+ min su comando da 0.6s).
-#     ConnectTimeout copre l'handshake, ServerAlive 10sx3 la sessione stabilita,
-#     BatchMode evita prompt interattivi (auth solo a chiave).
-# EN: shared ssh/scp anti-stall options: without keepalive a dead TCP hangs
-#     forever (seen 2026-07-15: ssh find stuck 4+ min on a 0.6s command).
-#     ConnectTimeout covers the handshake, ServerAlive 10sx3 the established
-#     session, BatchMode prevents interactive prompts (key-only auth).
-$SshOpts = @("-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=3","-o","BatchMode=yes")
+$SshOpts = $VpsSshOpts
 
 $Staging  = Join-Path $ProjRoot "data\vps_staging"
 New-Item -ItemType Directory -Force (Join-Path $Staging "iv\chain")        | Out-Null

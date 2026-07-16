@@ -19,20 +19,14 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 
-# IT: stesso mini-parser del blocco vps: usato da pull_vps_data.ps1 (valori
-#     privati: mai stampati).
-# EN: same vps: block mini-parser as pull_vps_data.ps1 (private values: never
-#     printed).
-$VpsHost = ""
-$secretsPath = Join-Path $ProjRoot "config\secrets.yaml"
-if (Test-Path $secretsPath) {
-    $inVps = $false
-    foreach ($line in (Get-Content $secretsPath)) {
-        if ($line -match '^vps:\s*$') { $inVps = $true; continue }
-        if ($inVps -and $line -match '^\S') { $inVps = $false }
-        if ($inVps -and $line -match '^\s+host:\s*(\S+)' -and -not $VpsHost) { $VpsHost = $Matches[1] }
-    }
-}
+# IT: parser secrets condiviso (common.ps1, step 3 refactor 2026-07-16); da qui
+#     anche $VpsSshOpts: il check ora ha keepalive anti-stallo come il pull
+#     (estensione deliberata del fix 2026-07-15, prima solo ConnectTimeout).
+# EN: shared secrets parser (common.ps1, refactor step 3, 2026-07-16); it also
+#     provides $VpsSshOpts: the check now gets the pull's anti-stall keepalive
+#     (deliberate extension of the 2026-07-15 fix, previously ConnectTimeout only).
+. (Join-Path $PSScriptRoot "common.ps1")
+$VpsHost = (Get-VpsConfig -SecretsPath (Join-Path $ProjRoot "config\secrets.yaml")).Host
 if (-not $VpsHost) { throw "vps.host assente in config/secrets.yaml / missing from config/secrets.yaml" }
 
 # IT: comando remoto: pull opzionale del repo + health check server-side.
@@ -47,7 +41,7 @@ $remote = "bash /opt/quantsys/deploy/vps/health_check.sh"
 if ($UpdateRepo) {
     $remote = "cd /opt/quantsys; git pull --ff-only -q; chown -R quantsys:quantsys /opt/quantsys; " + $remote
 }
-ssh -o ConnectTimeout=15 -o BatchMode=yes $VpsHost $remote
+ssh @VpsSshOpts $VpsHost $remote
 $code = $LASTEXITCODE
 if ($code -eq 255) {
     Write-Warning "VPS IRRAGGIUNGIBILE via ssh / VPS UNREACHABLE via ssh"
