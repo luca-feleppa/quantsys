@@ -5,6 +5,31 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — PROBE DVOL-COME-FEATURE (linea vol 1h, target log_rv) · 2026-07-17 · run nella finestra GPU post-gate-v1, DOPO A3/A8
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Zero numeri visti. UN solo run: nessuno sweep su trasformazioni/finestre DVOL; qualunque variante suggerita dai risultati (VRP-spread dvol−rv, MFIV@30h come feature, lag alternativi) = NUOVA pre-registrazione.
+
+**Ipotesi/prior onesto (pre-dichiarato):** la letteratura HAR-RV-IV (Busch–Christensen–Nielsen 2011; Christensen–Prabhala 1998) trova contenuto informativo incrementale della IV sulla RV futura oltre i lag di RV — e DVOL è informazione **risk-neutral genuinamente nuova** rispetto al set price+volume+macro correnti (stesso razionale del filone L2). CONTRO: (a) tenor mismatch strutturale 30d (DVOL) vs 30h (target) — il segnale è diluito dalla media di lungo periodo; (b) l'incumbent NN già batte HAR-RV del 30% in QLIKE, quindi parte dell'informazione IV può essere già catturata dalle non-linearità sui lag di RV; (c) copertura parziale del train (DVOL da 2021-03-24: mancano ~2.3 anni su 7, gestiti con indicator — rumore aggiuntivo). **Scenario base atteso: miglioramento nullo o sotto soglia; un PASS ≥3% sarebbe informativo e aprirebbe il filone IV-feature.**
+
+**Feature pre-dichiarate (3 colonne, stream macro X_macro_*, risoluzione ORARIA):** ① `dvol_log` = log(DVOL) via `merge_asof` backward sui `t_{split}` (causale: ultimo valore ≤ t, staleness cap 24h); ② `dvol_chg_24h` = Δ24h di log(DVOL); ③ `dvol_avail` ∈ {0,1} (indicator di disponibilità). Fill dove non disponibile (pre-2021-03-24 o staleness>cap): costante = mediana della porzione DISPONIBILE del **solo train** (no leakage) + indicator=0. Normalizzazione: stesso `MacroNormalizer` refit whole-df della pipeline macro esistente (comportamento pre-esistente, dichiarato). Span di training INVARIATO (2019→, stesso campione dell'incumbent).
+
+**Script/giudice:** nuovo `scripts/vol/dev_vols_dvol_append.py` (deriva `data/lstm_dataset_dvol.npz` dal npz production: SOLO aggiunta delle 3 colonne X_macro, resto bit-identico con assert; il npz production NON viene toccato — resta congelato per A3/A8); training `02_train.py --n-ensemble 5`, `QUANTSYS_ARCH=itransformer` (config incumbent invariata: il lever è il dataset, non gli iperparametri); giudice `scripts/vol/dev_vols_qlike.py`, **stesso run di giudice per candidato e incumbent** (stessi sample, stessa inversione completa z→raw).
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a gate val superato, one-shot.
+**Leva sperimentale:** nuovo env-flag `QUANTSYS_DATASET_NPZ` (override del path npz in `02_train.py` e `dev_vols_qlike.py`; **inerte di default** → path `data/lstm_dataset.npz` bit-identico) + sandbox `QUANTSYS_MODELS_ROOT=models_dvol_probe` — `models/itransformer` (vol PASS production) READ-ONLY.
+
+**Prerequisiti (non condizioni di gate):** (P1) finestra GPU post-chiusura gate v1, in coda DOPO A3 e A8 (run INDIPENDENTI vs lo stesso incumbent; ogni interazione = NUOVA pre-registrazione); (P2) `dvol.parquet` fresco al momento del build (pull VPS); (P3) patch env-gated `QUANTSYS_DATASET_NPZ` implementata e verificata inerte (run production invariato senza flag).
+
+**Baseline di confronto (pre-dichiarata):** incumbent = ensemble production vol-1h PASS (5 membri, `models/itransformer`), NON riaddestrato. Asimmetria di seed-draw accettata e dichiarata (la soglia ① ≥3% assorbe parte del rumore di seed; stesso pattern di A8). Diagnostica non decisionale: spread QLIKE tra i 5 membri candidati; QLIKE del candidato sul sotto-campione `dvol_avail=1` vs =0 del train (sanity, non gate).
+
+**Condizioni di PASS (tutte, AND, su val — val è interamente post-2021, indicator sempre 1):**
+1. `QLIKE_val(dvol, ensemble 5 seed) ≤ 0.97 · QLIKE_val(incumbent)` (miglioramento relativo ≥3%, stessi sample).
+2. Nessun regime distrutto: nel regime peggiore per il candidato (labels = argmax del gate causale sullo split), `QLIKE_val(dvol) ≤ 1.05 · QLIKE_val(incumbent)` in QUEL regime.
+3. Campione: ≥5000 sample val valutati E ≥800 nel regime meno popoloso; sotto una delle due soglie NESSUNA conclusione.
+
+**Conseguenze pre-dichiarate:** PASS → conferma one-shot su test (stesse 3 condizioni); se regge, le 3 feature DVOL diventano **candidate** per il ciclo di retrain SUCCESSIVO della linea vol (mai swap del live durante il forward test in corso) e si sbloccano (con NUOVE pre-reg) le varianti VRP-spread e MFIV@30h-come-feature. FAIL → filone "DVOL-come-feature" chiuso e marcato **FALLITO**, `QUANTSYS_DATASET_NPZ` resta flag inerte documentato, `lstm_dataset_dvol.npz`/`models_dvol_probe` si eliminano; resta viva (separata, in memoria) l'idea MFIV@30h come **comparatore di edge** per una pre-reg v2 di 04b, che non dipende da questo esito; scritto comunque.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — A8 QUICK-WIN MIXUP (mixup_alpha 0.0→0.2, linea vol 1h) · 2026-07-15 · run nella finestra GPU post-gate-v1
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Zero numeri visti. UN solo run: nessuno sweep su mixup_alpha; qualunque variante suggerita dai risultati = NUOVA pre-registrazione. ⚠ **La metà drop_path di A8 è OBSOLETA** (dead-doc della roadmap): l'incumbent iTransformer vol-1h già addestra con `drop_path_rate: 0.2` dal tuning pre-registrato 2026-06-10 — "aggiungere 0.05" sarebbe una RIDUZIONE della regolarizzazione in carica, cioè un'ipotesi nuova, non un quick-win. A8 si riduce al solo lever mixup.
