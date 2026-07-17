@@ -53,6 +53,19 @@
 
 ---
 
+## 🟢 2026-07-17 pomeriggio — Prerequisito P3 del probe DVOL COMPLETATO (patch + appender, verificati inerti)
+
+**Fatto (pre-reg DVOL sopra, commit `dad4adb`; checklist POST_GATE_V1 B4 aggiornata):**
+- **Patch `QUANTSYS_DATASET_NPZ`**: helper `dataset_npz_path()` in `quantsys/utils` (pattern `models_root`), consumato da `02_train.py` (era hardcoded a riga ~635, log warning su override) e `scripts/vol/dev_vols_qlike.py`. **Inerzia verificata**: 7 test nuovi `tests/test_dataset_npz_flag.py` (default = path production invariato, override esatto, causalità asof, staleness cap, fill train-only) + `test_recent_fixes.py` 25/25 PASS. Il run production di 02_train senza env è bit-invariato per costruzione (cambia solo l'espressione del path); smoke GPU non eseguito by design (04b live, contesa CUDA).
+- **Appender `scripts/vol/dev_vols_dvol_append.py` ESEGUITO**: `data/lstm_dataset_dvol.npz` (3.23 GB, non compresso deliberato), X_macro 90→93 (`dvol_log`, `dvol_chg_24h`, `dvol_avail`), **VERIFICA PASS** (chiavi non aumentate bit-identiche, prime 90 colonne X_macro identiche, npz production INTATTO — size+mtime invariati). Copertura `dvol_avail`: train 0.642, val 1.000, test 0.993 (~45 barre di gap DVOL nel test → indicator=0 + fill, nessuna azione). Fill mediane train-only: `dvol_log`=4.1250, `dvol_chg_24h`=−0.00186. Due bug catturati dai test/run e fixati: alignment pandas su index (NaN silenziosi → `.to_numpy()`) e mismatch risoluzione datetime ms/us (npz vs parquet → cast ns).
+- Doc: `scripts/README.md` (riga vol/) e `CLAUDE.md` NOMENCLATURA (env `QUANTSYS_DATASET_NPZ`) aggiornati. ⚠ `CLAUDE.md` resta NON committato: nel working tree ci sono anche i trim /doctor (riga test + 7-step→skill `add-arch`) in attesa di review utente.
+
+**Problemi aperti:** invariati (vedi sessione mattina). Il run B4 del probe resta gated: finestra GPU post-gate-v1, dopo A3/A8.
+
+**▶️ RIPARTI DA QUI:** invariato — domani dopo le 08:00 UTC `.\avvio_sessione.ps1`: il settlement chiude il gate v1 → `POST_GATE_V1.md` in ordine (B4 ora ha il prerequisito FATTO: servono solo `QUANTSYS_DATASET_NPZ=data/lstm_dataset_dvol.npz` + `QUANTSYS_MODELS_ROOT=models_dvol_probe` al momento del run).
+
+---
+
 ## 🟢 2026-07-17 — Avvio sessione + refresh macro CHIRURGICO (no full 01b) + fix launch.json · gate v1 n=19/20 (chiude domani)
 
 **Avvio (`avvio_sessione.ps1` 12:40):** pull+merge VPS OK (chain +90k righe sui parquet 16-17/07, L2 +12.5k, deribit_trades +5.5k, `atm_30h` +103, `dvol` +16; heartbeat ×3 tutti ≤0.1h), 01c/04b partiti singoli (coppie stub+worker, zero duplicati), B7 fresco (0 barre). ⚠ Il primo click "Run" in VS Code NON lanciava lo script — vedi fix sotto.

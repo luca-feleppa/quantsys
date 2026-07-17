@@ -39,7 +39,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 torch.set_num_threads(int(_cpu_limit))
 
-from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs, models_root
+from quantsys.utils import load_config, setup_logging, setup_device, ensure_dirs, models_root, dataset_npz_path
 from quantsys.model import QuantLSTM, student_t_nll, quantile_loss, EarlyStopping, set_clip_bounds
 
 setup_logging()
@@ -632,7 +632,12 @@ def main():
     ensure_dirs(str(out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    data  = np.load("data/lstm_dataset.npz", allow_pickle=True)
+    # IT: path npz env-aware (QUANTSYS_DATASET_NPZ, default invariato — probe DVOL).
+    # EN: env-aware npz path (QUANTSYS_DATASET_NPZ, default unchanged — DVOL probe).
+    _npz = dataset_npz_path()
+    if str(_npz) != "data/lstm_dataset.npz":
+        log.warning(f"Dataset OVERRIDE via QUANTSYS_DATASET_NPZ: {_npz}")
+    data  = np.load(str(_npz), allow_pickle=True)
     to_t  = lambda k: torch.from_numpy(data[k].astype(np.float32))
 
     X_tr, y_tr = to_t("X_train"), to_t("y_train")

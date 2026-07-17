@@ -36,7 +36,7 @@ import pandas as pd
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg, models_root  # noqa: E402
+from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg, models_root, dataset_npz_path  # noqa: E402
 # IT: QLIKE + ε ora vivono nel modulo condiviso (single source of truth con l'harness 02b).
 # EN: QLIKE + ε now live in the shared module (single source of truth with the 02b harness).
 from quantsys.model.vol_metrics import qlike, EPS  # noqa: E402
@@ -116,7 +116,9 @@ def main():
     }).dropna().set_index("open_time")
 
     # ── Allineamento ai timestamp degli split del dataset NN ────────────────────
-    d = np.load("data/lstm_dataset.npz", allow_pickle=True)
+    # IT: stesso npz env-aware del training (QUANTSYS_DATASET_NPZ, default invariato).
+    # EN: same env-aware npz as training (QUANTSYS_DATASET_NPZ, default unchanged).
+    d = np.load(str(dataset_npz_path()), allow_pickle=True)
     t_train = pd.to_datetime(d["t_train"]).tz_localize(None)
     t_eval  = pd.to_datetime(d[f"t_{split}"]).tz_localize(None)
     har.index = pd.to_datetime(har.index).tz_localize(None)

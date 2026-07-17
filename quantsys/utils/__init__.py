@@ -218,6 +218,18 @@ def models_root() -> Path:
     return Path(os.environ.get("QUANTSYS_MODELS_ROOT", "models"))
 
 
+# IT: path del dataset npz — override via env QUANTSYS_DATASET_NPZ per ESPERIMENTI ISOLATI
+#     (probe DVOL-come-feature, pre-reg 2026-07-17). Default "data/lstm_dataset.npz" =
+#     comportamento byte-identico. Consumer: 02_train.py + scripts/vol/dev_vols_qlike.py
+#     (train e giudice devono leggere lo STESSO npz: setta l'env prima di entrambi).
+# EN: dataset npz path — env override QUANTSYS_DATASET_NPZ for ISOLATED EXPERIMENTS
+#     (DVOL-as-feature probe, 2026-07-17 pre-reg). Default "data/lstm_dataset.npz" =
+#     byte-identical behavior. Consumers: 02_train.py + scripts/vol/dev_vols_qlike.py
+#     (train and judge must read the SAME npz: set the env before both).
+def dataset_npz_path() -> Path:
+    return Path(os.environ.get("QUANTSYS_DATASET_NPZ", "data/lstm_dataset.npz"))
+
+
 # IT: PipelineState — contenitore unificato scaler + config + metadati.
 # EN: PipelineState — unified container for scalers + config + metadata.
 
