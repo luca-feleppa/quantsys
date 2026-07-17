@@ -41,21 +41,23 @@
 
 ## 2 · Fase B — Finestra GPU (04b fermo, poche ore) · Phase B — GPU window (04b stopped, a few hours)
 
-🇮🇹 Ordine vincolante (pre-reg già scritte in STATUS; run indipendenti vs lo stesso incumbent; A3×A8 = nuova pre-reg):
+🇮🇹 Ordine vincolante (pre-reg già scritte in STATUS; run indipendenti vs lo stesso incumbent; ogni interazione A3×A8×DVOL = nuova pre-reg):
 | # | Azione | Test/giudice | Informazione attesa |
 |---|---|---|---|
 | B1 | **Audit `causality-auditor` sui file A3** (P3, mai eseguito) | audit read-only | nessun lookahead residuo nel gate/training MoE prima di spendere GPU |
 | B2 | **Run A3 regime-MoE** (`QUANTSYS_ARCH=itransformer_regime_moe`, sandbox `models_a3_moe`, 5 seed) | `dev_vols_qlike.py` su val: ① QLIKE ≤0.97·incumbent ② nessun regime distrutto (≤1.05 nel peggiore) ③ n≥5000/≥800 | le 3 teste-regime col gate causale battono l'incumbent su μ? (misura μ, NON σ — MINOR-1 dichiarata) |
 | B3 | **Run A8 mixup** (`QUANTSYS_ARCH=itransformer_a8_mixup`, sandbox `models_a8_mixup`, 5 seed) | stesse 3 condizioni su val | l'unica augmentation cross-feature-coerente riduce l'overfit residuo? (prior onesto: FAIL/nullo) |
-| B4 | Esiti scritti in STATUS **comunque**; PASS → one-shot su test; poi riavvio processi (Fase C) | — | — |
+| B4 | **Run probe DVOL-come-feature** (pre-reg 2026-07-17). Prerequisito CPU pre-finestra: patch `QUANTSYS_DATASET_NPZ` (02_train + giudice) verificata INERTE + `scripts/vol/dev_vols_dvol_append.py` → `lstm_dataset_dvol.npz` (assert bit-identità sul resto; npz production NON toccato). Run: `QUANTSYS_ARCH=itransformer`, sandbox `models_dvol_probe`, 5 seed | stesse 3 condizioni su val | la IV risk-neutral (DVOL 30d, unica serie IV con storia 2021→) aggiunge contenuto predittivo oltre price+volume+macro? (prior onesto: nullo/sotto soglia per tenor mismatch 30d vs 30h) |
+| B5 | Esiti scritti in STATUS **comunque**; PASS → one-shot su test; poi riavvio processi (Fase C) | — | — |
 
-**EN** Binding order (pre-regs already in STATUS; independent runs vs the same incumbent; A3×A8 = new pre-reg):
+**EN** Binding order (pre-regs already in STATUS; independent runs vs the same incumbent; any A3×A8×DVOL interaction = new pre-reg):
 | # | Action | Test/judge | Expected information |
 |---|---|---|---|
 | B1 | **`causality-auditor` audit of the A3 files** (P3, never run) | read-only audit | no residual lookahead in the MoE gate/training before spending GPU |
 | B2 | **A3 regime-MoE run** (`QUANTSYS_ARCH=itransformer_regime_moe`, `models_a3_moe` sandbox, 5 seeds) | `dev_vols_qlike.py` on val: ① QLIKE ≤0.97·incumbent ② no regime destroyed (≤1.05 in the worst) ③ n≥5000/≥800 | do 3 regime heads with a causal gate beat the incumbent on μ? (measures μ, NOT σ — declared MINOR-1) |
 | B3 | **A8 mixup run** (`QUANTSYS_ARCH=itransformer_a8_mixup`, `models_a8_mixup` sandbox, 5 seeds) | same 3 conditions on val | does the only cross-feature-coherent augmentation reduce residual overfit? (honest prior: FAIL/null) |
-| B4 | Outcomes written to STATUS **regardless**; PASS → one-shot on test; then restart processes (Phase C) | — | — |
+| B4 | **DVOL-as-feature probe run** (pre-reg 2026-07-17). Pre-window CPU prerequisite: `QUANTSYS_DATASET_NPZ` patch (02_train + judge) verified INERT + `scripts/vol/dev_vols_dvol_append.py` → `lstm_dataset_dvol.npz` (bit-identity assert on the rest; production npz UNTOUCHED). Run: `QUANTSYS_ARCH=itransformer`, `models_dvol_probe` sandbox, 5 seeds | same 3 conditions on val | does risk-neutral IV (DVOL 30d, the only IV series with 2021→ history) add predictive content beyond price+volume+macro? (honest prior: null/below threshold due to the 30d-vs-30h tenor mismatch) |
+| B5 | Outcomes written to STATUS **regardless**; PASS → one-shot on test; then restart processes (Phase C) | — | — |
 
 ---
 
@@ -85,12 +87,14 @@
 1. **Valutazione pre-registrata a n=30** (leg opzioni, §0.2) — stessi 3 criteri, stessi 2 campioni; SOLO dopo: pre-registrazione **sizing v2** (A13 pin-close + A14 vega-sizing + A7 cablaggio greeks-risk, coda di rischio da **HAR-q90** — esito A2 definitivo).
 2. **Sblocco candele oltre il 2026-06-22 + refresh macro** (`01b`; B7 incrementale scatta da solo via `avvio_sessione`) — SOLO a esperimenti A3/A8 chiusi (lo span congelato è il loro invariante).
 3. **Eventuale retrain con A4 (HAR-CJ) / A9 (MaxPool)** = rigen dataset + gate QLIKE **da pre-registrare** (nuova sezione STATUS; A10 sparsity solo se A8 delude).
-4. **Decisioni utente:** pubblicazione GitHub (audit secret PASS 07-14); migrazione `04b`→VPS (insieme al fix C1 già fatto); tenor ladder v2 (memoria, richiede nuova pre-reg). Promemoria: **disdetta netcup ~dicembre 2026**.
-5. A piano completato: eliminare questo file (checklist esaurita, esiti in STATUS).
+4. **Derivazione OFFLINE `mfiv_30h` + skew (25Δ RR/BF) dal raw chain** (CPU-only, retroattiva su tutto il periodo di raccolta; colonne registrate parallele, MAI nel path decisionale). Eventuale promozione a comparatore dell'edge di `04b` = **NUOVA pre-reg v2** con break-even ri-stimato (wedge di convessità MFIV vs IV ATM). Indipendente dall'esito del probe DVOL (B4); dettaglio: memoria `idea_mfiv_30h`.
+5. **Decisioni utente:** pubblicazione GitHub (audit secret PASS 07-14); migrazione `04b`→VPS (insieme al fix C1 già fatto); tenor ladder v2 (memoria, richiede nuova pre-reg). Promemoria: **disdetta netcup ~dicembre 2026**.
+6. A piano completato: eliminare questo file (checklist esaurita, esiti in STATUS).
 
 **EN**
 1. **Pre-registered n=30 evaluation** (options leg, §0.2) — same 3 criteria, same 2 samples; ONLY afterwards: **v2 sizing** pre-registration (A13 pin-close + A14 vega-sizing + A7 greeks-risk wiring, tail risk from **HAR-q90** — definitive A2 outcome).
 2. **Unfreeze candles past 2026-06-22 + macro refresh** (`01b`; incremental B7 fires by itself via `avvio_sessione`) — ONLY once the A3/A8 experiments are closed (the frozen span is their invariant).
 3. **Possible retrain with A4 (HAR-CJ) / A9 (MaxPool)** = dataset regen + QLIKE gate **to pre-register** (new STATUS section; A10 sparsity only if A8 disappoints).
-4. **User decisions:** GitHub publication (secret audit PASS 07-14); `04b`→VPS migration (together with the already-done C1 fix); v2 tenor ladder (memory, needs a new pre-reg). Reminder: **netcup cancellation ~December 2026**.
-5. When the plan is complete: delete this file (checklist exhausted, outcomes in STATUS).
+4. **OFFLINE derivation of `mfiv_30h` + skew (25Δ RR/BF) from the raw chain** (CPU-only, retroactive over the whole collection period; parallel recorded columns, NEVER in the decision path). Possible promotion to `04b` edge comparator = **NEW v2 pre-reg** with re-estimated break-even (MFIV-vs-ATM-IV convexity wedge). Independent of the DVOL probe outcome (B4); detail: `idea_mfiv_30h` memory.
+5. **User decisions:** GitHub publication (secret audit PASS 07-14); `04b`→VPS migration (together with the already-done C1 fix); v2 tenor ladder (memory, needs a new pre-reg). Reminder: **netcup cancellation ~December 2026**.
+6. When the plan is complete: delete this file (checklist exhausted, outcomes in STATUS).
