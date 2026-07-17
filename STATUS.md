@@ -28,6 +28,22 @@
 
 ---
 
+## 🟢 2026-07-17 — Avvio sessione + refresh macro CHIRURGICO (no full 01b) + fix launch.json · gate v1 n=19/20 (chiude domani)
+
+**Avvio (`avvio_sessione.ps1` 12:40):** pull+merge VPS OK (chain +90k righe sui parquet 16-17/07, L2 +12.5k, deribit_trades +5.5k, `atm_30h` +103, `dvol` +16; heartbeat ×3 tutti ≤0.1h), 01c/04b partiti singoli (coppie stub+worker, zero duplicati), B7 fresco (0 barre). ⚠ Il primo click "Run" in VS Code NON lanciava lo script — vedi fix sotto.
+
+**⑥ Gate v1: n=19/20 — CHIUDE DOMANI.** Al bootstrap 04b ha settlato il **19° trade eseguito** (LONG K=64000, payoff 0.01795 vs prem 0.01500 → **PnL +0.00235 BTC**; trades.jsonl ora **20 righe** = 1 smoke + 19 executed, 0 duplicati) e aperto **BTC-18JUL26-63000-C/P** (prem 0.01300, edge +0.683). Il suo settlement (18/07 08:00 UTC ≈ 10:00 locali) = 20° eseguito = **21ª riga = gate v1 CHIUDE** → valutazione pre-registrata sui 2 campioni (fail-safe sul verdetto peggiore) e poi `POST_GATE_V1.md` in ordine.
+
+**Refresh macro CHIRURGICO (staleness 9g → 0g):** NON usato il run default di `01b` — avrebbe eseguito anche il full rebuild regime (~3h, rimapperebbe le etichette R0/R1/R2 ri-derivate il 07-15) e il refit di `macro_normalizer.pkl`, che 04b **non consuma** (rifitta il normalizer dal parquet a ogni bootstrap, commento in `04b_vol_paper.py` sezione macro). Replicati i SOLI step 1-3 (FRED 38 serie + yfinance 9 + `MacroFeatureBuilder`) via script one-shot in scratchpad con guard fail-fast sul contratto colonne: `macro_features.parquet` **90 colonne identiche** (assert `n_macro=90` di 04b salvo), ultima data **2026-07-17** (era 07-08); aggiornati anche `macro_fred/macro_yfinance.parquet`. **04b riavviato 12:47** (lo snapshot macro è letto solo al bootstrap): macro 0g, posizione esistente riconosciuta → tick HOLD (nessun doppio ordine); `rv_pred` 5.701e-04→5.406e-04 = effetto snapshot fresco. Nota: `regime_probs.parquet`, normalizer pkl, `PipelineState` e npz NON toccati by design.
+
+**Fix tasto Run VS Code (`.vscode/launch.json`):** causa = `launch.json` conteneva SOLO config `debugpy` con `program` fisso (00→05): con un launch.json presente, F5/Run esegue la config selezionata nel dropdown, MAI il file aperto → col `.ps1` aperto partiva (o falliva) uno script Python, non `avvio_sessione.ps1`. Aggiunta config **"Avvio Sessione (ps1)"** (`type: PowerShell`, cwd root). ⚠ `.vscode/` è **gitignored** (riga 54): il fix resta locale, non committabile — ri-crearlo a mano su altre macchine.
+
+**Problemi aperti:** (a) il refresh macro-only vive in uno script di scratchpad EFFIMERO — se la staleness macro ricorre (warning 04b a 7g), valutare un flag `--macro-only` in `01b` (stesso pattern di `--regime-only`: skip regime/normalizer/npz); (b) invariati da sessioni precedenti (P3 audit A3 pre-run, finestra GPU post-gate).
+
+**▶️ RIPARTI DA QUI:** domani dopo le 08:00 UTC (≈10:00 locali) `.\avvio_sessione.ps1` (o config Run "Avvio Sessione (ps1)"): il settlement del BTC-18JUL26-63000 chiude il gate v1 (21ª riga) → valutazione pre-registrata sui 2 campioni (definizione campione in sessione 07-16, dettaglio `POST_GATE_V1.md` §0) e poi `POST_GATE_V1.md` in ordine (finestra GPU: P3 audit A3 → run A3 → run A8).
+
+---
+
 ## 🟢 2026-07-16 sera — Collector 01e trade opzioni Deribit sul VPS (nuovo servizio) + verifica avvio_sessione/API
 
 **Verifica `avvio_sessione.ps1` (riavvio 18:16):** pull+merge OK (chain +20.954, L2 +2.868, heartbeat freschi), 01c/04b partiti singoli (coppie stub 7372→2932 / 1432→17520, zero duplicati), B7 no-op corretto (0 barre oltre checkpoint congelato 06-22), `trades.jsonl` 19 righe / 19 chiavi uniche / 0 duplicati. 04b tick → HOLD (posizione aperta BTC-17JUL26-64000).
