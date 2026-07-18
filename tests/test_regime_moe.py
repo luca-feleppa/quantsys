@@ -351,6 +351,12 @@ class TestGuardsAndGateBuilder:
         p = tmp_path / "regime_probs.parquet"
         df.to_parquet(p)
 
+        # IT: MINOR-A (audit B1) — il fail-fast ora conta i fallback TOTALI
+        #     (burn-in incluso): 5 sample freschi extra tengono la frazione bad
+        #     a 2/10 = 20% (non oltre la soglia strict >20%).
+        # EN: MINOR-A (B1 audit) — fail-fast now counts TOTAL fallbacks
+        #     (burn-in included): 5 extra fresh samples keep the bad fraction
+        #     at 2/10 = 20% (not beyond the strict >20% bound).
         ts = np.array(
             [
                 "2026-01-01T02:30",   # IT: ultima disponibile ≤02:30 = riga 01:00 | EN: last available = the 01:00 row
@@ -358,11 +364,13 @@ class TestGuardsAndGateBuilder:
                 "2026-01-01T02:00",   # IT: REGRESSIONE lookahead: a t esatto → riga t−1h | EN: lookahead REGRESSION: at exact t → the t−1h row
                 "2026-01-01T03:00",   # IT: riga 02:00 (disponibile a 03:00) | EN: the 02:00 row (available at 03:00)
                 "2026-01-01T00:30",   # IT: nessuna riga disponibile (la 00:00 arriva a 01:00) → uniforme | EN: none available yet → uniform
+                "2026-01-01T04:00", "2026-01-01T04:00", "2026-01-01T04:00",
+                "2026-01-01T04:00", "2026-01-01T04:00",   # IT: filler freschi → riga 03:00 | EN: fresh fillers → the 03:00 row
             ],
             dtype="datetime64[ms]",
         )
         G = build_regime_gate(ts, parquet_path=str(p))
-        assert G.shape == (5, 3) and G.dtype == np.float32
+        assert G.shape == (10, 3) and G.dtype == np.float32
         # IT: righe sul simplesso.
         # EN: rows on the simplex.
         assert np.allclose(G.sum(axis=1), 1.0, atol=1e-6)
@@ -381,6 +389,9 @@ class TestGuardsAndGateBuilder:
         # IT: 00:30 — la prima riga (00:00) è disponibile solo dalle 01:00.
         # EN: 00:30 — the first row (00:00) is available only from 01:00.
         assert np.allclose(G[4], [1 / 3] * 3, atol=1e-6)
+        # IT: filler a 04:00 → riga 03:00 (ultima disponibile).
+        # EN: fillers at 04:00 → the 03:00 row (last available).
+        assert np.allclose(G[5:], [[0.0, 0.0, 1.0]] * 5, atol=1e-6)
 
     def test_build_regime_gate_staleness_bounded(self, tmp_path):
         # IT: audit MAJOR-1 — oltre max_age dall'ultima riga disponibile il gate
@@ -416,8 +427,38 @@ class TestGuardsAndGateBuilder:
         ts_bad = np.array(
             ["2026-01-01T01:00", "2026-01-05T00:00", "2026-01-06T00:00",
              "2026-01-07T00:00"], dtype="datetime64[ms]")
-        with pytest.raises(RuntimeError, match="stale"):
+        with pytest.raises(RuntimeError, match="fallback"):
             build_regime_gate(ts_bad, parquet_path=str(p), max_age="48h")
+
+    def test_build_regime_gate_truncated_head_failfast(self, tmp_path):
+        # IT: MINOR-A audit B1 (2026-07-18) — parquet TRONCATO IN TESTA (copertura
+        #     che parte dopo la maggioranza dei sample): i fallback sono burn-in
+        #     (NaT, zero stale) ma il gate sarebbe ~uniforme ovunque → il run
+        #     misurerebbe un modello ~single-head, NON l'esperimento pre-registrato.
+        #     Il fail-fast deve contare i fallback TOTALI, non solo gli stale.
+        # EN: MINOR-A B1 audit (2026-07-18) — HEAD-TRUNCATED parquet (coverage
+        #     starting after most samples): fallbacks are burn-in (NaT, zero
+        #     stale) yet the gate would be ~uniform everywhere → the run would
+        #     measure a ~single-head model, NOT the pre-registered experiment.
+        #     The fail-fast must count TOTAL fallbacks, not just stale ones.
+        import pandas as pd
+        from quantsys.model.regime_gate import build_regime_gate
+
+        idx = pd.date_range("2026-06-01 00:00", periods=3, freq="1h", tz="UTC")
+        df = pd.DataFrame(
+            {"regime_prob_0": [1.0] * 3, "regime_prob_1": [0.0] * 3,
+             "regime_prob_2": [0.0] * 3}, index=idx)
+        df.index.name = "open_time"
+        p = tmp_path / "regime_probs.parquet"
+        df.to_parquet(p)
+
+        # IT: 3 sample su 4 PRIMA dell'inizio della copertura (75% burn-in > 20%).
+        # EN: 3 of 4 samples BEFORE coverage starts (75% burn-in > 20%).
+        ts = np.array(
+            ["2026-01-01T00:00", "2026-02-01T00:00", "2026-03-01T00:00",
+             "2026-06-01T02:00"], dtype="datetime64[ms]")
+        with pytest.raises(RuntimeError, match="fallback"):
+            build_regime_gate(ts, parquet_path=str(p))
 
     def test_multitask_appends_dir_logits(self):
         # IT: use_multitask + regime_moe → (qp, dir_logits): contratto identico

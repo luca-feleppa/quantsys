@@ -635,7 +635,11 @@ def main():
     # IT: path npz env-aware (QUANTSYS_DATASET_NPZ, default invariato — probe DVOL).
     # EN: env-aware npz path (QUANTSYS_DATASET_NPZ, default unchanged — DVOL probe).
     _npz = dataset_npz_path()
-    if str(_npz) != "data/lstm_dataset.npz":
+    # IT: confronto tra Path (non stringhe): su Windows str(Path) usa backslash
+    #     → il confronto stringa scattava SEMPRE (warning spurio a ogni run).
+    # EN: Path comparison (not strings): on Windows str(Path) uses backslashes
+    #     → the string compare ALWAYS fired (spurious warning on every run).
+    if _npz != Path("data/lstm_dataset.npz"):
         log.warning(f"Dataset OVERRIDE via QUANTSYS_DATASET_NPZ: {_npz}")
     data  = np.load(str(_npz), allow_pickle=True)
     to_t  = lambda k: torch.from_numpy(data[k].astype(np.float32))

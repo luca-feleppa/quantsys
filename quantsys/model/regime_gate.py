@@ -160,12 +160,22 @@ def build_regime_gate(timestamps,
             f"di {max_age} → gate uniforme (parquet da rigenerare? 01b) / samples "
             f"with regime older than {max_age} → uniform gate (regenerate via 01b?)"
         )
-    if n_stale > STALE_FRAC_FAIL * len(G):
+    # IT: MINOR-A (audit B1 2026-07-18) — il fail-fast conta i fallback TOTALI
+    #     (stale + burn-in/NaT + righe degeneri), non solo gli stale: un parquet
+    #     troncato in testa renderebbe uniforme quasi tutto il gate senza errore
+    #     (modello ~single-head silente ≠ esperimento pre-registrato).
+    # EN: MINOR-A (B1 audit 2026-07-18) — fail-fast counts TOTAL fallbacks
+    #     (stale + burn-in/NaT + degenerate rows), not just stale ones: a
+    #     head-truncated parquet would silently make the gate ~uniform
+    #     (silent ~single-head model ≠ the pre-registered experiment).
+    if bad.sum() > STALE_FRAC_FAIL * len(G):
         raise RuntimeError(
-            f"build_regime_gate: {n_stale}/{len(G)} sample stale (> "
-            f"{STALE_FRAC_FAIL:.0%}) — regime_probs.parquet è fermo rispetto al "
-            f"dataset: rigenerare con 01b PRIMA del training / stale beyond the "
-            f"fail-fast bound — regenerate regime_probs.parquet via 01b BEFORE training"
+            f"build_regime_gate: {int(bad.sum())}/{len(G)} fallback uniformi "
+            f"(di cui stale/of which stale: {n_stale}; soglia/bound "
+            f"{STALE_FRAC_FAIL:.0%}) — regime_probs.parquet è fermo o troncato "
+            f"rispetto al dataset: rigenerare con 01b PRIMA del training / "
+            f"uniform fallbacks beyond the fail-fast bound — regime_probs.parquet "
+            f"is stalled or truncated vs the dataset: regenerate via 01b BEFORE training"
         )
 
     log.info(

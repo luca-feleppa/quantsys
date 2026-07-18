@@ -27,6 +27,10 @@ models/*
 # ── Sandbox modelli isolata (QUANTSYS_MODELS_ROOT, es. distill/k-fold) ───
 models_distill_vol/
 models_*_sandbox/
+# IT: sandbox Fase B post-gate-v1 (pre-reg B2/B3/B4) | EN: post-gate-v1 Phase B sandboxes
+models_a3_moe/
+models_a8_mixup/
+models_dvol_probe/
 
 # ── Risultati backtest/live (generati dalla pipeline) ────────
 results/*

@@ -5,6 +5,25 @@
 
 ---
 
+## 🟢 2026-07-18 sera — RIPRESA post-riavvio: pull OK + B7 eseguito + B1 AUDIT GPU-GO + B2 (A3 MoE) LANCIATO
+
+**① Pull+merge (`avvio_sessione.ps1`) OK:** heartbeat 4/4 freschi (IV 0.2h, L2 0.0h, trades 0.0h, 04b forecasts 1.1h); `trades.jsonl` 21 righe (la 22ª attesa dopo le 08:00 UTC del 19/07 — settlement VPS BTC-19JUL26-64000); `hedge_state/ledger` assenti sul VPS = hedge attivo ma mai scattato (delta dentro band 0.30, coerente).
+
+**② B7 refresh incrementale regime ESEGUITO** (una tantum, background, ~12 min): 621 barre appese, 1 retrain (t=65520, llf=−90559.8, PCA var 67.4%); `regime_probs.parquet` ora fresco al 2026-07-18 11:00 UTC + checkpoint aggiornato. Prerequisito P1 della pre-reg A3 soddisfatto.
+
+**③ B1 AUDIT `causality-auditor` sui file A3 — VERDETTO GPU-GO** (P3 chiuso): zero BLOCKER/MAJOR; i 3 fix dell'audit 07-12 (shift availability +1h, staleness bound 168h, RuntimeError g=None in eval) verificati presenti, corretti e coperti da test. Le 8 verifiche (causalità/off-by-one gate, filtered-only a monte, no leakage via gate, MAJOR-1, MAJOR-2, inerzia path single, sandbox models_root, MINOR-1 Vincentization) tutte PASS. 3 MINOR emersi e **tutti risolti in sessione**:
+- **MINOR-A** (`regime_gate.py`): il fail-fast contava solo gli stale → un parquet troncato in testa avrebbe reso il gate ~uniforme in silenzio (modello ~single-head ≠ esperimento pre-registrato). Fix: fail-fast sui fallback TOTALI (`bad.sum() > 20%`); golden burn-in ri-allineato (2/10=20% non oltre soglia strict) + nuovo regression test `test_build_regime_gate_truncated_head_failfast`. Test A3: **22/22 PASS**.
+- **MINOR-B** (`dev_vols_qlike.py`): `itransformer_regime_moe` aggiunto alle choices `--arch` — meccanismo giudice deciso EX-ANTE (condizione (b) dell'audit): candidato = `QUANTSYS_MODELS_ROOT=models_a3_moe` + `--arch itransformer_regime_moe`; incumbent = no env root + `--arch itransformer`; stesso split val, stessi sample.
+- **MINOR-C** (dead-doc): etichette semantiche "R0 Quiet/R1 Trending/R2 Stress" rimosse dai commenti di `itransformer_regime_moe.yaml` (la semantica degli indici NON è fissa tra run — regola CLAUDE.md, rebuild 7y: R1=stress).
+
+**④ B2 LANCIATO — training A3 regime-MoE** (pre-reg 2026-07-14 invariata, zero numeri visti): `QUANTSYS_ARCH=itransformer_regime_moe`, sandbox `QUANTSYS_MODELS_ROOT=models_a3_moe`, `02_train.py --n-ensemble 5`, dataset production `lstm_dataset.npz` (congelato 06-22), log `logs/a3_b2_train.log`. Condizione (a) dell'audit **VERIFICATA**: `build_regime_gate` = 0 fallback uniformi su tutti gli split (train 51.364 / val 6.420 / test 6.421, lag +1h) — gate pienamente informativo.
+
+**Problemi aperti:** (a) esito B2 + giudice val da eseguire a training finito; (b) B3 (A8 mixup) e B4 (probe DVOL) in coda dopo B2, run indipendenti vs lo stesso incumbent; (c) fix MINOR A/B/C + fix warning spurio `Dataset OVERRIDE` in `02_train.py` (confronto str vs Path su Windows — scattava a ogni run) non ancora committati; (d) ⚠ heads-up dal log training: stratified val = r0 2031 (32%) / r1 657 (10%) / r2 3732 (58%) sui regime 7y — se anche i label argmax del giudice danno r1<800, la condizione ③ della pre-reg A3 (≥800 nel regime meno popoloso) NON è soddisfatta → esito pre-registrato "nessuna conclusione" (non è un FAIL né un PASS, e non autorizza goalpost-moving); (e) invariati: C2, C4, n≥30 ~fine luglio, giudice hedged n≥20.
+
+**▶️ RIPARTI DA QUI:** a training B2 finito → controlla `logs/a3_b2_train.log` (gate fallback ≈ burn-in; 5 seed completati) → giudice: `QUANTSYS_VOLS_SPLIT=val` + `QUANTSYS_MODELS_ROOT=models_a3_moe` `python scripts/vol/dev_vols_qlike.py --arch itransformer_regime_moe` vs incumbent `python scripts/vol/dev_vols_qlike.py --arch itransformer` (stesso split) → valuta le 3 condizioni AND della pre-reg → esito in STATUS → poi B3 (A8 mixup) e B4 (DVOL); `RIPRESA.md` si elimina a lista esaurita.
+
+---
+
 ## 🟢 2026-07-18 pomeriggio — 04b MIGRATO SUL VPS + A3/A4 eseguiti + 🔴 BUG CANDELE (finestra live bucata dal ~06-24)
 
 **🔴 SCOPERTA MAJOR — finestra live contaminata (bug candele).** `raw_candles.parquet` era congelato al 2026-06-22 (freeze A3/A8) ma il bootstrap di `04b` copriva solo 48h di delta REST → da ~06-24, a ogni restart, la finestra T=120 del live conteneva ~72 candele di GIUGNO + ~48 fresche, senza alcun errore. Le feature rolling attraversavano il buco come se fosse contiguo. Il parity replay 07-14 non poteva vederlo (live e replay condividevano le stesse candele bucate). **Impatto:** i forecast live (e quindi le entry) da ~06-24 alla migrazione hanno input degradati — caveat AGGIUNTIVO sul campione gate v1 (trade #9…#21) e sulla posizione corrente BTC-19JUL26-64000 (entry con edge da finestra sporca). Il verdetto FAIL 0/3 non cambia (il criterio ② è within-calendar). **Fix (commit `28dcad1`+`e43744f`):** bootstrap `fetch_klines_incremental` (delta completo + persist parquet — il npz congelato NON è toccato), guard `RuntimeError` su finestra non contigua (safety net), e quantificazione: replay su serie sana vs live sui 33 tick sovrapposti → max|Δμ_z|=0.53, accordo segnale **64%**.

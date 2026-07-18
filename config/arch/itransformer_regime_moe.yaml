@@ -24,23 +24,25 @@ model:
   patch_size: 5
   drop_path_rate: 0.2
 
-  # IT: A3 — backbone condiviso + 3 teste-regime (R0 Quiet / R1 Trending / R2 Stress),
+  # IT: A3 — backbone condiviso + 3 teste-regime (indici R0/R1/R2 — la semantica
+  #     NON è fissa tra run: ri-derivarla dalle varianze a ogni full rebuild),
   #     soft-gate ESTERNO CAUSALE = filtered probs di data/regime_probs.parquet
   #     shiftate ad availability time +1h (audit BLOCKER-1: la riga t contiene la
   #     barra [t,t+1h)) — mai appreso, proprietà anti-overfit chiave. Loss sulla
   #     MISCELA: Vincentization dei quantili (loss_type=quantile) o legge della
   #     varianza totale (t_student). Burn-in / regime più vecchio di 168h → gate
-  #     uniforme (1/3,1/3,1/3); >20% stale → fail-fast (rigenerare con 01b).
+  #     uniforme (1/3,1/3,1/3); >20% fallback totali → fail-fast (rigenerare con 01b).
   #     ⚠ NOTA per la pre-registrazione (audit MINOR-1): sul path quantile la
   #     Vincentization NON ha il termine between → l'inflazione di σ su regime
   #     ambiguo esiste solo su t_student; il gate QLIKE misura μ.
-  # EN: A3 — shared backbone + 3 regime heads (R0 Quiet / R1 Trending / R2 Stress),
+  # EN: A3 — shared backbone + 3 regime heads (indices R0/R1/R2 — semantics are
+  #     NOT fixed across runs: re-derive from the variances at each full rebuild),
   #     EXTERNAL CAUSAL soft-gate = filtered probs from data/regime_probs.parquet
   #     shifted to availability time +1h (BLOCKER-1 audit: row t holds bar
   #     [t,t+1h)) — never learned, key anti-overfit property. Loss on the
   #     MIXTURE: quantile Vincentization (loss_type=quantile) or total variance
   #     law (t_student). Burn-in / regime older than 168h → uniform gate
-  #     (1/3,1/3,1/3); >20% stale → fail-fast (regenerate via 01b).
+  #     (1/3,1/3,1/3); >20% total fallbacks → fail-fast (regenerate via 01b).
   #     ⚠ Pre-registration NOTE (MINOR-1 audit): on the quantile path the
   #     Vincentization has NO between term → σ inflation on ambiguous regimes
   #     exists only under t_student; the QLIKE gate measures μ.

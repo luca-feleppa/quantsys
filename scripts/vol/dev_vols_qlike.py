@@ -67,8 +67,15 @@ def main():
     #     legacy run.
     ap = argparse.ArgumentParser(description="Giudice QLIKE vol-S (NN vs HAR-RV vs naive) / "
                                              "VOL-S QLIKE judge (NN vs HAR-RV vs naive)")
+    # IT: MINOR-B (audit B1 2026-07-18) — itransformer_regime_moe ammesso: il run
+    #     A3 scrive in {models_root}/itransformer_regime_moe (sandbox models_a3_moe);
+    #     senza la choice il giudice non può puntare alla dir corretta.
+    # EN: MINOR-B (B1 audit 2026-07-18) — itransformer_regime_moe allowed: the A3
+    #     run writes to {models_root}/itransformer_regime_moe (models_a3_moe
+    #     sandbox); without the choice the judge cannot target the right dir.
     ap.add_argument("--arch", default="itransformer",
-                    choices=["itransformer", "nhits", "tcnmamba", "lstm"],
+                    choices=["itransformer", "nhits", "tcnmamba", "lstm",
+                             "itransformer_regime_moe"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
     args = ap.parse_args()
