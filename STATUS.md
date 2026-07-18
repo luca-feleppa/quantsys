@@ -21,9 +21,11 @@
 - **Casa:** `04b` RIMOSSO da `avvio_sessione.ps1` (MAI rilanciarlo: doppio `--execute` = doppi ordini sulla stessa posizione testnet); resta 01c (ridondanza IV, dedup nel merge). sklearn pinnato 1.8.x in `requirements-vps.txt` (unpickle RobustScaler).
 - Commit: `267f198`→`e43744f` (5), pushati; VPS a HEAD.
 
-**Problemi aperti:** (a) C3 (attivazione `--hedge` coi parametri congelati) NON eseguita — richiede riavvio servizio con flag espliciti, decisione di attivazione separata; (b) C2 refactor 2ter e C4 greeks VPS pendenti; (c) B7 scatterà al prossimo avvio_sessione (621 barre nuove > 168) — append incrementale innocuo by design; (d) la riga forecast 13:00 UTC di oggi è stata riscritta dal tick VPS (finestra sana) — le righe live precedenti restano quelle storiche contaminate: per analisi pre-migrazione usare il replay.
+**C3 ATTIVATO (stessa sessione, sera):** servizio VPS riavviato con `--execute --hedge --hedge-band 0.30 --hedge-conv raw` (unit aggiornata in git, commit `923b9e7`); pre-reg hedged-vs-unhedged RATIFICATA (sezione 07-12 aggiornata col congelamento + esclusione pre-dichiarata della posizione parzialmente hedgiata); riconciliazione venue OK (flat=flat), tick HOLD pulito, DeprecationWarning numpy eliminato (guard senza `pd.Timedelta`, commit `3c92c10`). **Il forward v2 hedged è PARTITO** — giudice `hedged_vs_unhedged_judge.py` a n≥20 hedge-attivi (dal primo trade APERTO con hedge, ~metà agosto).
 
-**▶️ RIPARTI DA QUI:** (1) domani ≥08:00 UTC il settlement di BTC-19JUL26-64000 avviene SUL VPS (verifica: `.\scripts\vps\pull_vps_data.ps1` → trades.jsonl 22 righe); (2) decisione C3: riavviare il servizio con `--hedge --hedge-band 0.30 --hedge-conv raw` (parametri congelati sopra) per far partire il forward v2 hedged; (3) finestra GPU (04b ora NON contende: è sul VPS!): B1 audit A3-MoE → B2 → B3 → B4 DVOL; (4) valutazione n≥30 a ~fine luglio.
+**Problemi aperti:** (a) C2 refactor 2ter e C4 greeks VPS pendenti; (b) B7 scatterà al prossimo avvio_sessione (621 barre nuove > 168) — append incrementale innocuo by design; (c) le righe forecast live pre-migrazione restano quelle storiche contaminate dal bug candele: per analisi pre-migrazione usare il replay.
+
+**▶️ RIPARTI DA QUI:** (1) prossima sessione: `.\avvio_sessione.ps1` (pull porta a casa settlement + hedge ledger dal VPS; trades.jsonl atteso a 22 righe dopo il settlement di BTC-19JUL26-64000, ≥08:00 UTC del 19/07); (2) finestra GPU LIBERA (04b è sul VPS): B1 audit causality A3-MoE → B2 run A3 → B3 run A8 → B4 probe DVOL (pre-reg in cima al file); (3) valutazione n≥30 leg opzioni ~fine luglio; (4) giudice hedged-vs-unhedged a n≥20 hedge-attivi.
 
 ---
 
