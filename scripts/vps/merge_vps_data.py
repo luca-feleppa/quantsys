@@ -229,6 +229,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Merge dati VPS → copia canonica / VPS data merge")
     ap.add_argument("--stale-hours", type=float, default=3.0,
                     help="soglia heartbeat staleness VPS (ore) / VPS staleness threshold (hours)")
+    ap.add_argument("--keep-staging", action="store_true",
+                    help="non pulire data/vps_staging dopo un merge sano (default: "
+                         "pulito se heartbeat OK) / do not clean data/vps_staging "
+                         "after a healthy merge (default: cleaned when heartbeat OK)")
     args = ap.parse_args()
 
     if not STAGING.exists():
@@ -249,6 +253,17 @@ def main() -> int:
     merge_vol_paper()
 
     fresh = heartbeat(args.stale_hours)
+    # IT: igiene 2026-07-18 — lo staging duplica ~40 MB gia' fusi nei canonici:
+    #     si pulisce DOPO l'heartbeat (che lo legge) e SOLO a heartbeat sano; su
+    #     WARN resta su disco come evidenza di debug dell'ultimo pull.
+    # EN: 2026-07-18 hygiene — staging duplicates ~40 MB already merged into the
+    #     canonical copies: cleaned AFTER the heartbeat (which reads it) and ONLY
+    #     when the heartbeat is healthy; on WARN it stays on disk as debug
+    #     evidence of the last pull.
+    if fresh and not args.keep_staging:
+        shutil.rmtree(STAGING, ignore_errors=True)
+        log.info("staging pulito (ricreato al prossimo pull) / staging cleaned "
+                 "(recreated at next pull)")
     log.info("merge completato / merge done" + ("" if fresh else " — CON WARNING HEARTBEAT / WITH HEARTBEAT WARNINGS"))
     return 0 if fresh else 2
 

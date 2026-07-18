@@ -25,7 +25,9 @@
 
 **Problemi aperti:** (a) C2 refactor 2ter e C4 greeks VPS pendenti; (b) B7 scatterà al prossimo avvio_sessione (621 barre nuove > 168) — append incrementale innocuo by design; (c) le righe forecast live pre-migrazione restano quelle storiche contaminate dal bug candele: per analisi pre-migrazione usare il replay.
 
-**▶️ RIPARTI DA QUI:** (1) prossima sessione: `.\avvio_sessione.ps1` (pull porta a casa settlement + hedge ledger dal VPS; trades.jsonl atteso a 22 righe dopo il settlement di BTC-19JUL26-64000, ≥08:00 UTC del 19/07); (2) finestra GPU LIBERA (04b è sul VPS): B1 audit causality A3-MoE → B2 run A3 → B3 run A8 → B4 probe DVOL (pre-reg in cima al file); (3) valutazione n≥30 leg opzioni ~fine luglio; (4) giudice hedged-vs-unhedged a n≥20 hedge-attivi.
+**Igiene serale (stessa sessione, decisione utente):** ① 01c RIMOSSO dall'auto-start di `avvio_sessione.ps1` → **PC completamente passivo** (zero processi residenti; comando 01c d'emergenza nel commento dello script, da usare solo su WARN heartbeat IV); ② `merge_vps_data.py` ora auto-pulisce `data/vps_staging/` (~40 MB duplicati by design) a heartbeat sano (`--keep-staging` per il debug); ③ creato **`RIPRESA.md`** (root, effimero): checklist post-riavvio PC.
+
+**▶️ RIPARTI DA QUI:** **`RIPRESA.md`** (root) — in sintesi: (1) `.\avvio_sessione.ps1` (solo pull+merge; B7 scatterà una tantum in background); (2) verifica trades.jsonl → 22 righe dopo le 08:00 UTC del 19/07; (3) finestra GPU LIBERA: B1 audit → B2 A3 → B3 A8 → B4 DVOL (pre-reg in cima al file); (4) n≥30 ~fine luglio; (5) giudice hedged-vs-unhedged a n≥20 hedge-attivi.
 
 ---
 
