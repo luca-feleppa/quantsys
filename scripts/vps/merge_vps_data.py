@@ -49,6 +49,10 @@ SINGLE_FILES = [
      ["timestamp"], "timestamp"),
     (STAGING / "iv" / "dvol.parquet", ROOT / "data" / "iv" / "dvol.parquet",
      ["timestamp"], "timestamp"),
+    # IT: C4 (2026-07-18) — greeks straddle ATM ~30h (01c --greeks): 1 riga/tick.
+    # EN: C4 (2026-07-18) — ATM ~30h straddle greeks (01c --greeks): 1 row/tick.
+    (STAGING / "iv" / "atm_greeks.parquet", ROOT / "data" / "iv" / "atm_greeks.parquet",
+     ["timestamp"], "timestamp"),
 ]
 DAILY_DIRS = [
     (STAGING / "iv" / "chain", ROOT / "data" / "iv" / "chain",

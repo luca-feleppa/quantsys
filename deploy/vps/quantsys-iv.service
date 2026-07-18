@@ -1,9 +1,13 @@
-# IT: unit systemd — poller IV Deribit (01c), tick ogni 10 min, restart automatico.
+# IT: unit systemd — poller IV Deribit (01c), tick ogni 5 min + greeks ATM
+#     (C4 2026-07-18: cadenza 10→5 min, --greeks attivo — serie atm_greeks
+#     per la replayabilità offline della leg hedge v2).
 #     Install: cp in /etc/systemd/system/ → daemon-reload → enable --now.
-# EN: systemd unit — Deribit IV poller (01c), 10-min tick, automatic restart.
+# EN: systemd unit — Deribit IV poller (01c), 5-min tick + ATM greeks
+#     (C4 2026-07-18: cadence 10→5 min, --greeks on — atm_greeks series for
+#     offline replayability of the v2 hedge leg).
 #     Install: cp into /etc/systemd/system/ → daemon-reload → enable --now.
 [Unit]
-Description=QUANTSYS 01c Deribit IV poller (atm_30h + chain + dvol)
+Description=QUANTSYS 01c Deribit IV poller (atm_30h + chain + dvol + greeks)
 After=network-online.target
 Wants=network-online.target
 
@@ -11,9 +15,7 @@ Wants=network-online.target
 Type=simple
 User=quantsys
 WorkingDirectory=/opt/quantsys
-# IT: post-gate v1 (STATUS 2bis-①): aggiungere --greeks per la serie greeks ATM.
-# EN: post-v1-gate (STATUS 2bis-①): add --greeks for the ATM greeks series.
-ExecStart=/opt/quantsys/.venv/bin/python scripts/01c_iv_poller.py --minutes 10
+ExecStart=/opt/quantsys/.venv/bin/python scripts/01c_iv_poller.py --minutes 5 --greeks
 # IT: log non bufferizzati su journald (journalctl -u quantsys-iv -f).
 # EN: unbuffered logs to journald (journalctl -u quantsys-iv -f).
 Environment=PYTHONUNBUFFERED=1

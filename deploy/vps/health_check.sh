@@ -51,6 +51,11 @@ fresh() {  # $1=path-glob  $2=soglia-minuti/threshold-min  $3=label
 }
 fresh "$ROOT/data/iv/atm_30h.parquet"      30 "IV poller (atm_30h)"
 fresh "$ROOT/data/iv/chain/*.parquet"      30 "IV poller (chain)"
+# IT: C4 — greeks ATM (--greeks, cadenza 5'): fail-soft nel poller, quindi un
+#     WARN qui è l'UNICO segnale se la serie smette di crescere col tick vivo.
+# EN: C4 — ATM greeks (--greeks, 5' cadence): fail-soft in the poller, so a
+#     WARN here is the ONLY signal if the series stalls while ticks stay alive.
+fresh "$ROOT/data/iv/atm_greeks.parquet"   30 "IV poller (atm_greeks)"
 fresh "$ROOT/data/orderbook/*.parquet"     10 "L2 recorder (orderbook)"
 # IT: 01e scrive solo se ci sono trade nuovi: soglia larga (60') anti falsi-WARN.
 # EN: 01e writes only when new trades exist: wide threshold (60') vs false WARNs.

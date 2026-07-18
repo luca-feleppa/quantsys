@@ -80,6 +80,14 @@ scp -q @SshOpts "${VpsHost}:$RemoteRoot/data/iv/atm_30h.parquet" (Join-Path $Sta
 if ($LASTEXITCODE -ne 0) { throw "scp atm_30h.parquet fallito/failed" }
 scp -q @SshOpts "${VpsHost}:$RemoteRoot/data/iv/dvol.parquet" (Join-Path $Staging "iv\")
 if ($LASTEXITCODE -ne 0) { Write-Warning "dvol.parquet non copiato (puo' non esistere ancora) / not copied (may not exist yet)" }
+# IT: C4 (2026-07-18): greeks ATM del poller --greeks — senza questa riga il VPS
+#     accumula ma casa non vede la serie (nota 2026-07-16). Fail-soft: puo'
+#     mancare nei primi tick post-attivazione.
+# EN: C4 (2026-07-18): --greeks poller ATM greeks — without this line the VPS
+#     accumulates but home never sees the series (2026-07-16 note). Fail-soft:
+#     may be missing in the first post-activation ticks.
+scp -q @SshOpts "${VpsHost}:$RemoteRoot/data/iv/atm_greeks.parquet" (Join-Path $Staging "iv\")
+if ($LASTEXITCODE -ne 0) { Write-Warning "atm_greeks.parquet non copiato (puo' non esistere ancora) / not copied (may not exist yet)" }
 
 # IT: 2) giornalieri recenti — lista remota via find -mtime, poi scp per file
 #        (niente rsync su Windows; i file sono pochi MB, il costo è trascurabile).
