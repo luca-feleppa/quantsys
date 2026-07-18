@@ -5,6 +5,30 @@
 
 ---
 
+## 🔴 2026-07-18 — GATE V1 CHIUSO: **FAIL 0/3** su ENTRAMBI i campioni (valutazione pre-registrata al checkpoint n=20)
+
+**Campione completo:** il 20° trade eseguito (BTC-18JUL26-63000, long straddle) è settlato 2026-07-18 11:36 UTC con PnL +0.00154 BTC → `trades.jsonl` = 21 righe (1 smoke + 20 executed), 21 chiavi `entry_ts+settled_ts` uniche, 0 duplicati.
+
+**Verdetto sui 3 criteri congelati 2026-06-12** (giudice: `scripts/04c_vol_paper_baselines.py` → `results/vol_paper/baseline_report.json`, run 2026-07-18 14:27; aggregati ①③ ricalcolati indipendentemente sui due campioni, identici al giudice):
+
+| Criterio | Primario (20 executed) | Secondario (21 con #0 smoke) | Verdetto |
+|---|---|---|---|
+| ① PnL medio/trade > 0 net | **−0.00218** BTC (tot −0.04370; SE 0.00254, t=−0.86) | **−0.00256** BTC (tot −0.05371) | **FAIL** |
+| ② PnL tot NN > always-LONG **E** always-SHORT (replay, stesso calendario) | NN −0.02406 > LONG −0.06119 ✓ · NN < SHORT **+0.03959** ✗ | (replay unico, indipendente dal campione) | **FAIL** |
+| ③ hit-rate > 0.5 | **0.400** (8/20) | **0.381** (8/21) | **FAIL** |
+
+Il fail-safe sul verdetto peggiore NON è servito: i due campioni **concordano** (FAIL 0/3). La perdita media non è statisticamente distinguibile da zero (t=−0.86), ma i criteri pre-registrati sono su point estimate: FAIL.
+
+**Lettura economica (diagnostica, non decisionale):** finestra a VRP positivo — always-SHORT +0.0396 BTC, hit 0.611 — coerente col backtest FHS del braccio short-vol (edge strutturale, memoria PRIORITÀ 1). Il NN è entrato **sempre long** (tutti side=1: edge>0.25 a ogni entry, mai edge<−0.25): il timing DENTRO il lato long ha valore relativo (batte always-LONG di +0.037) ma combatte il premio strutturale; il comparatore IV ATM sottostima il var-swap rate (bias di convessità smile → idea MFIV@30h, memoria) quindi l'edge long era sistematicamente sovrastimato.
+
+**Caveat pre-dichiarati (A2 — delimitano la validità esterna, non le soglie):** (a) **selezione oraria**: i dati pre-14/07 coprono il 18.6% delle ore (poller casa, no H24) — calendario di entry non uniforme; (b) **dedup** 06-14 (18 righe→17) — nessun nuovo duplicato da allora; (c) **trade #0** smoke escluso dal primario per designazione contemporanea pre-settlement (è una perdita: l'esclusione favoriva il PASS — irrilevante, FAIL comunque); (d) **20-vs-30**: questa è la valutazione al **checkpoint operativo n=20**; la valutazione pre-registrata originale a **n≥30 resta dovuta** (~fine luglio: la leg opzioni resta invariata sotto `--hedge`, il campione v1 continua a crescere); (e) il replay NN ricostruito ha n=18 < 30 → il giudice marca il criterio ② "non valutabile" a rigore di pre-reg originale; al checkpoint vale il confronto calcolato (FAIL), ri-valutazione a n=30.
+
+**Conseguenze (piano `POST_GATE_V1.md`, scritto pre-esito e NON condizionato al verdetto):** A1+A2 **ESEGUITI** (questo report). Il checkpoint n=20 sblocca il resto della Fase A e le fasi B-C; **A13/A14 restano bloccati** fino alla valutazione n=30. Il FAIL 0/3 rafforza il prior della v2 (hedge + prospettiva short-vol) senza modificarne le pre-reg.
+
+**▶️ RIPARTI DA QUI:** `POST_GATE_V1.md` in ordine — **A3** (attivare `vol_paper_replay.py` come gap-filler ufficiale, griglia dal 2026-07-14T14Z) → **A4** (`hedge_dry_run.py` sulla serie A6: congelare band/λ-WW/convenzione δ + update pre-reg v2 in STATUS) → **finestra GPU** con 04b fermo (B1 audit causality sui file A3-MoE → B2 run A3 → B3 run A8 → B4 probe DVOL) → **Fase C** (fix funding per-tick, refactor 2ter, riavvio `04b --execute --hedge` coi parametri congelati, C4 greeks VPS).
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — PROBE DVOL-COME-FEATURE (linea vol 1h, target log_rv) · 2026-07-17 · run nella finestra GPU post-gate-v1, DOPO A3/A8
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Zero numeri visti. UN solo run: nessuno sweep su trasformazioni/finestre DVOL; qualunque variante suggerita dai risultati (VRP-spread dvol−rv, MFIV@30h come feature, lag alternativi) = NUOVA pre-registrazione.
