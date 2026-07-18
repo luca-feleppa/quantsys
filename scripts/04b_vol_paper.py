@@ -404,7 +404,11 @@ class VolForecaster:
         #     a hole in the series (stale parquet + 48h delta) silently produced
         #     forecasts on weeks-old candles. Fail-fast.
         tail_ot = self.candles["open_time"].tail(self.window_size)
-        step = pd.Timedelta(minutes=self.ps.interval_minutes)
+        # IT: cast int esplicito — un numpy scalar qui è DeprecationWarning oggi
+        #     e crash domani (stessa classe del fix 01e 2026-07-16).
+        # EN: explicit int cast — a numpy scalar here is a DeprecationWarning
+        #     today and a crash tomorrow (same class as the 2026-07-16 01e fix).
+        step = pd.Timedelta(minutes=int(self.ps.interval_minutes))
         gaps = tail_ot.diff().dropna()
         if not (gaps == step).all():
             raise RuntimeError(
