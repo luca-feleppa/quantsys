@@ -49,10 +49,30 @@ $Staging  = Join-Path $ProjRoot "data\vps_staging"
 New-Item -ItemType Directory -Force (Join-Path $Staging "iv\chain")        | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $Staging "orderbook")       | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $Staging "deribit_trades")  | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $Staging "vol_paper")       | Out-Null
 
 # IT: mai stampare l'host (privato): solo la finestra temporale.
 # EN: never print the host (private): only the time window.
 Write-Output "[pull] finestra/window: $Days giorni/days"
+
+# IT: 0) PUSH macro casa -> VPS (dal 2026-07-18 il VPS ospita 04b, che legge lo
+#     snapshot macro al bootstrap; il refresh macro resta lato casa). Atomico:
+#     scp su .tmp + mv remoto (04b non puo' leggere un file a meta'). Fail-soft:
+#     un push fallito non blocca il pull (04b warna da solo a 7g di staleness).
+# EN: 0) PUSH home macro -> VPS (since 2026-07-18 the VPS hosts 04b, which reads
+#     the macro snapshot at bootstrap; macro refresh stays home-side). Atomic:
+#     scp to .tmp + remote mv (04b can never read a half-written file).
+#     Fail-soft: a failed push does not block the pull (04b warns by itself at
+#     7d staleness).
+$macroLocal = Join-Path $ProjRoot "data\macro_features.parquet"
+if (Test-Path $macroLocal) {
+    scp -q @SshOpts $macroLocal "${VpsHost}:$RemoteRoot/data/macro_features.parquet.tmp"
+    if ($LASTEXITCODE -eq 0) {
+        ssh @SshOpts $VpsHost "mv $RemoteRoot/data/macro_features.parquet.tmp $RemoteRoot/data/macro_features.parquet"
+        if ($LASTEXITCODE -eq 0) { Write-Output "[pull] push macro_features.parquet -> VPS OK" }
+        else { Write-Warning "push macro: mv remoto fallito/remote mv failed" }
+    } else { Write-Warning "push macro: scp fallito/failed - 04b VPS usera' lo snapshot precedente / VPS 04b keeps the previous snapshot" }
+}
 
 # IT: 1) file singoli append-only (piccoli: si ricopiano interi ogni volta).
 # EN: 1) append-only single files (small: re-copied whole every time).
@@ -81,6 +101,36 @@ foreach ($p in $pairs) {
         if ($LASTEXITCODE -ne 0) { throw "scp fallito/failed: $f" }
     }
 }
+
+# IT: 2b) vol-paper (04b sul VPS dal 2026-07-18): log forward test + file di
+#     stato. forecasts/trades = record del giudizio (fatali se mancanti);
+#     position/hedge/exec_diag = opzionali (possono legittimamente non esistere:
+#     book flat, hedge mai attivato). Il marker _pulled.ok autorizza il merge a
+#     specchiare la PRESENZA di position/hedge_state (assente sul VPS = flat =
+#     va rimosso anche in canonico).
+# EN: 2b) vol-paper (04b on the VPS since 2026-07-18): forward-test log + state
+#     files. forecasts/trades = judgment record (fatal if missing);
+#     position/hedge/exec_diag = optional (may legitimately not exist: flat
+#     book, hedge never enabled). The _pulled.ok marker authorizes the merge to
+#     mirror the PRESENCE of position/hedge_state (absent on VPS = flat = must
+#     be removed from the canonical copy too).
+$vpStaging = Join-Path $Staging "vol_paper"
+Remove-Item (Join-Path $vpStaging "*") -Force -ErrorAction SilentlyContinue
+$vpRemote = "$RemoteRoot/results/vol_paper"
+foreach ($f in @("forecasts.parquet", "trades.jsonl")) {
+    scp -q @SshOpts "${VpsHost}:$vpRemote/$f" $vpStaging
+    if ($LASTEXITCODE -ne 0) { throw "scp vol_paper/$f fallito/failed" }
+}
+# IT: NIENTE redirect 2>$null sui native exe: in PS 5.1 con EAP=Stop lo stderr
+#     incapsulato come ErrorRecord diventerebbe terminante (gotcha noto del repo).
+# EN: NO 2>$null redirect on native exes: under PS 5.1 with EAP=Stop the stderr
+#     wrapped as an ErrorRecord would become terminating (known repo gotcha).
+foreach ($f in @("position.json", "hedge_state.json", "hedge_ledger.jsonl", "exec_diag.jsonl")) {
+    scp -q @SshOpts "${VpsHost}:$vpRemote/$f" $vpStaging
+    if ($LASTEXITCODE -ne 0) { Write-Output "[pull] vol_paper/$f assente sul VPS (ok se flat/hedge off) / absent on VPS (ok when flat/hedge off)" }
+}
+New-Item -ItemType File -Force (Join-Path $vpStaging "_pulled.ok") | Out-Null
+Write-Output "[pull] vol_paper: staging aggiornato / staging updated"
 
 # IT: 3) merge nella copia canonica + heartbeat staleness (salvo -NoMerge).
 #     Exit 2 del merge = merge OK ma heartbeat stale (warning gia' loggato,

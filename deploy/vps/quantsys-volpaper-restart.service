@@ -1,0 +1,10 @@
+# IT: oneshot invocato dal timer quantsys-volpaper-restart.timer — riavvia il
+#     servizio 04b (vedi razionale nel timer).
+# EN: oneshot invoked by quantsys-volpaper-restart.timer — restarts the 04b
+#     service (rationale in the timer file).
+[Unit]
+Description=QUANTSYS 04b restart helper (invoked by timer)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl try-restart quantsys-volpaper.service

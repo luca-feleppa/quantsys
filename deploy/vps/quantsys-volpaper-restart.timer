@@ -1,0 +1,20 @@
+# IT: timer — restart giornaliero di 04b alle 00:30 UTC (minuto SICURO: lontano
+#     dal tick hh:00+90s e dal settlement 08:00 UTC). Il bootstrap ri-legge lo
+#     snapshot macro (congelato all'avvio del processo), ri-persiste il parquet
+#     candele (gap-fill) e rinnova il funding: senza restart la staleness macro
+#     crescerebbe con l'uptime del servizio.
+# EN: timer — daily 04b restart at 00:30 UTC (SAFE minute: away from the
+#     hh:00+90s tick and the 08:00 UTC settlement). Bootstrap re-reads the macro
+#     snapshot (frozen at process start), re-persists the candle parquet
+#     (gap-fill) and refreshes funding: without restarts macro staleness would
+#     grow with service uptime.
+[Unit]
+Description=QUANTSYS daily 04b restart (macro/candle snapshot refresh)
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+Unit=quantsys-volpaper-restart.service
+
+[Install]
+WantedBy=timers.target

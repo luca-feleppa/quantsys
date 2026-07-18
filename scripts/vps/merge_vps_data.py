@@ -21,7 +21,10 @@
 #     HEARTBEAT: warns when the latest VPS tick (staging file, NOT the merged
 #     one) is older than --stale-hours → collector down on the VPS.
 import argparse
+import json
 import logging
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -84,6 +87,92 @@ def merge_one(staged: Path, canon: Path, keys: list[str], ts_col: str) -> tuple[
     return n_before, len(merged)
 
 
+# IT: ── vol-paper (04b sul VPS dal 2026-07-18) ─────────────────────────────
+#     Il VPS è la sorgente AUTORITATIVA del forward test: sui duplicati vincono
+#     le righe di staging (keep='last' con canonico prima — diverso dai
+#     collector, dove le righe sono identiche per costruzione e keep='first'
+#     equivale). I jsonl si uniscono per chiave; position/hedge_state si
+#     SPECCHIANO in presenza (assente sul VPS = flat) solo col marker _pulled.ok.
+# EN: ── vol-paper (04b on the VPS since 2026-07-18) ──────────────────────────
+#     The VPS is the AUTHORITATIVE forward-test source: on duplicates the
+#     staging rows win (keep='last' with canonical first — unlike collectors,
+#     whose rows are identical by construction so keep='first' is equivalent).
+#     Jsonl files are key-merged; position/hedge_state are PRESENCE-mirrored
+#     (absent on VPS = flat) only under the _pulled.ok marker.
+VP_STAGING = STAGING / "vol_paper"
+VP_CANON = ROOT / "results" / "vol_paper"
+VP_JSONL = [
+    ("trades.jsonl", ("entry_ts", "settled_ts")),
+    ("exec_diag.jsonl", ("ts",)),
+    ("hedge_ledger.jsonl", ("ts",)),
+]
+VP_MIRROR = ["position.json", "hedge_state.json"]
+
+
+def merge_jsonl(staged: Path, canon: Path, keys: tuple) -> tuple[int, int]:
+    # IT: unione per chiave (canonico prima, staging vince sui duplicati),
+    #     ordine per chiave; write atomica (.tmp + os.replace, safety net repo).
+    # EN: key-based union (canonical first, staging wins on duplicates), sorted
+    #     by key; atomic write (.tmp + os.replace, repo safety net).
+    def _load(p: Path) -> list:
+        if not p.exists():
+            return []
+        return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()
+                if l.strip()]
+
+    old, new = _load(canon), _load(staged)
+    by_key = {tuple(str(r.get(k)) for k in keys): r for r in old}
+    n_before = len(by_key)
+    for r in new:
+        by_key[tuple(str(r.get(k)) for k in keys)] = r
+    rows = sorted(by_key.values(), key=lambda r: tuple(str(r.get(k)) for k in keys))
+    if len(rows) != n_before or n_before == 0:
+        canon.parent.mkdir(parents=True, exist_ok=True)
+        tmp = canon.with_suffix(canon.suffix + ".tmp")
+        tmp.write_text("".join(json.dumps(r, default=str) + "\n" for r in rows),
+                       encoding="utf-8")
+        os.replace(tmp, canon)
+    return n_before, len(rows)
+
+
+def merge_vol_paper():
+    if not VP_STAGING.exists():
+        return
+    # IT: forecasts: dedup su candle_ts, righe VPS vincenti (vedi header sezione).
+    # EN: forecasts: dedup on candle_ts, VPS rows winning (see section header).
+    staged_fc = VP_STAGING / "forecasts.parquet"
+    if staged_fc.exists():
+        new = pd.read_parquet(staged_fc)
+        canon_fc = VP_CANON / "forecasts.parquet"
+        if canon_fc.exists():
+            old = pd.read_parquet(canon_fc)
+            n_before = len(old)
+            merged = pd.concat([old, new], ignore_index=True)
+        else:
+            n_before, merged = 0, new
+        merged = (merged.drop_duplicates(subset="candle_ts", keep="last")
+                        .sort_values("candle_ts").reset_index(drop=True))
+        atomic_save_parquet(merged, canon_fc, index=False)
+        log.info(f"merge vol_paper/forecasts: {n_before} → {len(merged)} righe/rows")
+    for name, keys in VP_JSONL:
+        staged = VP_STAGING / name
+        if staged.exists():
+            b, a = merge_jsonl(staged, VP_CANON / name, keys)
+            log.info(f"merge vol_paper/{name}: {b} → {a} righe/rows (+{a - b})")
+    # IT: mirror di presenza SOLO a pull riuscito (marker): copia o rimozione.
+    # EN: presence mirror ONLY after a successful pull (marker): copy or delete.
+    if (VP_STAGING / "_pulled.ok").exists():
+        for name in VP_MIRROR:
+            staged, canon = VP_STAGING / name, VP_CANON / name
+            if staged.exists():
+                canon.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(staged, canon)
+            elif canon.exists():
+                canon.unlink()
+                log.info(f"vol_paper/{name}: assente sul VPS (flat) — rimosso in "
+                         f"canonico / absent on VPS (flat) — canonical removed")
+
+
 def heartbeat(stale_hours: float) -> bool:
     # IT: staleness del VPS misurata sui file di STAGING (fotografano lo stato
     #     del collector remoto al momento del pull). True = tutto fresco.
@@ -107,6 +196,13 @@ def heartbeat(stale_hours: float) -> bool:
     if tr_files:
         checks.append(("Trades recorder (deribit_trades)", tr_files[-1], "timestamp",
                        max(stale_hours, 6.0)))
+    # IT: 04b (VPS dal 2026-07-18): candle_ts è la candela CHIUSA del tick →
+    #     età fisiologica ~1-2h; soglia 3.5h = tollera un tick fallito.
+    # EN: 04b (VPS since 2026-07-18): candle_ts is the tick's CLOSED candle →
+    #     physiological age ~1-2h; 3.5h threshold = tolerates one failed tick.
+    if (VP_STAGING / "forecasts.parquet").exists():
+        checks.append(("Vol-paper 04b (forecasts)", VP_STAGING / "forecasts.parquet",
+                       "candle_ts", max(stale_hours, 3.5)))
     for name, path, col, thresh in checks:
         if not path.exists():
             log.warning(f"HEARTBEAT {name}: file di staging assente / staging file missing")
@@ -150,6 +246,7 @@ def main() -> int:
             b, a = merge_one(staged, cdir / staged.name, keys, ts)
             if a != b:
                 log.info(f"merge {(cdir / staged.name).relative_to(ROOT)}: {b} → {a} (+{a - b})")
+    merge_vol_paper()
 
     fresh = heartbeat(args.stale_hours)
     log.info("merge completato / merge done" + ("" if fresh else " — CON WARNING HEARTBEAT / WITH HEARTBEAT WARNINGS"))

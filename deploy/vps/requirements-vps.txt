@@ -19,3 +19,10 @@ pandas>=2.1.0,<3.0
 pyarrow>=14.0.0,<22.0    # Parquet I/O
 requests>=2.31.0,<3.0
 pyyaml>=6.0.1,<7.0
+# IT: dal 2026-07-18 il VPS ospita anche 04b (inference CPU): sklearn serve per
+#     l'unpickle del RobustScaler in PipelineState — pin MINOR alla versione di
+#     casa (1.8.x): un major diverso può rompere il formato pickle dello scaler.
+# EN: since 2026-07-18 the VPS also hosts 04b (CPU inference): sklearn is needed
+#     to unpickle the RobustScaler inside PipelineState — MINOR-pinned to the
+#     home version (1.8.x): a different major can break the scaler pickle format.
+scikit-learn>=1.8.0,<1.9

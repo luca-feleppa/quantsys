@@ -78,6 +78,24 @@ systemctl enable --now quantsys-iv.service quantsys-ob.service quantsys-trades.s
 sleep 3
 systemctl --no-pager --lines=5 status quantsys-iv.service quantsys-ob.service quantsys-trades.service || true
 
+# IT: 04b vol-paper (migrato dal 2026-07-18) — abilitato SOLO se i prerequisiti
+#     NON-git sono già stati seedati (secrets testnet + modelli + stato forward
+#     test, vedi header di quantsys-volpaper.service): su un VPS collector-only
+#     questo blocco è un no-op esplicito.
+# EN: 04b vol-paper (migrated 2026-07-18) — enabled ONLY when the non-git
+#     prerequisites are already seeded (testnet secrets + models + forward-test
+#     state, see the quantsys-volpaper.service header): on a collector-only VPS
+#     this block is an explicit no-op.
+if [ -f "$INSTALL_DIR/config/secrets.yaml" ] && [ -d "$INSTALL_DIR/models/itransformer" ]; then
+    cp deploy/vps/quantsys-volpaper.service deploy/vps/quantsys-volpaper-restart.service \
+       deploy/vps/quantsys-volpaper-restart.timer /etc/systemd/system/
+    systemctl daemon-reload
+    systemctl enable --now quantsys-volpaper.service quantsys-volpaper-restart.timer
+    systemctl --no-pager --lines=5 status quantsys-volpaper.service || true
+else
+    echo "SKIP quantsys-volpaper: prerequisiti non seedati (secrets/modelli) / prerequisites not seeded (secrets/models)"
+fi
+
 echo
 echo "FATTO / DONE. Log live: journalctl -u quantsys-iv -u quantsys-ob -u quantsys-trades -f"
 echo "Da casa / from home: scripts/vps/pull_vps_data.ps1 -VpsHost <user@ip>"

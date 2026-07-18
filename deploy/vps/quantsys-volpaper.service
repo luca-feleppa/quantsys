@@ -1,0 +1,38 @@
+# IT: unit systemd — forward test vol-paper 04b (MIGRATO dal PC di casa il
+#     2026-07-18: elimina il bias di selezione oraria del campione — entry solo
+#     a PC acceso, 18.6% coverage pre-14/07). Tick orario, ordini REALI sul
+#     testnet Deribit (--execute; assert anti-mainnet nel codice). Prerequisiti
+#     NON in git: config/secrets.yaml (blocco deribit_testnet, chmod 600),
+#     models/itransformer/ (ensemble vol PASS), data/raw_candles.parquet,
+#     data/macro_features.parquet (push da casa via pull_vps_data.ps1),
+#     results/vol_paper/ (seed di continuità del forward test).
+#     Install: cp in /etc/systemd/system/ → daemon-reload → enable --now
+#     (insieme a quantsys-volpaper-restart.timer).
+# EN: systemd unit — 04b vol-paper forward test (MIGRATED from the home PC on
+#     2026-07-18: removes the sample's hour-selection bias — entries only while
+#     the PC was on, 18.6% coverage pre-07/14). Hourly tick, REAL Deribit
+#     testnet orders (--execute; anti-mainnet assert in code). Prerequisites
+#     NOT in git: config/secrets.yaml (deribit_testnet block, chmod 600),
+#     models/itransformer/ (PASS vol ensemble), data/raw_candles.parquet,
+#     data/macro_features.parquet (pushed from home by pull_vps_data.ps1),
+#     results/vol_paper/ (forward-test continuity seed).
+#     Install: cp into /etc/systemd/system/ → daemon-reload → enable --now
+#     (together with quantsys-volpaper-restart.timer).
+[Unit]
+Description=QUANTSYS 04b vol-paper forward test (NN-RV vs IV, Deribit testnet)
+After=network-online.target quantsys-iv.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quantsys
+WorkingDirectory=/opt/quantsys
+ExecStart=/opt/quantsys/.venv/bin/python scripts/04b_vol_paper.py --execute
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -2,9 +2,9 @@
 #       1. pull+merge dei dati raccolti dal VPS mentre il PC era spento
 #          (scripts/vps/pull_vps_data.ps1: host privato da config/secrets.yaml,
 #          heartbeat staleness incluso);
-#       2. rilancio dei 2 processi locali: 01c_iv_poller (alimenta 04b con IV
-#          fresca <=30 min) e 04b_vol_paper --execute (forward test testnet).
-#          01d NON viene lanciato: il recorder L2 vive sul VPS dal 2026-07-14.
+#       2. rilancio del processo locale 01c_iv_poller (ridondanza IV lato casa;
+#          il merge deduplica). 01d/01e vivono sul VPS; 04b_vol_paper vive sul
+#          VPS dal 2026-07-18 (quantsys-volpaper.service) - MAI rilanciarlo qui.
 #     Anti-duplicazione: se un processo e' gia' vivo NON viene rilanciato
 #     (due 04b scriverebbero position/trades in conflitto).
 #     NOTA encoding: file deliberatamente ASCII-only - PS 5.1 legge i .ps1
@@ -15,11 +15,10 @@
 #       1. pull+merge of the data the VPS collected while the PC was off
 #          (scripts/vps/pull_vps_data.ps1: private host from config/secrets.yaml,
 #          staleness heartbeat included);
-#       2. relaunch of the 2 local processes: 01c_iv_poller (feeds 04b with
-#          <=30 min fresh IV) and 04b_vol_paper --execute (testnet forward test).
-#          01d is NOT launched: the L2 recorder lives on the VPS since 2026-07-14.
-#     Anti-duplication: an already-alive process is NOT relaunched (two 04b
-#     would write conflicting position/trades).
+#       2. relaunch of the local 01c_iv_poller process (home-side IV redundancy;
+#          the merge dedups). 01d/01e live on the VPS; 04b_vol_paper lives on
+#          the VPS since 2026-07-18 (quantsys-volpaper.service) - NEVER here.
+#     Anti-duplication: an already-alive process is NOT relaunched.
 #     Encoding note: deliberately ASCII-only - PS 5.1 reads BOM-less .ps1 as
 #     cp1252 and unicode characters corrupt parsing.
 #     Usage: .\avvio_sessione.ps1 [-Days 7] [-SkipPull]  (from project root;
@@ -55,10 +54,17 @@ if (-not $SkipPull) {
 
 # --- 2. Processi locali (anti-duplicazione) / local processes (anti-dup) -----
 # IT: pattern -> argomenti di lancio. 01d/01e esclusi: girano sul VPS (systemd).
+#     04b RIMOSSO 2026-07-18: migrato sul VPS (quantsys-volpaper.service) per
+#     eliminare il bias di selezione oraria del campione — NON rilanciarlo a
+#     casa: due --execute gestirebbero la stessa posizione testnet (doppi
+#     ordini). I suoi file arrivano a casa via pull (sezione vol_paper).
 # EN: pattern -> launch arguments. 01d/01e excluded: they run on the VPS (systemd).
+#     04b REMOVED 2026-07-18: migrated to the VPS (quantsys-volpaper.service) to
+#     kill the sample's hour-selection bias — do NOT relaunch it at home: two
+#     --execute would manage the same testnet position (double orders). Its
+#     files reach home via the pull (vol_paper section).
 $targets = @(
-    @{ pattern = "01c_iv_poller"; args = @("scripts/01c_iv_poller.py");              name = "01c poller IV" },
-    @{ pattern = "04b_vol_paper"; args = @("scripts/04b_vol_paper.py", "--execute"); name = "04b vol-paper" }
+    @{ pattern = "01c_iv_poller"; args = @("scripts/01c_iv_poller.py"); name = "01c poller IV" }
 )
 $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe'"
 foreach ($t in $targets) {
