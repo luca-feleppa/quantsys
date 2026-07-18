@@ -5,6 +5,28 @@
 
 ---
 
+## 🟢 2026-07-18 pomeriggio — 04b MIGRATO SUL VPS + A3/A4 eseguiti + 🔴 BUG CANDELE (finestra live bucata dal ~06-24)
+
+**🔴 SCOPERTA MAJOR — finestra live contaminata (bug candele).** `raw_candles.parquet` era congelato al 2026-06-22 (freeze A3/A8) ma il bootstrap di `04b` copriva solo 48h di delta REST → da ~06-24, a ogni restart, la finestra T=120 del live conteneva ~72 candele di GIUGNO + ~48 fresche, senza alcun errore. Le feature rolling attraversavano il buco come se fosse contiguo. Il parity replay 07-14 non poteva vederlo (live e replay condividevano le stesse candele bucate). **Impatto:** i forecast live (e quindi le entry) da ~06-24 alla migrazione hanno input degradati — caveat AGGIUNTIVO sul campione gate v1 (trade #9…#21) e sulla posizione corrente BTC-19JUL26-64000 (entry con edge da finestra sporca). Il verdetto FAIL 0/3 non cambia (il criterio ② è within-calendar). **Fix (commit `28dcad1`+`e43744f`):** bootstrap `fetch_klines_incremental` (delta completo + persist parquet — il npz congelato NON è toccato), guard `RuntimeError` su finestra non contigua (safety net), e quantificazione: replay su serie sana vs live sui 33 tick sovrapposti → max|Δμ_z|=0.53, accordo segnale **64%**.
+
+**A3 ESEGUITO — gap-filler attivo.** `vol_paper_replay.py` run sulla griglia 2026-07-14T14Z → 07-18 12:00 (95 tick H24, 3 settlement replayati, output isolati `results/vol_paper/replay/`). Nota: post-migrazione il forward test è H24 nativo → il replay serve solo per outage futuri e per la serie pre-migrazione.
+
+**A4 ESEGUITO — parametri v2 CONGELATI** (`hedge_dry_run.py` esteso con sweep band+isteresi, semantica `maybe_hedge`; serie A6 = 86 tick, 76 intervalli, span 07-08→07-18; report `results/vols/hedge_dry_run.json`): **`--hedge-band 0.30 --hedge-conv raw --hedge-band-mode fixed`** (λ ww: NESSUNA — ww respinto: Δnet +4e-5 BTC = rumore vs σ/intervallo 0.0018, e var↓ peggiore 45.8% vs 64.9% → niente dominanza). Sweep fixed: net monotono ↑ con band (fee drag ↓), var↓ 64.9% a b=0.30 (≫ 40% richiesto dal gate C3). ⚠ Caveat onesto: slope empirico Δm~r = +0.19±0.07 (R²=0.10) NON matcha bene nessuna convenzione (δ_raw +0.035, δ_adj +0.017; raw più vicina) — Δm dominato da theta/vega su questo campione. Fee perp ratificata 5e-4 (taker Deribit); funding perp NON modellato (caveat dichiarato). **Questo aggiorna la pre-reg v2 hedged-vs-unhedged: band/conv/mode sopra sono i valori CONGELATI per `04b --hedge` (C3).**
+
+**MIGRAZIONE 04b → VPS COMPLETATA** (elimina il bias di selezione oraria: entry H24, ~1 trade/giorno vs ~0.55):
+- **Servizio `quantsys-volpaper.service`** ATTIVO (User=quantsys, `--execute`, Restart=always) + **timer restart 00:30 UTC** (re-snapshot macro, persist candele, minuto sicuro lontano da tick/settlement). Smoke `--once --execute` PASS: 66.072 candele contigue, 104 feature canoniche, tick → HOLD su posizione riconosciuta. Health check VPS **PASS 13/13** (4 servizi).
+- **Fix C1 incluso** (funding refresh per-tick, fail-soft) — la verifica A/B replay-vs-live completa resta da fare sui tick futuri sovrapposti.
+- **Seed:** modelli `models/itransformer` (15.6 MB), `raw_candles.parquet` guarito, `macro_features.parquet`, `funding_rate.parquet`, `results/vol_paper/*` (continuità del forward test: 21 righe trades, forecasts, position, exec_diag). Secrets: SOLO blocco `deribit_testnet` su VPS (`chmod 600`), estratto senza mai stamparlo.
+- **Sync:** `pull_vps_data.ps1` ora PUSHA `macro_features.parquet` casa→VPS (atomico .tmp+mv) e PULLA `results/vol_paper/` (forecasts dedup `candle_ts` keep-last VPS-autoritativo, jsonl per chiave, mirror di presenza position/hedge_state con marker `_pulled.ok`); heartbeat 04b in merge (soglia 3.5h) + `health_check.sh`. **Test end-to-end PASS** (macro push OK, 21=21 trades, +2 exec_diag dal VPS).
+- **Casa:** `04b` RIMOSSO da `avvio_sessione.ps1` (MAI rilanciarlo: doppio `--execute` = doppi ordini sulla stessa posizione testnet); resta 01c (ridondanza IV, dedup nel merge). sklearn pinnato 1.8.x in `requirements-vps.txt` (unpickle RobustScaler).
+- Commit: `267f198`→`e43744f` (5), pushati; VPS a HEAD.
+
+**Problemi aperti:** (a) C3 (attivazione `--hedge` coi parametri congelati) NON eseguita — richiede riavvio servizio con flag espliciti, decisione di attivazione separata; (b) C2 refactor 2ter e C4 greeks VPS pendenti; (c) B7 scatterà al prossimo avvio_sessione (621 barre nuove > 168) — append incrementale innocuo by design; (d) la riga forecast 13:00 UTC di oggi è stata riscritta dal tick VPS (finestra sana) — le righe live precedenti restano quelle storiche contaminate: per analisi pre-migrazione usare il replay.
+
+**▶️ RIPARTI DA QUI:** (1) domani ≥08:00 UTC il settlement di BTC-19JUL26-64000 avviene SUL VPS (verifica: `.\scripts\vps\pull_vps_data.ps1` → trades.jsonl 22 righe); (2) decisione C3: riavviare il servizio con `--hedge --hedge-band 0.30 --hedge-conv raw` (parametri congelati sopra) per far partire il forward v2 hedged; (3) finestra GPU (04b ora NON contende: è sul VPS!): B1 audit A3-MoE → B2 → B3 → B4 DVOL; (4) valutazione n≥30 a ~fine luglio.
+
+---
+
 ## 🔴 2026-07-18 — GATE V1 CHIUSO: **FAIL 0/3** su ENTRAMBI i campioni (valutazione pre-registrata al checkpoint n=20)
 
 **Campione completo:** il 20° trade eseguito (BTC-18JUL26-63000, long straddle) è settlato 2026-07-18 11:36 UTC con PnL +0.00154 BTC → `trades.jsonl` = 21 righe (1 smoke + 20 executed), 21 chiavi `entry_ts+settled_ts` uniche, 0 duplicati.
