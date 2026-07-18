@@ -66,12 +66,19 @@ def load_ticks(path: Path) -> list:
         if len(legs) != 2 or any(
                 l.get(k) is None for l in legs for k in ("mark", "underlying", "delta")):
             continue
+        # IT: gamma di struttura (A12/ww): può mancare su strike illiquidi → None,
+        #     la banda ww fa fallback alla fissa su quel tick (semantica di 04b).
+        # EN: structure gamma (A12/ww): may be missing on illiquid strikes → None,
+        #     the ww band falls back to fixed on that tick (04b semantics).
+        gammas = [l.get("gamma") for l in legs]
         ticks.append({
             "ts": r["ts"], "side": int(r["side"]), "strike": float(r["strike"]),
             "expiry_ms": int(r["expiry_ms"]),
             "S": float(np.mean([l["underlying"] for l in legs])),   # forward per-expiry
             "m": float(sum(l["mark"] for l in legs)),               # BTC/contratto · per contract
             "delta_raw": float(sum(l["delta"] for l in legs)),      # convenzione venue · venue convention
+            "gamma": (float(sum(gammas)) if all(g is not None for g in gammas)
+                      else None),
         })
     return ticks
 
@@ -188,6 +195,82 @@ def simulate(ticks: list, fee: float) -> dict:
     return out
 
 
+# ──────────────── simulazione no-trade band (A4 POST_GATE_V1) ────────────────
+def ww_band_offline(fee: float, S: float, gamma_struct: float, lam: float,
+                    band_ref: float) -> float:
+    # IT: mirror OFFLINE di ww_band in 04b (A12, Whalley–Wilmott 1997): half-width
+    #     (3·k·S·Γ²/2λ)^(1/3) in spazio |delta_book| BTC-eq, clip [ref/4, 4·ref].
+    #     Ridefinita qui (non importata) perché 04b ha nome non-importabile senza
+    #     importlib ed esegue side-effect a import — stesso pattern di 04c.
+    # EN: OFFLINE mirror of 04b's ww_band (A12, Whalley–Wilmott 1997): half-width
+    #     (3·k·S·Γ²/2λ)^(1/3) in |book_delta| BTC-eq space, clipped [ref/4, 4·ref].
+    #     Redefined here (not imported): 04b has a digit-leading name and runs
+    #     import-time side effects — same pattern as 04c.
+    h = (1.5 * fee * S * gamma_struct ** 2 / lam) ** (1.0 / 3.0)
+    return float(min(max(h, band_ref / 4.0), band_ref * 4.0))
+
+
+def simulate_band(ticks: list, fee: float, conv: str, band: float,
+                  band_mode: str = "fixed", lam: float | None = None,
+                  band_ref: float = 0.20) -> dict:
+    # IT: simulazione della leg hedge CON isteresi no-trade band — stessa semantica
+    #     di maybe_hedge (04b): a ogni tick book_delta = side·δ_conv + h; ribilancio
+    #     al target h* = −side·δ_conv SOLO se |book_delta| > band_eff; fee sul
+    #     nozionale |Δh| + fee di chiusura a fine struttura. band_mode='ww' usa la
+    #     banda gamma-scalata (fallback fissa se gamma assente, come 04b).
+    #     Ritorna total_net, varianza per-intervallo e n ribilanciamenti.
+    # EN: hedge-leg simulation WITH the no-trade-band hysteresis — same semantics
+    #     as 04b's maybe_hedge: each tick book_delta = side·δ_conv + h; rebalance
+    #     to target h* = −side·δ_conv ONLY when |book_delta| > band_eff; fee on the
+    #     |Δh| notional + closing fee at structure end. band_mode='ww' uses the
+    #     gamma-scaled band (fixed fallback when gamma is missing, like 04b).
+    #     Returns total_net, per-interval variance and rebalance count.
+    pnl_int, fees, n_reb = [], [], 0
+    h = None                       # IT: leg perp corrente (BTC-eq) | EN: current perp leg
+    for a, b in zip(ticks[:-1], ticks[1:]):
+        if (a["side"], a["strike"], a["expiry_ms"]) != (b["side"], b["strike"], b["expiry_ms"]):
+            if h is not None:
+                fees.append(fee * abs(h))          # IT/EN: chiusura struttura / structure close
+            h = None
+            continue
+        side = a["side"]
+        delta_conv = a["delta_raw"] if conv == "raw" else a["delta_raw"] - a["m"]
+        if h is None:
+            h = 0.0                                # IT/EN: nuova struttura parte flat / new structure starts flat
+        band_eff = band
+        if band_mode == "ww" and a["gamma"] is not None:
+            band_eff = ww_band_offline(fee, a["S"], a["gamma"], lam, band_ref)
+        book_delta = side * delta_conv + h
+        if abs(book_delta) > band_eff:
+            h_target = -side * delta_conv
+            fees.append(fee * abs(h_target - h))
+            h = h_target
+            n_reb += 1
+        dm = side * (b["m"] - a["m"])
+        pnl_int.append(dm + perp_pnl_btc(h, a["S"], b["S"]))
+    if h is not None:
+        fees.append(fee * abs(h))
+    x = np.asarray(pnl_int)
+    return {"conv": conv, "band": band, "band_mode": band_mode, "lam": lam,
+            "n_intervals": len(x), "n_rebalances": n_reb,
+            "mean": float(x.mean()), "std": float(x.std(ddof=1)),
+            "var_reduction_vs_unhedged": None,     # IT/EN: riempito dal chiamante / filled by caller
+            "fees_total": float(np.sum(fees)),
+            "total_net": float(x.sum() - np.sum(fees))}
+
+
+# IT: griglie A4 (POST_GATE_V1) — PRE-DICHIARATE prima di guardare i numeri:
+#     band fisse {0.10…0.30} (dal piano), λ ww log-spaced larga (la scala di λ
+#     non era nota a priori), convenzioni entrambe. La scelta avviene su dati
+#     DISGIUNTI dal giudizio forward v2 → zero gradi di libertà a giudizio in corso.
+# EN: A4 grids (POST_GATE_V1) — PRE-DECLARED before looking at the numbers:
+#     fixed bands {0.10…0.30} (from the plan), wide log-spaced ww λ (λ's scale was
+#     unknown a priori), both conventions. Selection happens on data DISJOINT from
+#     the v2 forward judgment → zero degrees of freedom mid-judgment.
+BAND_GRID = [0.10, 0.15, 0.20, 0.25, 0.30]
+LAMBDA_GRID = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]
+
+
 def main():
     # IT: boilerplate UTF-8 (checklist CLAUDE.md — bug cp1252 ricorrente).
     # EN: UTF-8 boilerplate (CLAUDE.md checklist — recurring cp1252 bug).
@@ -208,6 +291,58 @@ def main():
     log.info(f"tick 'position' validi/valid: {len(ticks)} da/from {EXEC_DIAG_PATH}")
     res = simulate(ticks, args.fee)
 
+    # IT: A4 (POST_GATE_V1) — sweep no-trade band con isteresi + selezione dei
+    #     parametri v2 da CONGELARE, con criteri pre-dichiarati nel piano:
+    #     ① conv = convenzione δ il cui delta sided medio matcha lo slope empirico;
+    #     ② band fissa = argmax total_net sulla griglia {0.10…0.30} (a conv scelta);
+    #     ③ band_mode = ww solo se il best ww batte il best fixed su total_net
+    #        (λ = argmax sulla griglia log-spaced).
+    # EN: A4 (POST_GATE_V1) — no-trade-band sweep with hysteresis + selection of
+    #     the v2 parameters to FREEZE, per the plan's pre-declared criteria:
+    #     ① conv = δ convention whose mean sided delta matches the empirical slope;
+    #     ② fixed band = argmax total_net over {0.10…0.30} (at the chosen conv);
+    #     ③ band_mode = ww only if best ww beats best fixed on total_net
+    #        (λ = argmax over the log-spaced grid).
+    u_var = res["unhedged"]["std"] ** 2
+    sweep = []
+    for conv in ("raw", "adj"):
+        for band in BAND_GRID:
+            sweep.append(simulate_band(ticks, args.fee, conv, band))
+        for lam in LAMBDA_GRID:
+            sweep.append(simulate_band(ticks, args.fee, conv, band=0.20,
+                                       band_mode="ww", lam=lam))
+    for row in sweep:
+        row["var_reduction_vs_unhedged"] = 1.0 - (row["std"] ** 2) / u_var
+    res["band_sweep"] = sweep
+
+    e = res["empirical"]
+    slope = e["slope_dm_on_r"]
+    conv_frozen = ("raw" if abs(slope - e["mean_delta_raw_sided"])
+                   <= abs(slope - e["mean_delta_adj_sided"]) else "adj")
+    fixed_rows = [r for r in sweep if r["conv"] == conv_frozen and r["band_mode"] == "fixed"]
+    ww_rows = [r for r in sweep if r["conv"] == conv_frozen and r["band_mode"] == "ww"]
+    best_fixed = max(fixed_rows, key=lambda r: r["total_net"])
+    best_ww = max(ww_rows, key=lambda r: r["total_net"])
+    # IT: ww solo per DOMINANZA (net E var↓ migliori): un vantaggio di solo net
+    #     dell'ordine del rumore per-intervallo non giustifica la complessità
+    #     gamma-scalata. Con ww la band congelata = band_ref del clip (0.20,
+    #     quella effettivamente simulata), NON il best della griglia fixed.
+    # EN: ww only under DOMINANCE (better net AND var↓): a net-only edge on the
+    #     order of per-interval noise does not justify the gamma-scaled
+    #     complexity. With ww the frozen band = the clip band_ref (0.20, the one
+    #     actually simulated), NOT the fixed-grid best.
+    use_ww = (best_ww["total_net"] > best_fixed["total_net"]
+              and best_ww["var_reduction_vs_unhedged"] > best_fixed["var_reduction_vs_unhedged"])
+    res["frozen_v2_params"] = {
+        "conv": conv_frozen,
+        "band_mode": "ww" if use_ww else "fixed",
+        "band": 0.20 if use_ww else best_fixed["band"],
+        "ww_lambda": best_ww["lam"] if use_ww else None,
+        "criteria": "conv=slope-match; band=argmax total_net su/over {0.10..0.30}; "
+                    "ww solo se DOMINA fixed (net E var-reduction) / ww only if it "
+                    "DOMINATES fixed (net AND var reduction)",
+    }
+
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(res, indent=2), encoding="utf-8")
 
@@ -224,6 +359,17 @@ def main():
              f"(fee {ha['fees_total']:.5f} → tot net {ha['total_net']:+.5f})")
     log.info(f"  riduzione varianza: raw {res['variance_reduction']['raw']*100:.1f}% · "
              f"adj {res['variance_reduction']['adj']*100:.1f}%")
+    log.info("  ── sweep no-trade band (A4) ──")
+    for row in sweep:
+        tag = (f"fixed b={row['band']:.2f}" if row["band_mode"] == "fixed"
+               else f"ww λ={row['lam']:.0e}")
+        log.info(f"    {row['conv']:3s} {tag:14s}: net={row['total_net']:+.5f} BTC "
+                 f"σ={row['std']:.5f} var↓={row['var_reduction_vs_unhedged']*100:5.1f}% "
+                 f"reb={row['n_rebalances']}")
+    fz = res["frozen_v2_params"]
+    log.info(f"  ► PARAMETRI v2 CONGELATI/FROZEN: conv={fz['conv']} "
+             f"band_mode={fz['band_mode']} band={fz['band']:.2f} "
+             f"ww_lambda={fz['ww_lambda']}")
     log.info(f"  report → {OUT_PATH}")
     log.info("═" * 72)
 
