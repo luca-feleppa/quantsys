@@ -404,16 +404,17 @@ class VolForecaster:
         #     a hole in the series (stale parquet + 48h delta) silently produced
         #     forecasts on weeks-old candles. Fail-fast.
         tail_ot = self.candles["open_time"].tail(self.window_size)
-        # IT: cast int esplicito — un numpy scalar qui è DeprecationWarning oggi
-        #     e crash domani (stessa classe del fix 01e 2026-07-16).
-        # EN: explicit int cast — a numpy scalar here is a DeprecationWarning
-        #     today and a crash tomorrow (same class as the 2026-07-16 01e fix).
-        step = pd.Timedelta(minutes=int(self.ps.interval_minutes))
-        gaps = tail_ot.diff().dropna()
-        if not (gaps == step).all():
+        # IT: confronto in SECONDI, niente pd.Timedelta — sul numpy del VPS il
+        #     costruttore emette il DeprecationWarning "generic unit" (stessa
+        #     classe del fix 01e 2026-07-16: warning oggi, crash-loop domani).
+        # EN: SECONDS-based comparison, no pd.Timedelta — on the VPS numpy the
+        #     constructor emits the "generic unit" DeprecationWarning (same class
+        #     as the 2026-07-16 01e fix: warning today, crash-loop tomorrow).
+        gap_secs = tail_ot.diff().dropna().dt.total_seconds()
+        if not (gap_secs == 60.0 * int(self.ps.interval_minutes)).all():
             raise RuntimeError(
-                f"finestra candele NON contigua (gap max {gaps.max()}) — serie "
-                f"bucata, forecast rifiutato / non-contiguous candle window — "
+                f"finestra candele NON contigua (gap max {gap_secs.max():.0f}s) — "
+                f"serie bucata, forecast rifiutato / non-contiguous candle window — "
                 f"holed series, forecast refused")
         # IT: C1 (POST_GATE_V1) — refresh funding PER TICK (delta interno a
         #     fetch_funding_rate, 0-1 request): prima veniva congelato all'avvio
