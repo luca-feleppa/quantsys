@@ -75,7 +75,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from quantsys.utils import setup_logging, load_config, PipelineState          # noqa: E402
 from quantsys.utils.atomic_save import atomic_save_parquet                    # noqa: E402
-from quantsys.data import fetch_klines, fetch_funding_rate                    # noqa: E402
+from quantsys.data import fetch_klines, fetch_klines_incremental, fetch_funding_rate  # noqa: E402
 from quantsys.features import FeatureBuilder, LIVE_DROP_FEATURES              # noqa: E402
 from quantsys.model.ensemble import EnsembleModel                             # noqa: E402
 
@@ -337,10 +337,34 @@ class VolForecaster:
                 log.warning(f"macro_features.parquet vecchio di {age_days}g — "
                             f"valuta un refresh (01b, sezione macro)")
 
-        # IT: bootstrap candele + funding dal disco (entrambi refreshati per tick/avvio).
-        # EN: candle + funding bootstrap from disk (both refreshed per tick/startup).
-        self.candles = pd.read_parquet("data/raw_candles.parquet") \
-                         .sort_values("open_time").reset_index(drop=True)
+        # IT: bootstrap candele GAP-AWARE (fix 2026-07-18): fetch_klines_incremental
+        #     scarica TUTTO il delta dall'ultima candela del parquet (non solo 48h) e
+        #     il parquet aggiornato viene ri-persistito. Il vecchio bootstrap
+        #     (parquet + delta REST 48 candele) lasciava un BUCO silenzioso quando il
+        #     parquet era più vecchio di 48h: col freeze A3/A8 al 2026-06-22 la
+        #     finestra T=120 del live conteneva ~72 candele di giugno a ogni restart
+        #     (bug scoperto alla chiusura del gate v1). La persistenza tocca SOLO
+        #     raw_candles.parquet: il dataset npz congelato NON viene rigenerato.
+        # EN: GAP-AWARE candle bootstrap (2026-07-18 fix): fetch_klines_incremental
+        #     downloads the FULL delta since the parquet's last candle (not just 48h)
+        #     and the updated parquet is re-persisted. The old bootstrap (parquet +
+        #     48-candle REST delta) left a silent HOLE whenever the parquet was older
+        #     than 48h: with the A3/A8 freeze at 2026-06-22 the live T=120 window
+        #     contained ~72 June candles at every restart (bug found at v1-gate
+        #     closure). Persistence touches ONLY raw_candles.parquet: the frozen
+        #     npz dataset is NOT regenerated.
+        raw_path = Path("data/raw_candles.parquet")
+        n_disk = len(pd.read_parquet(raw_path, columns=["open_time"]))
+        self.candles = fetch_klines_incremental(str(raw_path), self.symbol,
+                                                cfg["data"]["interval"]) \
+            .sort_values("open_time").reset_index(drop=True)
+        if len(self.candles) > n_disk:
+            raw_cols = ["open_time", "close_time", "open", "high", "low", "close",
+                        "volume", "quote_vol", "trades", "taker_buy_vol",
+                        "taker_buy_quote_vol"]
+            atomic_save_parquet(self.candles[raw_cols], raw_path, index=False)
+            log.info(f"raw_candles.parquet esteso/extended: {n_disk:,} → "
+                     f"{len(self.candles):,} candele (gap-fill bootstrap)")
         self.funding = fetch_funding_rate(self.symbol,
                                           str(cfg["data"].get("start_time", "2019-01-01")),
                                           "data")
@@ -373,6 +397,37 @@ class VolForecaster:
         # EN: one full forecast: candle refresh → features (full history, identical
         #     to training) → (T,104) window → ensemble → full z→raw inversion.
         self._refresh_candles()
+        # IT: SAFETY NET (fix 2026-07-18) — la finestra di input DEVE essere
+        #     contigua: un buco nella serie (parquet stale + delta 48h) produceva
+        #     forecast su candele di settimane prima SENZA alcun errore. Fail-fast.
+        # EN: SAFETY NET (2026-07-18 fix) — the input window MUST be contiguous:
+        #     a hole in the series (stale parquet + 48h delta) silently produced
+        #     forecasts on weeks-old candles. Fail-fast.
+        tail_ot = self.candles["open_time"].tail(self.window_size)
+        step = pd.Timedelta(minutes=self.ps.interval_minutes)
+        gaps = tail_ot.diff().dropna()
+        if not (gaps == step).all():
+            raise RuntimeError(
+                f"finestra candele NON contigua (gap max {gaps.max()}) — serie "
+                f"bucata, forecast rifiutato / non-contiguous candle window — "
+                f"holed series, forecast refused")
+        # IT: C1 (POST_GATE_V1) — refresh funding PER TICK (delta interno a
+        #     fetch_funding_rate, 0-1 request): prima veniva congelato all'avvio
+        #     e le feature funding diventavano stale con l'uptime (residuo Δμ
+        #     replay-vs-live). Fail-soft: su errore si tiene la serie precedente
+        #     (funding stale è meglio di un tick perso).
+        # EN: C1 (POST_GATE_V1) — PER-TICK funding refresh (delta handled inside
+        #     fetch_funding_rate, 0-1 requests): it used to be frozen at startup,
+        #     funding features went stale with uptime (replay-vs-live Δμ residual).
+        #     Fail-soft: on error keep the previous series (stale funding beats a
+        #     lost tick).
+        try:
+            self.funding = fetch_funding_rate(
+                self.symbol, str(self.cfg["data"].get("start_time", "2019-01-01")),
+                "data")
+        except Exception as e:
+            log.warning(f"refresh funding fallito/failed — uso serie precedente / "
+                        f"keeping previous series: {type(e).__name__}: {e}")
         feat = self.fb.build(self.candles, fit=False, normalize=True,
                              funding_df=self.funding)
         if self._canonical is None:
