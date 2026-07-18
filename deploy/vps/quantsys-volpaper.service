@@ -27,7 +27,13 @@ Wants=network-online.target
 Type=simple
 User=quantsys
 WorkingDirectory=/opt/quantsys
-ExecStart=/opt/quantsys/.venv/bin/python scripts/04b_vol_paper.py --execute
+# IT: C3 attivato 2026-07-18 — band/conv CONGELATI dalla pre-registrazione
+#     hedged-vs-unhedged (STATUS.md, congelamento 2026-07-18): NON cambiarli a
+#     giudizio in corso. band_mode=fixed e fee=5e-4 sono i default del CLI.
+# EN: C3 activated 2026-07-18 — band/conv FROZEN by the hedged-vs-unhedged
+#     pre-registration (STATUS.md, 2026-07-18 freeze): do NOT change them
+#     mid-judgment. band_mode=fixed and fee=5e-4 are the CLI defaults.
+ExecStart=/opt/quantsys/.venv/bin/python scripts/04b_vol_paper.py --execute --hedge --hedge-band 0.30 --hedge-conv raw
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=60

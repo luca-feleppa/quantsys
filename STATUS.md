@@ -276,7 +276,16 @@ Il fail-safe sul verdetto peggiore NON è servito: i due campioni **concordano**
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — V2 DELTA-HEDGED, hedged-vs-unhedged (`04b --hedge`) · 2026-07-12 · **DRAFT: attivazione SOLO post-gate v1 n≥20**
+## 🎯 PRE-REGISTRAZIONE GATE — V2 DELTA-HEDGED, hedged-vs-unhedged (`04b --hedge`) · 2026-07-12 · **CONGELATA E ATTIVATA 2026-07-18**
+
+> **🔒 CONGELAMENTO 2026-07-18 (eseguito secondo la regola pre-dichiarata qui sotto, PRIMA del primo tick con `--hedge`; da qui immutabile):**
+> - **band = 0.30** (argmax `total_net` sulla griglia {0.10…0.30}, dry-run A6 pieno: 86 tick, 76 intervalli, `results/vols/hedge_dry_run.json`);
+> - **convenzione δ = raw** (slope-match sul dry-run: slope +0.19±0.07 vs δ_raw +0.035 / δ_adj +0.017 — raw più vicina; ⚠ dichiarato: il match è debole, R²=0.10, Δm dominato da theta/vega, e sull'ATM le due convenzioni differiscono di ~Σmark≈0.02 BTC-eq → scelta quasi-indifferente);
+> - **band_mode = fixed, NIENTE λ ww** (ww respinto per assenza di dominanza: Δnet +4e-5 BTC = rumore, var↓ peggiore 45.8% vs 64.9%);
+> - **fee perp = 5e-4** ratificata (taker Deribit).
+> **Attivazione:** servizio VPS `quantsys-volpaper` riavviato con `--execute --hedge --hedge-band 0.30 --hedge-conv raw`.
+> **⚠ Esclusione pre-dichiarata (scritta PRIMA di qualunque esito hedge):** la posizione IN ESSERE all'attivazione (BTC-19JUL26-64000, entry 07-18 11:36 UTC, aperta UNHEDGED) è **parzialmente hedgiata** (leg perp attiva solo da metà vita) → NON conta nel campione n≥20 hedge-attivi della condizione ③; il campione parte dal primo trade APERTO con hedge attivo.
+> Con band 0.30 su 1 contratto ATM l'hedge scatta SOLO a |δ_book|>0.30 (struttura ben ITM): ribilanci sparsi attesi by design — è l'ottimo del dry-run, non un malfunzionamento.
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). ⚠ **Questo è un DRAFT congelabile, NON un gate attivo:** la v1 chiude sul design congelato (n≥20, ~metà luglio) e `--hedge` resta INERTE fino ad allora. Il codice della leg hedge è già in `04b_vol_paper.py` (flag CLI `--hedge`, default OFF = v1 bit-identica) ma NON è mai stato attivato. Due parametri sono deliberatamente lasciati aperti (band, convenzione δ) con la **regola di congelamento pre-dichiarata** qui sotto: verranno fissati su dati PRE-attivazione, mai a giudizio in corso.
 
