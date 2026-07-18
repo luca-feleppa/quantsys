@@ -68,6 +68,58 @@ LIVE_DROP_FEATURES = frozenset({
 })
 
 
+# IT: colonne non-feature escluse dalla derivazione canonica (intermedi del
+#     builder + target). C2 refactor 2ter (2026-07-18): era duplicato in 5 script.
+# EN: non-feature columns excluded from the canonical derivation (builder
+#     intermediates + targets). C2 2ter refactor (2026-07-18): was duplicated in 5 scripts.
+CANONICAL_EXCLUDE = frozenset({
+    "open_time", "close_time", "date_utc", "pv", "cum_pv", "cum_vol",
+    "typical_price", "obv", "target_ret", "target_dir",
+})
+
+
+def canonical_feature_columns(feature_cols, feat: pd.DataFrame,
+                              nan_thresh: float = 0.5,
+                              diag: Optional[dict] = None) -> list:
+    """
+    IT: Derivazione CANONICA della lista feature del modello (C2 refactor 2ter,
+        2026-07-18) — unica implementazione della sequenza di filtri che era
+        duplicata in 01_download/01_update/04b/vol_paper_replay/paper_01:
+        ① exclude non-feature ② dtype float ③ C-funding (LIVE_DROP_FEATURES)
+        ④ NaN > nan_thresh ⑤ colonne con Inf. Ordine di `feature_cols`
+        PRESERVATO (= ordine del builder). `diag`, se passato, viene popolato con
+        i dettagli per il logging dei chiamanti (chiavi: dropped_live,
+        nan_ratios, dropped_nan, dropped_inf) — la funzione non logga da sé.
+    EN: CANONICAL derivation of the model feature list (C2 2ter refactor,
+        2026-07-18) — single implementation of the filter sequence previously
+        duplicated across 01_download/01_update/04b/vol_paper_replay/paper_01:
+        ① non-feature exclude ② float dtype ③ C-funding (LIVE_DROP_FEATURES)
+        ④ NaN > nan_thresh ⑤ columns containing Inf. `feature_cols` order is
+        PRESERVED (= builder order). `diag`, when given, is filled with caller
+        logging detail (keys: dropped_live, nan_ratios, dropped_nan,
+        dropped_inf) — the function itself never logs.
+    """
+    cols = [c for c in feature_cols
+            if c not in CANONICAL_EXCLUDE and c in feat.columns
+            and feat[c].dtype in ["float64", "float32"]]
+    dropped_live = [c for c in cols if c in LIVE_DROP_FEATURES]
+    if dropped_live:
+        cols = [c for c in cols if c not in LIVE_DROP_FEATURES]
+    before = cols[:]
+    nan_ratios = {c: feat[c].isna().mean() for c in before}
+    cols = [c for c in cols if nan_ratios[c] <= nan_thresh]
+    dropped_inf = [c for c in cols if np.isinf(feat[c].values).any()]
+    if dropped_inf:
+        cols = [c for c in cols if c not in dropped_inf]
+    if diag is not None:
+        diag["dropped_live"] = dropped_live
+        diag["nan_ratios"] = nan_ratios
+        diag["dropped_nan"] = [(c, nan_ratios[c]) for c in before
+                               if nan_ratios[c] > nan_thresh]
+        diag["dropped_inf"] = dropped_inf
+    return cols
+
+
 # IT: Pipeline feature engineering OHLCV → matrice normalizzata per il modello.
 # EN: Feature-engineering pipeline OHLCV → normalized matrix for the model.
 class FeatureBuilder:

@@ -52,14 +52,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import requests
 import torch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from quantsys.utils import setup_logging, load_config          # noqa: E402
 from quantsys.utils.atomic_save import atomic_save_parquet     # noqa: E402
-from quantsys.features import LIVE_DROP_FEATURES               # noqa: E402
+from quantsys.features import canonical_feature_columns        # noqa: E402
+from quantsys.data.deribit import delivery_price_cached as _delivery_cached  # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.vol_replay")
@@ -157,32 +157,13 @@ def pick_straddle_asof(t: pd.Timestamp) -> dict | None:
 
 
 def delivery_price_cached(expiry_ts: pd.Timestamp) -> float | None:
-    # IT: delivery price (indice btc_usd, pubblico, endpoint prod = dato di
-    #     mercato) con cache su disco e paging count/offset — l'endpoint torna
-    #     solo gli ultimi N giorni per pagina.
-    # EN: delivery price (btc_usd index, public, prod endpoint = market data)
-    #     with on-disk cache and count/offset paging — the endpoint returns only
-    #     the last N days per page.
-    key = expiry_ts.strftime("%Y-%m-%d")
-    cache = json.loads(DELIVERY_CACHE.read_text(encoding="utf-8")) \
-        if DELIVERY_CACHE.exists() else {}
-    if key in cache:
-        return cache[key]
-    for offset in range(0, 100, 10):
-        r = requests.get("https://www.deribit.com/api/v2/public/get_delivery_prices",
-                         params={"index_name": "btc_usd", "count": 10,
-                                 "offset": offset}, timeout=15)
-        r.raise_for_status()
-        data = r.json().get("result", {}).get("data", [])
-        if not data:
-            break
-        for rec in data:
-            cache[str(pd.Timestamp(rec["date"]).date())] = float(rec["delivery_price"])
-        if key in cache:
-            break
-    DELIVERY_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    DELIVERY_CACHE.write_text(json.dumps(cache, indent=2), encoding="utf-8")
-    return cache.get(key)
+    # IT: delivery price production (dato di mercato) — helper condiviso C2 2ter
+    #     (quantsys.data.deribit): cache DDMMMYY + paging; le vecchie chiavi
+    #     YYYY-MM-DD in cache restano ignorate (refetch innocuo, valori identici).
+    # EN: production delivery price (market data) — shared C2 2ter helper
+    #     (quantsys.data.deribit): DDMMMYY cache + paging; old YYYY-MM-DD cache
+    #     keys are ignored (harmless refetch, identical values).
+    return _delivery_cached(expiry_ts, DELIVERY_CACHE)
 
 
 def macro_asof(fc, t: pd.Timestamp, device):
@@ -256,14 +237,9 @@ def main() -> int:
     #     equivalence parity-blessed by 99_replay) + 04b's canonical filter.
     log.info("build feature su storia completa / building features over full history...")
     feat = fc.fb.build(candles, fit=False, normalize=True, funding_df=fc.funding)
-    exclude = {"open_time", "close_time", "date_utc", "pv", "cum_pv", "cum_vol",
-               "typical_price", "obv", "target_ret", "target_dir"}
-    cols = [c for c in fc.fb.feature_cols
-            if c not in exclude and c in feat.columns
-            and feat[c].dtype in ["float64", "float32"]
-            and c not in LIVE_DROP_FEATURES]
-    cols = [c for c in cols if feat[c].isna().mean() <= 0.5]
-    cols = [c for c in cols if not np.isinf(feat[c].values).any()]
+    # IT: derivazione canonica condivisa (C2 2ter) — identica a 04b per costruzione.
+    # EN: shared canonical derivation (C2 2ter) — identical to 04b by construction.
+    cols = canonical_feature_columns(fc.fb.feature_cols, feat)
     if len(cols) != fc.n_feat_expected:
         raise RuntimeError(f"canonico: {len(cols)} feature vs {fc.n_feat_expected} attese/expected")
     # IT: allineamento feature↔candele PER CODA (contratto del live: feat.tail(T)

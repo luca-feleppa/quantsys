@@ -16,7 +16,7 @@ import numpy as np
 from quantsys.utils import load_config, setup_logging, ensure_dirs, PipelineState, interval_minutes_from_cfg
 from quantsys.utils.atomic_save import atomic_save_npz, atomic_save_parquet
 from quantsys.data import fetch_klines, fetch_funding_rate
-from quantsys.features import FeatureBuilder, create_windows, temporal_split, LIVE_DROP_FEATURES
+from quantsys.features import FeatureBuilder, create_windows, temporal_split, canonical_feature_columns
 
 setup_logging()
 log = logging.getLogger("quantsys.script.01")
@@ -179,38 +179,24 @@ def main():
     atomic_save_parquet(df_feat, feat_path, index=False)
     log.info(f"Features → {feat_path}  ({feat_path.stat().st_size//1024} KB)")
 
-    # IT: 5. costruisce le windows; esclude colonne non-feature e non-float
-    # EN: 5. build the sliding windows; drop non-feature and non-float columns
-    exclude = {"open_time","close_time","date_utc","pv","cum_pv","cum_vol",
-               "typical_price","obv","target_ret","target_dir"}
-    feat_cols = [c for c in builder.feature_cols
-                 if c not in exclude
-                 and df_feat[c].dtype in ["float64","float32"]]
-
-    # IT: set "C-funding" — scarta le feature a ROI ≤0 / lookback >30g non calcolabili in live
-    #     (importance 2026-05-28). Garantisce consistenza training↔live per costruzione.
-    # EN: "C-funding" set — drop ROI ≤0 / >30d-lookback features not computable live
-    #     (2026-05-28 importance). Guarantees training↔live consistency by construction.
-    _dropped_live = [c for c in feat_cols if c in LIVE_DROP_FEATURES]
-    if _dropped_live:
-        feat_cols = [c for c in feat_cols if c not in LIVE_DROP_FEATURES]
-        log.info(f"Set C-funding: scartate {len(_dropped_live)} feature live-incompatibili: {_dropped_live}")
-
-    # IT: scarta feature con piu' del 50% di NaN (es. momentum_90d su <90gg storia)
-    # EN: drop features with more than 50% NaN (e.g. momentum_90d on <90d history)
+    # IT: 5. lista feature canonica condivisa (C2 2ter): exclude non-feature →
+    #     dtype float → C-funding → NaN>50% → Inf, in quantsys.features.
+    #     `diag` preserva il logging storico di questo script.
+    # EN: 5. shared canonical feature list (C2 2ter): non-feature exclude →
+    #     float dtype → C-funding → NaN>50% → Inf, in quantsys.features.
+    #     `diag` preserves this script's historical logging.
     nan_thresh = 0.5
-    feat_cols_before = feat_cols[:]
-    nan_ratios = {c: df_feat[c].isna().mean() for c in feat_cols_before}
-    feat_cols = [c for c in feat_cols
-                 if nan_ratios[c] <= nan_thresh]
-    log.info(f"Feature valide (≤{nan_thresh*100:.0f}% NaN): {len(feat_cols)}")
-
-    # IT: scarta colonne con Inf (divisioni per zero non protette a monte)
-    # EN: drop columns containing Inf (divisions by zero not guarded upstream)
-    inf_cols = [c for c in feat_cols if np.isinf(df_feat[c].values).any()]
-    if inf_cols:
-        log.warning(f"Escluse {len(inf_cols)} colonne con valori Inf: {inf_cols}")
-        feat_cols = [c for c in feat_cols if c not in inf_cols]
+    diag: dict = {}
+    feat_cols = canonical_feature_columns(builder.feature_cols, df_feat,
+                                          nan_thresh=nan_thresh, diag=diag)
+    if diag["dropped_live"]:
+        log.info(f"Set C-funding: scartate {len(diag['dropped_live'])} feature "
+                 f"live-incompatibili: {diag['dropped_live']}")
+    log.info(f"Feature valide (≤{nan_thresh*100:.0f}% NaN): "
+             f"{len(feat_cols) + len(diag['dropped_inf'])}")
+    if diag["dropped_inf"]:
+        log.warning(f"Escluse {len(diag['dropped_inf'])} colonne con valori Inf: "
+                    f"{diag['dropped_inf']}")
 
     # IT: ricalcola n_dynamic dopo NaN/Inf filter per evitare mismatch TFT dual-stream
     # EN: recompute n_dynamic after the NaN/Inf filter to avoid TFT dual-stream mismatch
@@ -222,13 +208,12 @@ def main():
             f"(alcune colonne dinamiche escluse per NaN/Inf)"
         )
 
-    excluded = [(c, nan_ratios[c]) for c in feat_cols_before if c not in feat_cols]
-    if excluded:
+    if diag["dropped_nan"]:
         log.warning(
             f"Feature escluse per NaN > {nan_thresh*100:.0f}% "
-            f"({len(excluded)} su {len(feat_cols_before)}):"
+            f"({len(diag['dropped_nan'])}):"
         )
-        for col, pct in excluded:
+        for col, pct in diag["dropped_nan"]:
             log.warning(f"  {col}: {pct*100:.1f}% NaN")
 
     t0 = time.time()

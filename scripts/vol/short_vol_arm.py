@@ -24,15 +24,24 @@ from pathlib import Path
 from datetime import timedelta
 import numpy as np
 import pandas as pd
-import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _chain_io import load_chain  # noqa: E402  (loader chain condiviso, A3 | shared chain loader)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from quantsys.data.deribit import fetch_delivery_prices  # noqa: E402  (C2 2ter)
 
 ROOT = Path(__file__).resolve().parents[2]
 CHAIN_DIR = ROOT / "data" / "iv" / "chain"
 FC_PATH = ROOT / "results" / "vol_paper" / "forecasts.parquet"
-DELIV_CACHE = ROOT / "results" / "vol_paper" / "delivery_cache.json"
+# IT: C2 2ter (2026-07-18) — file cache PROPRIO (prima condivideva
+#     results/vol_paper/delivery_cache.json con 04c, che però ci scrive i
+#     delivery TESTNET del venue paper: venue diverse mai nello stesso file).
+#     Primo run col file nuovo: refetch innocuo (paging production).
+# EN: C2 2ter (2026-07-18) — OWN cache file (it used to share
+#     results/vol_paper/delivery_cache.json with 04c, which writes the paper
+#     venue's TESTNET deliveries there: different venues never in one file).
+#     First run with the new file: harmless refetch (production paging).
+DELIV_CACHE = ROOT / "results" / "vol_paper" / "delivery_cache_prod.json"
 OUT = ROOT / "results" / "vols" / "short_vol_arm.json"
 
 TENOR_H = 30.0           # IT: tenor target (h) come il forward test | EN: target tenor (h)
@@ -51,16 +60,14 @@ def fee_btc(premium: float) -> float:
 
 
 def fetch_delivery(date_key: str, cache: dict) -> float | None:
-    # IT: delivery price (08:00 UTC) — cache poi Deribit public. | EN: delivery price, cache then public.
+    # IT: delivery price (08:00 UTC) — cache in-memory (riusata nello sweep) poi
+    #     helper condiviso C2 2ter (quantsys.data.deribit, production).
+    # EN: delivery price (08:00 UTC) — in-memory cache (reused by the sweep)
+    #     then the shared C2 2ter helper (quantsys.data.deribit, production).
     if date_key in cache:
         return float(cache[date_key])
     try:
-        url = "https://www.deribit.com/api/v2/public/get_delivery_prices?index_name=btc_usd&count=60"
-        with urllib.request.urlopen(url, timeout=15) as r:
-            data = json.loads(r.read())["result"]["data"]
-        for rec in data:
-            d = pd.Timestamp(rec["date"]).strftime("%d%b%y").upper()
-            cache[d] = float(rec["delivery_price"])
+        cache.update(fetch_delivery_prices(count=60))
         return cache.get(date_key)
     except Exception as e:
         print(f"  ! delivery fetch fail {date_key}: {e}")

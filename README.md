@@ -420,7 +420,7 @@ quantsys_project/
 │   │   └── tcnmamba.yaml         override TCN+Mamba
 │   └── cafn.yaml                 overlay opzionale CAFN (probe, non letto dalla pipeline production)
 ├── quantsys/                     package Python installabile
-│   ├── data/                     Binance REST + WebSocket + funding rate
+│   ├── data/                     Binance REST + WebSocket + funding + deribit.py (public client + delivery cache)
 │   ├── features/                 FeatureBuilder (104 feature post C-funding, split dual-stream)
 │   ├── macro/                    FRED + yFinance + RegimeMarkovBTC (Markov-Switching su realized vol BTC)
 │   ├── model/
@@ -431,6 +431,8 @@ quantsys_project/
 │   │   ├── distillation.py       Knowledge Distillation multi-teacher (scoring target-aware)
 │   │   ├── forecast.py           Monte Carlo GJR-GARCH(1,1) + neural-guided
 │   │   ├── vol_metrics.py        QLIKE / inversione log-RV / baseline HAR-RV (linea vol, condivisi)
+│   │   ├── vol_forecaster.py     VolForecaster (nucleo forecast vol-paper; promosso da 04b, C2 2ter)
+│   │   ├── regime_gate.py        build_regime_gate (gate causale A3: asof backward + staleness bound)
 │   │   ├── cafn.py               CausalAttentionFlowNetwork (coordinatore causale, probe inerte)
 │   │   └── revin.py              Reversible Instance Normalization (opzionale)
 │   ├── trading/                  Kelly sizing, SL dinamico, trailing, circuit breaker

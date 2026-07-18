@@ -87,3 +87,66 @@ def test_append_empty_is_noop(tmp_path):
     p = tmp_path / "x.parquet"
     assert append_parquet(p, pd.DataFrame(), ["ts"]) == 0
     assert not p.exists()
+
+
+# IT: ── delivery cache condivisa (C2 2ter, 2026-07-18) ─────────────────────────
+# EN: ── shared delivery cache (C2 2ter, 2026-07-18) ────────────────────────────
+
+def test_delivery_key_formats():
+    # IT: chiave DDMMMYY (come maybe_settle 04b), da Timestamp/str/datetime.
+    # EN: DDMMMYY key (as 04b maybe_settle), from Timestamp/str/datetime.
+    from quantsys.data.deribit import delivery_key
+    assert delivery_key(pd.Timestamp("2026-07-19 08:00", tz="UTC")) == "19JUL26"
+    assert delivery_key("2026-07-09") == "09JUL26"
+    assert delivery_key(datetime(2026, 1, 2, 8, 0, tzinfo=timezone.utc)) == "02JAN26"
+
+
+def test_delivery_price_cached_hit_no_network(tmp_path, monkeypatch):
+    # IT: cache-hit NON deve toccare la rete (monkeypatch che esplode se chiamato).
+    # EN: cache-hit must NOT touch the network (exploding monkeypatch).
+    import json as _json
+    import quantsys.data.deribit as dd
+    p = tmp_path / "cache.json"
+    p.write_text(_json.dumps({"19JUL26": 64123.5}), encoding="utf-8")
+    monkeypatch.setattr(dd.requests, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("network!")))
+    assert dd.delivery_price_cached("2026-07-19", p) == 64123.5
+
+
+def test_delivery_price_cached_failsoft(tmp_path, monkeypatch):
+    # IT: rete giu'' + chiave assente -> None (mai raise), cache intatta.
+    # EN: network down + missing key -> None (never raises), cache untouched.
+    import quantsys.data.deribit as dd
+
+    def _boom(*a, **k):
+        raise ConnectionError("down")
+    monkeypatch.setattr(dd.requests, "get", _boom)
+    p = tmp_path / "cache.json"
+    assert dd.delivery_price_cached("2026-07-19", p) is None
+    assert not p.exists()
+
+
+def test_delivery_price_cached_paging_and_persist(tmp_path, monkeypatch):
+    # IT: miss -> paging finche'' trova la chiave, merge in cache e persist atomico.
+    # EN: miss -> pages until the key appears, merges into the cache, persists atomically.
+    import json as _json
+    import quantsys.data.deribit as dd
+    pages = {0: {"20JUL26": 65000.0}, 10: {"19JUL26": 64000.0}}
+
+    class _Resp:
+        def __init__(self, data):
+            self._data = data
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"result": {"data": self._data}}
+
+    def _get(url, params=None, timeout=None):
+        page = pages.get(params["offset"], {})
+        return _Resp([{"date": f"2026-07-{k[:2]}", "delivery_price": v}
+                      for k, v in page.items()])
+    monkeypatch.setattr(dd.requests, "get", _get)
+    p = tmp_path / "cache.json"
+    assert dd.delivery_price_cached("2026-07-19", p) == 64000.0
+    saved = _json.loads(p.read_text(encoding="utf-8"))
+    assert saved == {"20JUL26": 65000.0, "19JUL26": 64000.0}

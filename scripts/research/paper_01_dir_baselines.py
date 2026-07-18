@@ -41,7 +41,7 @@ from scipy.stats import spearmanr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from quantsys.utils import setup_logging, load_config, PipelineState           # noqa: E402
-from quantsys.features import FeatureBuilder, LIVE_DROP_FEATURES               # noqa: E402
+from quantsys.features import FeatureBuilder, canonical_feature_columns        # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.paper_dir")
@@ -88,13 +88,8 @@ def rebuild_split_timestamps(cfg: dict) -> dict:
     funding = pd.read_parquet("data/funding_rate.parquet")
     feat = fb.build(candles, fit=False, normalize=True, funding_df=funding)
 
-    exclude = {"open_time", "close_time", "date_utc", "pv", "cum_pv", "cum_vol",
-               "typical_price", "obv", "target_ret", "target_dir"}
-    cols = [c for c in fb.feature_cols
-            if c not in exclude and c in feat.columns
-            and feat[c].dtype in ["float64", "float32"] and c not in LIVE_DROP_FEATURES]
-    cols = [c for c in cols if feat[c].isna().mean() <= 0.5]
-    cols = [c for c in cols if not np.isinf(feat[c].values).any()]
+    # IT: derivazione canonica condivisa (C2 2ter). | EN: shared canonical derivation (C2 2ter).
+    cols = canonical_feature_columns(fb.feature_cols, feat)
     log.info(f"canonico ricostruito: {len(cols)} feature")
 
     # IT: replica di create_windows senza materializzare X: finestra j copre le

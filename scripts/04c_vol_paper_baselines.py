@@ -40,15 +40,14 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from quantsys.utils import setup_logging, load_config                          # noqa: E402
+from quantsys.data.deribit import fetch_delivery_prices, delivery_key          # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.vol_baselines")
@@ -159,34 +158,28 @@ def load_delivery_cache() -> dict:
     return {}
 
 
-def fetch_delivery_prices(base_url: str, count: int = 30) -> dict:
-    # IT: public/get_delivery_prices (no auth) → {DDMMMYY: prezzo}. Stessa sorgente
-    #     testnet del harness (i trade reali settlano su questi prezzi); count limitato
-    #     dall'API → si accumula in cache su run ripetute.
-    # EN: public/get_delivery_prices (no auth) → {DDMMMYY: price}. Same testnet source
-    #     as the harness (real trades settle on these); count is API-limited → it
-    #     accumulates into the cache over repeated runs.
+def fetch_delivery_prices_soft(base_url: str, count: int = 30) -> dict:
+    # IT: wrapper fail-soft dell'helper condiviso (C2 2ter, quantsys.data.deribit):
+    #     stessa sorgente TESTNET del harness (i trade reali settlano su questi
+    #     prezzi); count limitato dall'API → si accumula in cache su run ripetute.
+    # EN: fail-soft wrapper around the shared helper (C2 2ter,
+    #     quantsys.data.deribit): same TESTNET source as the harness (real
+    #     trades settle on these); count is API-limited → it accumulates into
+    #     the cache over repeated runs.
     try:
-        r = requests.get(f"{base_url.rstrip('/')}/public/get_delivery_prices",
-                         params={"index_name": "btc_usd", "count": count}, timeout=15)
-        r.raise_for_status()
-        data = r.json()["result"].get("data", [])
+        return fetch_delivery_prices(base_url, count=count)
     except Exception as e:
         log.warning(f"fetch delivery prices fallito/failed: {type(e).__name__}: {e} "
                     f"— uso solo la cache / using cache only")
         return {}
-    out = {}
-    for rec in data:
-        key = pd.Timestamp(rec["date"]).strftime("%d%b%y").upper()
-        out[key] = float(rec["delivery_price"])
-    return out
 
 
 def delivery_for_expiry(expiry_ms: int, cache: dict) -> float | None:
-    # IT: chiave DDMMMYY del giorno di settlement (08:00 UTC), come maybe_settle (04b).
-    # EN: DDMMMYY key of the settlement day (08:00 UTC), as in maybe_settle (04b).
-    key = datetime.fromtimestamp(expiry_ms / 1000, timezone.utc).strftime("%d%b%y").upper()
-    return cache.get(key)
+    # IT: chiave DDMMMYY del giorno di settlement (08:00 UTC), come maybe_settle
+    #     (04b) — formato dalla delivery_key condivisa.
+    # EN: DDMMMYY key of the settlement day (08:00 UTC), as in maybe_settle
+    #     (04b) — formatted by the shared delivery_key.
+    return cache.get(delivery_key(pd.Timestamp(expiry_ms, unit="ms", tz="UTC")))
 
 
 # ──────────────────────────── replay del loop 04b ────────────────────────────
@@ -308,7 +301,7 @@ def main():
     if not args.no_fetch:
         base = cfg.get("deribit_testnet", {}).get("endpoint")
         if base:
-            fresh = fetch_delivery_prices(base)
+            fresh = fetch_delivery_prices_soft(base)
             delivery.update(fresh)
             DELIVERY_CACHE.write_text(json.dumps(delivery, indent=2, sort_keys=True), encoding="utf-8")
             log.info(f"delivery price: {len(fresh)} freschi, {len(delivery)} in cache")
