@@ -1,26 +1,50 @@
 # RIPRESA — lista residua · remaining list
 
-> 🇮🇹 Riscritto 2026-07-18 sera (v2): la checklist post-riavvio originale è ESAURITA salvo la Fase B GPU (training stoppato su decisione utente) e gli item time-gated. File EFFIMERO: eliminarlo a lista esaurita. Pre-registrazioni vincolanti e dettaglio: `STATUS.md` (sezione 2026-07-18 sera) e `POST_GATE_V1.md`.
-> **EN** Rewritten 2026-07-18 evening (v2): the original post-reboot checklist is DONE except the GPU Phase B (training stopped by user decision) and the time-gated items. EPHEMERAL file: delete when exhausted. Binding pre-registrations and detail: `STATUS.md` (2026-07-18 evening section) and `POST_GATE_V1.md`.
+> 🇮🇹 Riscritto 2026-07-19 sera (v3). File EFFIMERO: eliminarlo a lista esaurita. Pre-registrazioni vincolanti e dettaglio: `STATUS.md` (pre-reg A8-BIS in cima + sezione 2026-07-19).
+> **EN** Rewritten 2026-07-19 evening (v3). EPHEMERAL file: delete when exhausted. Binding pre-registrations and detail: `STATUS.md` (A8-BIS pre-reg on top + 2026-07-19 section).
 
-## Fatto stasera · Done tonight
+## Fatto il 2026-07-19 · Done on 2026-07-19
 
-🇮🇹 Pull+merge OK (heartbeat 4/4) · B7 regime refresh eseguito · **B1 audit A3 → GPU-GO** (3 MINOR fixati, 22/22 test) · B2 training A3 partito e **STOPPATO** (sandbox `models_a3_moe` eliminata, pre-reg intatta) · **C4 FATTO** (greeks 5' attivi sul VPS + sync casa, health 14/14) · **C2 FATTO** (refactor 2ter, 3 estrazioni bit-perfette, 298 test, VPS a `6e77a23` col 04b refactorato — tick verificato) · **D4 FATTO** (`mfiv_30h.parquet`, 1.682 snapshot, wedge MFIV−ATM mediana **+3.45 vol pt**).
-**EN** Pull+merge OK · B7 done · B1 audit → GPU-GO · B2 started and STOPPED (sandbox deleted, pre-reg intact) · C4 DONE (VPS greeks + home sync) · C2 DONE (2ter refactor, bit-perfect, VPS updated & verified) · D4 DONE (MFIV@30h, median wedge +3.45 vol pts).
+🇮🇹 Pull+merge OK, **22ª riga trades verificata** (settlement quasi-pin, PnL −0.00072 BTC, n=21 executed) · **MFIV incrementale** +229 → 1.911 righe, wedge stabile +3.39 vol pt · **B2 A3-MoE e B3 A8-mixup eseguiti e giudicati: entrambi "NESSUNA CONCLUSIONE"** (condizione ③ model-independent, r1<800 sul val congelato; descrittivo: MoE −2.02%, **mixup −4.94%**) · **B4 DVOL RINVIATO** (mai girato) · lezione di processo: condizioni campionarie model-independent si verificano EX-ANTE · **dataset RICOSTRUITO** sullo span esteso (candele→07-19, split 51.882/6.485/6.486, backup `lstm_dataset_frozen0622.npz`) con macro fresche (`01b --skip-regime`, flag nuovo label-preserving) e regime incrementale (+27 barre) · **pre-reg A8-BIS scritta e committata** (`0e4a73b`): 2 bracci riaddestrati, gate ② solo su regimi qualificati (val: r0+r2; r1=613 descrittivo), one-shot test con tutti e 3 (r1=818) · giudice: report anti-clobber per-sandbox + breakdown per-regime · commit `43f2d80`, `2e8b8e8`, `0e4a73b`.
+**EN** 22nd trade row verified (n=21) · MFIV incremental (wedge stable +3.39) · B2+B3 run & judged: both "no conclusion" (condition ③, model-independent); B4 deferred · dataset REBUILT on extended span + fresh macro (new `--skip-regime` flag) + incremental regime · **A8-BIS pre-reg written & committed** (2 retrained arms, per-regime gate on qualified regimes only, one-shot test covers stress) · judge: per-sandbox reports + per-regime breakdown.
 
 ## Da fare · To do
 
-1. 🇮🇹 **Fase B GPU — B2 e B3 ESEGUITI 2026-07-19, entrambi "NESSUNA CONCLUSIONE"** (condizione ③ model-independent: r1=657<800 sul val congelato — era verificabile ex-ante, lezione in STATUS). Descrittivo: MoE −2.02% (① non passata), **mixup −4.94% (① sarebbe passata)** → A8-bis prioritaria alla ri-pre-reg. **B4 DVOL: RINVIATO (deciso 2026-07-19)** — esito ③ predeterminato sul val corrente; ri-pre-reg sul dataset esteso (npz dvol da ri-derivare).
-   **EN** GPU Phase B — B2+B3 RUN 2026-07-19, both "no conclusion" (condition ③, model-independent). Descriptive: mixup −4.94% (① would have passed) → priority for re-pre-reg. B4 not run, user decision pending.
-2. ~~🇮🇹 **Domani dopo le 08:00 UTC (19/07):** `.\avvio_sessione.ps1` → `trades.jsonl` deve avere **22 righe**~~ ✅ **FATTO 2026-07-19**: 22 righe, BTC-19JUL26-64000 settlato (PnL −0.00072 BTC, quasi-pin). n=21 executed.
-   **EN** ~~Tomorrow after 08:00 UTC: pull → 22 rows.~~ ✅ DONE 2026-07-19: 22 rows, settled (near-pin, −0.00072 BTC).
-3. 🇮🇹 **~Fine luglio:** valutazione pre-registrata **n≥30** leg opzioni (stessi 3 criteri, entrambi i campioni; POST_GATE_V1 §0.2). SOLO dopo: pre-reg sizing v2 (A13+A14+A7).
-   **EN** ~End of July: pre-registered n≥30 options-leg evaluation; only afterwards the v2 sizing pre-reg.
-4. 🇮🇹 **~Metà agosto:** giudice `hedged_vs_unhedged_judge.py` a n≥20 hedge-attivi (dal primo trade aperto con hedge).
+1. 🇮🇹 **A8-BIS — lanciare i 2 bracci (run MAI partiti; ~70-80 min GPU totali, sequenziali).** Pattern: training → verifica `$LASTEXITCODE`=0 e 5/5 seed (se fallito: elimina la sandbox e rilancia, MAI giudicare un ensemble parziale) → giudice.
+
+   **Braccio 1 — baseline riaddestrata:**
+   ```powershell
+   $env:QUANTSYS_ARCH="itransformer"; $env:QUANTSYS_MODELS_ROOT="models_base_ext"
+   python scripts/02_train.py --n-ensemble 5
+   # dopo verifica:
+   $env:QUANTSYS_VOLS_SPLIT="val"
+   python scripts/vol/dev_vols_qlike.py --arch itransformer
+   ```
+   **Braccio 2 — candidato mixup:**
+   ```powershell
+   $env:QUANTSYS_ARCH="itransformer_a8_mixup"; $env:QUANTSYS_MODELS_ROOT="models_a8_mixup_ext"
+   python scripts/02_train.py --n-ensemble 5
+   # dopo verifica:
+   python scripts/vol/dev_vols_qlike.py --arch itransformer_a8_mixup
+   Remove-Item Env:QUANTSYS_ARCH, Env:QUANTSYS_MODELS_ROOT, Env:QUANTSYS_VOLS_SPLIT
+   ```
+   Poi valutazione ①②③ dai report `results/vols/qlike_report_1h_val_models_base_ext.json` e `..._models_a8_mixup_ext.json` (blocco `per_regime`); esiti in STATUS comunque; a PASS val → one-shot su test (stesse condizioni, ② su tutti e 3 i regimi). ⚠ Invariante fino a chiusura gate: NON toccare candele/npz/regime_probs.
+   **EN** A8-BIS — launch the 2 arms (never started; ~70-80 min GPU, sequential); judge from the suffixed per-regime reports; outcomes to STATUS regardless; on val PASS → one-shot test. Do NOT touch candles/npz/regime_probs until the gate closes.
+
+2. 🇮🇹 **B4-bis DVOL (rinviato):** ri-derivare `lstm_dataset_dvol.npz` dal npz NUOVO (`dev_vols_dvol_append.py`) + NUOVA pre-reg con ③ verificata ex-ante — solo DOPO la chiusura di A8-BIS (npz congelato è l'invariante).
+   **EN** B4-bis DVOL (deferred): re-derive the dvol npz from the NEW npz + new pre-reg with ex-ante ③ — only AFTER A8-BIS closes.
+
+3. 🇮🇹 **Eventuale pre-reg v2 MFIV-comparatore** (wedge stabile +3.39 vol pt su 1.911 tick → break-even short-vol da ri-stimare); derivazione incrementale periodica `python scripts/vol/derive_mfiv.py`.
+   **EN** Possible MFIV-comparator v2 pre-reg + periodic incremental derivation.
+
+4. 🇮🇹 **~Fine luglio:** valutazione pre-registrata **n≥30** leg opzioni (POST_GATE_V1 §0.2); solo dopo: pre-reg sizing v2 (A13+A14+A7).
+   **EN** ~End of July: pre-registered n≥30 evaluation; only then the v2 sizing pre-reg.
+
+5. 🇮🇹 **~Metà agosto:** giudice `hedged_vs_unhedged_judge.py` a n≥20 hedge-attivi.
    **EN** ~Mid August: hedged-vs-unhedged judge at n≥20 hedge-active trades.
-5. 🇮🇹 **Sblocco candele oltre il 2026-06-22 + refresh macro** (`01b`) — SOLO a B2/B3 chiusi (lo span congelato è il loro invariante).
-   **EN** Unfreeze candles past 2026-06-22 — ONLY once B2/B3 are closed.
-6. 🇮🇹 **Eventuale pre-reg v2 MFIV-comparatore** (wedge STABILE: +3.39 mediana su 1.911 tick al 2026-07-19, era +3.45 su 1.682 → break-even short-vol da ri-stimare). Derivazione incrementale ESEGUITA 2026-07-19 (+229 snapshot); resta periodica (`python scripts/vol/derive_mfiv.py` — accodabile ad avvio_sessione se utile).
-   **EN** Possible MFIV-comparator v2 pre-reg (wedge stable +3.39 on 1,911 ticks); incremental derivation RUN 2026-07-19, stays periodic.
+
+6. 🇮🇹 Igiene a gate A8-BIS chiuso: sandbox `models_a3_moe`/`models_a8_mixup`/`models_base_ext`/`models_a8_mixup_ext` eliminabili; valutare rimozione backup `lstm_dataset_frozen0622.npz` (3 GB) e `lstm_dataset_dvol.npz` stale (3 GB, da ri-derivare comunque).
+   **EN** Hygiene once A8-BIS closes: sandboxes deletable; consider dropping the 3 GB frozen npz backup and the stale dvol npz.
+
 7. 🇮🇹 A lista esaurita: eliminare questo file (esiti in STATUS).
    **EN** When exhausted: delete this file (outcomes in STATUS).

@@ -59,7 +59,7 @@
 
 **Problemi aperti:** (a) **B4 DVOL: RINVIATO (decisione utente 2026-07-19)** — mai girato, zero numeri visti; ri-pre-reg sul dataset esteso con ③ verificata ex-ante (⚠ `lstm_dataset_dvol.npz` è derivato dal npz congelato: andrà RI-DERIVATO con `dev_vols_dvol_append.py` dal npz nuovo); (b) fix giudice da committare (+ eventuale suffisso per-arch del report `qlike_report_1h_val.json`, clobberato tra candidato e incumbent); (c) n≥30 ~fine luglio; giudice hedged n≥20 ~metà agosto; (d) **sblocco candele post-06-22 ORA POSSIBILE** (B2 e B3 entrambi chiusi) → `01b` + rebuild dataset + NUOVE pre-reg (A8-bis prioritaria, poi eventuale B4/A3-bis con ③ ex-ante); (e) eventuale pre-reg v2 MFIV-comparatore (wedge stabile ~+3.4 vol pt); (f) sandbox `models_a3_moe`+`models_a8_mixup` conservate (run completi giudicati; eliminabili, rigenerabili).
 
-**▶️ RIPARTI DA QUI:** raccogliere gli esiti QLIKE dei run Fase B dal terminale utente (log in `logs/quantsys_*.log`), scriverli in STATUS (esito negativo compreso), committare il fix giudice; poi valutare pre-reg v2 MFIV.
+**▶️ RIPARTI DA QUI:** **A8-BIS** — pre-reg committata (`0e4a73b`, sezione in cima), dataset esteso pronto, run MAI lanciati: eseguire i 2 bracci (comandi esatti in `RIPRESA.md`: baseline `models_base_ext` → giudice, candidato `models_a8_mixup_ext` → giudice, ~70-80 min GPU), valutare ①②③ dai report suffissati `results/vols/qlike_report_1h_val_models_*.json` (blocco `per_regime` incluso), esiti in STATUS comunque; a PASS val → one-shot test. Poi: eventuale pre-reg v2 MFIV-comparatore (wedge stabile +3.39).
 
 ---
 
