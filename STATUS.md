@@ -79,7 +79,7 @@
 
 **Problemi aperti:** (a) igiene disco post-gate ✅ COMPLETATA: 4 sandbox (73 MB) + `lstm_dataset_frozen0622.npz` + `lstm_dataset_dvol.npz` stale + `pipeline_state_frozen0622.pkl` eliminati (~6,4 GB; rigenerabili/obsoleti; report giudice preservati; B4-bis ri-deriverà il dvol npz dal npz production); (b) env sperimentali nel terminale utente da azzerare (Passo D) se non già fatto.
 
-**▶️ RIPARTI DA QUI:** punto 2 della roadmap 2026-07-20 — **pre-reg v2 MFIV-comparatore** (CPU-only: wedge +3.39 vol pt stabile su 1.911 tick → ri-stima del break-even short-vol, gate da pre-registrare PRIMA di guardare qualunque numero decisionale nuovo). Poi B4-bis DVOL (ri-derivazione npz + pre-reg pattern-③ standard).
+**▶️ RIPARTI DA QUI:** MFIV v2 è in attesa campione (pre-reg + giudice FATTI 2026-07-20; a ogni sessione `derive_mfiv.py` + `mfiv_comparator_judge.py --count-only`; run one-shot alla prima sessione con n≥40, ~metà agosto). Prossimo item ATTIVO: **B4-bis DVOL** — ri-derivare `lstm_dataset_dvol.npz` dal npz production (`dev_vols_dvol_append.py`) + NUOVA pre-reg col pattern-③ standard (conteggi regime ex-ante PRIMA della finestra GPU).
 
 ---
 

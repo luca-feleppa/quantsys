@@ -10,8 +10,8 @@
 
 ## Da fare (ordine = roadmap corrente) · To do (order = current roadmap)
 
-1. 🇮🇹 **MFIV-comparatore v2 — ✅ PRE-REG SCRITTA 2026-07-20** (in cima a STATUS): gate Δρ Spearman appaiato MFIV-vs-ATM sui PnL short-straddle per-expiry, ③ n≥40 qualificati (oggi 15, +~1/giorno → run one-shot ~metà agosto). Residuo operativo: scrivere `scripts/vol/mfiv_comparator_judge.py` (smoke SOLO sintetico, zero numeri reali prima del run) + derivazione incrementale periodica `python scripts/vol/derive_mfiv.py`.
-   **EN** MFIV-comparator v2 — ✅ PRE-REG WRITTEN 2026-07-20 (top of STATUS): paired ΔSpearman gate, ③ n≥40 (15 today → one-shot ~mid-August). Remaining: write the judge script (synthetic smoke only) + periodic incremental MFIV derivation.
+1. 🇮🇹 **MFIV-comparatore v2 — ✅ PRE-REG SCRITTA 2026-07-20** (in cima a STATUS): gate Δρ Spearman appaiato MFIV-vs-ATM sui PnL short-straddle per-expiry, ③ n≥40 qualificati (oggi 15, +~1/giorno → run one-shot ~metà agosto). ✅ **Giudice SCRITTO 2026-07-20** (`scripts/vol/mfiv_comparator_judge.py`, smoke sintetico 3/3, guard n≥40 fail-fast; conteggio con regola causale = 12). Residuo: attesa campione (+~1/giorno) — a ogni sessione: `derive_mfiv.py` (derivazione incrementale) + `mfiv_comparator_judge.py --count-only`; run one-shot alla prima sessione con n≥40 (~metà agosto).
+   **EN** MFIV-comparator v2 — ✅ PRE-REG WRITTEN + JUDGE WRITTEN 2026-07-20 (synthetic smoke 3/3; causal-rule count = 12). Remaining: sample wait — per session run incremental derivation + `--count-only`; one-shot at the first session with n≥40 (~mid-August).
 
 2. 🇮🇹 **B4-bis DVOL:** ri-derivare `lstm_dataset_dvol.npz` dal npz NUOVO (`dev_vols_dvol_append.py`) + NUOVA pre-reg col pattern-③ standard (invariante npz di A8-BIS decaduto: si può procedere).
    **EN** B4-bis DVOL: re-derive the dvol npz from the NEW npz + new pre-reg with the standard ③-pattern (the A8-BIS npz invariant has lapsed: clear to proceed).
