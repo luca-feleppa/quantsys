@@ -215,6 +215,31 @@ def main():
         }
         log.info(f"{name:6s} QLIKE={res[name]['qlike']:.5f}  MSE(log)={res[name]['mse_log']:.4f}")
 
+    # IT: A8-bis (pre-reg 2026-07-19) — breakdown QLIKE per-regime: label = argmax del
+    #     gate causale (model-independent), allineate ai sample `ev` via `sel`. Serve
+    #     alla condizione ② dei gate per-regime; fail-soft con warning (il verdetto
+    #     aggregato NON dipende da questo blocco).
+    # EN: A8-bis (2026-07-19 pre-reg) — per-regime QLIKE breakdown: labels = argmax of
+    #     the causal gate (model-independent), aligned to the `ev` samples via `sel`.
+    #     Feeds per-regime gate condition ②; fail-soft with a warning (the aggregate
+    #     verdict does NOT depend on this block).
+    per_regime = {}
+    try:
+        from quantsys.model.regime_gate import build_regime_gate as _brg
+        lbl = _brg(d[f"t_{split}"]).argmax(axis=1)[sel]
+        for r in range(3):
+            m = lbl == r
+            per_regime[f"r{r}"] = {
+                "n": int(m.sum()),
+                "qlike_nn":  float(qlike(rv_true[m], np.exp(log_pred_nn[m]))) if m.any() else None,
+                "qlike_har": float(qlike(rv_true[m], np.exp(log_pred_har[m]))) if m.any() else None,
+            }
+        log.info("per-regime QLIKE: " + "  ".join(
+            f"r{r}[n={per_regime[f'r{r}']['n']}] nn={per_regime[f'r{r}']['qlike_nn']:.5f}"
+            for r in range(3) if per_regime[f"r{r}"]["n"]))
+    except Exception as e:  # pragma: no cover
+        log.warning(f"breakdown per-regime non disponibile / unavailable: {e}")
+
     gate = {
         "split": split,
         "nn_vs_har_ratio": res["nn"]["qlike"] / res["har"]["qlike"],
@@ -237,7 +262,8 @@ def main():
     _sandbox = f"_{_root.name}" if _root.name != "models" else ""
     out_path = out_dir / f"qlike_report_{interval}_{split}{_sandbox}.json"
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"metrics": res, "gate": gate, "har_beta": list(map(float, beta))}, f, indent=2)
+        json.dump({"metrics": res, "gate": gate, "per_regime": per_regime,
+                   "har_beta": list(map(float, beta))}, f, indent=2)
 
     print(f"\n══════ VOL-S QLIKE [{interval}·{split}] ══════")
     for name in ("nn", "har", "naive"):

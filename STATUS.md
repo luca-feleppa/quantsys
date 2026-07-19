@@ -5,6 +5,38 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — A8-BIS MIXUP SU DATASET ESTESO (baseline riaddestrata, linea vol 1h) · 2026-07-19
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun numero decisionale del NUOVO dataset visto: le uniche quantità osservate ex-ante sono (a) i conteggi regime sotto (model-independent) e (b) gli esiti della finestra 07-19 sul dataset CONGELATO — B2/B3 "nessuna conclusione", descrittivo mixup −4.94% su un val che overlappa ~90% col nuovo (caveat vincolante per l'interpretazione, non azzerabile). UN solo run per braccio: nessuno sweep su `mixup_alpha`; qualunque variante = NUOVA pre-registrazione.
+
+**Ipotesi/prior onesto (pre-dichiarato):** dato l'overlap ~90%, un PASS della ① su val è ATTESO e quasi-in-sample (NON evidenza indipendente): il valore epistemico di questo esperimento è concentrato nel one-shot su test. Prior sul test: incerto — il precedente vol-S mostrò coerenza val→test sul target log-RV (momento pari), ma il vantaggio mixup può essere periodo-specifico. FAIL su test = esito plausibile e informativo.
+
+**Dataset (nuovo, CONGELATO per questo esperimento):** `data/lstm_dataset.npz` del rebuild 2026-07-19 (span 2019→2026-07-19, split 51.882/6.485/6.486, X_macro 90, scaler rifittato; backup precedente `lstm_dataset_frozen0622.npz`). Candele/npz/regime_probs NON si toccano fino a chiusura gate (invariante).
+
+**Bracci — ENTRAMBI riaddestrati sul npz nuovo** (l'incumbent production ha scaler stale rispetto al npz corrente: riusarlo confonderebbe lever mixup e distribution shift; il confronto vs incumbent resta solo diagnostico):
+- **baseline:** `QUANTSYS_ARCH=itransformer`, sandbox `QUANTSYS_MODELS_ROOT=models_base_ext`, `02_train.py --n-ensemble 5` (config tuned invariata).
+- **candidato:** `QUANTSYS_ARCH=itransformer_a8_mixup` (overlay: unico diff funzionale `mixup_alpha: 0.2`), sandbox `models_a8_mixup_ext`, 5 seed.
+- `models/itransformer` (production live, VPS-mirror) READ-ONLY.
+
+**Script/giudice:** `scripts/vol/dev_vols_qlike.py` su entrambi i bracci, stesso split, stessi sample (report anti-clobber per-sandbox, commit `43f2d80`; **breakdown per-regime aggiunto EX-ANTE al giudice** per la condizione ② — nessun numero visto).
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a gate val superato, one-shot.
+**Leva sperimentale:** `mixup_alpha` SOLO nell'overlay arch (`default.yaml`/`itransformer.yaml` intatti → path production bit-identico); sandbox dedicate; nessun nuovo env-flag.
+
+**Conteggi regime EX-ANTE (argmax `build_regime_gate`, model-independent, calcolati PRIMA di ogni training):** val n=6485: r0=2075, r1=613, r2=3797 · test n=6486: r0=1591, r1=818, r2=4077. → **Regimi qualificati (≥800): su VAL r0 e r2** (r1 sotto soglia STRUTTURALMENTE — mix regime time-varying — quindi escluso dal gate ② su val e riportato solo come descrittivo; caveat dichiarato: il comportamento in stress NON è validato su val); **su TEST tutti e tre** (la copertura stress si valida al one-shot).
+
+**Condizioni di PASS (tutte, AND, su val):**
+1. `QLIKE_val(mixup) ≤ 0.97 · QLIKE_val(baseline riaddestrata)` (miglioramento ≥3%, stessi sample).
+2. Nessun regime QUALIFICATO distrutto: per ogni regime con ≥800 sample val (ex-ante: r0, r2), `QLIKE_val(mixup) ≤ 1.05 · QLIKE_val(baseline)` in quel regime. r1: descrittivo, non gating.
+3. Validità campione (PRE-VERIFICATA ex-ante, per costruzione non impossibile): ≥5000 sample val E ≥2 regimi qualificati — soddisfatta (6485; r0+r2).
+
+**One-shot su test (solo a gate val superato):** stesse ①+②, con ② estesa a TUTTI i regimi (tutti ≥800 su test, ex-ante) → include la validazione stress assente su val.
+
+**Conseguenze pre-dichiarate:** PASS val+test → `mixup_alpha: 0.2` **candidato** per il prossimo ciclo di retrain della linea vol (MAI swap del live durante il forward v1/v2; il deployment richiederebbe pre-reg dedicata); la baseline-ext NON è promossa da questo esperimento (misura il lever, non il modello in carica). FAIL (val o test) → mixup marcato **FALLITO sul dataset esteso** (chiusura definitiva del lever: il descrittivo −4.94% resta un falso segnale documentato), overlay eliminato, A10 unico candidato training residuo; scritto comunque. A chiusura: sandbox eliminabili, env azzerati, stato production invariato.
+
+**Diagnostica non decisionale:** spread QLIKE tra i 5 membri per braccio; ratio r1 descrittivo su val; confronto candidato vs incumbent production (old-scaler) senza valore di gate.
+
+---
+
 ## 🟢 2026-07-19 — Ripresa: 22ª riga verificata (n=21 executed); MFIV incrementale +229; finestra GPU Fase B APERTA (terminale utente)
 
 **① Pull+merge OK:** heartbeat 4/4 freschi; B7 fresco (6 barre < 168); staging auto-pulito. **`trades.jsonl` = 22 righe**: BTC-19JUL26-64000 settlato 13:01 UTC, delivery 64404.49 (|Δ| dal K = 404 $, quasi-pin), payoff 0.00628 vs premi 0.0064+fee → **PnL −0.00072 BTC**. Campione post-gate: **n=21 executed** (verso n≥30 ~fine luglio). `hedge_state/ledger` ancora assenti sul VPS = hedge mai scattato (coerente: nessun trade aperto con hedge da C3).
