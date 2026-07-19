@@ -5,7 +5,30 @@
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — A8-BIS MIXUP SU DATASET ESTESO (baseline riaddestrata, linea vol 1h) · 2026-07-19
+## 🎯 PRE-REGISTRAZIONE GATE — MFIV-COMPARATORE v2 (04b, braccio short-vol) · 2026-07-20
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun numero decisionale visto: PnL per-expiry, edge per-variante e ogni correlazione MAI calcolati. Uniche quantità osservate ex-ante (model-independent, pattern-③ standard): conteggi di copertura timestamp-only (sotto) e il wedge MFIV−ATM già pubblico in STATUS (mediana +3.39 vol pt, p10 +2.33 / p90 +5.98 su 1.911 tick — descrittivo D4, mai usato come gate).
+
+**Domanda:** l'edge di `04b` (`edge = log(RV_pred/var_iv)`, soglia pre-registrata ±0.25) usa come comparatore la IV ATM interpolata a 30h. La MFIV@30h model-free (integrale VIX-style sulla strip OTM, `data/iv/mfiv_30h.parquet`) è il var-swap rate corretto: l'ATM lo sottostima per la convessità dello smile. Il comparatore MFIV **migliora il ranking dei PnL realizzati** rispetto all'ATM?
+
+**Ipotesi/prior onesto (pre-dichiarato):** plausibile FAIL/nullo. Se il wedge in log-varianza fosse COSTANTE, edge_MFIV = edge_ATM − c e gli Spearman sarebbero IDENTICI per invarianza di rango: il gate misura esclusivamente se la **variazione temporale** del wedge (pricing time-varying della convessità/tail) aggiunge potere di ranking. Il valore permanente dell'esperimento sta comunque nel descrittivo (ri-stima del break-even short-vol), che si produce qualunque sia l'esito. Potere statistico basso a n=40 (SE di uno Spearman ≈0.16): dichiarato ex-ante, niente upgrade della soglia a risultati visti.
+
+**Campione (regola deterministica, fedele al live):** per ogni expiry daily 08:00 UTC nella copertura MFIV, entry teorica = **PRIMO tick orario nella finestra tenor [E−30h, E−22h]** con tick MFIV fresco (≤30 min) E forecast registrato (≤60 min); PnL = short-straddle ATM 1 contratto con convenzioni identiche a `04b` (premi mark delle 2 leg al tick d'entry dal chain raw, payoff da `delivery_price_cached`, fee `FEE_PER_CONTRACT`×2 leg). Stessi expiry per ENTRAMBE le varianti (disegno appaiato: RV_pred comune, gli errori del forecast colpiscono simmetricamente). **Conteggio ex-ante 2026-07-20: 15 expiry qualificati su 37** (9 con entry pre-07-14 — caveat dichiarato: selezione oraria + bug candele live, degrado comune ai due bracci; 6 era-VPS H24). Crescita ~+1/giorno.
+
+**Script/giudice:** `scripts/vol/mfiv_comparator_judge.py` (NUOVO, offline CPU-only; da scrivere e smoke-testare SOLO su sintetico prima del run reale; input: `mfiv_30h.parquet` + chain raw + `forecasts.parquet` + delivery cache; MAI import dal path live di 04b in scrittura).
+**Split:** non applicabile (dati forward, nessun training). Disciplina one-shot: il giudice gira UNA volta, alla prima sessione con n≥40; nessun run parziale prima.
+**Leva sperimentale:** NESSUNA nel path production — il comparatore live di `04b` resta ATM (costanti pre-registrate intoccabili a campione aperto); MFIV resta colonna diagnostica off-path. Nessun env-flag necessario (zero file production toccati).
+
+**Condizioni di PASS (tutte, AND):**
+1. `Δρ = ρ_MFIV − ρ_ATM ≥ +0.05`, dove `ρ_x = Spearman(−edge_x(entry), PnL_short)` sugli STESSI expiry (edge_x = log(RV_pred/var_x) al tick d'entry).
+2. Robustezza: `Δρ` ha lo stesso segno su entrambe le metà cronologiche del campione (split al mediano temporale).
+3. Validità campione: **n ≥ 40 expiry qualificati** (regola sopra, model-independent; oggi 15 → valutazione attesa ~metà agosto). Sotto 40: NESSUN run, nessuna conclusione.
+
+**Conseguenze pre-dichiarate:** PASS → MFIV **candidato comparatore** per una pre-reg v3 del servizio 04b (con EDGE_THRESHOLD ricalibrato sul wedge; attivazione MAI prima della chiusura della valutazione n≥30 leg opzioni E mai a forward hedged aperto senza pre-reg dedicata). FAIL → comparatore resta ATM IV, MFIV colonna diagnostica permanente, item chiuso; scritto comunque. **In entrambi i casi (descrittivo non gating):** ri-stima del break-even short-vol col wedge in log-varianza, documentata in STATUS.
+
+---
+
+## 🎯 PRE-REGISTRAZIONE GATE — A8-BIS MIXUP SU DATASET ESTESO (baseline riaddestrata, linea vol 1h) · 2026-07-19 · **CHIUSO: FAIL SU VAL 2026-07-20 (sezione ④ sotto)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun numero decisionale del NUOVO dataset visto: le uniche quantità osservate ex-ante sono (a) i conteggi regime sotto (model-independent) e (b) gli esiti della finestra 07-19 sul dataset CONGELATO — B2/B3 "nessuna conclusione", descrittivo mixup −4.94% su un val che overlappa ~90% col nuovo (caveat vincolante per l'interpretazione, non azzerabile). UN solo run per braccio: nessuno sweep su `mixup_alpha`; qualunque variante = NUOVA pre-registrazione.
 
