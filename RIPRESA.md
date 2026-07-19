@@ -1,41 +1,23 @@
 # RIPRESA — lista residua · remaining list
 
-> 🇮🇹 Riscritto 2026-07-19 sera (v3). File EFFIMERO: eliminarlo a lista esaurita. Pre-registrazioni vincolanti e dettaglio: `STATUS.md` (pre-reg A8-BIS in cima + sezione 2026-07-19).
-> **EN** Rewritten 2026-07-19 evening (v3). EPHEMERAL file: delete when exhausted. Binding pre-registrations and detail: `STATUS.md` (A8-BIS pre-reg on top + 2026-07-19 section).
+> 🇮🇹 Riscritto 2026-07-20 (v4, roadmap riordinata su decisione utente). File EFFIMERO: eliminarlo a lista esaurita. Pre-registrazioni vincolanti e dettaglio: `STATUS.md` (pre-reg A8-BIS in cima + sezioni 2026-07-19/20).
+> **EN** Rewritten 2026-07-20 (v4, roadmap reordered by user decision). EPHEMERAL file: delete when exhausted. Binding pre-registrations and detail: `STATUS.md` (A8-BIS pre-reg on top + 2026-07-19/20 sections).
 
-## Fatto il 2026-07-19 · Done on 2026-07-19
+## Fatto · Done
 
-🇮🇹 Pull+merge OK, **22ª riga trades verificata** (settlement quasi-pin, PnL −0.00072 BTC, n=21 executed) · **MFIV incrementale** +229 → 1.911 righe, wedge stabile +3.39 vol pt · **B2 A3-MoE e B3 A8-mixup eseguiti e giudicati: entrambi "NESSUNA CONCLUSIONE"** (condizione ③ model-independent, r1<800 sul val congelato; descrittivo: MoE −2.02%, **mixup −4.94%**) · **B4 DVOL RINVIATO** (mai girato) · lezione di processo: condizioni campionarie model-independent si verificano EX-ANTE · **dataset RICOSTRUITO** sullo span esteso (candele→07-19, split 51.882/6.485/6.486, backup `lstm_dataset_frozen0622.npz`) con macro fresche (`01b --skip-regime`, flag nuovo label-preserving) e regime incrementale (+27 barre) · **pre-reg A8-BIS scritta e committata** (`0e4a73b`): 2 bracci riaddestrati, gate ② solo su regimi qualificati (val: r0+r2; r1=613 descrittivo), one-shot test con tutti e 3 (r1=818) · giudice: report anti-clobber per-sandbox + breakdown per-regime · commit `43f2d80`, `2e8b8e8`, `0e4a73b`.
-**EN** 22nd trade row verified (n=21) · MFIV incremental (wedge stable +3.39) · B2+B3 run & judged: both "no conclusion" (condition ③, model-independent); B4 deferred · dataset REBUILT on extended span + fresh macro (new `--skip-regime` flag) + incremental regime · **A8-BIS pre-reg written & committed** (2 retrained arms, per-regime gate on qualified regimes only, one-shot test covers stress) · judge: per-sandbox reports + per-regime breakdown.
+🇮🇹 **2026-07-19:** B2 A3-MoE e B3 A8-mixup giudicati "NESSUNA CONCLUSIONE" (③ model-independent); dataset RICOSTRUITO su span esteso; pre-reg A8-BIS committata (`0e4a73b`). **2026-07-20:** decisione utente pattern-③ standard + roadmap riordinata; **A8-BIS ESEGUITO E CHIUSO: FAIL su val** — baseline 0.26206 vs mixup 0.25998, ratio 0.9921 (−0.79% ≪ −3% della ①) → mixup FALLITO definitivo sul dataset esteso, overlay eliminato, niente test; il descrittivo −4.94% di B3 era artefatto di distribution shift (incumbent old-scaler). A10 unico candidato training residuo. Invarianti npz DECADUTI. Dettaglio: STATUS 2026-07-20 ④.
+**EN** 2026-07-19: B2+B3 judged "no conclusion" (③); dataset rebuilt; A8-BIS pre-reg committed. 2026-07-20: standard ③-pattern decision + roadmap reordered; **A8-BIS RUN AND CLOSED: FAIL on val** (−0.79% ≪ −3%) → mixup definitively FAILED, overlay deleted, no test; the −4.94% descriptive was a distribution-shift artifact. A10 = only residual training candidate. Npz invariants LIFTED. Detail: STATUS 2026-07-20 ④.
 
-## Da fare · To do
+## Da fare (ordine = roadmap corrente) · To do (order = current roadmap)
 
-1. 🇮🇹 **A8-BIS — lanciare i 2 bracci (run MAI partiti; ~70-80 min GPU totali, sequenziali).** Pattern: training → verifica `$LASTEXITCODE`=0 e 5/5 seed (se fallito: elimina la sandbox e rilancia, MAI giudicare un ensemble parziale) → giudice.
+1. 🇮🇹 **Pre-reg v2 MFIV-comparatore** (primo item attivo): CPU-only, wedge stabile +3.39 vol pt su 1.911 tick → break-even short-vol da ri-stimare (tocca PRIORITÀ 1); gate da pre-registrare PRIMA di guardare numeri decisionali nuovi; derivazione incrementale periodica `python scripts/vol/derive_mfiv.py`; si incastra con la valutazione n≥30 (~fine luglio).
+   **EN** MFIV-comparator v2 pre-reg (first active item): CPU-only, re-estimates the short-vol break-even (touches PRIORITY 1); gate pre-registered BEFORE looking at any new decision numbers.
 
-   **Braccio 1 — baseline riaddestrata:**
-   ```powershell
-   $env:QUANTSYS_ARCH="itransformer"; $env:QUANTSYS_MODELS_ROOT="models_base_ext"
-   python scripts/02_train.py --n-ensemble 5
-   # dopo verifica:
-   $env:QUANTSYS_VOLS_SPLIT="val"
-   python scripts/vol/dev_vols_qlike.py --arch itransformer
-   ```
-   **Braccio 2 — candidato mixup:**
-   ```powershell
-   $env:QUANTSYS_ARCH="itransformer_a8_mixup"; $env:QUANTSYS_MODELS_ROOT="models_a8_mixup_ext"
-   python scripts/02_train.py --n-ensemble 5
-   # dopo verifica:
-   python scripts/vol/dev_vols_qlike.py --arch itransformer_a8_mixup
-   Remove-Item Env:QUANTSYS_ARCH, Env:QUANTSYS_MODELS_ROOT, Env:QUANTSYS_VOLS_SPLIT
-   ```
-   Poi valutazione ①②③ dai report `results/vols/qlike_report_1h_val_models_base_ext.json` e `..._models_a8_mixup_ext.json` (blocco `per_regime`); esiti in STATUS comunque; a PASS val → one-shot su test (stesse condizioni, ② su tutti e 3 i regimi). ⚠ Invariante fino a chiusura gate: NON toccare candele/npz/regime_probs.
-   **EN** A8-BIS — launch the 2 arms (never started; ~70-80 min GPU, sequential); judge from the suffixed per-regime reports; outcomes to STATUS regardless; on val PASS → one-shot test. Do NOT touch candles/npz/regime_probs until the gate closes.
+2. 🇮🇹 **B4-bis DVOL:** ri-derivare `lstm_dataset_dvol.npz` dal npz NUOVO (`dev_vols_dvol_append.py`) + NUOVA pre-reg col pattern-③ standard (invariante npz di A8-BIS decaduto: si può procedere).
+   **EN** B4-bis DVOL: re-derive the dvol npz from the NEW npz + new pre-reg with the standard ③-pattern (the A8-BIS npz invariant has lapsed: clear to proceed).
 
-2. 🇮🇹 **B4-bis DVOL (rinviato):** ri-derivare `lstm_dataset_dvol.npz` dal npz NUOVO (`dev_vols_dvol_append.py`) + NUOVA pre-reg con ③ verificata ex-ante — solo DOPO la chiusura di A8-BIS (npz congelato è l'invariante).
-   **EN** B4-bis DVOL (deferred): re-derive the dvol npz from the NEW npz + new pre-reg with ex-ante ③ — only AFTER A8-BIS closes.
-
-3. 🇮🇹 **Eventuale pre-reg v2 MFIV-comparatore** (wedge stabile +3.39 vol pt su 1.911 tick → break-even short-vol da ri-stimare); derivazione incrementale periodica `python scripts/vol/derive_mfiv.py`.
-   **EN** Possible MFIV-comparator v2 pre-reg + periodic incremental derivation.
+3. 🇮🇹 **A3-bis regime-MoE: PARCHEGGIATO** (prior sfavorevole, descrittivo −2.02% < 3%; il ramo "baseline cambia con PASS mixup" è decaduto col FAIL): rivalutare SOLO se un episodio stress porta massa a r1. **CAFN: parcheggiato a prior basso**, riapribile solo con re-scope. **A10 sparsity = unico candidato training residuo** (prior basso, effort M). Razionale: STATUS 2026-07-20 ③④.
+   **EN** A3-bis PARKED (the "baseline changes on mixup PASS" branch lapsed with the FAIL); CAFN parked low-prior; A10 sparsity = only residual training candidate (rationale: STATUS 2026-07-20 ③④).
 
 4. 🇮🇹 **~Fine luglio:** valutazione pre-registrata **n≥30** leg opzioni (POST_GATE_V1 §0.2); solo dopo: pre-reg sizing v2 (A13+A14+A7).
    **EN** ~End of July: pre-registered n≥30 evaluation; only then the v2 sizing pre-reg.
@@ -43,8 +25,8 @@
 5. 🇮🇹 **~Metà agosto:** giudice `hedged_vs_unhedged_judge.py` a n≥20 hedge-attivi.
    **EN** ~Mid August: hedged-vs-unhedged judge at n≥20 hedge-active trades.
 
-6. 🇮🇹 Igiene a gate A8-BIS chiuso: sandbox `models_a3_moe`/`models_a8_mixup`/`models_base_ext`/`models_a8_mixup_ext` eliminabili; valutare rimozione backup `lstm_dataset_frozen0622.npz` (3 GB) e `lstm_dataset_dvol.npz` stale (3 GB, da ri-derivare comunque).
-   **EN** Hygiene once A8-BIS closes: sandboxes deletable; consider dropping the 3 GB frozen npz backup and the stale dvol npz.
+6. 🇮🇹 Igiene disco: ✅ COMPLETATA 2026-07-20 — 4 sandbox (73 MB) + `lstm_dataset_frozen0622.npz` + `lstm_dataset_dvol.npz` stale + `pipeline_state_frozen0622.pkl` ELIMINATI (~6,4 GB; tutti rigenerabili/obsoleti; report giudice preservati in `results/vols/`). Azzerare gli env sperimentali nel terminale (Passo D) se non già fatto.
+   **EN** Disk hygiene: ✅ DONE 2026-07-20 — 4 sandboxes + both npz backups + frozen pkl DELETED (~6.4 GB; all regenerable/obsolete; judge reports preserved). Clear experimental env vars if not already done.
 
 7. 🇮🇹 A lista esaurita: eliminare questo file (esiti in STATUS).
    **EN** When exhausted: delete this file (outcomes in STATUS).
