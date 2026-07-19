@@ -221,6 +221,18 @@ def main():
                       help="B7: ricostruisce il checkpoint walk-forward da pkl+parquet "
                            "esistenti con golden test integrato (1 fit MLE, no rebuild) "
                            "/ rebuild the checkpoint from existing artifacts")
+    # IT: 2026-07-19 — refresh macro SENZA toccare il regime: il full rebuild (~3h)
+    #     RIMAPPA le etichette (semantica indici non fissa tra run) e romperebbe la
+    #     comparabilità con gli esperimenti già giudicati; per le barre nuove c'è
+    #     --regime-incremental (label-preserving). Inerte di default.
+    # EN: 2026-07-19 — macro refresh WITHOUT touching the regime: the full rebuild
+    #     (~3h) REMAPS the labels (index semantics not fixed across runs) and would
+    #     break comparability with already-judged experiments; new bars are handled
+    #     by --regime-incremental (label-preserving). Inert by default.
+    mode.add_argument("--skip-regime", action="store_true",
+                      help="pipeline macro completa ma regime detector INTATTO "
+                           "(regime_probs/regime_hmm non toccati) / full macro "
+                           "pipeline but regime detector left untouched")
     args = parser.parse_args()
 
     cfg   = load_config("config/default.yaml")
@@ -364,7 +376,13 @@ def main():
     # EN: 4. Markov-Switching regime detection on BTC realized vol (Variant 3, 2026-06-03)
     #     — df_macro is ignored by the detector (uses raw_candles.parquet); section shared with
     #     the --regime-only path (run_regime_detection helper).
-    regime_df = run_regime_detection(mcfg, out, df_macro=df_macro)
+    #     Con --skip-regime lo step è SALTATO: regime_probs/regime_hmm restano quelli
+    #     su disco (label-preserving). / With --skip-regime the step is SKIPPED:
+    #     regime_probs/regime_hmm stay as on disk (label-preserving).
+    if args.skip_regime:
+        log.info("--skip-regime: regime detector NON toccato (regime_probs.parquet invariato)")
+    else:
+        run_regime_detection(mcfg, out, df_macro=df_macro)
 
     # IT: 5. fit del MacroNormalizer (RobustScaler con clipping)
     # EN: 5. fit the MacroNormalizer (RobustScaler with clipping)
@@ -449,15 +467,15 @@ def main():
   Serie FRED          : {df_fred.shape[1]}
   Serie yfinance      : {df_yf.shape[1] if not df_yf.empty else 0}
   Macro features      : {df_macro.shape[1]}
-  Regimi (Markov-BTC) : {n_regimes} su realized vol BTC oraria
+  Regimi (Markov-BTC) : {'SALTATO (--skip-regime, file su disco INTATTI)' if args.skip_regime else f'{n_regimes} su realized vol BTC oraria'}
   MacroEncoder input  : {len(macro_cols)} features → 16 dim embedding
 
   File generati in {out}/:
     ✓ macro_fred.parquet
     ✓ macro_yfinance.parquet
     ✓ macro_features.parquet
-    ✓ regime_hmm.pkl  (RegimeMarkovBTC, filename kept for backward compat)
-    ✓ regime_probs.parquet
+    {'⊘ regime_hmm.pkl / regime_probs.parquet NON toccati (--skip-regime)' if args.skip_regime else '''✓ regime_hmm.pkl  (RegimeMarkovBTC, filename kept for backward compat)
+    ✓ regime_probs.parquet'''}
     ✓ macro_normalizer.pkl
     ✓ lstm_dataset.npz   (aggiornato con X_macro_*)
 

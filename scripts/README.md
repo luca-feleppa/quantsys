@@ -11,7 +11,7 @@
 | Script | Fase / Phase | Linea / Line |
 |---|---|---|
 | `00_check_setup.py` · `00_test_binance_testnet.py` | setup / smoke | shared |
-| `01_download_data.py` · `01_update_data.py` · `01b_download_macro.py` (`--regime-only` = solo regime, skip macro/npz / regime only, skips macro/npz; `--regime-incremental` = append B7 dal checkpoint, minuti / B7 append from the checkpoint, minutes; `--regime-bootstrap-checkpoint` = ricostruzione one-off del checkpoint con golden test / one-off checkpoint rebuild with golden test) | dati + macro/regime | shared |
+| `01_download_data.py` · `01_update_data.py` · `01b_download_macro.py` (`--regime-only` = solo regime, skip macro/npz / regime only, skips macro/npz; `--regime-incremental` = append B7 dal checkpoint, minuti / B7 append from the checkpoint, minutes; `--regime-bootstrap-checkpoint` = ricostruzione one-off del checkpoint con golden test / one-off checkpoint rebuild with golden test; `--skip-regime` = pipeline macro completa, regime INTATTO / full macro pipeline, regime untouched) | dati + macro/regime | shared |
 | `01c_iv_poller.py` | poller IV Deribit (forward) → `data/iv/` | vol (gate NN-RV vs IV) |
 | `01d_orderbook_recorder.py` | recorder order-book L2 Binance (forward) → `data/orderbook/` | B1 direzionale (raccolta) |
 | `01e_trades_recorder.py` | recorder trade opzioni Deribit production (forward, retention API ~24h) → `data/deribit_trades/` | vol (spread realizzati vs mark, costi eseguibili post-gate-v1) |
