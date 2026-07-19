@@ -10,21 +10,17 @@
 
 ## Da fare · To do
 
-1. 🇮🇹 **Fase B GPU (quando decidi di riaprire la finestra — ordine vincolante, pre-reg già in STATUS, audit B1 valido).** Ogni run 5 seed → giudice `dev_vols_qlike.py` su val (`QUANTSYS_VOLS_SPLIT=val`) vs incumbent `models/itransformer` (giudice incumbent: stesso script SENZA env root, `--arch itransformer`):
-   - **B2** A3 regime-MoE (DA ZERO): `$env:QUANTSYS_ARCH="itransformer_regime_moe"; $env:QUANTSYS_MODELS_ROOT="models_a3_moe"; python scripts/02_train.py --n-ensemble 5` → giudice con env root + `--arch itransformer_regime_moe`. ⚠ Heads-up condizione ③: r1≈657<800 su val → possibile "nessuna conclusione" pre-registrata.
-   - **B3** A8 mixup: idem con `itransformer_a8_mixup` / `models_a8_mixup`.
-   - **B4** probe DVOL: `QUANTSYS_ARCH=itransformer`, `QUANTSYS_DATASET_NPZ=data/lstm_dataset_dvol.npz`, `QUANTSYS_MODELS_ROOT=models_dvol_probe`.
-   Esiti in STATUS comunque; PASS → one-shot su test; ogni interazione = nuova pre-reg. Tempi: ~35-40 min/esperimento (misura seed 1: 7,5 min).
-   **EN** GPU Phase B (when you reopen the window — binding order): B2 A3-MoE from scratch, B3 A8 mixup, B4 DVOL probe; 5 seeds each in its sandbox, judged on val vs the incumbent; outcomes to STATUS regardless. ~35-40 min per experiment.
-2. 🇮🇹 **Domani dopo le 08:00 UTC (19/07):** `.\avvio_sessione.ps1` → `trades.jsonl` deve avere **22 righe** (settlement BTC-19JUL26-64000 eseguito dal VPS).
-   **EN** Tomorrow after 08:00 UTC: pull → trades.jsonl must show 22 rows.
+1. 🇮🇹 **Fase B GPU — B2 e B3 ESEGUITI 2026-07-19, entrambi "NESSUNA CONCLUSIONE"** (condizione ③ model-independent: r1=657<800 sul val congelato — era verificabile ex-ante, lezione in STATUS). Descrittivo: MoE −2.02% (① non passata), **mixup −4.94% (① sarebbe passata)** → A8-bis prioritaria alla ri-pre-reg. **B4 DVOL: RINVIATO (deciso 2026-07-19)** — esito ③ predeterminato sul val corrente; ri-pre-reg sul dataset esteso (npz dvol da ri-derivare).
+   **EN** GPU Phase B — B2+B3 RUN 2026-07-19, both "no conclusion" (condition ③, model-independent). Descriptive: mixup −4.94% (① would have passed) → priority for re-pre-reg. B4 not run, user decision pending.
+2. ~~🇮🇹 **Domani dopo le 08:00 UTC (19/07):** `.\avvio_sessione.ps1` → `trades.jsonl` deve avere **22 righe**~~ ✅ **FATTO 2026-07-19**: 22 righe, BTC-19JUL26-64000 settlato (PnL −0.00072 BTC, quasi-pin). n=21 executed.
+   **EN** ~~Tomorrow after 08:00 UTC: pull → 22 rows.~~ ✅ DONE 2026-07-19: 22 rows, settled (near-pin, −0.00072 BTC).
 3. 🇮🇹 **~Fine luglio:** valutazione pre-registrata **n≥30** leg opzioni (stessi 3 criteri, entrambi i campioni; POST_GATE_V1 §0.2). SOLO dopo: pre-reg sizing v2 (A13+A14+A7).
    **EN** ~End of July: pre-registered n≥30 options-leg evaluation; only afterwards the v2 sizing pre-reg.
 4. 🇮🇹 **~Metà agosto:** giudice `hedged_vs_unhedged_judge.py` a n≥20 hedge-attivi (dal primo trade aperto con hedge).
    **EN** ~Mid August: hedged-vs-unhedged judge at n≥20 hedge-active trades.
 5. 🇮🇹 **Sblocco candele oltre il 2026-06-22 + refresh macro** (`01b`) — SOLO a B2/B3 chiusi (lo span congelato è il loro invariante).
    **EN** Unfreeze candles past 2026-06-22 — ONLY once B2/B3 are closed.
-6. 🇮🇹 **Eventuale pre-reg v2 MFIV-comparatore** (D4 derivato: wedge +3.45 vol pt → break-even short-vol da ri-stimare) e **derivazione incrementale periodica** (`python scripts/vol/derive_mfiv.py`, appende i soli snapshot nuovi — accodabile ad avvio_sessione se utile).
-   **EN** Possible MFIV-comparator v2 pre-reg (re-estimated break-even) + periodic incremental derivation.
+6. 🇮🇹 **Eventuale pre-reg v2 MFIV-comparatore** (wedge STABILE: +3.39 mediana su 1.911 tick al 2026-07-19, era +3.45 su 1.682 → break-even short-vol da ri-stimare). Derivazione incrementale ESEGUITA 2026-07-19 (+229 snapshot); resta periodica (`python scripts/vol/derive_mfiv.py` — accodabile ad avvio_sessione se utile).
+   **EN** Possible MFIV-comparator v2 pre-reg (wedge stable +3.39 on 1,911 ticks); incremental derivation RUN 2026-07-19, stays periodic.
 7. 🇮🇹 A lista esaurita: eliminare questo file (esiti in STATUS).
    **EN** When exhausted: delete this file (outcomes in STATUS).

@@ -70,12 +70,16 @@ def main():
     # IT: MINOR-B (audit B1 2026-07-18) — itransformer_regime_moe ammesso: il run
     #     A3 scrive in {models_root}/itransformer_regime_moe (sandbox models_a3_moe);
     #     senza la choice il giudice non può puntare alla dir corretta.
+    #     2026-07-19: stesso fix per itransformer_a8_mixup (sandbox models_a8_mixup,
+    #     run B3) — aggiunto EX-ANTE, prima di qualsiasi training A8.
     # EN: MINOR-B (B1 audit 2026-07-18) — itransformer_regime_moe allowed: the A3
     #     run writes to {models_root}/itransformer_regime_moe (models_a3_moe
     #     sandbox); without the choice the judge cannot target the right dir.
+    #     2026-07-19: same fix for itransformer_a8_mixup (models_a8_mixup sandbox,
+    #     B3 run) — added EX-ANTE, before any A8 training.
     ap.add_argument("--arch", default="itransformer",
                     choices=["itransformer", "nhits", "tcnmamba", "lstm",
-                             "itransformer_regime_moe"],
+                             "itransformer_regime_moe", "itransformer_a8_mixup"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
     args = ap.parse_args()
@@ -222,8 +226,16 @@ def main():
 
     out_dir = Path("results/vols"); out_dir.mkdir(parents=True, exist_ok=True)
     # IT: report suffissato per interval+split — run a risoluzioni diverse non si sovrascrivono.
+    #     2026-07-19: + suffisso sandbox quando QUANTSYS_MODELS_ROOT è attivo — il run
+    #     candidato e quello incumbent non si clobberano più (visto su B2/B3: il report
+    #     del candidato sopravviveva solo nei log). Path production (no env) INVARIATO.
     # EN: report suffixed by interval+split — runs at different resolutions do not overwrite.
-    out_path = out_dir / f"qlike_report_{interval}_{split}.json"
+    #     2026-07-19: + sandbox suffix when QUANTSYS_MODELS_ROOT is set — candidate and
+    #     incumbent runs no longer clobber each other (seen on B2/B3: the candidate
+    #     report only survived in the logs). Production path (no env) UNCHANGED.
+    _root = models_root()
+    _sandbox = f"_{_root.name}" if _root.name != "models" else ""
+    out_path = out_dir / f"qlike_report_{interval}_{split}{_sandbox}.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"metrics": res, "gate": gate, "har_beta": list(map(float, beta))}, f, indent=2)
 
