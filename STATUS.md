@@ -60,6 +60,25 @@
 
 ---
 
+## 🟢 2026-07-22 — Routine di sessione + monitoraggio MFIV v2 (nessun consumo GPU)
+
+**① `avvio_sessione.ps1` OK (pull+merge VPS, finestra 7g):** heartbeat 4/4 freschi (IV 0.1h · L2 0.0h · Trades 0.1h · 04b forecasts 1.6h). Merge: `atm_30h` +744, `dvol` +62, `atm_greeks` +744, chain 19–22/07 (+626k righe cumulate), orderbook 19–22/07, deribit_trades 19–22/07, `vol_paper/forecasts` 241→303, `exec_diag` +65. **`trades.jsonl` 22 → 24 righe (+2)** → campione post-gate **n=23 executed** (verso n≥30 ~fine luglio). **🆕 `hedge_ledger.jsonl` 0 → 11 righe (+11): l'hedge C3 ha INIZIATO a scattare** (prima sempre assente = mai scattato) → il forward v2 hedged accumula eventi; rilevante per il giudice hedged n≥20 (~metà agosto). Staging auto-pulito.
+
+**② B7 regime: FRESCO (0 barre nuove) → refresh NON scattato, CORRETTO by design.** Verifica timestamp (richiesta utente): `raw_candles` max = checkpoint = `regime_probs` max = **2026-07-19 14:00 UTC** (delta candele↔checkpoint = 0). Le candele di casa sono congelate al 07-19 (71,7h fa) perché la routine è passiva: non rinfresca `raw_candles` (raccolta tutta sul VPS; a casa le candele avanzano solo con un rebuild `01_download_data`). B7 scatterebbe solo DOPO un refresh candele locale → nessun refresh mancato. Staleness ininfluente: linea-vol gira sul npz congelato 07-19, live-forecasting ha finestra candele fresca sul VPS. Nota pre-esistente: `regime_probs` 66.159 righe vs `raw_candles` 66.099 (stesso head) = artefatto indicizzazione rebuild 07-19, ininfluente per B7.
+
+**③ Monitoraggio MFIV v2 (CPU-only, disciplina one-shot intatta):** `derive_mfiv.py` incrementale → `mfiv_30h.parquet` **1.911 → 2.773 righe (+862**, snapshot 19–22/07). Wedge convessità MFIV−ATM su 2.773 tick: **mediana +3.13 vol pt (p10 +2.20 / p90 +5.10)** — stabile vs +3.39 (nessuna deriva del segnale). `mfiv_comparator_judge.py --count-only`: **15 expiry qualificati** (regola causale, era 12 il 20/07; n_min=40) → sotto soglia, **NESSUN run one-shot**, PnL/edge MAI calcolati. Crescita ~+1/giorno → valutazione attesa ~metà agosto.
+
+**Problemi aperti:** (a) B4-bis DVOL da avviare (item ATTIVO, sotto); (b) gate forward a calendario: n≥30 leg opzioni ~fine luglio (n=23 oggi), giudice hedged n≥20 ~metà agosto (hedge ora scatta → campione hedge in accumulo); (c) MFIV v2 one-shot alla prima sessione con n≥40.
+
+**▶️ RIPARTI DA QUI — B4-bis DVOL (prossima cosa da fare, decisione utente 2026-07-22):**
+1. **Ri-derivare `data/lstm_dataset_dvol.npz`** dal npz production 2026-07-19 (`scripts/vol/dev_vols_dvol_append.py` — il vecchio dvol npz era stale, eliminato con l'igiene 07-20). ⚠ Deve leggere lo stesso npz che leggerà il giudice (`QUANTSYS_DATASET_NPZ`, contratto DVOL-come-feature pre-reg 2026-07-17).
+2. **Scrivere NUOVA pre-reg col pattern-③ standard** (ratificato 2026-07-20 ②): conteggi regime EX-ANTE con `a3_cond3_counts` PRIMA di aprire la finestra GPU. ⚠ **Nodo di disegno aperto (ereditato da 07-19 ⑧):** sul val corrente r1≈613 < 800 (scarsità stress STRUTTURALE, mix time-varying) → una condizione ③ "≥800 nel regime minimo" sarebbe di nuovo predeterminata a "nessuna conclusione". La condizione campionaria va RIDISEGNATA (gate ② solo su regimi qualificati r0/r2 su val, stress demandato al one-shot su test) prima di toccare la GPU.
+3. Solo a pre-reg scritta e ③ verificata ex-ante → finestra GPU (probe DVOL-come-feature, sandbox dedicata `models_dvol_probe`, giudice val-first candidato-vs-incumbent).
+
+**Monitoraggio ricorrente per sessione (economico):** `avvio_sessione.ps1` + `derive_mfiv.py` + `mfiv_comparator_judge.py --count-only` (verso n≥40 MFIV e n≥30 gate forward).
+
+---
+
 ## 🟢 2026-07-20 — A8-BIS IN ESECUZIONE (braccio 1 chiuso su val) + ROADMAP RIORDINATA (decisione utente)
 
 **① A8-BIS braccio 1 (baseline riaddestrata) COMPLETATO E GIUDICATO su val.** Training pulito (5/5 seed, 28.5 min, exit 0, sandbox `models_base_ext`, ECE 0.077). Giudice val (`qlike_report_1h_val_models_base_ext.json`): **QLIKE NN 0.26206** · HAR 0.35698 · naive 0.71288 · NN/HAR 0.734 · n=6485; per-regime r0[2075]=0.28631, r1[613]=0.24306 (descrittivo), r2[3797]=0.25187 — conteggi = ex-ante della pre-reg (coerenza ③ confermata). Sanity: scaler center=−7.176/scale=1.427 (log-RV), 0 fallback gate, lag +1h. **Soglie derivate (meccaniche dalla pre-reg) per il candidato:** ① ≤ 0.97·0.26206 = **0.25420**; ② r0 ≤ 1.05·0.28631 = **0.30062**, r2 ≤ 1.05·0.25187 = **0.26447**. Descrittivo non decisionale: baseline-ext più forte dell'incumbent old-scaler (0.26206 vs 0.28516, atteso da scaler/span allineati). **Braccio 2 (mixup) in training nel terminale utente** → poi giudice, valutazione ①②③, esiti qui comunque; a PASS val → one-shot test. Invariante attivo: candele/npz/regime_probs congelati, `models/itransformer` READ-ONLY.
