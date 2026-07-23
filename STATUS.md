@@ -5,6 +5,40 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — B4-BIS PROBE DVOL-COME-FEATURE (linea vol 1h, target log_rv) · 2026-07-23
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti.** Ri-pre-registrazione sul dataset esteso della pre-reg DVOL 2026-07-17 (RINVIATA/mai eseguita): due modifiche di disegno vincolanti rispetto alla v1 — **(A) baseline RIADDESTRATA** (non l'incumbent production) e **(B) condizione ③ col pattern-③ standard** (gate ② solo sui regimi qualificati su val, stress al one-shot su test). Razionale in ⑤ sotto. UN solo run per braccio: nessuno sweep su trasformazioni/finestre/lag DVOL; qualunque variante suggerita dai risultati (VRP-spread dvol−rv, MFIV@30h-come-feature, lag alternativi) = NUOVA pre-registrazione. Le sole quantità osservate ex-ante sono model-independent: conteggi regime (③, dal npz congelato) e copertura `dvol_avail` (dal Passo 1).
+
+**① Ipotesi/prior onesto (pre-dichiarato):** la letteratura HAR-RV-IV (Busch–Christensen–Nielsen 2011; Christensen–Prabhala 1998) trova contenuto informativo incrementale della IV sulla RV futura oltre i lag di RV, e DVOL è informazione **risk-neutral genuinamente nuova** rispetto al set price+volume+macro corrente (stesso razionale del filone L2). CONTRO: (a) tenor mismatch strutturale 30d (DVOL) vs 30h (target) — segnale diluito dalla media di lungo periodo; (b) l'incumbent NN già batte HAR-RV del 30% in QLIKE → parte dell'informazione IV può essere già catturata dalle non-linearità sui lag di RV; (c) copertura parziale del train (DVOL da 2021-03-24, `dvol_avail`=0.645: ~35% del train gestito con indicator=0 + fill → rumore aggiuntivo). **Scenario base atteso: miglioramento nullo o sotto soglia; un PASS ≥3% sarebbe informativo e aprirebbe il filone IV-feature.**
+
+**② Feature pre-dichiarate (3 colonne, stream macro X_macro_*, risoluzione ORARIA — già derivate, Passo 1 del 2026-07-23):** `dvol_log` = log(DVOL) via `merge_asof` backward causale (ultimo valore ≤ t, staleness cap 24h); `dvol_chg_24h` = Δ24h di log(DVOL); `dvol_avail` ∈ {0,1} (indicator). Fill dove non disponibile: mediana della porzione DISPONIBILE del **solo train** (no leakage) + indicator=0 (`dvol_log`=4.1228, `dvol_chg_24h`=−0.00181). Normalizzazione: `MacroNormalizer` refit whole-df (pattern macro pre-esistente). `data/lstm_dataset_dvol.npz` (X_macro 90→93) verificato bit-identico al production su tutte le chiavi non aumentate; npz production INTATTO.
+
+**③ Dataset e bracci — ENTRAMBI riaddestrati sul npz production 07-19** (l'incumbent `models/itransformer` ha scaler/span STALE rispetto al npz corrente: riusarlo confonderebbe il lever DVOL con il distribution shift — lezione A8-BIS 2026-07-20 ④; il confronto vs incumbent resta solo diagnostico):
+- **baseline (no DVOL):** `QUANTSYS_ARCH=itransformer`, sandbox `QUANTSYS_MODELS_ROOT=models_base_ext`, npz production `data/lstm_dataset.npz` (90-macro, `QUANTSYS_DATASET_NPZ` NON settato), `02_train.py --n-ensemble 5`, config invariata.
+- **candidato (DVOL):** `QUANTSYS_ARCH=itransformer`, sandbox `QUANTSYS_MODELS_ROOT=models_dvol_probe`, `QUANTSYS_DATASET_NPZ=data/lstm_dataset_dvol.npz` (93-macro), 5 seed, stessa config (il lever è il dataset, non gli iperparametri).
+- `models/itransformer` (vol PASS production, VPS-mirror) READ-ONLY.
+
+**Script/giudice:** appender `scripts/vol/dev_vols_dvol_append.py` (FATTO); training `scripts/02_train.py --n-ensemble 5`; giudice `scripts/vol/dev_vols_qlike.py` su entrambi i bracci, stesso split, stessi sample, stessa inversione completa z→raw. ⚠ Verificare che il report sia suffissato per-`models_root` (come A8-BIS `qlike_report_1h_val_models_base_ext.json`): `qlike_report_1h_val.json` è clobberato tra i due run se il path non è per-sandbox.
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a gate val superato, one-shot.
+**Leva sperimentale:** `QUANTSYS_DATASET_NPZ` (override path npz in `02_train.py`+`dev_vols_qlike.py`, **inerte di default** → path production bit-identico; patch `dad4adb`, 7 test inerzia PASS) + sandbox `QUANTSYS_MODELS_ROOT` dedicate. Nessun file production toccato.
+
+**④ Conteggi regime EX-ANTE (argmax `build_regime_gate`, model-independent, dal npz congelato 07-19 — identici ad A8-BIS, stesso npz/split):** val n=6485: **r0=2075, r1=613, r2=3797** · test n=6486: **r0=1591, r1=818, r2=4077**. → **Regimi qualificati (≥800): su VAL r0 e r2** (r1=613 sotto soglia STRUTTURALMENTE — mix regime time-varying, stress ~9,5% del val recente — escluso dal gate ② su val, riportato solo come descrittivo; caveat: stress NON validato su val); **su TEST tutti e tre** (copertura stress validata al one-shot).
+
+**Condizioni di PASS (tutte, AND, su val):**
+1. `QLIKE_val(dvol, ensemble 5 seed) ≤ 0.97 · QLIKE_val(baseline riaddestrata)` (miglioramento relativo ≥3%, stessi sample).
+2. Nessun regime QUALIFICATO distrutto: per ogni regime con ≥800 sample val (ex-ante: r0, r2), `QLIKE_val(dvol) ≤ 1.05 · QLIKE_val(baseline)` in quel regime. r1: descrittivo, non gating.
+3. Validità campione (PRE-VERIFICATA ex-ante, per costruzione non impossibile): ≥5000 sample val E ≥2 regimi qualificati — soddisfatta (6485; r0+r2). Sotto: NESSUN run, nessuna conclusione.
+
+**One-shot su test (solo a gate val superato):** stesse ①+②, con ② estesa a TUTTI i regimi (tutti ≥800 su test, ex-ante) → include la validazione stress assente su val.
+
+**⑤ Razionale delle due modifiche vs pre-reg v1 (2026-07-17):** (A) la v1 confrontava vs l'incumbent NON riaddestrato — A8-BIS ha dimostrato che l'incumbent old-scaler confonde lever e distribution shift (il "−4.94% mixup" era per ~intero artefatto di scaler; contro baseline riaddestrata → −0.79% ≈ rumore): B4-bis usa baseline riaddestrata a parità di tutto tranne le 3 colonne (disegno appaiato pulito). (B) la ③ v1 ("≥800 nel regime minimo") su questo val (r1=613) sarebbe predeterminata a "nessuna conclusione": ridisegno col pattern-③ ratificato 2026-07-20 ② (gate ② su regimi qualificati r0/r2 su val, stress demandato al test dove qualifica).
+
+**Diagnostica non decisionale:** spread QLIKE tra i 5 membri per braccio; QLIKE candidato sul sotto-campione `dvol_avail=1` vs =0 del train (sanity); ratio r1 descrittivo su val; confronto vs incumbent production (old-scaler) senza valore di gate.
+
+**Conseguenze pre-dichiarate:** PASS val+test → le 3 feature DVOL diventano **candidate** per il ciclo di retrain SUCCESSIVO della linea vol (MAI swap del live durante il forward v1/v2; deployment richiede pre-reg dedicata) e si sbloccano (con NUOVE pre-reg) le varianti VRP-spread dvol−rv e MFIV@30h-come-feature; la baseline-ext NON è promossa (misura il lever, non il modello in carica). FAIL (val o test) → filone "DVOL-come-feature" chiuso e marcato **FALLITO sul dataset esteso**, `QUANTSYS_DATASET_NPZ` resta flag inerte documentato, `lstm_dataset_dvol.npz`+sandbox eliminabili; resta viva (separata) l'idea MFIV@30h come **comparatore di edge** per la pre-reg v2 di 04b, indipendente da questo esito; scritto comunque. A chiusura: azzerare env sperimentali, stato production invariato.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — MFIV-COMPARATORE v2 (04b, braccio short-vol) · 2026-07-20
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun numero decisionale visto: PnL per-expiry, edge per-variante e ogni correlazione MAI calcolati. Uniche quantità osservate ex-ante (model-independent, pattern-③ standard): conteggi di copertura timestamp-only (sotto) e il wedge MFIV−ATM già pubblico in STATUS (mediana +3.39 vol pt, p10 +2.33 / p90 +5.98 su 1.911 tick — descrittivo D4, mai usato come gate).
