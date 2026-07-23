@@ -5,7 +5,7 @@
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — B4-BIS PROBE DVOL-COME-FEATURE (linea vol 1h, target log_rv) · 2026-07-23
+## 🎯 PRE-REGISTRAZIONE GATE — B4-BIS PROBE DVOL-COME-FEATURE (linea vol 1h, target log_rv) · 2026-07-23 · **CHIUSO: FAIL SU VAL 2026-07-23 (⑥ sotto)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti.** Ri-pre-registrazione sul dataset esteso della pre-reg DVOL 2026-07-17 (RINVIATA/mai eseguita): due modifiche di disegno vincolanti rispetto alla v1 — **(A) baseline RIADDESTRATA** (non l'incumbent production) e **(B) condizione ③ col pattern-③ standard** (gate ② solo sui regimi qualificati su val, stress al one-shot su test). Razionale in ⑤ sotto. UN solo run per braccio: nessuno sweep su trasformazioni/finestre/lag DVOL; qualunque variante suggerita dai risultati (VRP-spread dvol−rv, MFIV@30h-come-feature, lag alternativi) = NUOVA pre-registrazione. Le sole quantità osservate ex-ante sono model-independent: conteggi regime (③, dal npz congelato) e copertura `dvol_avail` (dal Passo 1).
 
@@ -36,6 +36,14 @@
 **Diagnostica non decisionale:** spread QLIKE tra i 5 membri per braccio; QLIKE candidato sul sotto-campione `dvol_avail=1` vs =0 del train (sanity); ratio r1 descrittivo su val; confronto vs incumbent production (old-scaler) senza valore di gate.
 
 **Conseguenze pre-dichiarate:** PASS val+test → le 3 feature DVOL diventano **candidate** per il ciclo di retrain SUCCESSIVO della linea vol (MAI swap del live durante il forward v1/v2; deployment richiede pre-reg dedicata) e si sbloccano (con NUOVE pre-reg) le varianti VRP-spread dvol−rv e MFIV@30h-come-feature; la baseline-ext NON è promossa (misura il lever, non il modello in carica). FAIL (val o test) → filone "DVOL-come-feature" chiuso e marcato **FALLITO sul dataset esteso**, `QUANTSYS_DATASET_NPZ` resta flag inerte documentato, `lstm_dataset_dvol.npz`+sandbox eliminabili; resta viva (separata) l'idea MFIV@30h come **comparatore di edge** per la pre-reg v2 di 04b, indipendente da questo esito; scritto comunque. A chiusura: azzerare env sperimentali, stato production invariato.
+
+**⑥ ESITO — FAIL SU VAL (condizione ①), niente one-shot su test.** Entrambi i bracci addestrati puliti sul npz production 07-19 (5/5 seed ciascuno, exit 0; baseline `models_base_ext` ~27 min, candidato `models_dvol_probe` 93-macro ~31 min). Giudici val sugli stessi 6485 sample (report suffissati per-sandbox, nessun clobber):
+- **① QLIKE_val: candidato 0.25939 vs baseline 0.26206 → ratio 0.9898 (−1.02%), soglia era ≤0.25420 (−3%) → ① FAIL.** Il candidato batte la baseline di 0.0027 QLIKE assoluti = dentro il rumore di seed-draw.
+- **② sarebbe PASSATA** (r0 0.28719 ≤ 0.30063; r2 0.24638 ≤ 0.26446; r1 descrittivo 0.24582 vs 0.24306, +1.1%) ma il gate è AND → irrilevante.
+- **③ ex-ante OK** (n=6485; r0=2075/r1=613/r2=3797, r0+r2 qualificati — conteggi confermati nel run del giudice, coerenti con ④).
+- **Diagnostica non decisionale:** MSE(log) migliora di più (candidato 0.5691 vs baseline 0.6062, −6.1%) ma QLIKE no → il segnale DVOL sposta la media log-RV ma NON migliora la calibrazione della varianza dove QLIKE penalizza (la metrica di gate, sensibile alla sottostima di σ²). NN/HAR 0.7266 (candidato) vs 0.7341 (baseline).
+
+**Lettura scientifica (conferma lo scenario base pre-dichiarato ①):** il tenor mismatch strutturale 30d (DVOL) vs 30h (target) + l'incumbent NN che già batte HAR-RV del 30% (gran parte dell'informazione IV catturata dalle non-linearità sui lag di RV) → DVOL@30d non aggiunge potere predittivo materiale sulla RV a 30h in QLIKE. **Conseguenze pre-dichiarate applicate:** filone "DVOL-come-feature" **FALLITO sul dataset esteso**, `QUANTSYS_DATASET_NPZ` resta flag inerte documentato; `lstm_dataset_dvol.npz` (3.26 GB) + sandbox `models_base_ext`/`models_dvol_probe` eliminabili; env sperimentali azzerati; `models/itransformer` production mai toccato. Resta viva (separata) la pre-reg v2 MFIV@30h-come-**comparatore di edge** di 04b, indipendente da questo esito. Le varianti VRP-spread e MFIV-come-feature NON si sbloccano (dipendevano dal PASS).
 
 ---
 
@@ -91,6 +99,18 @@
 **Conseguenze pre-dichiarate:** PASS val+test → `mixup_alpha: 0.2` **candidato** per il prossimo ciclo di retrain della linea vol (MAI swap del live durante il forward v1/v2; il deployment richiederebbe pre-reg dedicata); la baseline-ext NON è promossa da questo esperimento (misura il lever, non il modello in carica). FAIL (val o test) → mixup marcato **FALLITO sul dataset esteso** (chiusura definitiva del lever: il descrittivo −4.94% resta un falso segnale documentato), overlay eliminato, A10 unico candidato training residuo; scritto comunque. A chiusura: sandbox eliminabili, env azzerati, stato production invariato.
 
 **Diagnostica non decisionale:** spread QLIKE tra i 5 membri per braccio; ratio r1 descrittivo su val; confronto candidato vs incumbent production (old-scaler) senza valore di gate.
+
+---
+
+## 🟢 2026-07-23 — Monitoraggio ricorrente + B4-BIS DVOL eseguito e CHIUSO (FAIL su val)
+
+**① Monitoraggio ricorrente OK (CPU-only):** `avvio_sessione.ps1` heartbeat 4/4 freschi (IV 0.1h · L2 0.0h · Trades 0.2h · 04b 1.5h); merge — `trades.jsonl` 24→**25 (+1)** → **n=24 executed** (verso n≥30); `hedge_ledger.jsonl` 11→**15 (+4)** (hedge C3 continua a scattare, campione hedged in accumulo); `atm_30h` +370, chain 22–23/07 (+315k). B7 fresco (0 barre nuove). **MFIV v2:** `derive_mfiv.py` 2773→**3143 (+370)**, wedge convessità mediana **+3.15 vol pt** (p10 +2.20/p90 +4.77, stabile); `mfiv_comparator_judge.py --count-only` = **16 expiry qualificati** (era 15 il 22/07; n_min=40) → sotto soglia, NESSUN run one-shot, PnL/edge MAI calcolati. Valutazione ~metà agosto.
+
+**② B4-BIS DVOL — ri-derivazione npz + pre-reg + finestra GPU, CHIUSO FAIL SU VAL nella stessa sessione.** Passo 1: `dev_vols_dvol_append.py` → `lstm_dataset_dvol.npz` (X_macro 90→93: dvol_log/dvol_chg_24h/dvol_avail, VERIFICA PASS, copertura val 1.000, production npz intatto). Passo 2: pre-reg col disegno baseline-riaddestrata + pattern-③ standard, committata `e3a9e97` PRIMA di ogni numero (sezione in testa). Passo 3 (GPU, sequenziale): baseline `models_base_ext` (QLIKE_val **0.26206**) + candidato `models_dvol_probe` 93-macro (QLIKE_val **0.25939**) → **ratio 0.9898 (−1.02%) > soglia 0.97 → ① FAIL** (② sarebbe passata, gate AND). **Filone DVOL-come-feature FALLITO sul dataset esteso.** Dettaglio completo in ⑥ della pre-reg B4-bis (in testa). Lettura: tenor mismatch 30d→30h + incumbent che già cattura l'informazione IV via lag RV → nessun edge materiale in QLIKE (MSE-log migliora −6% ma non la calibrazione σ² dove QLIKE conta).
+
+**Problemi aperti:** (a) igiene disco post-gate: `lstm_dataset_dvol.npz` (3.26 GB) + sandbox `models_base_ext`/`models_dvol_probe` eliminabili (rigenerabili); (b) gate forward a calendario: n≥30 leg opzioni ~fine luglio (n=24), giudice hedged n≥20 ~metà agosto; (c) MFIV v2 one-shot alla prima sessione con n≥40.
+
+**▶️ RIPARTI DA QUI:** nessun item GPU attivo residuo (B4-bis chiuso FAIL; A10 sparsity è l'unico candidato training superstite in roadmap, non pre-registrato). Filone attivo = **monitoraggio ricorrente** a ogni sessione (`avvio_sessione.ps1` + `derive_mfiv.py` + `mfiv_comparator_judge.py --count-only`) verso i due gate forward (n≥30 opzioni ~fine luglio, MFIV n≥40 + hedged n≥20 ~metà agosto). Igiene disco B4-bis da fare (punto (a) sopra).
 
 ---
 
