@@ -188,11 +188,11 @@ nvidia-smi -pl 215    # ripristina · restore
 
 ### 2.2 Collector forward (dato non rigenerabile) · Forward collectors (non-regenerable data)
 
-🇮🇹 Due collector raccolgono **in avanti** storico non disponibile gratis altrove. Sul PC di casa vanno **rilanciati dopo ogni riavvio** (non sono servizi) — comandi di avvio/stop nella sezione *5.3 Collector forward*. Dal 2026-07-14 il percorso primario è il **VPS always-on** (kit in `deploy/vps/`, sync `scripts/vps/` — vedi *5.3bis*): elimina i buchi PC-off (coverage IV misurata al 18.6% delle ore, 2026-06-12→07-14).
+🇮🇹 Due collector raccolgono **in avanti** storico non disponibile gratis altrove. Dal 2026-07-18 girano **solo sul VPS** (servizi systemd): a casa non va rilanciato nulla — routine di sessione in *5.3*. Dal 2026-07-14 il percorso primario è il **VPS always-on** (kit in `deploy/vps/`, sync `scripts/vps/` — vedi *5.3bis*): elimina i buchi PC-off (coverage IV misurata al 18.6% delle ore, 2026-06-12→07-14).
 - **`01c_iv_poller.py`** — IV Deribit short-tenor → `data/iv/` (UNICO dato non rigenerabile).
 - **`01d_orderbook_recorder.py`** — order-book L2 Binance → `data/orderbook/` (Strada B1 microstruttura).
 
-**EN** Two collectors gather **forward** history not freely available elsewhere. On the home PC they must be **relaunched after every reboot** (not services) — start/stop commands in *5.3 Forward collectors*. Since 2026-07-14 the primary path is the **always-on VPS** (kit in `deploy/vps/`, sync in `scripts/vps/` — see *5.3bis*): it removes the PC-off gaps (measured IV coverage 18.6% of hours, 2026-06-12→07-14).
+**EN** Two collectors gather **forward** history not freely available elsewhere. Since 2026-07-18 they run **on the VPS only** (systemd services): nothing to relaunch at home — session routine in *5.3*. Since 2026-07-14 the primary path is the **always-on VPS** (kit in `deploy/vps/`, sync in `scripts/vps/` — see *5.3bis*): it removes the PC-off gaps (measured IV coverage 18.6% of hours, 2026-06-12→07-14).
 - **`01c_iv_poller.py`** — Deribit short-tenor IV → `data/iv/` (the ONLY non-regenerable data).
 - **`01d_orderbook_recorder.py`** — Binance L2 order-book → `data/orderbook/` (B1 microstructure track).
 
@@ -403,41 +403,42 @@ python run_all.py --distill                       # full + distillation
 
 **EN** Started by `run_all.py` (live phase, unless `--skip-live`) or by `python scripts/04_live_signals.py`. Path: `LiveCandleBuffer`→`FeatureAssembler`→`FeatureBuilder.build`→`_deterministic_predict`→`denormalize_predictions`→`SignalGenerator` (bit-perfect parity with the backtest). Paper-only, no real orders. ⚠ Directional backtest negative OOS → paper-trading only accumulates real trades. Do **NOT** run live + GPU training/inference in parallel (CUDA contention).
 
-### 5.3 Collector forward & vol-paper · Forward collectors & vol-paper
+### 5.3 Routine di sessione (lato casa) · Session routine (home side)
 
-🇮🇹 Dal 2026-07-14 sul PC girano **2 processi** (poller IV `01c` + vol-paper `04b`); il recorder L2 `01d` vive sul VPS (§5.3bis) e NON va più lanciato a casa. I processi locali **NON sono servizi**: dopo un riavvio muoiono. **Avvio consigliato (tutto-in-uno, anti-duplicazione):**
-
-```powershell
-.\avvio_sessione.ps1          # pull+merge VPS + rilancia 01c e 04b SOLO se non già vivi
-```
-
-🇮🇹 Avvio **manuale** equivalente (percorso `.venv` ESPLICITO — evita l'ambiguità `python`→interprete base; ⚠ senza anti-dup: verifica prima che non siano già vivi):
+🇮🇹 Dal 2026-07-18 il PC di casa è **completamente passivo**: nessun processo residente locale — i collector `01c`/`01d`/`01e` e il vol-paper `04b` girano tutti come **servizi systemd sul VPS** (§5.3bis). **Unico comando a ogni sessione** (dalla root di progetto):
 
 ```powershell
-$py = "E:\quantsys_project\.venv\Scripts\python.exe"
-Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/01c_iv_poller.py"
-Start-Process -WindowStyle Hidden -WorkingDirectory "E:\quantsys_project" -FilePath $py -ArgumentList "scripts/04b_vol_paper.py","--execute"
-# 01d SOLO in emergenza (VPS giù per giorni): scripts/01d_orderbook_recorder.py
+.\avvio_sessione.ps1          # [-Days 7] [-SkipPull] [-SkipMonitor]
 ```
 
-🇮🇹 **Stop** (mirato sulla command line → cattura stub+worker, non tocca altri `python.exe`; `-Force` perché `-WindowStyle Hidden`; il regex include `01d` per catturare eventuali istanze residue/di emergenza):
+🇮🇹 Cosa fa, in ordine (dal 2026-07-25 include il monitoraggio ricorrente, prima manuale):
+
+| # | Blocco | Contenuto |
+|---|---|---|
+| ① | **Pull + merge VPS** | `pull_vps_data.ps1`: push `macro_features.parquet` → VPS, scp collector → `data/vps_staging/`, merge dedup nella copia canonica, **heartbeat staleness dei 4 collector** (IV / L2 / trades / 04b), staging auto-pulito |
+| ② | **Freshness regime B7** | se ≥168 barre orarie oltre il checkpoint walk-forward → `01b --regime-incremental` in background (anti-dup su `01b` già vivo); con candele congelate stampa "fresco" ed è un no-op |
+| ③ | **Monitoraggio linea vol** (CPU-only) | `scripts/vol/derive_mfiv.py` incrementale (**dopo** il merge per costruzione: legge la chain appena scaricata) + `mfiv_comparator_judge.py --count-only` + contatori dei gate forward aperti (`n executed` di `trades.jsonl` verso n≥30, eventi `hedge_ledger.jsonl` verso n≥20) |
+
+🇮🇹 ⚠ **Disciplina one-shot (pre-reg MFIV v2):** il blocco ③ non esegue **mai** il giudice vero — `--count-only` calcola solo timestamp (nessun PnL, nessun edge, nessuna correlazione) e il giudice ha comunque il guard `n < N_MIN=40 → NO_RUN` senza scrivere report. Il run one-shot va lanciato **a mano** alla prima sessione con n≥40. Fail-soft: ogni passo che fallisce logga un warning senza fermare la routine (`-SkipMonitor` salta il blocco ③, `-SkipPull` il blocco ①).
+
+🇮🇹 ⚠ **EMERGENZA** — solo su `WARN IV poller` nell'heartbeat (collector VPS giù), lanciare a mano finché il VPS non torna: `.\.venv\Scripts\python.exe scripts\01c_iv_poller.py`. `04b` **NON va MAI lanciato a casa**: due `--execute` gestirebbero la stessa posizione testnet (doppi ordini). Stop di un processo d'emergenza (mirato sulla command line → cattura stub+worker, non tocca altri `python.exe`):
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-  Where-Object { $_.CommandLine -match '01c_iv_poller|04b_vol_paper|01d_orderbook_recorder' } |
+  Where-Object { $_.CommandLine -match '01c_iv_poller|01d_orderbook_recorder' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
-🇮🇹 Per fermarne **uno solo**, restringi il regex (es. `'04b_vol_paper'`). Verifica: rilancia lo stesso `Get-CimInstance ... | Select-Object ProcessId` senza il `ForEach-Object` → deve tornare vuoto. **Salute:** conta i processi **LOGICI** non OS — ogni `.venv\python.exe` è stub+worker = 2 OS, attesi **2 logici** (confronta i `ParentProcessId`). Crescita attesa locale: `data/iv/atm_30h.parquet` ~144 righe/g, `results/vol_paper/forecasts.parquet` ~24 righe/g; `data/orderbook/*` cresce via **pull dal VPS**, non da un processo locale. Log vivi in `logs/quantsys_*.log` (più recenti per mtime), **non** i redirect `iv_poller.log`/`vol_paper.log`. ⚠ NON girare training/inferenza GPU in parallelo a `04b` senza fermarlo.
+🇮🇹 **Salute:** conta i processi **LOGICI** non OS — ogni `.venv\python.exe` è stub+worker = 2 OS (confronta i `ParentProcessId`). Crescita attesa dei dati **via pull**, non da processi locali: `data/iv/atm_30h.parquet` ~288 righe/g (cadenza VPS 5 min), `results/vol_paper/forecasts.parquet` ~24 righe/g, `data/iv/mfiv_30h.parquet` cresce come `atm_30h`. Log vivi in `logs/quantsys_*.log` (più recenti per mtime). ⚠ NON girare training/inferenza GPU in parallelo a un `04b` locale (a regime non ne gira nessuno).
 
-**EN** Since 2026-07-14 the PC runs **2 processes** (IV poller `01c` + vol-paper `04b`); the L2 recorder `01d` lives on the VPS (§5.3bis) and must NOT be launched at home anymore. Local processes **are NOT services**: they die on reboot. **Recommended startup (all-in-one, anti-duplication):** `.\avvio_sessione.ps1` (VPS pull+merge + relaunches 01c and 04b ONLY if not already alive). Manual equivalent: block above (EXPLICIT `.venv` path; ⚠ no anti-dup: check they are not already running; `01d` only as an emergency if the VPS is down for days). **Stop**: block above (command-line matched → catches stub+worker, leaves other `python.exe` untouched; the regex includes `01d` to catch residual/emergency instances). To stop **a single one**, narrow the regex. Verify: re-run the same `Get-CimInstance ... | Select-Object ProcessId` without `ForEach-Object` → must come back empty. **Health:** count **LOGICAL** processes, not OS — each `.venv\python.exe` is stub+worker = 2 OS, expected **2 logical** (compare `ParentProcessId`). Expected local growth: `data/iv/atm_30h.parquet` ~144 rows/day, `results/vol_paper/forecasts.parquet` ~24 rows/day; `data/orderbook/*` grows via the **VPS pull**, not a local process. Live logs in `logs/quantsys_*.log` (newest by mtime), **not** the `iv_poller.log`/`vol_paper.log` redirects. ⚠ Do NOT run GPU training/inference in parallel with `04b` without stopping it.
+**EN** Since 2026-07-18 the home PC is **fully passive**: no resident local process — collectors `01c`/`01d`/`01e` and vol-paper `04b` all run as **systemd services on the VPS** (§5.3bis). **Single command per session** (from the project root): block above. What it does, in order (since 2026-07-25 it includes the recurring monitoring, previously manual): ① **VPS pull + merge** (`pull_vps_data.ps1`: push `macro_features.parquet` → VPS, scp collectors → `data/vps_staging/`, dedup merge into the canonical copy, **staleness heartbeat of the 4 collectors**, auto-cleaned staging); ② **B7 regime freshness** (≥168 hourly bars past the walk-forward checkpoint → background `01b --regime-incremental`, anti-dup; a no-op with frozen candles); ③ **vol-line monitoring** (CPU-only): incremental `scripts/vol/derive_mfiv.py` (**after** the merge by construction: it reads the freshly pulled chain) + `mfiv_comparator_judge.py --count-only` + open forward-gate counters (`trades.jsonl` executed count toward n≥30, `hedge_ledger.jsonl` events toward n≥20). ⚠ **One-shot discipline (MFIV v2 pre-reg):** block ③ **never** runs the real judge — `--count-only` computes timestamps only (no PnL, no edge, no correlation) and the judge guards `n < N_MIN=40 → NO_RUN` writing no report; the one-shot run must be launched **by hand** at the first session with n≥40. Fail-soft: a failing step warns without stopping the routine (`-SkipMonitor` skips ③, `-SkipPull` skips ①). ⚠ **EMERGENCY** — only on a `WARN IV poller` heartbeat (VPS collector down), run by hand until the VPS is back: `.\.venv\Scripts\python.exe scripts\01c_iv_poller.py`. `04b` must **NEVER** run at home: two `--execute` would manage the same testnet position (double orders). Emergency stop: block above (command-line matched → catches stub+worker, leaves other `python.exe` untouched). **Health:** count **LOGICAL** processes, not OS — each `.venv\python.exe` is stub+worker = 2 OS (compare `ParentProcessId`). Expected data growth **via pull**, not from local processes: `data/iv/atm_30h.parquet` ~288 rows/day (5-min VPS cadence), `results/vol_paper/forecasts.parquet` ~24 rows/day, `data/iv/mfiv_30h.parquet` grows like `atm_30h`. Live logs in `logs/quantsys_*.log` (newest by mtime). ⚠ Do NOT run GPU training/inference alongside a local `04b` (none runs in steady state).
 
 #### 5.3bis Collector 24/7 su VPS · 24/7 collectors on the VPS
 
 🇮🇹 `01c`+`01d` girano come **servizi systemd** su un VPS EU always-on (netcup, DEPLOYED 2026-07-14; **host/IP privati: SOLO in `config/secrets.yaml` → blocco `vps:`**, mai nel repo/doc). Deploy completo: `deploy/vps/README.md` (geo-test 451 Binance → deploy key → `setup_vps.sh` one-shot → verify). Sync verso casa dalla root di progetto:
 
 ```powershell
-.\avvio_sessione.ps1              # TUTTO-IN-UNO alla riaccensione: pull+merge VPS + rilancio 01c/04b (anti-dup)
+.\avvio_sessione.ps1              # TUTTO-IN-UNO di sessione: pull+merge VPS + check B7 + monitoraggio vol (§5.3)
 .\scripts\vps\pull_vps_data.ps1   # solo sync: host da secrets.yaml → scp → data/vps_staging/ + merge + heartbeat
 ```
 
@@ -496,9 +497,9 @@ Live header: BTC spot (index), 30d DVOL, 30d ATM IV, total OI/volume, put/call r
 
 ### 5.5 Fermare tutto · Stopping everything
 
-🇮🇹 `Ctrl+C` nel terminale di `run_all.py` (o del server dashboard): ferma la pipeline e, in un run completo, anche il feed live WebSocket. ⚠ Se la dashboard era detached (`Start-Process`), `Ctrl+C` non basta: usa lo `Stop-Process` mirato (§5.4). I 3 processi di sfondo (poller IV, recorder L2, vol-paper) si fermano col blocco *Stop* in §5.3.
+🇮🇹 `Ctrl+C` nel terminale di `run_all.py` (o del server dashboard): ferma la pipeline e, in un run completo, anche il feed live WebSocket. ⚠ Se la dashboard era detached (`Start-Process`), `Ctrl+C` non basta: usa lo `Stop-Process` mirato (§5.4). I collector di sfondo non girano più a casa (VPS, §5.3bis): un'eventuale istanza locale d'emergenza si ferma col blocco *Stop* in §5.3.
 
-**EN** `Ctrl+C` in the `run_all.py` terminal (or the dashboard server): stops the pipeline and, in a full run, the WebSocket live feed too. ⚠ If the dashboard was detached (`Start-Process`), `Ctrl+C` is not enough: use the targeted `Stop-Process` (§5.4). The 3 background processes (IV poller, L2 recorder, vol-paper) are stopped via the *Stop* block in §5.3.
+**EN** `Ctrl+C` in the `run_all.py` terminal (or the dashboard server): stops the pipeline and, in a full run, the WebSocket live feed too. ⚠ If the dashboard was detached (`Start-Process`), `Ctrl+C` is not enough: use the targeted `Stop-Process` (§5.4). Background collectors no longer run at home (VPS, §5.3bis): any emergency local instance is stopped via the *Stop* block in §5.3.
 
 ---
 

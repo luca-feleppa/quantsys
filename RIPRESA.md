@@ -10,17 +10,17 @@
 
 ## Da fare (ordine = roadmap corrente) · To do (order = current roadmap)
 
-1. 🇮🇹 **MFIV-comparatore v2 — ✅ PRE-REG SCRITTA 2026-07-20** (in cima a STATUS): gate Δρ Spearman appaiato MFIV-vs-ATM sui PnL short-straddle per-expiry, ③ n≥40 qualificati (oggi 15, +~1/giorno → run one-shot ~metà agosto). ✅ **Giudice SCRITTO 2026-07-20** (`scripts/vol/mfiv_comparator_judge.py`, smoke sintetico 3/3, guard n≥40 fail-fast; conteggio con regola causale = 12). Residuo: attesa campione (+~1/giorno) — a ogni sessione: `derive_mfiv.py` (derivazione incrementale) + `mfiv_comparator_judge.py --count-only`; run one-shot alla prima sessione con n≥40 (~metà agosto).
-   **EN** MFIV-comparator v2 — ✅ PRE-REG WRITTEN + JUDGE WRITTEN 2026-07-20 (synthetic smoke 3/3; causal-rule count = 12). Remaining: sample wait — per session run incremental derivation + `--count-only`; one-shot at the first session with n≥40 (~mid-August).
+1. 🇮🇹 **MFIV-comparatore v2 — ✅ PRE-REG + GIUDICE SCRITTI 2026-07-20** (in cima a STATUS): gate Δρ Spearman appaiato MFIV-vs-ATM sui PnL short-straddle per-expiry, ③ n≥40 qualificati (**18 il 25/07**, +~1/giorno → run one-shot ~metà agosto). Residuo: **solo attesa campione** — il monitoraggio per-sessione (`derive_mfiv.py` + `--count-only`) è **automatizzato dal blocco ③ di `avvio_sessione.ps1`** dal 2026-07-25: niente da lanciare a mano. Run one-shot **MANUALE** alla prima sessione in cui la routine stampa ≥40.
+   **EN** MFIV-comparator v2 — ✅ PRE-REG + JUDGE WRITTEN 2026-07-20 (**18 qualifying on 25/07**). Remaining: sample wait only — per-session monitoring is now **automated by block ③ of `avvio_sessione.ps1`** (since 2026-07-25). The one-shot run stays **MANUAL** at the first session printing ≥40.
 
-2. 🇮🇹 **B4-bis DVOL:** ri-derivare `lstm_dataset_dvol.npz` dal npz NUOVO (`dev_vols_dvol_append.py`) + NUOVA pre-reg col pattern-③ standard (invariante npz di A8-BIS decaduto: si può procedere).
-   **EN** B4-bis DVOL: re-derive the dvol npz from the NEW npz + new pre-reg with the standard ③-pattern (the A8-BIS npz invariant has lapsed: clear to proceed).
+2. 🇮🇹 **B4-bis DVOL: ✅ CHIUSO FAIL 2026-07-23** (pre-reg `e3a9e97`, close `b463763`): candidato 0.25939 vs baseline riaddestrata 0.26206 = **−1.02% ≫ soglia −3% → ① FAIL**, niente one-shot su test. Filone DVOL-come-feature FALLITO sul dataset esteso; igiene disco verificata fatta il 25/07. Nessuna azione residua.
+   **EN** B4-bis DVOL: ✅ CLOSED FAIL 2026-07-23 (−1.02% vs the −3% threshold → ① FAIL, no test one-shot). DVOL-as-feature FAILED on the extended dataset; disk hygiene verified done on 25/07. No residual action.
 
 3. 🇮🇹 **A3-bis regime-MoE: PARCHEGGIATO** (prior sfavorevole, descrittivo −2.02% < 3%; il ramo "baseline cambia con PASS mixup" è decaduto col FAIL): rivalutare SOLO se un episodio stress porta massa a r1. **CAFN: parcheggiato a prior basso**, riapribile solo con re-scope. **A10 sparsity = unico candidato training residuo** (prior basso, effort M). Razionale: STATUS 2026-07-20 ③④.
    **EN** A3-bis PARKED (the "baseline changes on mixup PASS" branch lapsed with the FAIL); CAFN parked low-prior; A10 sparsity = only residual training candidate (rationale: STATUS 2026-07-20 ③④).
 
-4. 🇮🇹 **~Fine luglio:** valutazione pre-registrata **n≥30** leg opzioni (POST_GATE_V1 §0.2); solo dopo: pre-reg sizing v2 (A13+A14+A7).
-   **EN** ~End of July: pre-registered n≥30 evaluation; only then the v2 sizing pre-reg.
+4. 🇮🇹 **~29/07 (n=26 il 25/07, +~1/giorno):** valutazione pre-registrata **n≥30** leg opzioni (POST_GATE_V1 §0.2); subito dopo: refresh macro `01b --skip-regime` (rimandato per non perturbare il live a campione aperto — STATUS 25/07 ⑤); solo dopo: pre-reg sizing v2 (A13+A14+A7).
+   **EN** ~29/07 (n=26 on 25/07): pre-registered n≥30 evaluation; right after: macro refresh `01b --skip-regime` (deferred to avoid perturbing the live path mid-sample — STATUS 25/07 ⑤); only then the v2 sizing pre-reg.
 
 5. 🇮🇹 **~Metà agosto:** giudice `hedged_vs_unhedged_judge.py` a n≥20 hedge-attivi.
    **EN** ~Mid August: hedged-vs-unhedged judge at n≥20 hedge-active trades.

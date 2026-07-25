@@ -4,27 +4,36 @@
 #          heartbeat staleness incluso);
 #       2. check freshness regime B7 (refresh incrementale in background se
 #          servono barre nuove). NESSUN processo residente parte piu' a casa:
-#          01c/01d/01e e 04b vivono TUTTI sul VPS (systemd) dal 2026-07-18.
+#          01c/01d/01e e 04b vivono TUTTI sul VPS (systemd) dal 2026-07-18;
+#       3. monitoraggio ricorrente linea vol (CPU-only, dal 2026-07-25):
+#          derivazione MFIV incrementale + conteggio expiry qualificati
+#          (--count-only) + contatori dei gate forward aperti.
 #     Anti-duplicazione: se un processo e' gia' vivo NON viene rilanciato
 #     (due 04b scriverebbero position/trades in conflitto).
 #     NOTA encoding: file deliberatamente ASCII-only - PS 5.1 legge i .ps1
 #     senza BOM come cp1252 e i caratteri unicode corrompono il parsing.
-#     Uso: .\avvio_sessione.ps1 [-Days 7] [-SkipPull]  (da root progetto;
-#     il doppio click NON esegue i .ps1 - usa "Esegui con PowerShell" o terminale).
+#     Uso: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor]
+#     (da root progetto; il doppio click NON esegue i .ps1 - usa
+#     "Esegui con PowerShell" o terminale).
 # EN: SESSION STARTUP (home side) - a single command at PC power-on:
 #       1. pull+merge of the data the VPS collected while the PC was off
 #          (scripts/vps/pull_vps_data.ps1: private host from config/secrets.yaml,
 #          staleness heartbeat included);
 #       2. B7 regime freshness check (background incremental refresh when new
 #          bars exist). NO resident process starts at home anymore: 01c/01d/01e
-#          and 04b ALL live on the VPS (systemd) since 2026-07-18.
+#          and 04b ALL live on the VPS (systemd) since 2026-07-18;
+#       3. recurring vol-line monitoring (CPU-only, since 2026-07-25):
+#          incremental MFIV derivation + qualifying-expiry count (--count-only)
+#          + counters of the open forward gates.
 #     Encoding note: deliberately ASCII-only - PS 5.1 reads BOM-less .ps1 as
 #     cp1252 and unicode characters corrupt parsing.
-#     Usage: .\avvio_sessione.ps1 [-Days 7] [-SkipPull]  (from project root;
-#     double-click does NOT run .ps1 - use "Run with PowerShell" or a terminal).
+#     Usage: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor]
+#     (from project root; double-click does NOT run .ps1 - use "Run with
+#     PowerShell" or a terminal).
 param(
     [int]$Days = 7,
-    [switch]$SkipPull
+    [switch]$SkipPull,
+    [switch]$SkipMonitor
 )
 
 $ErrorActionPreference = "Stop"
@@ -84,9 +93,9 @@ Write-Output "[sessione] nessun processo locale da avviare (tutto sul VPS dal 20
 #     incremental append does NOT alter historical rows (causal chain, frozen
 #     scaler): it cannot misalign running experiments.
 $RegimeStaleBars = 168  # IT: soglia = 1 settimana di barre 1h / EN: threshold = 1 week of 1h bars
-# IT: NOTA quoting: solo apici SINGOLI nel codice python — PS 5.1 strippa le
+# IT: NOTA quoting: solo apici SINGOLI nel codice python - PS 5.1 strippa le
 #     doppie virgolette negli argomenti ai native exe (bug classico di quoting).
-# EN: quoting NOTE: SINGLE quotes only in the python code — PS 5.1 strips double
+# EN: quoting NOTE: SINGLE quotes only in the python code - PS 5.1 strips double
 #     quotes in arguments to native exes (classic quoting bug).
 $pyRegimeCheck = @'
 import pickle, sys
@@ -126,6 +135,67 @@ if ($barsNew -match '^-?\d+$') {
     }
 } else {
     Write-Warning "[sessione] regime B7: check fallito/failed ($barsNew) - refresh manuale: python scripts\01b_download_macro.py --regime-incremental"
+}
+
+# --- 4. Monitoraggio ricorrente linea vol / recurring vol-line monitoring ----
+# IT: i tre passi che la routine di sessione richiedeva a mano (STATUS 2026-07-22
+#     "monitoraggio ricorrente per sessione"). Tutti CPU-only e OFF-PATH: nessun
+#     file di produzione toccato, zero GPU.
+#     ATTENZIONE - DISCIPLINA ONE-SHOT (pre-reg MFIV v2): qui si lancia SOLO --count-only,
+#     che calcola timestamp e NIENTE altro (nessun PnL, nessun edge, nessuna
+#     correlazione); il giudice ha comunque il guard n<N_MIN -> NO_RUN e non
+#     scrive report sotto soglia. Il run one-shot vero va lanciato A MANO alla
+#     prima sessione con n>=40: NON automatizzarlo qui.
+#     Ordine vincolante: derive_mfiv DOPO il merge (legge la chain appena
+#     scaricata). Fail-soft: un errore non blocca la routine.
+# EN: the three steps the session routine required manually (STATUS 2026-07-22).
+#     All CPU-only and OFF-PATH: no production file touched, zero GPU.
+#     WARNING - ONE-SHOT DISCIPLINE (MFIV v2 pre-reg): only --count-only runs here, which
+#     computes timestamps and NOTHING else (no PnL, no edge, no correlation); the
+#     judge also guards n<N_MIN -> NO_RUN and writes no report below threshold.
+#     The real one-shot run must be launched BY HAND at the first session with
+#     n>=40: do NOT automate it here.
+#     Binding order: derive_mfiv AFTER the merge (it reads the freshly pulled
+#     chain). Fail-soft: an error does not stop the routine.
+if (-not $SkipMonitor) {
+    # IT: nota PS 5.1 - un exe nativo che esce !=0 NON solleva eccezione (il
+    #     try/catch non basta): si controlla $LASTEXITCODE esplicitamente.
+    # EN: PS 5.1 note - a native exe exiting !=0 does NOT throw (try/catch is not
+    #     enough): $LASTEXITCODE is checked explicitly.
+    Write-Output "[sessione] monitoraggio vol: derivazione MFIV incrementale / incremental MFIV derivation..."
+    & $Py (Join-Path $ProjRoot "scripts\vol\derive_mfiv.py")
+    if ($LASTEXITCODE -ne 0) { Write-Warning "derive_mfiv FALLITO/FAILED (exit $LASTEXITCODE) - conteggio MFIV sotto sara' su dati non aggiornati / count below is on stale data" }
+
+    Write-Output "[sessione] monitoraggio vol: conteggio expiry qualificati (solo timestamp) / qualifying-expiry count (timestamps only)..."
+    & $Py (Join-Path $ProjRoot "scripts\vol\mfiv_comparator_judge.py") --count-only
+    if ($LASTEXITCODE -ne 0) { Write-Warning "mfiv_comparator_judge --count-only FALLITO/FAILED (exit $LASTEXITCODE)" }
+
+    # IT: contatori dei gate forward aperti (leg opzioni n>=30, hedged n>=20).
+    #     Sola lettura dei ledger di 04b: nessun PnL aggregato, nessun verdetto.
+    #     NOTA quoting: solo apici SINGOLI (PS 5.1 strippa le doppie virgolette
+    #     negli argomenti ai native exe).
+    # EN: counters of the open forward gates (option legs n>=30, hedged n>=20).
+    #     Read-only over 04b ledgers: no aggregate PnL, no verdict.
+    #     Quoting NOTE: SINGLE quotes only (PS 5.1 strips double quotes in native
+    #     exe arguments).
+    $pyGateCounters = @'
+import json
+from pathlib import Path
+tp = Path('results/vol_paper/trades.jsonl')
+hp = Path('results/vol_paper/hedge_ledger.jsonl')
+n_rows = n_exec = 0
+if tp.exists():
+    rows = [json.loads(l) for l in tp.open(encoding='utf-8') if l.strip()]
+    n_rows = len(rows)
+    n_exec = sum(1 for r in rows if r.get('executed'))
+n_hedge = sum(1 for l in hp.open(encoding='utf-8') if l.strip()) if hp.exists() else 0
+print(f'[gate] leg opzioni / option legs: n={n_exec} executed ({n_rows} righe/rows) - soglia/threshold n>=30')
+print(f'[gate] hedge_ledger: {n_hedge} eventi/events - giudice hedged a/at n>=20 hedge-attivi/hedge-active')
+'@
+    & $Py -c $pyGateCounters
+    if ($LASTEXITCODE -ne 0) { Write-Warning "contatori gate FALLITI/FAILED (exit $LASTEXITCODE)" }
+} else {
+    Write-Output "[sessione] monitoraggio vol saltato (-SkipMonitor)"
 }
 
 Write-Output "[sessione] pronto / ready. Log vivi: logs\quantsys_*.log (piu' recenti per mtime)"
