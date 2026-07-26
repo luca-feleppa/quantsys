@@ -14,7 +14,7 @@
 
 | Cosa | Dove |
 |---|---|
-| **Il risultato.** Il forecast NN della realized variance batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive 0.807), con val→test coerenti | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
+| **Il risultato.** Il forecast NN della realized variance batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive 0.807 — Diebold-Mariano HAC **p ≤ 1.7·10⁻⁶**, vedi `TEORIA.md` §12.2), con val→test coerenti | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
 | **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `TEORIA.md` §12.1 (protocollo in 5 passi) · `STATUS.md` (pre-registrazioni in testa) |
 | **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `TEORIA.md` §12.3-12.4 (corpus KILL, con i numeri) |
 | **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **298 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
