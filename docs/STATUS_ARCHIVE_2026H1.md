@@ -3,13 +3,25 @@
 > 🇮🇹 Sezioni scorporate da `STATUS.md` il 2026-07-25 per tenere il continuity log leggibile.
 > **Nessun contenuto è stato riscritto o riassunto**: questo file è lo scorporo letterale dei blocchi
 > antecedenti al 2026-07-08 e delle pre-registrazioni già chiuse. Il file attivo `STATUS.md` conserva
-> luglio 2026 e **tutti i gate aperti**. Il corpus KILL sintetizzato vive in `CLAUDE.md` § STATO NOTO;
+> luglio 2026 e **tutti i gate aperti**. Il corpus KILL sintetizzato vive in `TEORIA.md` §12;
 > i milestone in `CHANGELOG.md`. Append-only: non modificare, si legge solo.
+>
+> ⚠ **Eccezione dichiarata all'append-only, 2026-07-26 (unica finora).** Sono stati sostituiti i soli
+> **puntatori a file** (nome del manifesto operativo e path del tooling di sessione, ora fuori dal repo)
+> con i puntatori pubblici equivalenti. **Nessun numero, esito, data, gate o frase di contenuto è stato
+> toccato**: la sostituzione è lessicale e verificabile nel diff del commit. Motivo: l'invariante esiste
+> per proteggere il record scientifico, e un nome di file non ne fa parte.
+>
+> **EN** ⚠ **Declared exception to append-only, 2026-07-26 (the only one so far).** Only **file pointers**
+> were substituted (the operating manifesto's name and the session-tooling paths, now outside the repo)
+> with their public equivalents. **No number, outcome, date, gate or content sentence was touched**: the
+> substitution is lexical and verifiable in the commit diff. Rationale: the invariant exists to protect
+> the scientific record, and a file name is not part of it.
 >
 > **EN** Sections split off from `STATUS.md` on 2026-07-25 to keep the continuity log readable.
 > **No content was rewritten or summarized**: this is the literal split-off of blocks predating
 > 2026-07-08 plus already-closed pre-registrations. The active `STATUS.md` retains July 2026 and
-> **every open gate**. The synthesized KILL corpus lives in `CLAUDE.md` § STATO NOTO; milestones in
+> **every open gate**. The synthesized KILL corpus lives in `TEORIA.md` §12; milestones in
 > `CHANGELOG.md`. Append-only: do not edit, read-only.
 
 ---
@@ -224,7 +236,7 @@ Su richiesta utente, eseguite 3 cose in parallelo (fan-out).
 **3) PREREQUISITI DISTILL-VOL → PRONTI (NON è l'esperimento, solo la prep reversibile).**
 - Config verificata read-only: `target_type: log_rv`, `interval: 1h`, `forecast_horizon: 30`. ✅
 - **Dataset npz RIGENERATO** (era assente dal cleanup 06-12): `01_download_data.py` (`QUANTSYS_ARCH=lstm` per NON toccare `models/itransformer/`) + `scripts/vol/dev_vols_macro_append.py`. Risultato: `data/lstm_dataset.npz` (3.2 GB), `X_train (51364,120,104)`, split 51364/6420/6421, `X_macro_* (·,90)`, target z-scored (`target_scale=1.4343` = IQR del log_rv, log-ret avrebbe IQR ~1e-3 → conferma log_rv). Canonical `models/pipeline_state.pkl` riscritta: interval=1h, h=30. **`models/itransformer/` confermato INTATTO** (tutti i file ancora 2026-06-10 20:25 — forward test di `04b` salvo).
-  - ⚠ **Trappola incontrata e risolta:** lanciato in chain PS `cmd1 *> log; if ($?){cmd2}`, lo step macro_append era stato **saltato** (npz senza `X_macro_*`): è il gotcha PS 5.1 di CLAUDE.md — `01_download` logga su stderr, sotto `*>` PowerShell marca `$?`=`$false` (NativeCommandError) anche con exit 0. Rilanciato `dev_vols_macro_append.py` in foreground → OK. **Lezione: per chain dipendenti da uno script Python che logga su stderr, NON affidarsi a `if ($?)`; sequenziare a mano o usare la shell bash.**
+  - ⚠ **Trappola incontrata e risolta:** lanciato in chain PS `cmd1 *> log; if ($?){cmd2}`, lo step macro_append era stato **saltato** (npz senza `X_macro_*`): è il gotcha PS 5.1 del manifesto operativo — `01_download` logga su stderr, sotto `*>` PowerShell marca `$?`=`$false` (NativeCommandError) anche con exit 0. Rilanciato `dev_vols_macro_append.py` in foreground → OK. **Lezione: per chain dipendenti da uno script Python che logga su stderr, NON affidarsi a `if ($?)`; sequenziare a mano o usare la shell bash.**
 - **Dir sandbox create:** `models/distill_vol/`, `results/distill_vol/` (gitignored). NB la garanzia vera dell'isolamento è l'env `QUANTSYS_MODELS_ROOT`, non queste dir.
 - **NESSUN training avviato** (è l'esperimento gated, non la prep; + contesa CUDA coi 3 processi live).
 
@@ -310,13 +322,13 @@ Su richiesta utente (/goal): riadattare gli script della distill a funzionare su
 - **`run_all.py`:** `_select_best_teacher(all_archs, target_type=...)` (il selettore reale, legge `history.json`) ora usa lo stesso helper; `phase_distill` legge `target_type` da config e lo passa. Log diagnostico stampa i pesi attivi.
 - **`scripts/02_train.py`:** passa `target_type` a `compute_teacher_weights`; **persiste in `config.json`** `best_val_loss`/`best_spearman`/`best_da` (metriche di val alla best-val epoch). ⚠ Prima NON erano persistite → `compute_teacher_weights` (che le legge) ricadeva silenziosamente su pesi UNIFORMI: ora il blend multi-teacher è davvero quality-weighted.
 - **`tests/test_distillation.py`** (5 test nuovi): vol azzera dir_acc, direzionale la mantiene, blend ignora dir_acc su vol, blend preferisce val_loss più basso su vol, default back-compat. **Suite full: 138 passed, 8 skipped, 0 failed** (era 133; +5).
-- **Doc sincronizzate:** CLAUDE.md (§REGOLE), TEORIA.md, README.md (×2 lingue ×2 sezioni), AVVIO.md (Fase 2b). MODEL_IMPROVEMENTS.md non aveva la sezione scoring → nessun edit.
+- **Doc sincronizzate:** manifesto operativo (§REGOLE), TEORIA.md, README.md (×2 lingue ×2 sezioni), AVVIO.md (Fase 2b). MODEL_IMPROVEMENTS.md non aveva la sezione scoring → nessun edit.
 
 **Verifica integrazione:** `_select_best_teacher` su dati sintetici — arch con dir_acc 0.95 ma val_loss peggiore: vince sotto `ret` solo se domina anche val/sp; sotto `log_rv` la dir_acc contribuisce 0 (score isola val_loss+Spearman). Il resto del path distill era già target-agnostic (`transfer_output_heads`, `distillation_loss_*`, `generate_multi_teacher_predictions` gestiscono quantile+t_student).
 
 **⚠ NON ESEGUITO (è solo l'engineering del metodo, non un esperimento):** il distill vol vero richiede i prerequisiti già noti (STATUS 2026-06-12): (1) rigenerare l'npz (`01_download_data.py`+`scripts/vol/dev_vols_macro_append.py`, eliminato col cleanup 06-12); (2) addestrare nhits/tcnmamba su `log_rv` (mai fatto; i loro yaml hanno hyperparam era-1m → rischio overfit, il tuning vol lr3e-5/drop0.3 è solo in itransformer.yaml); (3) **dir SEPARATE, non in-place** (`models/itransformer/` è il modello del forward test `04b` in corso); (4) **pre-registrare il gate prima di girare** (QLIKE val del distillato vs iTrans 5-seed corrente; misurare PRIMA la correlazione cross-arch degli errori sulla vol — se ≈0.995 come sul direzionale, il blend è inutile a priori). NON girare training in parallelo a poller/vol_paper (contesa CUDA).
 
-**Working tree:** modificati `quantsys/model/distillation.py`, `run_all.py`, `scripts/02_train.py`, `tests/test_distillation.py` (nuovo), CLAUDE/TEORIA/README/AVVIO + STATUS. NON committato.
+**Working tree:** modificati `quantsys/model/distillation.py`, `run_all.py`, `scripts/02_train.py`, `tests/test_distillation.py` (nuovo), manifesto/TEORIA/README/AVVIO + STATUS. NON committato.
 
 ## 🕒 Aggiornamento precedente: 2026-06-18 (CAFN coordinatore + DASHBOARD opzioni)
 
@@ -375,7 +387,7 @@ Riscritta **da zero** `scripts/06_dashboard.py`: da dashboard ML (metriche backt
 Eseguito audit diagnostico delle inefficienze computazionali dei percorsi caldi (forward ensemble, FeatureBuilder, loop backtest/walkforward, MC GJR-GARCH, regime refit). **Implementato il solo fix P1** (impatto ampio + bit-equivalente); l'audit completo e lo scaffolding di test sono stati RIMOSSI su richiesta utente (conclusione preservata qui, analisi rigenerabile — coerente col workflow "conclusione in STATUS, codice/doc throwaway via").
 - **P1 (FATTO):** `quantsys/features/__init__.py` `_vp_single` — istogramma VP ora `np.bincount(idx_arr, weights=vol, minlength=vp_bins)` invece di `np.zeros`+`np.add.at` (innermost loop ×3 scale 60/240/1440) → ~10–40× sul singolo hotspot dell'engine feature; si paga al build dataset (01) **e** a ogni build feature live. Firma invariata, numericamente identico (≤1 ULP, accumulo float64). `idx_arr` già `np.clip(0, vp_bins-1)` → prerequisito non-negatività di bincount soddisfatto.
 - **Verifica (fan-out 2 subagent):** (a) audit consumer → SICURO (call chain unica `_vp_single`←`_volume_profile`←`build`; 5 consumer production tutti via API pubblica: `01_download_data`, `01_update_data`, `99_replay`, `04b_vol_paper`, `04_live_signals`; nessun golden bit-exact, nessun altro `np.add.at` in production); (b) suite completa post-fix → **122 passed, 8 skipped, 0 failed** (baseline invariata; il test di parità usato per validare è stato rimosso col cleanup) + smoke VP end-to-end via `build()` OK.
-- **Restanti P2–P7 (NON implementati, rigenerabili dall'audit):** P2 MC `forecast.py` copie host↔device per step (live only). P3 `03_backtest.py` `mdd_stats` loop Python→`np.maximum.accumulate`. P4 buffer rank/quiet `list.pop(0)`→`deque` (flag già FALLITI OOS). P5 `features.build` 3× `df.copy()` (985/1058 deliberati, 965 valutabile). P6 `ensemble.py:360` tensore pesi per `__call__` (cache). P7 `02b` `nanpercentile` per fold (NON bit-per-bit). Esclusi come falsi positivi (CLAUDE.md): refit expanding O(t) del regime, `predict_proba` sequenziale, batch-inference già batchata, `sliding_window_view` già zero-copy.
+- **Restanti P2–P7 (NON implementati, rigenerabili dall'audit):** P2 MC `forecast.py` copie host↔device per step (live only). P3 `03_backtest.py` `mdd_stats` loop Python→`np.maximum.accumulate`. P4 buffer rank/quiet `list.pop(0)`→`deque` (flag già FALLITI OOS). P5 `features.build` 3× `df.copy()` (985/1058 deliberati, 965 valutabile). P6 `ensemble.py:360` tensore pesi per `__call__` (cache). P7 `02b` `nanpercentile` per fold (NON bit-per-bit). Esclusi come falsi positivi (manifesto operativo): refit expanding O(t) del regime, `predict_proba` sequenziale, batch-inference già batchata, `sliding_window_view` già zero-copy.
 - **Working tree:** `quantsys/features/__init__.py` + `STATUS.md` modificati, NON committati.
 
 ## 🗂️ RIORGANIZZAZIONE REPO 2026-06-16 (script per linea, motore condiviso invariato)
@@ -384,7 +396,7 @@ Decisione con l'utente: la vol (unico PASS OOS) è la linea pubblicabile su GitH
 - **Spostati** (`git mv`): `dev_vols_qlike.py`/`dev_vols_rs_judge.py`/`dev_vols_macro_append.py` → `scripts/vol/`; `paper_01_dir_baselines.py` → `scripts/research/`. ⚠ Fix `Path(__file__).resolve().parents[1]→parents[2]` in tutti e 4 (un livello più in profondità); lanciare dalla root (path relativi CWD-relativi). Smoke OK (import quantsys risolto, `paper_01` gira dalla nuova posizione).
 - **Spine numerato `00→99`: invariato** (è la *fase*, non la linea; `02_train` è condiviso, target da `config.features.target_type`). Nessun rinumero → zero riferimenti rotti in `run_all.py`.
 - **Nuovo `scripts/README.md`:** mappa bilingue script→linea (shared / vol / direzionale).
-- **Doc sincronizzati** (path `scripts/vol/`·`scripts/research/`): CLAUDE.md (§NOMENCLATURA + STATO NOTO), README.md (albero), AVVIO.md, TEORIA.md, config/default.yaml, docs/MODEL_IMPROVEMENTS.md, docs/paper/{OUTLINE,RESULTS_MAP}.md. STATUS storico lasciato com'è (log). `.gitignore` già copre data/models/results/logs/secrets → nessun rischio di pubblicare artefatti.
+- **Doc sincronizzati** (path `scripts/vol/`·`scripts/research/`): manifesto operativo (§NOMENCLATURA + STATO NOTO), README.md (albero), AVVIO.md, TEORIA.md, config/default.yaml, docs/MODEL_IMPROVEMENTS.md, docs/paper/{OUTLINE,RESULTS_MAP}.md. STATUS storico lasciato com'è (log). `.gitignore` già copre data/models/results/logs/secrets → nessun rischio di pubblicare artefatti.
 - **Pubblicazione futura (NON ora):** vol-only su GitHub via README che mette la vol in primo piano + eventuale export `git subtree split` (mai branch divergente); pesi vol PASS via release asset (`models/` è gitignored).
 
 ## 🟢 AUDIT COMPLETO 2026-06-16 — esito + B1 AVVIATO
@@ -500,7 +512,7 @@ Salute: contare i processi LOGICI (ParentProcessId, vedi lezione sopra) = atteso
 - **Eliminati (~4,7 GB, tutti rigenerabili o filoni morti):** `data/lstm_dataset.npz` (3,07 GB, era vol-1m FAIL) + `features.parquet` (65 MB); `data/xs/` (433 MB, probe KILL — resta `results/xs/ic_report.json`); `models/{nhits,tcnmamba}` (535 MB, duplicati byte-identici dei backup 1m); `models/backup_1m/` (611 MB, direzionale-1m morto — riaddestrabile da `data/backup_1m/` che RESTA, 36 MB). ⚠ Conseguenze: **il dataset npz NON esiste** (prima di train/judge: `01_download_data.py` + `dev_vols_macro_append.py`, ~10 min); **rollback 1m = restore data + RETRAIN** (checkpoint 1m non esistono più).
 - **Script:** `xs_01/02/03` + `dev_step0_regime_sigma.py` → `scripts/archive/` (git mv). I `dev_vols_*` restano in `scripts/` (linea attiva).
 - **Tenuti:** `models/backup_1h_vols/` (asset primario), `data/iv/` (non rigenerabile), `data/backup_1m/`, `models/backup_1m_vols/` (15 MB, record FAIL), `models/lstm/` (5,7 MB).
-- Doc sincronizzate: CLAUDE.md (STATO NOTO + rollback), AVVIO.md (file layout), README.md (albero scripts).
+- Doc sincronizzate: manifesto operativo (STATO NOTO + rollback), AVVIO.md (file layout), README.md (albero scripts).
 
 ## 🟢 POLLER IV DERIBIT — IMPLEMENTATO, SMOKE OK, IN ESECUZIONE (2026-06-12)
 
@@ -678,7 +690,7 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 2. **KILL secco** e passare a Strada 2 (vol-S, chiude B2) o B1 (order-book L2).
 3. Ibrido: tuning 1h in background + avvio studio vol-S in parallelo (GPU permettendo).
 
-**Nota dashboard/metrics:** `models/itransformer/{metrics.json,trades.csv,equity_curve.npz}` e `results/itransformer/dashboard_results.json` = run 23 bps (≡ 13 bps). `QUANTSYS_MIN_EXPECTED_RET` documentato in CLAUDE.md.
+**Nota dashboard/metrics:** `models/itransformer/{metrics.json,trades.csv,equity_curve.npz}` e `results/itransformer/dashboard_results.json` = run 23 bps (≡ 13 bps). `QUANTSYS_MIN_EXPECTED_RET` documentato in manifesto operativo.
 
 ## 🕒 2026-06-09 (PIVOT 1h — implementazione)
 
@@ -726,7 +738,7 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 
 - **Fusi i 4 file `.md` gemelli IT/EN in un unico file bilingue paragrafo-per-paragrafo.** Coppie fuse → file base, gemelli eliminati: `AVVIO.md`(+`AVVIO.en.md`), `README.md`(+`README.it.md`), `TEORIA.md`(+`TEORIA.en.md`), `docs/MODEL_IMPROVEMENTS.md`(+`.en.md`). Formato: heading bilingue `IT · EN`; corpo con paragrafo IT (prefisso `🇮🇹`) seguito da EN (prefisso `**EN**`); blocchi di codice emessi una volta, tabelle duplicate IT/EN; puntatori "versione X in Y" rimossi; cross-reference `.en.md`/`.it.md` reindirizzati ai file base (le menzioni storiche dentro MODEL_IMPROVEMENTS restano come record).
 - **Metodo:** script one-shot `_merge_bilingual.py` (mai committato, rimosso dopo l'uso — NON cercarlo su disco) con allineamento **sezione-per-sezione via difflib** su chiave heading language-neutral (numeri/date/emoji/`Step X` + ancora primaria `Stage|Phase|Fase|Step|Fix #N`) e **resync corpo** via ancore inline-code/numeri. Validato con check di adiacenza marker: AVVIO 38/38 e README 26/26 perfetti; TEORIA ha 1 blocco IT-only legittimo (`Perché T=120`, assente nell'EN); MODEL ha la sola sezione IT-only `RESUME 2026-06-04` + Stage 4 con heading `✅ COMPLETATO · 🚧 IN PROGRESS` (l'EN era stale, drift pre-esistente reso esplicito).
-- **Doc-convention aggiornata in `CLAUDE.md`** (direttiva #2 + nomenclatura): single-file bilingue, NON ricreare i gemelli.
+- **Doc-convention aggiornata in il manifesto operativo** (direttiva #2 + nomenclatura): single-file bilingue, NON ricreare i gemelli.
 - ⚠ **Drift residuo da sanare (non bloccante):** l'EN di alcune sezioni era più vecchio dell'IT (evidente in `MODEL_IMPROVEMENTS` Stage 4). Ora visibile nello stesso file → riallineare le due lingue alla prossima modifica di quelle sezioni.
 
 ## ✅ Sotto-sessione 2026-06-06
@@ -769,7 +781,7 @@ Per tornare a un setting operativo qualsiasi: restore modelli dal backup appropr
 - **Fix ② — Esposizione continua rank-based, regime-gated** (env `QUANTSYS_RANK_EXPOSURE=1`/`QUANTSYS_RANK_REGIME`/`QUANTSYS_RANK_BAND`/`QUANTSYS_RANK_MIN_SIGMA`/`QUANTSYS_RANK_WIN`).
   `r`=percentile causale di μ nel buffer ∈[0,1]; `s`=2r−1; no-trade band `|s|<band` (deadzone=isteresi); `conviction=(|s|−band)/(1−band)` → scala il Kelly con continuità (`dist.conviction → RiskManager._size`). Attivo SOLO nel regime target (Quiet di default), NONE altrove. Sostituisce concettualmente il rank-entry **discreto** (che distrugge l'informazione ordinale). Inerte di default.
 - **Verificato:** `py_compile` OK; sanity-check matematico del mapping rank→conviction e del gate cadenza (band=0.5 ⇒ trade solo top/bottom 25%; cadence=0 ⇒ baseline invariato).
-- **Doc sincronizzate:** `CLAUDE.md` (nuovi flag), `AVVIO.md`+`AVVIO.en.md` (paragrafo harvest edge ordinale).
+- **Doc sincronizzate:** il manifesto operativo (nuovi flag), `AVVIO.md`+`AVVIO.en.md` (paragrafo harvest edge ordinale).
 
 ## 🧪 Esito validazione su VAL — Fix ①② FALLISCONO decisamente (NON promossi)
 
@@ -793,14 +805,14 @@ Confronto su `QUANTSYS_BACKTEST_SPLIT=val`, ensemble eterogeneo 3 archi, `cadenc
 
 ## ✅ Sessione precedente (val-backtest split + esito edge Quiet)
 
-- **Verifica CLAUDE.md vs codice** — allineato. Corretto unico ref sfasato: AMP-off in inference `ensemble.py:170` → **`:275`**.
+- **Verifica manifesto operativo vs codice** — allineato. Corretto unico ref sfasato: AMP-off in inference `ensemble.py:170` → **`:275`**.
 - **Passo 1 — modalità val-backtest implementata** in `scripts/03_backtest.py`:
   `QUANTSYS_BACKTEST_SPLIT=val|test` (default `test`). Carica `X_{split}/y_{split}/t_{split}` e `X_macro_{split}`,
   allinea OHLCV (`raw_candles.parquet`) e regimi (`regime_probs.parquet`) su `t_{split}`.
   Output **suffissati** per `val` (`metrics_val.json`, `equity_curve_val.npz`, `trades_val.csv`,
   `dashboard_results_val.json`) → la run val **non clobbera** i file production-clean (risolve vecchio problema #4 per il caso val).
 - **Passo 2 — backtest Quiet eseguito su val** (`q=0.10, σ≥0.004`, ensemble eterogeneo 3 archi).
-- **Documentazione sincronizzata:** `CLAUDE.md` (nuova env var), `AVVIO.md`+`AVVIO.en.md` (esito validazione).
+- **Documentazione sincronizzata:** il manifesto operativo (nuova env var), `AVVIO.md`+`AVVIO.en.md` (esito validazione).
 
 ## 🧪 Esito chiave — l'edge Quiet rank-entry NON regge su val (Passo 3)
 
