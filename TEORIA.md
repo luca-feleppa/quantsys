@@ -4,17 +4,17 @@
 
 **EN** A descriptive walkthrough of the full flow, from raw material (candles) to the operating signal (BUY / SELL / HOLD with size and stop loss).
 
-> 🇮🇹 **Orientamento — due linee, una sola di produzione.** Lo stesso motore (dati → 104 feature → finestre 120×104 → archs probabilistiche → ensemble/distill) serve due `target_type`. La **linea di produzione corrente è la VOLATILITÀ a 1h** (`features.target_type: log_rv`, `data.interval: 1h`): il NN batte HAR-RV del ~30% in QLIKE su test, val→test **coerenti** (l'edge esiste OOS), e alimenta la linea opzioni (forward test straddle su Deribit, `04b_vol_paper.py`). La **linea DIREZIONALE** (`target_type: ret`, somma dei prossimi 30 log-return → BUY/SELL/HOLD, Parte V) è **legacy/KILLED OOS**: l'anti-correlazione val→test e il muro dei costi la rendono non tradabile (probe pivot 1m→1h KILL 2026-06-10), ma il suo path di codice (SignalGenerator/RiskManager/LiveEngine) resta bit-invariato come baseline e per il rollback. Sintesi del progetto: **i momenti PARI (livello di vol) generalizzano OOS, i momenti DISPARI (direzione, semivarianza firmata) no.**
+> 🇮🇹 **Orientamento — due linee, una sola di produzione.** Lo stesso motore (dati → 104 feature → finestre 120×104 → archs probabilistiche → ensemble/distill) serve due `target_type`. **Produzione: VOLATILITÀ a 1h** (`target_type: log_rv`, `interval: 1h`, iTransformer a 5 membri) — unico segnale con edge OOS verificato, alimenta la linea opzioni (`04b_vol_paper.py`). **Linea DIREZIONALE** (`target_type: ret`, Parte V): **legacy / KILLED OOS**, path di codice bit-invariato come baseline e negative control. Panoramica e motivazione: `README.md`.
 
-> **EN** **Orientation — two lines, only one in production.** The same engine (data → 104 features → 120×104 windows → probabilistic archs → ensemble/distill) serves two `target_type`s. The **current production line is VOLATILITY at 1h** (`features.target_type: log_rv`, `data.interval: 1h`): the NN beats HAR-RV by ~30% in test QLIKE, val→test **coherent** (the edge exists OOS), and it feeds the options line (Deribit straddle forward test, `04b_vol_paper.py`). The **DIRECTIONAL line** (`target_type: ret`, sum of the next 30 log-returns → BUY/SELL/HOLD, Part V) is **legacy/KILLED OOS**: val→test anti-correlation and the cost wall make it untradable (1m→1h pivot probe KILL 2026-06-10), but its code path (SignalGenerator/RiskManager/LiveEngine) stays bit-invariant as a baseline and for rollback. Project synthesis: **EVEN moments (vol level) generalize OOS, ODD moments (direction, signed semivariance) do not.**
+> **EN** **Orientation — two lines, only one in production.** The same engine (data → 104 features → 120×104 windows → probabilistic archs → ensemble/distill) serves two `target_type`s. **Production: VOLATILITY at 1h** (`target_type: log_rv`, `interval: 1h`, 5-member iTransformer) — the only signal with a verified OOS edge, feeding the options line (`04b_vol_paper.py`). **DIRECTIONAL line** (`target_type: ret`, Part V): **legacy / KILLED OOS**, code path bit-invariant as a baseline and negative control. Overview and motivation: `README.md`.
 
 ---
 
 # Indice · Table of contents
 
-🇮🇹 Il documento segue la pipeline ML-standard: **(0) Setup teorico** → **(I) Dati** (target, log-return, feature, normalizzazione/invariante z-score) → **(II) Modellazione** (architetture, loss, ensemble, distillation, regime) → **(III) Valutazione** (walk-forward, QLIKE/Spearman, distribution shift, ensembling cross-arch) → **(IV) Inferenza** (Monte Carlo, denormalizzazione) → **(V) Trading layer direzionale** (segnale, rischio, live — *legacy, KILLED OOS*) → **(VI) Storico esperimenti** (kill documentati). I riferimenti incrociati usano i numeri di Parte.
+🇮🇹 Il documento segue la pipeline ML-standard: **(0) Setup teorico** → **(I) Dati** (target, log-return, feature, normalizzazione/invariante z-score) → **(II) Modellazione** (architetture, loss, ensemble, distillation, regime) → **(III) Valutazione** (walk-forward, QLIKE/Spearman, distribution shift, ensembling cross-arch) → **(IV) Inferenza** (Monte Carlo, denormalizzazione) → **(V) Trading layer direzionale** (segnale, rischio, live — *legacy, KILLED OOS*) → **(VI) Lettura scientifica trasversale** (cosa generalizza e perché). I riferimenti incrociati usano i numeri di Parte. Questo file è **la matematica**: i comandi operativi stanno in `AVVIO.md`, la panoramica in `README.md`, la cronaca degli esperimenti in `CHANGELOG.md` / `STATUS.md`.
 
-**EN** The document follows the ML-standard pipeline: **(0) Theoretical setup** → **(I) Data** (target, log-returns, features, normalization / z-score invariant) → **(II) Modeling** (architectures, loss, ensemble, distillation, regime) → **(III) Evaluation** (walk-forward, QLIKE/Spearman, distribution shift, cross-arch ensembling) → **(IV) Inference** (Monte Carlo, denormalization) → **(V) Directional trading layer** (signal, risk, live — *legacy, KILLED OOS*) → **(VI) Experiment Log** (documented kills). Cross-references use Part numbers.
+**EN** The document follows the ML-standard pipeline: **(0) Theoretical setup** → **(I) Data** (target, log-returns, features, normalization / z-score invariant) → **(II) Modeling** (architectures, loss, ensemble, distillation, regime) → **(III) Evaluation** (walk-forward, QLIKE/Spearman, distribution shift, cross-arch ensembling) → **(IV) Inference** (Monte Carlo, denormalization) → **(V) Directional trading layer** (signal, risk, live — *legacy, KILLED OOS*) → **(VI) Cross-cutting scientific reading** (what generalizes, and why). Cross-references use Part numbers. This file is **the mathematics**: operating commands live in `AVVIO.md`, the overview in `README.md`, the experiment chronicle in `CHANGELOG.md` / `STATUS.md`.
 
 ---
 
@@ -34,17 +34,13 @@
 
 ## 1. Raccolta dati di prezzo · 1. Price data collection
 
-🇮🇹 Il punto di partenza è Binance: candele OHLCV (Open, High, Low, Close, Volume) BTC/USDT. **Dal pivot 2026-06-09 il timeframe è 1 ora** (`data.interval: 1h` in `config/default.yaml`); la finestra storica corrente è **dal 2019-01-01 a oggi** (multi-anno, 65.145 barre) — configurata via `data.start_time`. Il precedente perimetro 1m (2025-05-19 → oggi, ~525k candele, scelto empiricamente perché una storia 1m multi-ciclo peggiorava la generalizzazione) è conservato in `data/backup_1m/` e `models/backup_1m/` per rollback.
+🇮🇹 Il punto di partenza è Binance: candele OHLCV (Open, High, Low, Close, Volume) BTC/USDT. Il timeframe corrente è **1 ora** (`data.interval: 1h`), finestra storica **2019-01-01 → oggi** (multi-anno, ~65k barre) via `data.start_time`. Lo storico è in Parquet (colonnare, compresso); gli avvii successivi scaricano solo il delta dall'ultima candela locale. Il perimetro 1m precedente (2025-05-19 → oggi, ~525k candele) sopravvive **solo come dato grezzo** in `data/backup_1m/`: i checkpoint 1m sono stati eliminati il 2026-06-12, quindi un rollback a 1m richiede un retrain.
 
-**EN** Starting point: Binance, OHLCV (Open, High, Low, Close, Volume) candles on BTC/USDT. **Since the 2026-06-09 pivot the timeframe is 1 hour** (`data.interval: 1h` in `config/default.yaml`); the current history window is **from 2019-01-01 to today** (multi-year, 65,145 bars) — configured via `data.start_time`. The previous 1m perimeter (2025-05-19 → today, ~525k candles, chosen empirically because a multi-cycle 1m history hurt generalization) is preserved in `data/backup_1m/` and `models/backup_1m/` for rollback.
+**EN** Starting point: Binance, OHLCV (Open, High, Low, Close, Volume) candles on BTC/USDT. The current timeframe is **1 hour** (`data.interval: 1h`), history window **2019-01-01 → today** (multi-year, ~65k bars) via `data.start_time`. History is stored in Parquet (columnar, compressed); subsequent runs download only the delta from the last local candle. The previous 1m perimeter (2025-05-19 → today, ~525k candles) survives **as raw data only** in `data/backup_1m/`: the 1m checkpoints were deleted on 2026-06-12, so a 1m rollback requires a retrain.
 
-🇮🇹 **Razionale econometrico del pivot 1m→1h.** Il costo roundtrip (fee + slippage, ~26 bps) è **fisso** per trade, mentre la deviazione standard del movimento di una barra cresce **∝ √Δt**: il rapporto costo/σ scala quindi come 1/√Δt. A 1m era ~1.9–3.3× (il probe cross-sectional del 2026-06-06 ha dato KILL con diagnosi "il muro è la magnitudine, non il segno": effetto ~1.5 bps contro ~26 bps di costo); a 1h scende a **~0.25–0.42×**. A parità di motore predittivo, a 1h l'edge deve battere una frizione di un ordine di grandezza minore. Lo storico multi-anno (2019→oggi) è la contropartita necessaria: a 1h un solo anno fornirebbe ~8.7k barre, insufficienti per il training.
+🇮🇹 **Razionale econometrico del passaggio a 1h — e suo esito.** Il costo round-trip (fee + slippage, ~26 bps) è **fisso** per trade, mentre la deviazione standard del movimento di una barra cresce **∝ √Δt**: il rapporto costo/σ scala quindi come **1/√Δt**. A 1m era ~1.9–3.3×, a 1h scende a **~0.25–0.42×**. La contropartita necessaria è lo storico multi-anno: a 1h un solo anno fornirebbe ~8.7k barre, insufficienti per il training. ⚠ **Esito misurato (2026-06-10): a 1h il muro dei costi cade ma non emerge skill direzionale OOS** → il pivot *come strategia direzionale* è **KILLED** (Parte VI). Il perimetro 1h resta perché è il setting naturale della linea vol (RV oraria, HAR-RV/QLIKE), che è la produzione corrente.
 
-**EN** **Econometric rationale of the 1m→1h pivot.** The roundtrip cost (fee + slippage, ~26 bps) is **fixed** per trade, while the standard deviation of a bar's move grows **∝ √Δt**: the cost/σ ratio therefore scales as 1/√Δt. At 1m it was ~1.9–3.3× (the 2026-06-06 cross-sectional probe returned KILL with diagnosis "the wall is magnitude, not sign": ~1.5 bps effect vs ~26 bps cost); at 1h it drops to **~0.25–0.42×**. With the same predictive engine, at 1h the edge must beat an order-of-magnitude smaller friction. The multi-year history (2019→today) is the necessary counterpart: at 1h a single year would yield only ~8.7k bars, insufficient for training.
-
-🇮🇹 Lo storico è salvato in Parquet (colonnare, compresso). Negli avvii successivi viene scaricato solo il delta dall'ultima candela locale (aggiornamento in secondi).
-
-**EN** History is stored in Parquet (columnar, compressed). Subsequent runs download only the delta from the last local candle (a seconds-long update).
+**EN** **Econometric rationale of the move to 1h — and its outcome.** The round-trip cost (fee + slippage, ~26 bps) is **fixed** per trade, while the standard deviation of a bar's move grows **∝ √Δt**: the cost/σ ratio therefore scales as **1/√Δt**. At 1m it was ~1.9–3.3×, at 1h it drops to **~0.25–0.42×**. The necessary counterpart is the multi-year history: at 1h a single year would yield only ~8.7k bars, insufficient for training. ⚠ **Measured outcome (2026-06-10): at 1h the cost wall falls but no directional skill emerges OOS** → the pivot *as a directional strategy* is **KILLED** (Part VI). The 1h perimeter stays because it is the natural setting of the vol line (hourly RV, HAR-RV/QLIKE), which is the current production.
 
 ---
 
@@ -58,21 +54,31 @@
 - Stationary (no rising trend).
 - Symmetric (a +10% and a −10% have the same absolute weight).
 
-🇮🇹 Il **target** è la somma dei log rendimenti delle prossime **30 barre** (`forecast_horizon: 30` in `config/default.yaml`). L'orizzonte è definito in **barre**, quindi la durata in tempo dipende dal timeframe: **30 ore al timeframe corrente 1h** (erano 30 minuti a 1m). Nota storica: a 1m l'orizzonte fu portato da 15 a 30 candele il 2026-05-20 perché a 15 minuti il rapporto edge/costo era strutturalmente sfavorevole (movimento medio ~25 bps vs costo roundtrip ~26 bps) — lo stesso argomento costo/σ (∝ 1/√Δt) che il 2026-06-09 ha motivato il pivot a 1h (§1).
+🇮🇹 Il **target** è la somma dei log rendimenti delle prossime **30 barre** (`forecast_horizon: 30`). L'orizzonte è definito in **barre**, quindi la durata in tempo dipende dal timeframe: **30 ore al timeframe corrente 1h** (erano 30 minuti a 1m). L'orizzonte h e il timeframe Δt sono le due leve dello stesso argomento costo/σ ∝ 1/√(h·Δt) del §1: allungare h a parità di Δt aumenta il movimento atteso lasciando il costo fisso.
 
-**EN** The **target** is the sum of log returns over the next **30 bars** (`forecast_horizon: 30` in `config/default.yaml`). The horizon is defined in **bars**, so its duration in time depends on the timeframe: **30 hours at the current 1h timeframe** (it was 30 minutes at 1m). Historical note: at 1m the horizon was bumped from 15 to 30 candles on 2026-05-20 because at 15 minutes the edge/cost ratio was structurally unfavourable (avg move ~25 bps vs ~26 bps roundtrip cost) — the same cost/σ argument (∝ 1/√Δt) that on 2026-06-09 motivated the 1h pivot (§1).
+**EN** The **target** is the sum of log returns over the next **30 bars** (`forecast_horizon: 30`). The horizon is defined in **bars**, so its duration in time depends on the timeframe: **30 hours at the current 1h timeframe** (it was 30 minutes at 1m). Horizon h and timeframe Δt are the two levers of the same cost/σ ∝ 1/√(h·Δt) argument of §1: lengthening h at fixed Δt raises the expected move while the cost stays fixed.
 
-🇮🇹 **Tipo di target (`features.target_type`, dal 2026-06-10):** `ret` (default, somma direzionale dei log-return — path bit-invariato), `log_rv` (esperimento vol-S: target = `log(Σr² + 10⁻¹²)` sulle h barre future, con `target_dir` = RV futura > RV trailing h barre, causale) oppure `log_rs_ratio` (probe semivarianza 2026-06-11: target = `log((RS⁺+ε)/(RS⁻+ε))` con `RS± = Σr²·1[r≷0]` sulle h barre future — l'asimmetria firmata della semivarianza realizzata, Barndorff-Nielsen et al. 2010 / Patton–Sheppard 2015). Il log rende la distribuzione ≈ gaussiana → RobustScaler/NLL/denormalizzazione funzionano invariati. ⚠ Con `log_rv` la mediana del target è ≈ −7.2 (non ≈ 0): l'inversione z→raw richiede `μ·IQR + centro` (vedi `scripts/vol/dev_vols_qlike.py`), `denormalize_predictions` da sola non basta; il log-ratio è invece quasi-centrato (|centro| < 2). **Esiti:** `log_rv` 2026-06-10: NN batte HAR-RV del 30% in QLIKE su test a 1h (FAIL a 1m: edge risoluzione-specifico) — la vol è prevedibile ma non tradabile su spot/perp. `log_rs_ratio` 2026-06-11: **FAIL** — l'asimmetria è impredicibile per NN *e* HAR-RS (entrambi ≈ costante su test; giudice `scripts/vol/dev_vols_rs_judge.py`). Sintesi: **i momenti pari generalizzano OOS, i momenti dispari (direzione, signed jump variation) no.** Nessun backtest trading sui modelli vol.
+🇮🇹 **Tipo di target (`features.target_type`).** Tre definizioni sulle stesse h barre future:
+- `ret` — somma direzionale dei log-return `Σ_{i=1}^{h} r_{t+i}` (path legacy bit-invariato, **primo momento**);
+- `log_rv` — **produzione**: `log(Σ r² + 10⁻¹²)`, log della realized variance (**secondo momento**), con `target_dir` = RV futura > RV trailing h barre (causale);
+- `log_rs_ratio` — `log((RS⁺+ε)/(RS⁻+ε))` con `RS± = Σ r²·1[r ≷ 0]`: asimmetria firmata della semivarianza realizzata (Barndorff-Nielsen et al. 2010 / Patton–Sheppard 2015), **terzo momento** in forma di rapporto.
 
-**EN** **Target type (`features.target_type`, since 2026-06-10):** `ret` (default, directional sum of log-returns — bit-invariant path), `log_rv` (vol-S experiment: target = `log(Σr² + 10⁻¹²)` over the next h bars, with `target_dir` = future RV > trailing h-bar RV, causal) or `log_rs_ratio` (semivariance probe 2026-06-11: target = `log((RS⁺+ε)/(RS⁻+ε))` with `RS± = Σr²·1[r≷0]` over the next h bars — the signed asymmetry of realized semivariance, Barndorff-Nielsen et al. 2010 / Patton–Sheppard 2015). The log makes the distribution ≈ Gaussian → RobustScaler/NLL/denormalization work unchanged. ⚠ With `log_rv` the target median is ≈ −7.2 (not ≈ 0): the z→raw inversion requires `μ·IQR + center` (see `scripts/vol/dev_vols_qlike.py`); `denormalize_predictions` alone is not enough; the log-ratio is instead near-centered (|center| < 2). **Outcomes:** `log_rv` 2026-06-10: the NN beats HAR-RV by 30% in test QLIKE at 1h (FAIL at 1m: the edge is resolution-specific) — vol is predictable but not tradable on spot/perp. `log_rs_ratio` 2026-06-11: **FAIL** — the asymmetry is unpredictable for the NN *and* HAR-RS (both ≈ the constant on test; judge `scripts/vol/dev_vols_rs_judge.py`). Synthesis: **even moments generalize OOS, odd moments (direction, signed jump variation) do not.** No trading backtest on vol models.
+Il log rende la distribuzione ≈ gaussiana → RobustScaler / NLL / denormalizzazione funzionano invariati. ⚠ Con `log_rv` la mediana del target è ≈ −7.2 (non ≈ 0): l'inversione z→raw richiede `μ·IQR + centro`, `denormalize_predictions` da sola **non basta** (§5, invariante); il log-ratio è invece quasi-centrato (|centro| < 2). **Esiti:** `log_rv` PASS a 1h (NN batte HAR-RV del ~30% in QLIKE su test), FAIL a RV-30min → edge risoluzione-specifico; `log_rs_ratio` FAIL (impredicibile per NN *e* HAR-RS). È la dicotomia **momenti pari / momenti dispari** (Parte VI). Nessun backtest trading sui modelli vol: il target non è un rendimento.
+
+**EN** **Target type (`features.target_type`).** Three definitions over the same h future bars:
+- `ret` — directional sum of log-returns `Σ_{i=1}^{h} r_{t+i}` (legacy bit-invariant path, **first moment**);
+- `log_rv` — **production**: `log(Σ r² + 10⁻¹²)`, log realized variance (**second moment**), with `target_dir` = future RV > trailing h-bar RV (causal);
+- `log_rs_ratio` — `log((RS⁺+ε)/(RS⁻+ε))` with `RS± = Σ r²·1[r ≷ 0]`: signed asymmetry of realized semivariance (Barndorff-Nielsen et al. 2010 / Patton–Sheppard 2015), a **third-moment** ratio.
+
+The log makes the distribution ≈ Gaussian → RobustScaler / NLL / denormalization work unchanged. ⚠ With `log_rv` the target median is ≈ −7.2 (not ≈ 0): the z→raw inversion requires `μ·IQR + center`; `denormalize_predictions` alone is **not enough** (§5, invariant); the log-ratio is instead near-centered (|center| < 2). **Outcomes:** `log_rv` PASS at 1h (NN beats HAR-RV by ~30% in test QLIKE), FAIL at RV-30min → resolution-specific edge; `log_rs_ratio` FAIL (unpredictable for the NN *and* HAR-RS). This is the **even / odd moment** dichotomy (Part VI). No trading backtest on vol models: the target is not a return.
 
 ---
 
 ## 3. Feature engineering — cosa vede il modello · 3. Feature engineering — what the model sees
 
-🇮🇹 **104 feature** per candela (**86 dinamiche + 18 strutturali**, verificate sull'npz corrente rigenerato il 2026-06-22 → asse feature = 104), pensate per dare al modello gli strumenti che un trader esperto userebbe. Il conteggio è post-filtro **C-funding** (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decisione 2026-05-28): sono state rimosse 15 feature live-incompatibili con ROI ≤ 0 (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — razionale (permutation importance su 2500 finestre val): il tier long-lookback ha ROI ≤ 0, uniche eccezioni le feature funding.
+🇮🇹 **104 feature** per candela (**86 dinamiche + 18 strutturali**). Il conteggio è **verificato sul dataset, non assunto**: la lista canonica è derivata una volta sola da `canonical_feature_columns` (`quantsys/features/__init__.py`) leggendo `feature_names` dall'npz, con golden test a protezione. È post-filtro **C-funding** (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decisione 2026-05-28): sono state rimosse 15 feature live-incompatibili con ROI ≤ 0 (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — razionale (permutation importance su 2500 finestre val): il tier long-lookback ha ROI ≤ 0, uniche eccezioni le feature funding.
 
-**EN** **104 features** per candle (**86 dynamic + 18 structural**, verified on the current npz regenerated 2026-06-22 → feature axis = 104), designed to give the model the same tools an experienced trader would use. The count is after the **C-funding** filter (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decision 2026-05-28): 15 live-incompatible features with ROI ≤ 0 were removed (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — rationale (permutation importance over 2500 val windows): the long-lookback tier has ROI ≤ 0, the funding features being the only exceptions.
+**EN** **104 features** per candle (**86 dynamic + 18 structural**). The count is **verified on the dataset, not assumed**: the canonical list is derived once by `canonical_feature_columns` (`quantsys/features/__init__.py`) reading `feature_names` from the npz, protected by a golden test. It is after the **C-funding** filter (`LIVE_DROP_FEATURES` in `quantsys/features/__init__.py`, decision 2026-05-28): 15 live-incompatible features with ROI ≤ 0 were removed (90d/365d, `frac_diff_*`, `vp_*_long`, `vp_poc_convergence`, `momentum_7d/90d`) — rationale (permutation importance over 2500 val windows): the long-lookback tier has ROI ≤ 0, the funding features being the only exceptions.
 
 ### Contratto timeframe — finestre TIME-semantic vs BAR-semantic · Timeframe contract — TIME-semantic vs BAR-semantic windows
 
@@ -92,159 +98,114 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** **Per-interval config overlay (2026-06-10).** The interval-dependent keys (`data.interval`/`start_time`, `model.window_stride`, `validation.embargo_steps`, `risk.max_hold_candles`, `backtest.min_expected_ret`/`max_sigma`) are factored into `config/interval/{1m,1h}.yaml`. `load_config` merges them per-section (shallow) **after secrets and before the arch overlay** — hierarchy: default → secrets → interval → arch. Activated via the `QUANTSYS_INTERVAL` env var or `run_all.py --interval`.
 
-### Tendenza e momentum · Trend and momentum
+### Catalogo delle feature · Feature catalogue
 
-🇮🇹
-- **Medie mobili** rolling su 5/10/20/60 barre (BAR-semantic) — trend su orizzonti diversi.
-- **Momentum derivato** — rapporti tra medie mobili a scale diverse, ratio momentum/volatilità. RSI/MACD classici rimossi: l'informazione è già catturata dal mix `vol_std` + `lag_ret` + microstructure.
+🇮🇹 (la semantica BAR- / TIME- di ogni finestra è quella del contratto qui sopra)
+- **Tendenza e momentum** — medie mobili rolling su 5/10/20/60 barre, rapporti fra scale diverse, ratio momentum/volatilità. RSI/MACD rimossi: la stessa informazione è già nel mix `vol_std` + `lag_ret` + microstructure.
+- **Volatilità** — rolling std dei log-return su 5/10/20/60 barre. ATR rimosso dall'input perché ridondante con `vol_std`; resta calcolato dal `RiskManager` per il sizing dinamico degli stop (§10).
+- **VWAP** — prezzo medio ponderato per il volume; la distanza prezzo−VWAP misura lo scostamento dall'equilibrio di sessione.
+- **Volume Profile multi-scala** — distribuzione del volume per livello di prezzo su **60/240/1440 barre** (a 1m = 1h/4h/1 giorno; a 1h = 60h/10 giorni/60 giorni); 4 feature per finestra (distanza da POC, VAH, VAL + concentrazione al POC). In alta volatilità domina la scala breve, in bassa volatilità la lunga è più stabile.
+- **CVD** — volume taker-buy meno taker-sell, cumulato: una divergenza CVD↑ / prezzo↓ segnala pressione d'acquisto non ancora prezzata.
+- **Microstructure** — 10 feature dalla geometria della candela (body ratio, shadow superiore/inferiore, price velocity, price acceleration): informazione **istantanea**, senza il lag di costruzione degli oscillatori classici.
+- **Funding rate** — perp BTC/USDT ogni 8h → `funding_rate`, `funding_rate_1d`, `funding_rate_dev`. Funding alto = long affollati (rischio di short squeeze al ribasso); negativo = short affollati.
+- **Temporali** — ora del giorno, giorno della settimana, giorno del mese: la liquidità crypto ha stagionalità intraday e settimanale.
+- **Lag** — log-return delle ultime 5 barre come regressori diretti (componente autoregressiva esplicita).
+- **Interazioni** — 3 prodotti espliciti (`vol_x_pos` = volatilità × posizione VWAP, `momentum_x_funding`, `cvd_x_vol`): termini di secondo ordine che altrimenti il modello deve apprendere implicitamente.
 
-**EN**
-- **Rolling moving averages** over 5/10/20/60 bars (BAR-semantic) — trend at multiple horizons.
-- **Derived momentum** — ratios between MAs at different scales, momentum/volatility ratios. Classic RSI/MACD were removed: the same information is already captured by the `vol_std` + `lag_ret` + microstructure mix.
+**EN** (each window's BAR-/TIME-semantics is the one from the contract above)
+- **Trend and momentum** — rolling moving averages over 5/10/20/60 bars, ratios across scales, momentum/volatility ratios. RSI/MACD removed: the same information already sits in the `vol_std` + `lag_ret` + microstructure mix.
+- **Volatility** — rolling std of log-returns over 5/10/20/60 bars. ATR removed from the inputs (redundant with `vol_std`); still computed by the `RiskManager` for dynamic stop sizing (§10).
+- **VWAP** — volume-weighted average price; the price−VWAP distance measures the deviation from the session equilibrium.
+- **Multi-scale Volume Profile** — volume distribution per price level over **60/240/1440 bars** (at 1m = 1h/4h/1 day; at 1h = 60h/10 days/60 days); 4 features per window (distance from POC, VAH, VAL + concentration at the POC). In high volatility the short scale dominates, in low volatility the long one is more stable.
+- **CVD** — cumulative taker-buy minus taker-sell volume: a CVD↑ / price↓ divergence flags buying pressure not yet priced in.
+- **Microstructure** — 10 features from candle geometry (body ratio, upper/lower shadow, price velocity, price acceleration): **instantaneous** information, without the construction lag of classic oscillators.
+- **Funding rate** — BTC/USDT perps every 8h → `funding_rate`, `funding_rate_1d`, `funding_rate_dev`. High funding = crowded longs (downside short-squeeze risk); negative = crowded shorts.
+- **Temporal** — time of day, day of week, day of month: crypto liquidity has intraday and weekly seasonality.
+- **Lags** — log-returns of the last 5 bars as direct regressors (explicit autoregressive component).
+- **Interactions** — 3 explicit products (`vol_x_pos` = volatility × VWAP position, `momentum_x_funding`, `cvd_x_vol`): second-order terms the model would otherwise have to learn implicitly.
 
-### Volatilità · Volatility
+🇮🇹 **HAR-CJ (A4, lever inerte — `features.har_cj`, default OFF).** Decomposizione continua/jump della varianza realizzata come input (Andersen–Bollerslev–Diebold 2007): bipower variation `BV = (π/2)·mean(|r_t|·|r_{t-1}|)` — stimatore della componente continua, robusto ai salti — poi `J = max(RV − BV, 0)` e `jump_ratio = J/RV ∈ [0,1]`, su scale TIME-semantic 1d/1w. Con flag OFF (default production) le 104 feature restano bit-invariate; attivazione solo a retrain pianificato con gate pre-registrato.
 
-🇮🇹 Rolling std dei log rendimenti su 5/10/20/60 barre (BAR-semantic). ATR classico rimosso dall'input perché ridondante con `vol_std`; resta calcolato dal `RiskManager` per il sizing dinamico degli stop (§10).
-
-🇮🇹 **HAR-CJ (A4, lever inerte — `features.har_cj`, default OFF):** decomposizione continua/jump della varianza realizzata come input (Andersen–Bollerslev–Diebold 2007). Bipower variation `BV = (π/2)·mean(|r_t|·|r_{t-1}|)` (stimatore della componente continua, robusto ai salti), `J = max(RV−BV, 0)`, `jump_ratio = J/RV ∈ [0,1]`, su scale TIME-semantic 1d/1w. Con flag OFF (default production) le 104 feature restano bit-invariate; attivazione solo a retrain pianificato con gate pre-registrato.
-
-**EN** Rolling std of log returns over 5/10/20/60 bars (BAR-semantic). Classic ATR removed from the inputs (redundant with `vol_std`); still computed by the `RiskManager` for dynamic stop sizing (§10).
-
-**EN** **HAR-CJ (A4, inert lever — `features.har_cj`, default OFF):** continuous/jump decomposition of realized variance as input (Andersen–Bollerslev–Diebold 2007). Bipower variation `BV = (π/2)·mean(|r_t|·|r_{t-1}|)` (continuous-component estimator, jump-robust), `J = max(RV−BV, 0)`, `jump_ratio = J/RV ∈ [0,1]`, on TIME-semantic 1d/1w scales. With the flag OFF (production default) the 104 features stay bit-invariant; activation only at a planned retrain with a pre-registered gate.
-
-### VWAP
-
-🇮🇹 Prezzo medio ponderato per il volume. Riferimento usato da fondi e market maker. La distanza prezzo-VWAP indica se il mercato è temporaneamente sopra/sotto-valutato rispetto all'equilibrio di sessione.
-
-**EN** Volume-weighted average price. The reference used by funds and market makers. Distance price-vs-VWAP tells whether the market is temporarily over/under-valued relative to the session's equilibrium.
-
-### Volume Profile (multi-scala) · Volume Profile (multi-scale)
-
-🇮🇹 Distribuzione del volume per livello di prezzo: i livelli con molto volume diventano supporti/resistenze. Calcolato su **tre finestre di 60/240/1440 barre** (BAR-semantic: a 1m = 1h/4h/1 giorno; al timeframe corrente 1h = 60h/10 giorni/60 giorni). Ogni finestra produce 4 feature: distanza dal POC, dalla Value Area High, dalla Value Area Low, concentrazione del volume al POC. In alta volatilità domina il VP breve; in bassa volatilità quello lungo è più stabile.
-
-**EN** Volume distribution per price level: high-volume levels become strong supports/resistances. Computed on **three windows of 60/240/1440 bars** (BAR-semantic: at 1m = 1h/4h/1 day; at the current 1h timeframe = 60h/10 days/60 days). Each window produces 4 features: distance from POC, from Value Area High, from Value Area Low, volume concentration at the POC. In high volatility the short VP dominates; in low volatility the long one is more stable.
-
-### CVD — Cumulative Volume Delta
-
-🇮🇹 Differenza tra volume buy aggressivo (taker) e sell aggressivo. Quando CVD sale mentre il prezzo scende, c'è pressione di acquisto nascosta — e viceversa. Uno degli indicatori più informativi sull'intenzione reale del mercato.
-
-**EN** Difference between aggressive buy volume (taker) and aggressive sell volume. When CVD rises while price falls, there's hidden buy pressure — and vice versa. One of the most informative indicators about the market's real intent.
-
-### Microstructure (forma della candela) · Microstructure (candle shape)
-
-🇮🇹 10 feature istantanee derivate dalla geometria: body ratio, upper/lower shadow, price velocity, price acceleration. Catturano in tempo reale ciò che MACD/RSI catturano solo dopo molte candele.
-
-**EN** 10 instantaneous features derived from candle geometry: body ratio, upper/lower shadow, price velocity, price acceleration. Capture in real time what MACD/RSI capture only after many candles.
-
-### Funding rate
-
-🇮🇹 Funding rate dei futures perpetui BTC/USDT scaricato ogni 8h. Genera 3 feature strutturali: `funding_rate`, `funding_rate_1d`, `funding_rate_dev`. Funding alto = long affollati (rischio short squeeze al ribasso); funding negativo = short affollati (rischio squeeze al rialzo).
-
-**EN** Funding rate of BTC/USDT perpetual futures downloaded every 8h. Produces 3 structural features: `funding_rate`, `funding_rate_1d`, `funding_rate_dev`. High funding = crowded longs (risk of short squeeze down); negative funding = crowded shorts (risk of squeeze up).
-
-### Feature temporali · Temporal features
-
-🇮🇹 Ora del giorno, giorno della settimana, giorno del mese. I mercati crypto hanno pattern ciclici: liquidità minore di notte, apertura Wall Street / scadenze future generano movimenti sistematici.
-
-**EN** Time of day, day of week, day of month. Crypto markets have cyclical patterns: liquidity is lower at night, Wall Street open / futures expiries produce systematic moves.
-
-### Lag features
-
-🇮🇹 Log rendimenti delle ultime 5 candele come feature dirette — aiuta a riconoscere rimbalzi, continuazioni di trend, esaurimenti.
-
-**EN** Log returns of the last 5 candles fed directly as features — helps recognize bounces, trend continuations, exhaustions.
-
-### Feature interactions
-
-🇮🇹 3 prodotti espliciti per riconoscimento di regime: `vol_x_pos` (volatilità × posizione VWAP), `momentum_x_funding`, `cvd_x_vol`. Aiutano il modello a riconoscere combinazioni rilevanti senza apprenderle implicitamente.
-
-**EN** 3 explicit products for regime recognition: `vol_x_pos` (volatility × VWAP position), `momentum_x_funding`, `cvd_x_vol`. Help the model see relevant combinations without learning them implicitly.
+**EN** **HAR-CJ (A4, inert lever — `features.har_cj`, default OFF).** Continuous/jump decomposition of realized variance as input (Andersen–Bollerslev–Diebold 2007): bipower variation `BV = (π/2)·mean(|r_t|·|r_{t-1}|)` — jump-robust estimator of the continuous component — then `J = max(RV − BV, 0)` and `jump_ratio = J/RV ∈ [0,1]`, on TIME-semantic 1d/1w scales. With the flag OFF (production default) the 104 features stay bit-invariant; activation only at a planned retrain with a pre-registered gate.
 
 ---
 
 ## 4. Dati macro (FRED + yFinance) · 4. Macro data (FRED + yFinance)
 
-🇮🇹 Indicatori macroeconomici esterni:
-- **DXY** — BTC tende a muoversi inversamente al dollaro.
-- **VIX** — la paura sui tradizionali si propaga al crypto.
-- **Tassi** (Fed Funds Rate, Treasury) — costo del capitale e propensione al rischio.
-- **Oro** — correlato a BTC come asset rifugio.
+🇮🇹 Regressori esogeni a bassa frequenza (giornaliera/mensile), processati separatamente e fusi col flusso di prezzo al training (90 colonne → `MacroEncoder` 16-dim): **DXY** (BTC tende a muoversi inversamente al dollaro), **VIX** (propagazione dell'avversione al rischio dai mercati tradizionali), **tassi** Fed Funds / Treasury (costo del capitale), **oro** (asset rifugio comparabile). Il mismatch di frequenza è il vincolo: l'informazione macro è quasi costante sull'orizzonte h=30 barre, quindi agisce da condizionamento lento, non da predittore di barra.
 
-**EN** External macroeconomic indicators:
-- **DXY** — BTC tends to move inversely to the dollar.
-- **VIX** — fear in traditional markets spills into crypto.
-- **Rates** (Fed Funds Rate, Treasury) — cost of capital and risk appetite.
-- **Gold** — correlated with BTC as a safe-haven asset.
-
-🇮🇹 Frequenza molto più bassa (giornaliera/mensile): processati separatamente e fusi con i dati di prezzo al training.
-
-**EN** These have much lower frequency (daily/monthly): processed separately and merged with price data at training time.
+**EN** Low-frequency exogenous regressors (daily/monthly), processed separately and merged with the price stream at training time (90 columns → 16-dim `MacroEncoder`): **DXY** (BTC tends to move inversely to the dollar), **VIX** (risk-aversion spillover from traditional markets), **rates** Fed Funds / Treasury (cost of capital), **gold** (comparable safe-haven asset). The frequency mismatch is the binding constraint: macro information is nearly constant over the h=30-bar horizon, so it acts as slow conditioning, not as a per-bar predictor.
 
 ### Rilevamento dei regimi (Markov-Switching su realized volatility BTC, oraria) · Regime detection (Markov-Switching on BTC realized volatility, hourly)
 
-🇮🇹 Dal **2026-06-03** il detector di regime opera **direttamente sui dati BTC**, non più sulle macro USA. La classe attiva è `RegimeMarkovBTC` in `quantsys/macro/regime.py` — Markov-Switching (Hamilton 1989) su realized volatility intraday di BTC aggregata oraria. Sostituisce sia il vecchio `RegimeMarkovSwitching` su PC1 delle macro daily (regimi mensili, incompatibili con h=30) sia la baseline transitoria `RegimeSession` (Asia/EU/US deterministico, ~33% per costruzione ma informativamente vuota: cluster temporali, non di mercato).
+🇮🇹 **Oggetto.** Il detector opera **direttamente sui dati BTC**, non sulle macro USA: `RegimeMarkovBTC` (`quantsys/macro/regime.py`) è un Markov-Switching (Hamilton 1989) sulla realized volatility di BTC aggregata **oraria**. Sostituisce il MS su PC1 delle macro daily (regimi che commutano su scala mensile — incompatibili con h=30) e la baseline `RegimeSession` (Asia/EU/US deterministico: cluster **temporali**, non di mercato, informativamente vuoti).
 
-**EN** Since **2026-06-03** the regime detector runs **directly on BTC data**, no longer on US macros. The active class is `RegimeMarkovBTC` in `quantsys/macro/regime.py` — Markov-Switching (Hamilton 1989) on intraday BTC realized volatility aggregated hourly. It supersedes both the legacy `RegimeMarkovSwitching` on PC1 of daily macros (regimes switching every months — incompatible with h=30) and the transitional `RegimeSession` baseline (deterministic Asia/EU/US, ~33% by construction but informationally empty: temporal clusters, not market clusters).
+**EN** **Object.** The detector runs **directly on BTC data**, not on US macros: `RegimeMarkovBTC` (`quantsys/macro/regime.py`) is a Markov-Switching model (Hamilton 1989) on BTC realized volatility aggregated **hourly**. It supersedes the MS on PC1 of daily macros (regimes switching on a monthly scale — incompatible with h=30) and the `RegimeSession` baseline (deterministic Asia/EU/US: **temporal** clusters, not market clusters, informationally empty).
 
-🇮🇹 **Pipeline di feature.** Da `data/raw_candles.parquet` (candele BTC a qualunque intervallo **≤1h**: il clock del regime è ORARIO by design, indipendente dal timeframe di trading; input >1h → `ValueError` fail-fast) il detector aggrega ogni ora:
-- `log_ret_h` — somma dei log-return per barra sull'ora (return orario; con input 1h il resample è un'identità);
-- `log_rv` — `log(Σ log_ret²)` clippato a 1e-12 (log della realized variance; la rv grezza è fortemente right-skewed, il log la stabilizza per la MarkovRegression). Con input 1h ogni bucket contiene una sola osservazione → rv = log_ret² della barra (proxy povera ma valida della RV oraria).
+🇮🇹 **Feature.** Da `data/raw_candles.parquet` (candele a qualunque intervallo **≤1h** — il clock del regime è ORARIO by design, indipendente dal timeframe di trading; input >1h → `ValueError` fail-fast) si aggrega per ora:
+- `log_ret_h` = somma dei log-return di barra sull'ora (con input 1h il resample è un'identità);
+- `log_rv` = `log(Σ log_ret²)` clippato a 1e-12 — la RV grezza è fortemente right-skewed, il log la stabilizza per la `MarkovRegression`. Con input 1h ogni bucket ha una sola osservazione → rv = log_ret² della barra (proxy povera ma valida della RV oraria).
 
-**EN** **Feature pipeline.** From `data/raw_candles.parquet` (BTC candles at any interval **≤1h**: the regime clock is HOURLY by design, independent of the trading timeframe; >1h input → fail-fast `ValueError`) the detector aggregates per hour:
-- `log_ret_h` — sum of per-bar log-returns over the hour (hourly return; with 1h input the resample is an identity);
-- `log_rv` — `log(Σ log_ret²)` clipped at 1e-12 (log realized variance; raw rv is heavily right-skewed, the log stabilizes it for MarkovRegression). With 1h input each bucket holds a single observation → rv = the bar's log_ret² (a poor but valid proxy of hourly RV).
+**Statistica.** RobustScaler globale (mediana/IQR, look-ahead dichiarato trascurabile) → PCA expanding window con `n_pca=1`, che collassa `log_ret_h` + `log_rv` in un unico segnale di **intensità del moto** (PC1 spiega ~65–73% della varianza congiunta) → `MarkovRegression` su PC1 con switching **mean + variance** → Hamilton filter manuale, O(1) per passo orario fra un retrain e l'altro. Walk-forward **expanding**, cadenza da `macro.hmm_burn_in_days` / `hmm_retrain_days` (30 giorni di burn-in, retrain ogni 90 giorni): il refit expanding è O(t), su 7 anni un full rebuild costa ~3h (a cadenza mensile ~9h).
 
-🇮🇹 **Pipeline statistica.** RobustScaler globale (mediana/IQR, look-ahead trascurabile) → PCA expanding window con `n_pca=1` (combina `log_ret_h` + `log_rv` in un singolo segnale di intensità del moto) → `MarkovRegression` su PC1 con switching mean **+** switching variance → Hamilton filter manuale O(1) per i passi orari fra un retrain e l'altro. Walk-forward: cadenza da config `macro.hmm_burn_in_days` / `hmm_retrain_days` (correnti: burn-in 30 giorni = 720h, retrain ogni 90 giorni = 2160h — il refit expanding è O(t), su 7 anni il full rebuild costa ~3h).
+**EN** **Features.** From `data/raw_candles.parquet` (candles at any interval **≤1h** — the regime clock is HOURLY by design, independent of the trading timeframe; >1h input → fail-fast `ValueError`), aggregated per hour:
+- `log_ret_h` = sum of per-bar log-returns over the hour (with 1h input the resample is an identity);
+- `log_rv` = `log(Σ log_ret²)` clipped at 1e-12 — raw RV is heavily right-skewed, the log stabilizes it for `MarkovRegression`. With 1h input each bucket holds a single observation → rv = the bar's log_ret² (a poor but valid proxy of hourly RV).
 
-**EN** **Statistical pipeline.** Global RobustScaler (median/IQR, negligible look-ahead) → expanding-window PCA with `n_pca=1` (collapses `log_ret_h` + `log_rv` into a single motion-intensity signal) → `MarkovRegression` on PC1 with switching mean **+** switching variance → manual Hamilton filter, O(1) per hourly step between retrains. Walk-forward: cadence from config `macro.hmm_burn_in_days` / `hmm_retrain_days` (current: 30-day burn-in = 720h, retrain every 90 days = 2160h — the expanding refit is O(t), a full rebuild over 7 years costs ~3h).
+**Statistics.** Global RobustScaler (median/IQR, declared-negligible look-ahead) → expanding-window PCA with `n_pca=1`, collapsing `log_ret_h` + `log_rv` into a single **motion-intensity** signal (PC1 explains ~65–73% of the joint variance) → `MarkovRegression` on PC1 with switching **mean + variance** → manual Hamilton filter, O(1) per hourly step between retrains. **Expanding** walk-forward, cadence from `macro.hmm_burn_in_days` / `hmm_retrain_days` (30-day burn-in, retrain every 90 days): the expanding refit is O(t), a full rebuild over 7 years costs ~3h (monthly cadence ~9h).
 
-🇮🇹 **Refresh incrementale (B7, 2026-07-15).** Il full rebuild persiste anche `data/regime_wf_checkpoint.pkl`: lo stato della **catena** walk-forward (parametri dell'ultimo retrain, PCA sign-aligned, posteriore filtrato, cadenza, scaler congelato) — ciò che `regime_hmm.pkl` NON contiene (quello ha solo il fit finale full-sample per `predict_proba`). `01b --regime-incremental` estende il parquet alle sole barre nuove riprendendo la catena (0-1 fit MLE → minuti invece di ore), con bit-parity by construction verificata dal golden test `tests/test_regime_incremental.py`; `--regime-bootstrap-checkpoint` ricostruisce una-tantum il checkpoint da pkl+parquet esistenti validandolo via replay contro il parquet production (fail-fast, nessun artefatto scritto su divergenza). In incrementale `regime_hmm.pkl` resta quello dell'ultimo full rebuild (il fit finale full-sample costerebbe il fit pieno). Unico scostamento accettato e documentato: lo scaler resta congelato al full rebuild (nel rebuild è globale sullo span, leakage dichiarato trascurabile) → un full rebuild periodico ri-ancora.
+🇮🇹 ⚠ **Perché il detector è CAUSALE — `filtered_marginal_probabilities`, MAI le `smoothed_`.** Il filtro di Hamilton produce a ogni passo la probabilità **filtrata**, con una ricorsione predict → update:
 
-**EN** **Incremental refresh (B7, 2026-07-15).** The full rebuild also persists `data/regime_wf_checkpoint.pkl`: the walk-forward **chain** state (last-retrain parameters, sign-aligned PCA, filtered posterior, cadence, frozen scaler) — what `regime_hmm.pkl` does NOT contain (that one only holds the final full-sample fit for `predict_proba`). `01b --regime-incremental` extends the parquet to the new bars only by resuming the chain (0-1 MLE fits → minutes instead of hours), with bit-parity by construction verified by the `tests/test_regime_incremental.py` golden test; `--regime-bootstrap-checkpoint` one-off rebuilds the checkpoint from existing pkl+parquet, validating it via replay against the production parquet (fail-fast, no artifact written on divergence). In incremental mode `regime_hmm.pkl` stays the one from the last full rebuild (the final full-sample fit would cost the full fit). The only accepted, documented deviation: the scaler stays frozen at the full rebuild (in the rebuild it is global over the span, declared-negligible leakage) → a periodic full rebuild re-anchors.
+```
+predict:  P(S_t=j | y_{1:t-1}) = Σ_i P(S_t=j | S_{t-1}=i) · P(S_{t-1}=i | y_{1:t-1})
+update:   P(S_t=j | y_{1:t})   ∝ f(y_t | S_t=j) · P(S_t=j | y_{1:t-1})
+```
 
-🇮🇹 **Tre regimi data-driven (run 2026-07-15 sui 7 anni del pivot 1h: 65.511 ore 2019→2026-06-22, post burn-in; parametri dal fit finale full-sample).** ⚠ **Gli indici NON hanno semantica fissa**: l'ordinamento è un artefatto del fit e cambia tra run — i nomi Quiet/Trending/Stress dello span 1m 2025-26 (R0 42% / R1 18% / R2 40%) NON mappano sugli indici correnti. La semantica va ri-derivata dalle varianze a ogni full rebuild:
-- **R0** (31.1%): bassa volatilità (σ² PC1 ≈ 0.12), μ ≈ −0.01, P(stay)≈92% — il "quiet" corrente.
-- **R1** (36.3%): alta volatilità (σ² ≈ 4.76), μ ≈ 0, P(stay)≈83% — il "stress" corrente.
-- **R2** (32.7%): volatilità media (σ² ≈ 0.61), μ ≈ 0, P(stay)≈89% — intermedio.
+🇮🇹 Il condizionamento è su `y_{1:t}`: **solo informazione disponibile all'istante t**, esattamente ciò che si avrebbe in live. Le probabilità *smoothed* (Kim 1994) sono invece `P(S_t=j | y_{1:T})`, prodotte da una ricorsione **all'indietro** che condiziona sull'intero campione, `y_{t+1..T}` inclusi: sono stimatori migliori del regime *ex post*, ma usarle per stratificare la val, per un gate o come feature farebbe entrare il futuro nella decisione a `t` — **lookahead bias**, e per costruzione irriproducibile in produzione. Per lo stesso motivo la catena walk-forward ri-stima i parametri MS solo su dati passati e il filtro resta forward-only fra un retrain e l'altro.
 
-**EN** **Three data-driven regimes (2026-07-15 run on the 7 years of the 1h pivot: 65,511 hours 2019→2026-06-22, post burn-in; parameters from the final full-sample fit).** ⚠ **Indices have NO fixed semantics**: the ordering is a fit artifact and changes across runs — the Quiet/Trending/Stress names from the 1m 2025-26 span (R0 42% / R1 18% / R2 40%) do NOT map onto the current indices. Semantics must be re-derived from the variances at every full rebuild:
-- **R0** (31.1%): low volatility (PC1 σ² ≈ 0.12), μ ≈ −0.01, P(stay) ≈ 92% — the current "quiet".
-- **R1** (36.3%): high volatility (σ² ≈ 4.76), μ ≈ 0, P(stay) ≈ 83% — the current "stress".
-- **R2** (32.7%): mid volatility (σ² ≈ 0.61), μ ≈ 0, P(stay) ≈ 89% — intermediate.
+**EN** ⚠ **Why the detector is CAUSAL — `filtered_marginal_probabilities`, NEVER the `smoothed_` ones.** The Hamilton filter yields at each step the **filtered** probability via a predict → update recursion (formulas above).
 
-🇮🇹 La frequenza di switch tipica misurata sullo span 1m è di **3–8 cambi al giorno** (clock del detector orario by design, indipendente dal timeframe di trading). La PCA expanding window spiega ~65–73% della varianza fra `log_ret_h` e `log_rv` (PC1 cattura la magnitudine del moto). Le probabilità sono persistite in `data/regime_probs.parquet` su index orario UTC, schema invariato (`regime_dominant`, `regime_burn_in`, `regime_prob_0/1/2`) per drop-in con tutti i consumer (`02_train.py::_load_val_regimes`, `RiskManager`).
+**EN** Conditioning is on `y_{1:t}`: **only information available at time t**, exactly what live would have. The *smoothed* probabilities (Kim 1994) are instead `P(S_t=j | y_{1:T})`, produced by a **backward** recursion conditioning on the whole sample, `y_{t+1..T}` included: they are better *ex post* regime estimators, but using them to stratify val, as a gate or as a feature would inject the future into the decision at `t` — **lookahead bias**, and irreproducible in production by construction. For the same reason the walk-forward chain re-estimates the MS parameters on past data only, and the filter stays forward-only between retrains.
 
-**EN** Typical switch frequency measured on the 1m span is **3–8 changes per day** (the detector clock is hourly by design, independent of the trading timeframe). The expanding-window PCA explains ~65–73% of the variance between `log_ret_h` and `log_rv` (PC1 captures the magnitude of motion). Probabilities are persisted in `data/regime_probs.parquet` on a UTC hourly index, with the unchanged schema (`regime_dominant`, `regime_burn_in`, `regime_prob_0/1/2`) for drop-in compatibility with every consumer (`02_train.py::_load_val_regimes`, `RiskManager`).
+🇮🇹 **Refresh incrementale (B7).** Il full rebuild persiste, oltre a `regime_hmm.pkl` (solo il fit finale full-sample per `predict_proba`), anche `data/regime_wf_checkpoint.pkl` = lo stato della **catena** walk-forward (parametri dell'ultimo retrain, PCA sign-aligned, posteriore filtrato, cadenza, scaler congelato). Riprendendo la catena si estende il parquet alle sole barre nuove con 0-1 fit MLE (minuti invece di ore), **bit-parity by construction** (golden test `tests/test_regime_incremental.py`). Unico scostamento accettato e documentato: lo scaler resta congelato al full rebuild → un full rebuild periodico ri-ancora. Comandi (`01b --regime-incremental`, `--regime-bootstrap-checkpoint`) e runbook: **`AVVIO.md`**.
 
-🇮🇹 **Uso del regime nel modello.** Come prima, **non è feature di input** del modello: serve per (a) stratificare il validation split (ora i tre cluster sono di mercato, non di sessione), e (b) come dimensione diagnostica per il `val_nll per regime` nei training log — se uno dei tre regimi mostra NLL sistematicamente peggiore, il modello ha un buco di calibrazione su quella micro-condizione. Le macro USA (FRED + yFinance) restano scollegate dal regime detector ma vengono ancora consumate dal `MacroEncoder` 16-dim come prima.
+**EN** **Incremental refresh (B7).** Besides `regime_hmm.pkl` (only the final full-sample fit for `predict_proba`), the full rebuild persists `data/regime_wf_checkpoint.pkl` = the walk-forward **chain** state (last-retrain parameters, sign-aligned PCA, filtered posterior, cadence, frozen scaler). Resuming the chain extends the parquet to the new bars only with 0-1 MLE fits (minutes instead of hours), **bit-parity by construction** (golden test `tests/test_regime_incremental.py`). The only accepted, documented deviation: the scaler stays frozen at the full rebuild → a periodic full rebuild re-anchors. Commands (`01b --regime-incremental`, `--regime-bootstrap-checkpoint`) and runbook: **`AVVIO.md`**.
 
-**EN** **How the model consumes the regime.** As before, the regime is **not an input feature**: it is used to (a) stratify the validation split (now the three clusters are market clusters, not session clusters), and (b) feed the `val_nll per regime` diagnostic in the training logs — if one of the three regimes shows systematically worse NLL, the model has a calibration gap on that micro-condition. The US macros (FRED + yFinance) are now decoupled from the regime detector but are still consumed by the 16-dim `MacroEncoder` as before.
+🇮🇹 ⚠ **Gli indici di regime NON hanno semantica fissa fra run.** L'ordinamento `R0/R1/R2` è un artefatto del fit MLE (label switching): cambia a ogni full rebuild. I nomi Quiet/Trending/Stress dello span 1m 2025-26 (R0 42% / R1 18% / R2 40%) **non mappano** sugli indici correnti. La semantica va **ri-derivata dalle varianze** `σ²` del run corrente, sempre. Run 2026-07-15 (7 anni orari 2019→2026, post burn-in; parametri dal fit finale full-sample):
 
-🇮🇹 **Classi legacy in `quantsys/macro/regime.py`** (mantenute come fallback opzionali, non più cablate nella pipeline):
-- `RegimeMarkovSwitching` — MS su PC1 delle macro daily FRED+yFinance.
-- `RegimeSession` — baseline deterministica Asia/EU/US su `hour_utc // 8`.
-- `RegimeHMM` — Gaussian HMM storico (predecessore di MS).
+| Regime | Frequenza · Frequency | σ² PC1 | μ | P(stay) | Semantica corrente |
+|---|---|---|---|---|---|
+| **R0** | 31.1% | ≈ 0.12 | ≈ −0.01 | ≈ 92% | bassa vol ("quiet") |
+| **R1** | 36.3% | ≈ 4.76 | ≈ 0 | ≈ 83% | alta vol ("stress") |
+| **R2** | 32.7% | ≈ 0.61 | ≈ 0 | ≈ 89% | vol media (intermedio) |
 
-**EN** **Legacy classes in `quantsys/macro/regime.py`** (kept as optional fallbacks, no longer wired into the pipeline):
-- `RegimeMarkovSwitching` — MS on PC1 of daily FRED+yFinance macros.
-- `RegimeSession` — deterministic Asia/EU/US baseline on `hour_utc // 8`.
-- `RegimeHMM` — legacy Gaussian HMM (MS predecessor).
+**EN** ⚠ **Regime indices have NO fixed semantics across runs.** The `R0/R1/R2` ordering is an MLE-fit artifact (label switching): it changes at every full rebuild. The Quiet/Trending/Stress names of the 1m 2025-26 span (R0 42% / R1 18% / R2 40%) do **not** map onto the current indices. Semantics must always be **re-derived from the current run's variances** `σ²`. 2026-07-15 run (7 hourly years 2019→2026, post burn-in; parameters from the final full-sample fit):
 
-🇮🇹 Il `RiskManager` continua ad applicare profili di rischio per regime (§10), ma ⚠ **i profili sono keyed sull'INDICE di regime, la cui semantica cambia a ogni full rebuild** (vedi sopra: dal run 2026-07-15 l'alta volatilità è R1, non più R2). Finché il mapping indice→profilo non viene ri-derivato dalle varianze del run corrente, i profili hardcoded su "regime=2 → riduci sizing" sono da considerare STALE (irrilevante per la linea vol, che non usa il RiskManager direzionale).
+| Regime | Frequency | PC1 σ² | μ | P(stay) | Current semantics |
+|---|---|---|---|---|---|
+| **R0** | 31.1% | ≈ 0.12 | ≈ −0.01 | ≈ 92% | low vol ("quiet") |
+| **R1** | 36.3% | ≈ 4.76 | ≈ 0 | ≈ 83% | high vol ("stress") |
+| **R2** | 32.7% | ≈ 0.61 | ≈ 0 | ≈ 89% | mid vol (intermediate) |
 
-**EN** `RiskManager` keeps applying regime-specific risk profiles (§10), but ⚠ **profiles are keyed on the regime INDEX, whose semantics change at every full rebuild** (see above: from the 2026-07-15 run high volatility is R1, no longer R2). Until the index→profile mapping is re-derived from the current run's variances, profiles hardcoded as "regime=2 → cut sizing" must be considered STALE (irrelevant for the vol line, which does not use the directional RiskManager).
+🇮🇹 **Uso nel modello.** Il regime **non è feature di input**: serve a (a) stratificare il validation split (cluster di mercato, non di sessione) e (b) alimentare la diagnostica `val_nll per regime` — se un regime mostra NLL sistematicamente peggiore, il modello ha un buco di calibrazione su quella micro-condizione. Le probabilità sono persistite in `data/regime_probs.parquet` (index orario UTC, colonne `regime_dominant`, `regime_burn_in`, `regime_prob_0/1/2`). Le macro USA (FRED + yFinance) sono scollegate dal detector ma restano consumate dal `MacroEncoder` 16-dim. I detector precedenti (`RegimeMarkovSwitching`, `RegimeSession`, `RegimeHMM`) sopravvivono nel modulo come fallback **non cablati**.
+
+**EN** **Use in the model.** The regime is **not an input feature**: it serves to (a) stratify the validation split (market clusters, not session clusters) and (b) feed the `val_nll per regime` diagnostic — if one regime shows systematically worse NLL, the model has a calibration gap on that micro-condition. Probabilities are persisted in `data/regime_probs.parquet` (UTC hourly index, columns `regime_dominant`, `regime_burn_in`, `regime_prob_0/1/2`). The US macros (FRED + yFinance) are decoupled from the detector but still consumed by the 16-dim `MacroEncoder`. The earlier detectors (`RegimeMarkovSwitching`, `RegimeSession`, `RegimeHMM`) survive in the module as **non-wired** fallbacks.
+
+🇮🇹 **Corollario del label switching.** I profili di rischio per regime del `RiskManager` direzionale (§10) sono **keyed sull'INDICE**: finché il mapping indice→profilo non viene ri-derivato dalle varianze del run corrente, ogni regola hardcoded del tipo "regime=2 → riduci sizing" è **STALE** per costruzione. Irrilevante per la produzione (la linea vol non usa il `RiskManager` direzionale), vincolante per chiunque riattivi Parte V.
+
+**EN** **Label-switching corollary.** The per-regime risk profiles of the directional `RiskManager` (§10) are **keyed on the INDEX**: until the index→profile mapping is re-derived from the current run's variances, any hardcoded rule like "regime=2 → cut sizing" is **STALE** by construction. Irrelevant for production (the vol line does not use the directional `RiskManager`), binding for anyone re-activating Part V.
 
 ---
 
 ## 5. Dataset per il training · 5. Training dataset
 
-🇮🇹 Le feature vengono organizzate in **finestre temporali**: ogni esempio è una matrice `120×104` (ultime 120 **barre** di contesto = **5 giorni** al timeframe corrente 1h; erano 2 ore a 1m, 104 feature). Il target è il log-return cumulativo sulle prossime 30 barre (§2).
+🇮🇹 Le feature vengono organizzate in **finestre temporali**: ogni esempio è una matrice `120×104` (ultime 120 **barre** di contesto = **5 giorni** al timeframe corrente 1h; erano 2 ore a 1m). Il target associato alla finestra è quello selezionato da `features.target_type` sulle prossime 30 barre (§2): log-RV in produzione, somma dei log-return sulla linea legacy.
 
-**EN** Features are organized into **temporal windows**: every example is a `120×104` matrix (last 120 **bars** of context = **5 days** at the current 1h timeframe; it was 2 hours at 1m, 104 features). The target is the cumulative log-return over the next 30 bars (§2).
+**EN** Features are organized into **temporal windows**: every example is a `120×104` matrix (last 120 **bars** of context = **5 days** at the current 1h timeframe; it was 2 hours at 1m). The target attached to the window is the one selected by `features.target_type` over the next 30 bars (§2): log-RV in production, the sum of log-returns on the legacy line.
 
-🇮🇹 Sul dataset corrente 1h (2019→oggi) con `window_stride: 1` l'ultima rigenerazione npz (2026-06-22, `01_download_data.py` + `scripts/vol/dev_vols_macro_append.py`) produce **51.364 esempi train** (`X_train (51364, 120, 104)`), split **51.364 / 6.420 / 6.421** (train/val/test) più `X_macro_* (·, 90)`. (Il precedente dataset 1m 549k con stride 5 dava 80824 / 10103 / 10104.)
+🇮🇹 Sul dataset 1h (2019→oggi) con `window_stride: 1` l'npz corrente su disco è `X_train (51882, 120, 104)`, split **51.882 / 6.485 / 6.486** (train/val/test ≈ 80/10/10, temporale e non mescolato) più `X_macro_* (·, 90)`. Lo split cresce a ogni estensione del raw: i valori vanno **letti dall'npz**, non assunti.
 
-**EN** On the current 1h dataset (2019→today) with `window_stride: 1` the latest npz regeneration (2026-06-22, `01_download_data.py` + `scripts/vol/dev_vols_macro_append.py`) yields **51,364 train examples** (`X_train (51364, 120, 104)`), split **51,364 / 6,420 / 6,421** (train/val/test) plus `X_macro_* (·, 90)`. (The previous 549k 1m dataset with stride 5 yielded 80,824 / 10,103 / 10,104.)
+**EN** On the 1h dataset (2019→today) with `window_stride: 1` the current on-disk npz is `X_train (51882, 120, 104)`, split **51,882 / 6,485 / 6,486** (train/val/test ≈ 80/10/10, temporal and unshuffled) plus `X_macro_* (·, 90)`. The split grows with every raw-data extension: these figures must be **read from the npz**, not assumed.
 
 🇮🇹 **Perché T=120 e non di più.** La finestra di 120 barre è uno sweet spot empirico verificato il 2026-06-04 **sul perimetro 1m**: esperimenti a **T=180 e T=240 hanno prodotto regressioni** (degrado monotono di Spearman walkforward e backtest, μ_pred collassata, sotto-random WHR). Il dataset 1m ~525k non aveva profondità informativa per sostenere context più lunghi (over-fitting al noise temporale; il plateau di letteratura 192-384 vale su dataset multi-anno multi-asset). T=120 è stato **mantenuto invariato** nel pivot 1h (ora = 5 giorni di contesto): non aumentarlo senza nuova evidenza empirica.
 
@@ -262,7 +223,7 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 🇮🇹 **Inversione z→raw — dipende dal `target_type`.**
 - **Target direzionale (`ret`, linea legacy).** Il target raw è ≈ centrato (mediana log-ret ≈ 0), quindi la riconciliazione si riduce a `PipelineState.denormalize_predictions(mu, sigma) -> (mu_raw, sigma_raw)`, che moltiplica per `target_scale` (il centro è trascurabile su μ ed è strutturalmente nullo sulla σ). Esempio storico di `target_scale` ≈ 0.002707 (run 2026-06-02, 1m, h=30). **Sia `03_backtest.py` sia `04_live_signals.py` la applicano subito dopo il forward**, prima del `SignalGenerator`. Senza denormalizzazione, SL/TP `σ × price × multiplier` diventano macroscopici (σ_z=1 × $42k × 1.5 = $63k) — bug strutturale fixato il 2026-05-23 (Sharpe −256 → +18.7).
-- **Target di volatilità (`log_rv`, linea di PRODUZIONE).** Qui `denormalize_predictions` (solo `μ·scale`) **è insufficiente**: la mediana del log-RV è ≈ −7.2, quindi serve l'**inversione completa** `log_rv = μ_z · scale + center` (con `center`/`scale` dal RobustScaler persistito), poi `RV = exp(log_rv)` per riportare in livelli. È implementata in `quantsys/model/vol_metrics.py` (`invert_log_rv(z, center, scale)`, `qlike_from_z(...)`), single source of truth condivisa dai giudici (`scripts/vol/dev_vols_qlike.py`, walk-forward `02b`, `step0_xarch_corr.py`). Saltare il `center` collassa la RV stimata di ~e⁷ ordini di grandezza. `target_scale` corrente ≈ **1.4343** (IQR del log-RV sull'npz 2026-06-22; un IQR ~1e-3 segnalerebbe invece il target direzionale).
+- **Target di volatilità (`log_rv`, linea di PRODUZIONE).** Qui `denormalize_predictions` (solo `μ·scale`) **è insufficiente**: la mediana del log-RV è ≈ −7.2, quindi serve l'**inversione completa** `log_rv = μ_z · scale + center` (con `center`/`scale` dal RobustScaler persistito), poi `RV = exp(log_rv)` per riportare in livelli. È implementata in `quantsys/model/vol_metrics.py` (`invert_log_rv(z, center, scale)`, `qlike_from_z(...)`), single source of truth condivisa dai giudici (`scripts/vol/dev_vols_qlike.py`, walk-forward `02b`, `step0_xarch_corr.py`). Saltare il `center` sposta la RV stimata di un fattore `exp(7.2)` ≈ **1300×**. `target_scale` del modello di produzione = **1.4376** (IQR del log-RV); la copia canonica `models/pipeline_state.pkl` segue l'ultima rigenerazione del dataset e può differire di qualche 1e-3. Il discriminante robusto è **l'ordine di grandezza**: un IQR ~1e-3 segnala il target direzionale, ~1.4 il target log-RV.
 
 **EN** The target (`target_ret`, whatever `target_type`) is scaled by the RobustScaler along with the other features. The RobustScaler persists **two** per-column parameters in `PipelineState`: the **center** (raw median) and the **scale** (`target_scale` = IQR of the raw target on the training set); both vary with dataset, forecast horizon and `target_type`. Therefore:
 - **The model predicts μ, σ, ν in z-score space** (standardized fraction). σ = 1.0 means "one IQR of the target", not "1% of price".
@@ -270,7 +231,7 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** **z→raw inversion — depends on `target_type`.**
 - **Directional target (`ret`, legacy line).** The raw target is ≈ centered (log-ret median ≈ 0), so reconciliation reduces to `PipelineState.denormalize_predictions(mu, sigma) -> (mu_raw, sigma_raw)`, which multiplies by `target_scale` (the center is negligible on μ and structurally null on σ). Historical `target_scale` ≈ 0.002707 (2026-06-02 run, 1m, h=30). **Both `03_backtest.py` and `04_live_signals.py` apply it right after the forward pass**, before the `SignalGenerator`. Without it, SL/TP `σ × price × multiplier` become macroscopic (σ_z=1 × $42k × 1.5 = $63k) — structural bug fixed on 2026-05-23 (Sharpe −256 → +18.7).
-- **Volatility target (`log_rv`, PRODUCTION line).** Here `denormalize_predictions` (only `μ·scale`) **is insufficient**: the log-RV median is ≈ −7.2, so the **full inversion** `log_rv = μ_z · scale + center` is required (with `center`/`scale` from the persisted RobustScaler), then `RV = exp(log_rv)` to return to levels. It lives in `quantsys/model/vol_metrics.py` (`invert_log_rv(z, center, scale)`, `qlike_from_z(...)`), the single source of truth shared by the judges (`scripts/vol/dev_vols_qlike.py`, walk-forward `02b`, `step0_xarch_corr.py`). Skipping the `center` collapses the estimated RV by ~e⁷ orders of magnitude. Current `target_scale` ≈ **1.4343** (IQR of log-RV on the 2026-06-22 npz; an IQR of ~1e-3 would instead flag the directional target).
+- **Volatility target (`log_rv`, PRODUCTION line).** Here `denormalize_predictions` (only `μ·scale`) **is insufficient**: the log-RV median is ≈ −7.2, so the **full inversion** `log_rv = μ_z · scale + center` is required (with `center`/`scale` from the persisted RobustScaler), then `RV = exp(log_rv)` to return to levels. It lives in `quantsys/model/vol_metrics.py` (`invert_log_rv(z, center, scale)`, `qlike_from_z(...)`), the single source of truth shared by the judges (`scripts/vol/dev_vols_qlike.py`, walk-forward `02b`, `step0_xarch_corr.py`). Skipping the `center` shifts the estimated RV by a factor `exp(7.2)` ≈ **1300×**. The production model's `target_scale` = **1.4376** (IQR of log-RV); the canonical copy `models/pipeline_state.pkl` tracks the latest dataset regeneration and may differ by a few 1e-3. The robust discriminator is the **order of magnitude**: an IQR of ~1e-3 flags the directional target, ~1.4 the log-RV one.
 
 🇮🇹 **Per nuovi entry point**: usare sempre `denormalize_predictions` prima di interpretare μ/σ. Safety net contro regressioni:
 - `RuntimeError` in `03_backtest.py` se `σ_max ≥ 0.05·√interval_minutes` (0.05 a 1m, ≈0.387 a 1h; `raise` invece di `assert` sopravvive a `python -O`). Lo scaling √Δt preserva l'intento del guard: cattura il bug di denormalizzazione z→raw (~30–100×), non la crescita √60 legittima della σ a orizzonte 30 barre orarie.
@@ -300,9 +261,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 ## 6. Architetture disponibili · 6. Available architectures
 
-🇮🇹 Quattro architetture selezionabili con `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. Composizione ensemble eterogeneo configurabile in `config/default.yaml` → `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba; LSTM disponibile ma fuori dall'ensemble per under-performance strutturale). **Modello di produzione corrente (linea vol):** **iTransformer 5-seed** in `models/itransformer/` (target `log_rv`, PASS QLIKE validato due volte OOS — single-split test e k-fold sui fold data-rich). Il distill multi-teacher 5-seed sulla vol resta un esperimento gated (prior basso: vedi nota fine §7).
+🇮🇹 Quattro architetture selezionabili con `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. La composizione dell'ensemble eterogeneo è in `config/default.yaml` → `distillation.archs` (iTransformer + N-HiTS + TCNMamba; LSTM disponibile ma fuori dall'ensemble per under-performance strutturale). **Modello di produzione (linea vol): iTransformer a 5 membri** in `models/itransformer/` (target `log_rv`, `interval=1h`, PASS QLIKE validato due volte OOS — single-split test e k-fold sui fold data-rich). ⚠ **Su disco esistono checkpoint solo per `itransformer` e `lstm`**: `models/{nhits,tcnmamba}` sono stati eliminati col cleanup 2026-06-12, quindi qualunque run eterogeneo (ensemble o distill) richiede prima di riaddestrarli. Il distill multi-teacher 5-seed sulla vol resta un esperimento gated (prior basso: nota a fine §7).
 
-**EN** Four architectures selectable via `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. The heterogeneous ensemble composition is configurable in `config/default.yaml` → `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba; LSTM available but outside the ensemble due to structural under-performance). **Current production model (vol line):** the **5-seed iTransformer** in `models/itransformer/` (target `log_rv`, QLIKE PASS validated twice OOS — single-split test and k-fold on the data-rich folds). The 5-seed multi-teacher vol distill remains a gated experiment (low prior: see note end of §7).
+**EN** Four architectures selectable via `--arch`: `lstm`, `itransformer`, `tcnmamba`, `nhits`. The heterogeneous ensemble composition lives in `config/default.yaml` → `distillation.archs` (iTransformer + N-HiTS + TCNMamba; LSTM available but outside the ensemble due to structural under-performance). **Production model (vol line): the 5-member iTransformer** in `models/itransformer/` (target `log_rv`, `interval=1h`, QLIKE PASS validated twice OOS — single-split test and k-fold on the data-rich folds). ⚠ **On disk only `itransformer` and `lstm` have checkpoints**: `models/{nhits,tcnmamba}` were deleted in the 2026-06-12 cleanup, so any heterogeneous run (ensemble or distill) requires retraining them first. The 5-seed multi-teacher vol distill stays a gated experiment (low prior: note at the end of §7).
 
 ### LSTM dual-stream (`--arch lstm`, legacy)
 
@@ -314,9 +275,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 - **Dynamic stream** (86 features): log returns, CVD, volume delta, microstructure — short-term momentum. Processed by an LSTM.
 - **Structural stream** (18 features): VWAP, Volume Profile (short + mid), temporal features, ATH/ATL 30d, momentum_30d, funding rate — market context. Processed by a GRU.
 
-🇮🇹 I due stream fusi e passati attraverso **attention temporale** (pesa diversamente le candele della finestra: alcune sono più informative di altre, es. quella più recente o quella a −15 min). Training ~30-60 min su RTX 2070 Super. Rimosso dall'ensemble il 2026-05-14 dopo val_NLL 5.28 vs iTransformer 0.18.
+🇮🇹 I due stream sono fusi e passati attraverso **attention temporale** (pesa diversamente le barre della finestra). Rimosso dall'ensemble dopo val_NLL 5.28 vs 0.18 dell'iTransformer: under-performance strutturale, non tuning.
 
-**EN** The two streams are fused and passed through **temporal attention** (weighs the window's candles differently: some are more informative, e.g. the most recent one or the one at −15 min). Training ~30–60 min on RTX 2070 Super. Removed from the ensemble on 2026-05-14 after val_NLL 5.28 vs iTransformer 0.18.
+**EN** The two streams are fused and passed through **temporal attention** (it weighs the window's bars differently). Removed from the ensemble after val_NLL 5.28 vs the iTransformer's 0.18: structural under-performance, not a tuning issue.
 
 ### iTransformer (`--arch itransformer`)
 
@@ -340,9 +301,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 - **Mamba** (State Space Model): hidden state evolving by discrete differential equations with **input-dependent** parameters — the model decides at each step how much to remember. Dynamic information selection over 120 candles without attention's quadratic overhead. Pure PyTorch (no external deps). **Vectorized** scan via `cumprod` + `cumsum` in 32-step chunks (AMP disabled in inference to avoid NaN on spectral_norm + Mamba edge cases, see `quantsys/model/ensemble.py`). Forward+backward speedup ~1.8× vs initial sequential scan.
 - **Learned gated fusion**: `σ(W·[tcn; mamba])` learns how much weight to give local vs global per example.
 
-🇮🇹 Con `d_model=128`, training ~40-70 min su RTX 2070 Super (~2.5 GB VRAM).
+🇮🇹 È l'arch più costosa del gruppo (lo scan sequenziale del ramo Mamba domina il tempo di training); tempi e vincoli di sequenzialità GPU: `AVVIO.md`.
 
-**EN** With `d_model=128`, training ~40–70 min on RTX 2070 Super (~2.5 GB VRAM).
+**EN** It is the most expensive arch of the group (the Mamba branch's sequential scan dominates training time); timings and GPU sequencing constraints: `AVVIO.md`.
 
 ### N-HiTS (`--arch nhits`)
 
@@ -372,9 +333,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** **Parallel MaxPool block (A9, inert lever — `nhits_max_pool_block`, default OFF):** stack pooling is AvgPool (low-pass); for the vol target spikes are informative (RV jumps). With the flag ON a MaxPool `NHiTSBlock` reads the same projected input (BEFORE the AvgPool stacks subtract the spikes) and adds its latent forecast; the backcast is discarded → the residual decomposition stays unchanged. OFF = zero new params, bit-compatible checkpoints.
 
-🇮🇹 Training molto rapido (~10-15 min su RTX 2070 Super vs 25 min iTransformer).
+🇮🇹 Essendo pure-MLP è la più economica delle tre in training (nessuna ricorrenza né attention da srotolare).
 
-**EN** Very fast training (~10–15 min on RTX 2070 Super vs 25 min for iTransformer).
+**EN** Being pure-MLP it is the cheapest of the three to train (no recurrence and no attention to unroll).
 
 ### Output probabilistico (comune a tutte) · Probabilistic output (common to all)
 
@@ -394,9 +355,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 ### Regime-MoE — mixture-of-universes (A3, implementato-inerte) · Regime-MoE — mixture-of-universes (A3, implemented-inert)
 
-🇮🇹 **NON è un'arch `--arch`**: è una **testa di output** alternativa dell'iTransformer (`model.head_type: "regime_moe"`, chiave **assente di default = path storico bit-identico**). Backbone condiviso + **3 teste per-regime** (R0 Quiet / R1 Trending / R2 Stress) mescolate da un **soft-gate ESTERNO CAUSALE** `g(t)` = filtered probabilities di `RegimeMarkovBTC` (§4) allineate via `merge_asof` backward (`quantsys/model/regime_gate.py`) — il gate **non è appreso** (proprietà anti-overfit chiave: nessun grado di libertà che possa overfittare la val). Mixing: path quantile → **Vincentization** pesata dal gate + re-sort monotono; path t-Student → **legge della varianza totale** (σ² inflazionata quando il regime è ambiguo → calibrazione σ regime-condizionata, l'obiettivo A3: l'edge short-vol è Trending-driven). Contratto forward invariato (`g=None` → gate uniforme). **MAI addestrato** (2026-07-12): gate QLIKE da pre-registrare + sandbox `QUANTSYS_MODELS_ROOT` prima del primo run. Dettagli: `docs/MODEL_IMPROVEMENTS.md` (sezione A3).
+🇮🇹 **NON è un'arch `--arch`**: è una **testa di output** alternativa dell'iTransformer (`model.head_type: "regime_moe"`, chiave **assente di default = path storico bit-identico**). Backbone condiviso + **3 teste per-regime** (R0/R1/R2, semantica da ri-derivare dalle varianze — §4) mescolate da un **soft-gate ESTERNO CAUSALE** `g(t)` = filtered probabilities di `RegimeMarkovBTC` (§4) allineate via `merge_asof` backward (`quantsys/model/regime_gate.py`) — il gate **non è appreso** (proprietà anti-overfit chiave: nessun grado di libertà che possa overfittare la val). Mixing: path quantile → **Vincentization** pesata dal gate + re-sort monotono; path t-Student → **legge della varianza totale** (σ² inflazionata quando il regime è ambiguo → calibrazione σ regime-condizionata, l'obiettivo di A3, dato che l'edge short-vol **non è uniforme fra i regimi**). Contratto forward invariato (`g=None` → gate uniforme). **MAI addestrato** (2026-07-12): gate QLIKE da pre-registrare + sandbox `QUANTSYS_MODELS_ROOT` prima del primo run. Dettagli: `docs/MODEL_IMPROVEMENTS.md` (sezione A3).
 
-**EN** **NOT an `--arch`**: it is an alternative **output head** of the iTransformer (`model.head_type: "regime_moe"`, key **absent by default = bit-identical legacy path**). Shared backbone + **3 per-regime heads** (R0 Quiet / R1 Trending / R2 Stress) mixed by an **EXTERNAL CAUSAL soft-gate** `g(t)` = `RegimeMarkovBTC` filtered probabilities (§4) aligned via backward `merge_asof` (`quantsys/model/regime_gate.py`) — the gate is **not learned** (key anti-overfit property: no degree of freedom that could overfit val). Mixing: quantile path → gate-weighted **Vincentization** + monotone re-sort; Student-t path → **total variance law** (σ² inflated when the regime is ambiguous → regime-conditional σ calibration, the A3 goal: the short-vol edge is Trending-driven). Forward contract unchanged (`g=None` → uniform gate). **NEVER trained** (2026-07-12): QLIKE gate to pre-register + `QUANTSYS_MODELS_ROOT` sandbox before the first run. Details: `docs/MODEL_IMPROVEMENTS.md` (A3 section).
+**EN** **NOT an `--arch`**: it is an alternative **output head** of the iTransformer (`model.head_type: "regime_moe"`, key **absent by default = bit-identical legacy path**). Shared backbone + **3 per-regime heads** (R0/R1/R2, semantics to be re-derived from the variances — §4) mixed by an **EXTERNAL CAUSAL soft-gate** `g(t)` = `RegimeMarkovBTC` filtered probabilities (§4) aligned via backward `merge_asof` (`quantsys/model/regime_gate.py`) — the gate is **not learned** (key anti-overfit property: no degree of freedom that could overfit val). Mixing: quantile path → gate-weighted **Vincentization** + monotone re-sort; Student-t path → **total variance law** (σ² inflated when the regime is ambiguous → regime-conditional σ calibration, A3's goal, since the short-vol edge is **not uniform across regimes**). Forward contract unchanged (`g=None` → uniform gate). **NEVER trained** (2026-07-12): QLIKE gate to pre-register + `QUANTSYS_MODELS_ROOT` sandbox before the first run. Details: `docs/MODEL_IMPROVEMENTS.md` (A3 section).
 
 ---
 
@@ -428,27 +389,38 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 ### Knowledge Distillation (alternativa all'ensemble omogeneo 5× stessa arch) · Knowledge Distillation (alternative to homogeneous ensemble 5× same arch)
 
-🇮🇹 **Fase 2a — Training candidati**: architetture in `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba) addestrate normalmente con `n_ensemble=1`. Una sola riga di config cambia la composizione.
+🇮🇹 **Fase 2a — candidati.** Le architetture in `distillation.archs` sono addestrate normalmente con `n_ensemble=1`. Una sola riga di config cambia la composizione. *(Comandi: `AVVIO.md`.)*
 
-**EN** **Phase 2a — Candidate training**: archs in `distillation.archs` (default: iTransformer + N-HiTS + TCNMamba) trained normally with `n_ensemble=1`. A single config line changes the composition.
+🇮🇹 **Fase 2b — scoring multi-teacher TARGET-AWARE.** Ogni arch `a` è valutata alla best epoch; le metriche sono normalizzate min-max **fra le arch** (`loss` invertita perché minore-è-meglio) e combinate con pesi che dipendono dal `target_type` (`teacher_score_weights`, single source of truth in `distillation.py`):
 
-🇮🇹 **Fase 2b — Multi-Teacher Scoring (TARGET-AWARE)**: ogni modello valutato alla best epoch con scoring normalizzato (min-max tra arch). I pesi dipendono dal `target_type` (`teacher_score_weights`, single source of truth in `distillation.py`): target **direzionale** (`ret`) → **40% val_loss + 35% Spearman + 25% directional accuracy**; target di **volatilità** (`log_rv`, linea opzioni) → **65% val_loss + 35% Spearman + 0% directional accuracy**. Sul target di varianza la directional accuracy misura il segno della varianza-vs-mediana, che NON è un segnale tradabile (lo straddle è direction-neutral): il peso va sul momento PARI (val_loss/QLIKE), l'unico che generalizza OOS. Tutti contribuiscono come teacher con pesi softmax (temperature=2) proporzionali allo score — non singolo teacher. Le metriche di val alla best epoch sono persistite in `config.json` (`best_val_loss`/`best_spearman`/`best_da`), senza le quali il blend ricadrebbe su pesi uniformi.
+```
+score_a = w_vl·(1 − norm(val_loss_a)) + w_sp·norm(spearman_a) + w_da·norm(dir_acc_a)
+π_a     = exp(T · score_a) / Σ_b exp(T · score_b),        T = 2
 
-**EN** **Phase 2b — Multi-Teacher Scoring (TARGET-AWARE)**: every model evaluated at its best epoch with normalized scoring (min-max across archs). Weights depend on `target_type` (`teacher_score_weights`, single source of truth in `distillation.py`): **directional** target (`ret`) → **40% val_loss + 35% Spearman + 25% directional accuracy**; **volatility** target (`log_rv`, options line) → **65% val_loss + 35% Spearman + 0% directional accuracy**. On the variance target directional accuracy measures the sign of variance-vs-median, which is NOT a tradable signal (the straddle is direction-neutral): weight goes to the EVEN moment (val_loss/QLIKE), the only one that generalizes OOS. All of them contribute as teachers with softmax weights (temperature=2) proportional to the score — not a single teacher. Best-epoch validation metrics are persisted to `config.json` (`best_val_loss`/`best_spearman`/`best_da`); without them the blend would fall back to uniform weights.
+target `ret`     (direzionale) : (w_vl, w_sp, w_da) = (0.40, 0.35, 0.25)
+target `log_rv`  (volatilità)  : (w_vl, w_sp, w_da) = (0.65, 0.35, 0.00)
+```
 
-🇮🇹 **Fase 2c — Student con transfer + distillation**: ogni modello riadestrato come "student" con tre vantaggi:
-- I pesi delle output heads (μ, σ, ν) sono copiati dal best teacher — partenza calibrata invece di casuale.
-- Loss mista: **70% NLL reale + 30% distillation**, normalizzata per la varianza di ogni componente teacher (μ~1e-5, ν~5 hanno scale diverse → contributo equo).
-- Soft labels pesate da tutti i teacher integrate nel `TensorDataset` (shuffle-safe): ogni batch contiene sia dati reali sia predizioni teacher per gli stessi campioni.
+🇮🇹 ⚠ Nota sulla temperatura: `T=2` **moltiplica** lo score dentro l'esponenziale, quindi **affila** la distribuzione dei pesi (non la ammorbidisce come farebbe una divisione per T). ⚠ Nota econometrica sul termine `dir_acc`: sul target di **varianza** la directional accuracy misura il segno di varianza-vs-mediana, che **non è un segnale tradabile** (lo straddle è direction-neutral) → il peso viene azzerato e ribilanciato sul momento **PARI** (`val_loss`/QLIKE), l'unico che generalizza OOS. Tutte le arch contribuiscono come teacher con peso `π_a` — non c'è un teacher unico. Le metriche di val alla best epoch devono essere persistite in `config.json` (`best_val_loss`/`best_spearman`/`best_da`): in loro assenza il blend degrada silenziosamente a pesi uniformi.
 
-**EN** **Phase 2c — Student with transfer + distillation**: every model is retrained as "student" with three advantages:
-- Output-head weights (μ, σ, ν) copied from the best teacher — calibrated start instead of random.
-- Mixed loss: **70% real NLL + 30% distillation**, normalized by the variance of each teacher component (μ~1e-5, ν~5 have different scales → equal contribution).
-- Soft labels weighted across all teachers, integrated into the `TensorDataset` (shuffle-safe): each batch contains both real data and teacher predictions for the same samples.
+**EN** **Phase 2a — candidates.** The archs listed in `distillation.archs` are trained normally with `n_ensemble=1`. One config line changes the composition. *(Commands: `AVVIO.md`.)*
 
-🇮🇹 Student convergono in ~60% delle epoche normali. Student già distillati riconosciuti e skippati automaticamente.
+**EN** **Phase 2b — TARGET-AWARE multi-teacher scoring.** Each arch `a` is evaluated at its best epoch; metrics are min-max normalized **across archs** (`loss` inverted, lower-is-better) and combined with `target_type`-dependent weights (`teacher_score_weights`, single source of truth in `distillation.py`) — formulas above.
 
-**EN** Students converge in ~60% of the normal epochs. Already-distilled students are recognized and skipped automatically.
+**EN** ⚠ Temperature note: `T=2` **multiplies** the score inside the exponential, so it **sharpens** the weight distribution (it does not smooth it, as dividing by T would). ⚠ Econometric note on the `dir_acc` term: on the **variance** target directional accuracy measures the sign of variance-vs-median, which is **not a tradable signal** (the straddle is direction-neutral) → the weight is zeroed and rebalanced onto the **EVEN** moment (`val_loss`/QLIKE), the only one that generalizes OOS. All archs contribute as teachers with weight `π_a` — there is no single teacher. Best-epoch validation metrics must be persisted to `config.json` (`best_val_loss`/`best_spearman`/`best_da`): without them the blend silently degrades to uniform weights.
+
+🇮🇹 **Fase 2c — student con head-transfer + distillation.** Ogni modello è riaddestrato come *student*: (a) i pesi delle output head (μ, σ, ν) sono copiati dal best teacher — partenza calibrata invece che casuale; (b) le soft label pesate da tutti i teacher entrano nel `TensorDataset` (shuffle-safe: ogni batch contiene dati reali e predizioni teacher **degli stessi campioni**); (c) la loss è una miscela
+
+```
+L = (1 − α)·NLL(y, ŷ) + α·L_distill
+L_distill = 0.5·MSE(μ_s, μ_t)/Var(μ_t) + 0.3·MSE(σ_s, σ_t)/Var(σ_t) + 0.2·MSE(ν_s, ν_t)/Var(ν_t)
+```
+
+🇮🇹 La **scale-normalization** per la varianza del corrispondente output teacher è la parte non ovvia: μ ~ 1e-5 e ν ~ 5 differiscono di ordini di grandezza, senza normalizzare ν dominerebbe il gradiente e μ sarebbe irrilevante. `α` è schedulato **linearmente 0.6 → 0.1 su 20 epoche** (default CLI; il default della funzione di training, senza schedule, è 0.3): il peso della distillation decade man mano che lo student vede i dati reali. Gli student convergono in ~60% delle epoche normali.
+
+**EN** **Phase 2c — student with head-transfer + distillation.** Each model is retrained as a *student*: (a) output-head weights (μ, σ, ν) are copied from the best teacher — calibrated rather than random start; (b) teacher-weighted soft labels enter the `TensorDataset` (shuffle-safe: each batch holds real data and teacher predictions for **the same samples**); (c) the loss is the mixture shown above.
+
+**EN** The **scale-normalization** by the variance of the corresponding teacher output is the non-obvious part: μ ~ 1e-5 and ν ~ 5 differ by orders of magnitude, and without it ν would dominate the gradient while μ became irrelevant. `α` is scheduled **linearly 0.6 → 0.1 over 20 epochs** (CLI default; the training function's own default, with no schedule, is 0.3): the distillation weight decays as the student sees real data. Students converge in ~60% of the normal epochs.
 
 🇮🇹 **Ensemble eterogeneo (inferenza)**: le N architetture predicono insieme. Errori tendono a non essere correlati perché catturano pattern diversi (N-HiTS gerarchici multi-scala, TCNMamba locali + contesto lungo, iTransformer correlazioni inter-feature). Combinazione = **media pesata** con `DEFAULT_ARCH_WEIGHTS` (`ensemble.py`):
 - `mu_ens = Σ w_i · mu_i` (riduce la varianza dell'errore)
@@ -466,9 +438,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** **⚠ How much ensembling helps depends on `target_type` (measured, not assumed).** Variance reduction is ∝ to the **decorrelation of cross-arch errors**. On the **directional** line the cross-arch error is ρ ≈ **0.995** → variance reduction ≈ 0, ensembling is **mathematically useless** (the directional edge is regime-conditioned, not fixable by combining models). On the **vol** line (`log_rv`) the 2026-06-22 STEP 0 kill-check (`scripts/vol/step0_xarch_corr.py`, val split) instead measures ρ_err ≈ **0.83** (iTrans|N-HiTS 0.78, iTrans|TCN-Mamba 0.82, N-HiTS|TCN-Mamba 0.89) → exploitable diversity, so ensemble/distill has **potential headroom** (KILL≥0.99 gate cleared → PROCEED). Consistent with the even-moment thesis: vol is predictable OOS **and** the archs disagree.
 
-🇮🇹 **Stato del distill multi-teacher sulla vol (prior onesto).** Lo STEP 0 dà PROCEED ma il run completo 5-seed è **gated e ancora da eseguire** (val-first, dir sandbox via `QUANTSYS_MODELS_ROOT`, gate pre-registrato: QLIKE_student ≤ 0.97×QLIKE(iTrans 5-seed) **E** ratio HAR ≤ 0.95). Prior **basso/atteso-FAIL**: l'iTransformer è già il QLIKE-migliore sul regime di produzione e il mismatch `val_nll↔QLIKE` (TCN-Mamba miglior val_nll, iTrans miglior QLIKE) eleggerebbe un teacher che distillerebbe l'iTrans *verso il basso*. Si esegue per chiudere la domanda "combinare aiuta?" con un NO documentato.
+🇮🇹 ⚠ **Perché il PROCEED non implica un guadagno.** La decorrelazione è condizione *necessaria* ma non sufficiente: il criterio di selezione del teacher è `val_loss`, mentre il giudice della linea vol è **QLIKE**, e i due non sono allineati (sul run misurato TCN-Mamba ha il miglior `val_nll`, iTransformer il miglior QLIKE). Uno scoring che eleggesse il teacher sbagliato distillerebbe l'incumbent *verso il basso*: il prior sul distill vol è quindi **basso**, ed è un esperimento gated con gate pre-registrato (stato e soglie in `STATUS.md`).
 
-**EN** **State of the vol multi-teacher distill (honest prior).** STEP 0 gives PROCEED but the full 5-seed run is **gated and not yet executed** (val-first, sandbox dir via `QUANTSYS_MODELS_ROOT`, pre-registered gate: QLIKE_student ≤ 0.97×QLIKE(5-seed iTrans) **AND** HAR ratio ≤ 0.95). **Low / expected-FAIL** prior: the iTransformer is already the best QLIKE on the production regime, and the `val_nll↔QLIKE` mismatch (TCN-Mamba best val_nll, iTrans best QLIKE) would elect a teacher that distills the iTrans *downward*. Run to close the "does combining help?" question with a documented NO.
+**EN** ⚠ **Why PROCEED does not imply a gain.** Decorrelation is *necessary* but not sufficient: the teacher-selection criterion is `val_loss`, while the vol line's judge is **QLIKE**, and the two are not aligned (on the measured run TCN-Mamba has the best `val_nll`, iTransformer the best QLIKE). A scoring that elected the wrong teacher would distill the incumbent *downward*: the prior on the vol distill is therefore **low**, and it stays a gated experiment with a pre-registered gate (status and thresholds in `STATUS.md`).
 
 ---
 
@@ -498,13 +470,13 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 ## 7quater. Distribution shift val→test · 7quater. Distribution shift val→test
 
-🇮🇹 **Fatto empirico strutturale (misurato sul dataset 1m, ri-confermato a 1h sulla linea direzionale).** Sulla linea **direzionale** le metriche in-sample (`val_nll`, Spearman/WHR walk-forward) **anti-correlano** col backtest OOS: ottimizzare regole guidate da metriche in-sample peggiora sistematicamente il PnL. Conseguenze operative codificate nel `PROTOCOLLO SPERIMENTALE` (val-first, gate pre-registrati, flag inerti): ogni lever di trading è stato validato su `QUANTSYS_BACKTEST_SPLIT=val` e **FALLITO OOS** (entry a soglia/rango, calibrazione σ, cadenza, esposizione continua — vedi Parte VI). L'edge direzionale reale esiste **solo regime-condizionato** (R0 Quiet: Spearman +0.13÷0.19 stabile OOS) ma è edge di **rango**, non catturato da una entry a soglia |μ|.
+🇮🇹 **Fatto empirico strutturale (misurato sul dataset 1m, ri-confermato a 1h sulla linea direzionale).** Sulla linea **direzionale** le metriche in-sample (`val_nll`, Spearman/WHR walk-forward) **anti-correlano** col backtest OOS: ottimizzare regole guidate da metriche in-sample peggiora sistematicamente il PnL. Conseguenze operative codificate nel `PROTOCOLLO SPERIMENTALE` (val-first, gate pre-registrati, flag inerti): ogni lever di trading è stato validato su `QUANTSYS_BACKTEST_SPLIT=val` e **FALLITO OOS** (entry a soglia/rango, calibrazione σ, cadenza, esposizione continua: il corpus dei flag inerti è elencato in `CLAUDE.md`, i numeri in `STATUS.md`). L'edge direzionale reale esiste **solo regime-condizionato** (R0 Quiet: Spearman +0.13÷0.19 stabile OOS) ma è edge di **rango**, non catturato da una entry a soglia |μ|.
 
-**EN** **Structural empirical fact (measured on the 1m dataset, re-confirmed at 1h on the directional line).** On the **directional** line, in-sample metrics (`val_nll`, walk-forward Spearman/WHR) **anti-correlate** with the OOS backtest: optimizing rules guided by in-sample metrics systematically worsens PnL. Operational consequences are codified in the `EXPERIMENTAL PROTOCOL` (val-first, pre-registered gates, inert flags): every trading lever was validated on `QUANTSYS_BACKTEST_SPLIT=val` and **FAILED OOS** (threshold/rank entry, σ calibration, cadence, continuous exposure — see Part VI). The real directional edge exists **only regime-conditioned** (R0 Quiet: Spearman +0.13÷0.19 stable OOS) but it is a **rank** edge, not captured by a |μ| threshold entry.
+**EN** **Structural empirical fact (measured on the 1m dataset, re-confirmed at 1h on the directional line).** On the **directional** line, in-sample metrics (`val_nll`, walk-forward Spearman/WHR) **anti-correlate** with the OOS backtest: optimizing rules guided by in-sample metrics systematically worsens PnL. Operational consequences are codified in the `EXPERIMENTAL PROTOCOL` (val-first, pre-registered gates, inert flags): every trading lever was validated on `QUANTSYS_BACKTEST_SPLIT=val` and **FAILED OOS** (threshold/rank entry, σ calibration, cadence, continuous exposure: the inert-flag corpus is listed in `CLAUDE.md`, the numbers in `STATUS.md`). The real directional edge exists **only regime-conditioned** (R0 Quiet: Spearman +0.13÷0.19 stable OOS) but it is a **rank** edge, not captured by a |μ| threshold entry.
 
-🇮🇹 **Asimmetria val→test per `target_type`.** L'anti-correlazione è **specifica del target direzionale**: sulla linea **vol** (`log_rv`) val e test sono **coerenti** (il QLIKE su val predice il QLIKE su test), motivo per cui il PASS vol-S è considerato un edge OOS reale e non un artefatto di overfit del test split. La diversità cross-arch degli errori (ρ) e il razionale dell'ensembling sono trattati in §7 (ensemble eterogeneo).
+🇮🇹 ⚠ L'anti-correlazione è **specifica del target direzionale**: sulla vol (`log_rv`) val e test sono coerenti, ed è la ragione per cui il PASS vol-S conta come edge OOS e non come overfit del test split. Formulazione generale del fatto: **Parte VI, punto 2**. Diversità cross-arch degli errori e razionale dell'ensembling: §7.
 
-**EN** **val→test asymmetry by `target_type`.** The anti-correlation is **specific to the directional target**: on the **vol** line (`log_rv`) val and test are **coherent** (val QLIKE predicts test QLIKE), which is why the vol-S PASS is treated as a real OOS edge and not a test-split overfit artifact. Cross-arch error diversity (ρ) and the ensembling rationale are covered in §7 (heterogeneous ensemble).
+**EN** ⚠ The anti-correlation is **specific to the directional target**: on vol (`log_rv`) val and test are coherent, which is why the vol-S PASS counts as an OOS edge and not as a test-split overfit. General statement of the fact: **Part VI, point 2**. Cross-arch error diversity and the ensembling rationale: §7.
 
 ---
 
@@ -524,13 +496,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** Volatility is estimated with a **GJR-GARCH(1,1)** model: the GJR variant adds an asymmetry term that amplifies the volatility update in response to negative shocks (leverage effect). **Parameters RE-ESTIMATED on 1h returns on 2026-07-15** (`config/default.yaml → montecarlo`: `ω=1.026e-6, α=0.1011, γ=0.0052, β=0.8732`; Gaussian QMLE + variance targeting on 65,450 bars 2019→2026-06-22, script `scripts/vol/estimate_gjr_1h.py`, report `results/vols/gjr_params_1h.json`). Persistence 0.977 (30h half-life), unconditional σ 0.67%/bar (~62% annualized). Empirical note: at hourly frequency γ≈0.005 — the leverage effect is near-zero on this sample; the asymmetry emerges at daily frequencies. The per-bar σ anti-explosion cap is now parametric (`gjr_sigma_cap`: 0.13 at 1h, 1m-era 0.01 in `config/interval/1m.yaml`); the full 1m-era values live in the 1m overlay for rollback.
 
-🇮🇹 Risultato: "ventola" di scenari con intervalli di confidenza. Permette di rispondere a domande come:
-- Con quale probabilità il prezzo è sopra X$ a orizzonte 30 barre?
-- Qual è il peggior scenario nel 5% dei casi?
+🇮🇹 Il risultato è una stima empirica della distribuzione del prezzo a orizzonte h: da essa si leggono probabilità di superamento di un livello e quantili di coda (es. il 5° percentile come worst case). Il MC **non è sul critical path** del backtest: è diagnostica e sizing-support, non generatore di segnale.
 
-**EN** The result is a "fan" of scenarios with confidence intervals. It lets the system answer questions like:
-- What's the probability that price is above $X at the 30-bar horizon?
-- What's the worst case in the bottom 5%?
+**EN** The result is an empirical estimate of the price distribution at horizon h: from it one reads level-crossing probabilities and tail quantiles (e.g. the 5th percentile as worst case). The MC is **not on the backtest critical path**: it is diagnostics and sizing support, not a signal generator.
 
 ---
 
@@ -553,12 +521,12 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 🇮🇹 **Filtri di qualità**:
 - Rendimento atteso > soglia minima (per coprire commissioni)
 - Volatilità prevista non troppo alta (mercato caotico → skip)
-- Regime BTC compatibile (es. R2 Stress → soglie di ingresso più conservative; R1 Trending → full Kelly)
+- Regime BTC compatibile (soglie di ingresso più conservative nel regime ad alta σ², full Kelly in quello intermedio). ⚠ Il mapping regola↔indice di regime è hardcoded ed è **STALE** finché non lo si ri-deriva dalle varianze del run corrente (§4, corollario del label switching).
 
 **EN** **Quality filters**:
 - Expected return > minimum threshold (to cover commissions)
 - Predicted volatility not too high (chaotic market → skip)
-- BTC regime compatible (e.g. R2 Stress → tighter entry thresholds; R1 Trending → full Kelly)
+- BTC regime compatible (tighter entry thresholds in the high-σ² regime, full Kelly in the intermediate one). ⚠ The rule↔regime-index mapping is hardcoded and **STALE** until re-derived from the current run's variances (§4, label-switching corollary).
 
 ---
 
@@ -588,25 +556,9 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 ## 11. Esecuzione live · 11. Live execution
 
-🇮🇹 In modalità live il sistema (`LiveEngine` in `scripts/04_live_signals.py`) si connette a Binance via WebSocket e riceve ogni candela chiusa in tempo reale. Per ogni candela:
-1. Aggiorna le feature con la normalizzazione del training.
-2. Passa la sequenza delle ultime 120 barre al modello.
-3. Genera le simulazioni Monte Carlo.
-4. Calcola il conviction score.
-5. Se il segnale supera i filtri, apre/chiude una posizione (**paper trading**, nessun ordine reale).
-6. Aggiorna lo stato del portafoglio e scrive il segnale su disco.
+🇮🇹 Il `LiveEngine` (`scripts/04_live_signals.py`) si connette a Binance via WebSocket e, a ogni candela **chiusa**, esegue la stessa catena del backtest: feature con la normalizzazione del training → sequenza delle ultime 120 barre → forward → denormalizzazione → Monte Carlo → conviction score → eventuale apertura/chiusura di posizione (**paper trading**, nessun ordine reale) → persistenza di stato e segnale. Lo snapshot macro è rinfrescato in background ogni ora per non bloccare il feed.
 
-**EN** In live mode the system (`LiveEngine` in `scripts/04_live_signals.py`) connects to Binance via WebSocket and receives every closed candle in real time. For each candle:
-1. Updates features with the training-time normalization.
-2. Passes the last 120-bar sequence to the model.
-3. Generates the Monte Carlo simulations.
-4. Computes the conviction score.
-5. If the signal passes filters, opens/closes a position (**paper trading**, no real orders).
-6. Updates portfolio state and writes the signal to disk.
-
-🇮🇹 Ogni ora aggiorna in background lo snapshot delle macro per mantenere il contesto aggiornato senza bloccare il feed.
-
-**EN** Every hour, the macro variables snapshot is refreshed in the background to keep the macro context up to date without blocking the live feed.
+**EN** The `LiveEngine` (`scripts/04_live_signals.py`) connects to Binance over WebSocket and, on every **closed** candle, runs the same chain as the backtest: features with the training normalization → last-120-bar sequence → forward → denormalization → Monte Carlo → conviction score → optional position open/close (**paper trading**, no real orders) → state and signal persistence. The macro snapshot is refreshed in the background hourly so it never blocks the feed.
 
 ### ✅ Stato attuale: BLOCKER #1 RISOLTO (2026-06-05) — parity live↔training chiusa · ✅ Current status: BLOCKER #1 RESOLVED (2026-06-05) — live↔training parity closed
 
@@ -620,59 +572,45 @@ At `interval_minutes=1` every conversion is an **identity** → the legacy 1m be
 
 **EN** **Validation (both go/no-go gates green):** Gate 1 FEATURE parity (`tests/test_live_training_parity.py` + `scripts/99_replay_live_vs_training.py`) → max|Δ|=0; Gate 2 SIGNAL parity → Δμ=Δσ=0, identical side. The old `LiveFeatureBuffer` (39 features) is deprecated, kept only as an ATR/sanity helper.
 
-🇮🇹 Residuo **operativo** (non di codice): smoke test WS Binance reale + avvio paper-trading. ⚠ I segnali paper ora riflettono il backtest, ma il backtest è negativo OOS (edge a soglia/rank esaurito): il paper-trading serve ad accumulare trade reali, senza aspettativa di Sharpe>0 a priori.
+🇮🇹 ⚠ La parity chiusa significa che i segnali live **riflettono fedelmente il backtest** — e il backtest direzionale è **negativo OOS** (edge a soglia/rango esaurito). Il `LiveEngine` direzionale **non è in esecuzione**: la produzione forward è la linea vol/opzioni (`04b`). Questo path resta come baseline verificata e come infrastruttura riutilizzabile, non come strategia da avviare.
 
-**EN** Operational remainder (not code): real Binance WS smoke test + paper-trading start. ⚠ Paper signals now reflect the backtest, but the backtest is negative OOS (threshold/rank edge exhausted): paper-trading is for accumulating real trades, with no a-priori expectation of Sharpe>0.
+**EN** ⚠ Closed parity means live signals **faithfully reflect the backtest** — and the directional backtest is **negative OOS** (threshold/rank edge exhausted). The directional `LiveEngine` is **not running**: forward production is the vol/options line (`04b`). This path remains a verified baseline and reusable infrastructure, not a strategy to be started.
 
 ### Robustezza operativa 24/7 · 24/7 operational robustness
 
-🇮🇹 Il `LiveEngine` implementa diverse safety net per sistemi sempre attivi:
+🇮🇹 Tre di queste safety net sono **invarianti di correttezza**, non dettagli operativi:
+- **Dimensionamento del buffer di lookback**: `max(window_size + 60, max_rolling_window + 60) = 260` candele. Deve dominare la finestra rolling **più lunga**, altrimenti quella feature è silenziosamente costante in live e la parity col training si rompe senza errori (caso reale: buffer 180 → `price_vs_ma200m` sempre zero).
+- **Separazione candela in formazione vs buffer chiuso**: solo le kline con `k.x == True` entrano nel buffer; le parziali stanno in `_pending_candle` e vengono scartate al reconnect WS. È una condizione di **causalità**: una candela non chiusa contiene informazione incompleta e non ripetibile.
+- **Guard `forecast_horizon` e `interval`**: `LiveEngine.__init__` solleva `RuntimeError` se `cfg.data.forecast_horizon != PipelineState.forecast_horizon` o se l'interval della config differisce da `PipelineState.interval_minutes` — impedisce di servire un modello addestrato per un orizzonte o un timeframe diversi. Stesso pattern in backtest (§5).
+- **Checkpoint atomici**: `EarlyStopping` scrive su `.tmp` + `os.replace()` (rename atomico cross-platform) — nessun checkpoint troncato se il processo muore durante il save.
 
-**EN** The `LiveEngine` implements several safety nets for always-on systems:
+Le restanti (thread-safety del refresh funding sotto `threading.Lock()`, log rotation tollerante ai file-lock Windows) sono di esercizio: dettaglio in `AVVIO.md`.
 
-🇮🇹
-- **Buffer di lookback dinamico**: dimensionato a `max(window_size + 60, max_rolling_window + 60) = 260` candele — garantisce warmup completo per tutte le feature rolling (es. `price_vs_ma200m` su 200 candele). Pre-2026-05-24 il buffer era 180 e questa feature era silenziosamente sempre zero in live.
-- **Separazione candela in formazione vs buffer chiuso**: solo le candele con `k.x == True` (kline chiusa) entrano nel buffer; le parziali stanno in `_pending_candle` separato e vengono scartate al reconnect WS. Previene corruzione del warmup post-disconnessione.
-- **Thread safety funding**: il thread daemon che aggiorna il funding ogni 8h scrive `_funding_df` sotto `threading.Lock()`. Primo update eseguito immediatamente all'avvio (no attesa 8h con parquet vecchio).
-- **Log rotation tollerante a file lock Windows**: rotazione a 50 MB wrappata in `try/except` per `OSError, PermissionError` — prosegue senza ruotare se il file è temporaneamente lockato.
-- **Mismatch forecast_horizon e interval**: `LiveEngine.__init__` solleva `RuntimeError` se `cfg.data.forecast_horizon != PipelineState.forecast_horizon` oppure se l'interval della config differisce da `PipelineState.interval_minutes` (pivot 2026-06-09), impedendo di avviare il live con un modello addestrato per un orizzonte o un timeframe diverso.
-- **Checkpoint atomici**: `EarlyStopping` salva i pesi su `.tmp` + `os.replace()` (rename atomico cross-platform), evita checkpoint corrotti se il processo è killato durante un save.
+**EN** Three of these safety nets are **correctness invariants**, not operational details:
+- **Lookback-buffer sizing**: `max(window_size + 60, max_rolling_window + 60) = 260` candles. It must dominate the **longest** rolling window, otherwise that feature is silently constant in live and parity with training breaks with no error (real case: buffer 180 → `price_vs_ma200m` always zero).
+- **Forming vs closed candle separation**: only klines with `k.x == True` enter the buffer; partial ones sit in `_pending_candle` and are dropped on WS reconnect. This is a **causality** condition: an unclosed candle carries incomplete, non-repeatable information.
+- **`forecast_horizon` and `interval` guards**: `LiveEngine.__init__` raises `RuntimeError` if `cfg.data.forecast_horizon != PipelineState.forecast_horizon` or if the config interval differs from `PipelineState.interval_minutes` — it prevents serving a model trained for a different horizon or timeframe. Same pattern in the backtest (§5).
+- **Atomic checkpoints**: `EarlyStopping` writes to `.tmp` + `os.replace()` (cross-platform atomic rename) — no truncated checkpoint if the process dies mid-save.
 
-**EN**
-- **Dynamic lookback buffer**: sized to `max(window_size + 60, max_rolling_window + 60) = 260` candles — guarantees full warmup for all rolling features (e.g. `price_vs_ma200m` on 200 candles). Pre-2026-05-24 the buffer was 180 and this feature was silently always zero in live.
-- **Forming vs closed candle separation**: only candles with `k.x == True` (closed kline) enter the buffer; partial ones live in a separate `_pending_candle` and are dropped on WS reconnect. Prevents warmup corruption after disconnections.
-- **Funding thread safety**: the daemon thread refreshing funding every 8h writes `_funding_df` under `threading.Lock()`. First update executed immediately at startup (no 8h wait on possibly stale parquet).
-- **Windows-tolerant log rotation**: rotation at 50 MB wrapped in `try/except` for `OSError, PermissionError` — proceeds without rotating if the file is temporarily locked.
-- **forecast_horizon and interval mismatch**: `LiveEngine.__init__` raises `RuntimeError` if `cfg.data.forecast_horizon != PipelineState.forecast_horizon` or if the config interval differs from `PipelineState.interval_minutes` (2026-06-09 pivot), preventing live startup with a model trained for a different horizon or timeframe.
-- **Atomic checkpoints**: `EarlyStopping` saves weights to `.tmp` + `os.replace()` (cross-platform atomic rename), avoiding corrupted checkpoints if the process is killed during a save.
+The remaining ones (funding-refresh thread safety under `threading.Lock()`, Windows file-lock-tolerant log rotation) are operational: details in `AVVIO.md`.
 
 ---
 
-# Parte VI — Storico esperimenti · Part VI — Experiment Log
+# Parte VI — Lettura scientifica trasversale · Part VI — Cross-cutting scientific reading
 
-🇮🇹 Registro dei filoni **chiusi**, conservati per valore metodologico (il kill documentato è il vaccino contro il re-test involontario — direttiva del `PROTOCOLLO SPERIMENTALE`). Non sono rumore: sono risultati scientifici negativi pre-registrati.
+🇮🇹 Al netto della cronaca, i filoni chiusi hanno stabilito tre fatti che sono **teoria** e non aneddoto:
+1. **Momenti PARI vs DISPARI.** Su questo asset generalizzano OOS i momenti **pari** (varianza, RV, QLIKE); i momenti **dispari** (segno della direzione, asimmetria firmata della semivarianza) sono impredicibili **sia per il NN sia per le baseline econometriche** — HAR-RS sul rapporto di semivarianze fa peggio della costante. Non è un limite di capacità del modello: è una proprietà del processo.
+2. **Il distribution shift val→test è una proprietà del TARGET, non della pipeline.** Sul direzionale le metriche in-sample (`val_nll`, Spearman/WHR walk-forward) **anti-correlano** col backtest OOS; sulla vol (`log_rv`) val e test sono **coerenti** (il QLIKE su val predice quello su test). Stessa pipeline, stesso scaler, stesso schema di split: cambia solo il target.
+3. **Il muro del direzionale a 1m era di MAGNITUDINE, non di segno** (~1.5 bps di effetto contro ~26 bps di costo round-trip). A 1h il muro dei costi cade (cost/σ da ~1.9–3.3× a ~0.25–0.42×, |μ| raw ≈ 43 bps) **ma non emerge skill direzionale OOS**: il fallimento non era imputabile alla frizione, e la sua rimozione non produce edge.
 
-**EN** Registry of **closed** lines of work, kept for methodological value (the documented kill is the vaccine against involuntary re-testing — a directive of the `EXPERIMENTAL PROTOCOL`). They are not noise: they are pre-registered negative scientific results.
+🇮🇹 Corollario operativo: ogni ipotesi nuova va pesata con questo prior e ogni gate pre-registrato **prima** di girare. La **cronaca** degli esperimenti (date, gate, numeri run-per-run) non vive qui: `CHANGELOG.md`, `STATUS.md` (periodo corrente + gate aperti), `docs/STATUS_ARCHIVE_2026H1.md` (storico ante 2026-07-08, read-only).
 
-| Esperimento · Experiment | Esito · Outcome | Sintesi · Synthesis |
-|---|---|---|
-| **Pivot timeframe 1m→1h** (direzionale) | **KILL 2026-06-10** | Il 1h sfonda il muro dei costi (|μ| raw ≈43 bps ≫ 26 bps round-trip; cost/σ da ~1.9–3.3× a ~0.25–0.42×) ma **zero skill direzionale OOS**; l'anti-correlazione val→test si conferma a 1h. Probe + 1 tuning pre-registrato (lr 3e-5/drop 0.3/5-seed), gate 4/4 fallito a 13 **e** 23 bps. Filone "stesso metodo, altro timeframe" chiuso. |
-| **Vol-S `log_rv`** (linea PRODUZIONE) | **PASS 2026-06-10 a 1h · FAIL a 1m** | NN batte HAR-RV del ~30% in QLIKE su test (0.257 vs 0.368; naive 0.807), val→test coerenti → edge OOS reale. La verifica cross-risoluzione a RV-30min fallisce (NN/HAR 1.0127 > 0.95): l'edge è **specifico della risoluzione 1h**. Nessun backtest trading sui modelli vol. |
-| **Semivarianza firmata `log_rs_ratio`** | **FAIL 2026-06-11** | `log(RS⁺/RS⁻)` fwd (signed jump variation, Barndorff-Nielsen 2010 / Patton–Sheppard 2015): NN/HAR-RS MSE 0.9952 > gate 0.95, signDA 0.459, e HAR-RS fa peggio della costante → l'asimmetria è impredicibile **per tutti**. Conferma la dicotomia momenti pari/dispari. |
-| **Edge a soglia / rango direzionale** | **FAIL OOS** | Entry rank-based discreta (regime Quiet) e continua (esposizione ∝ percentile causale di μ), cadenza decisionale, calibrazione σ: tutti validati val-first e falliti. L'edge di **rango** (Spearman R0 Quiet) non sopravvive alla macchina di realizzazione SL/TP; restano flag inerti documentati. |
-| **Ensembling sulla linea direzionale** | **inutile (ρ≈0.995)** | Errore cross-arch ρ ≈ 0.995 → riduzione di varianza ≈ 0. Combinare modelli non aiuta dove l'edge è regime-condizionato. (Sulla linea vol invece ρ_err ≈ 0.83 → headroom; vedi §7.) |
+**EN** Net of the chronicle, the closed lines of work established three facts that are **theory**, not anecdote:
+1. **EVEN vs ODD moments.** On this asset the **even** moments (variance, RV, QLIKE) generalize OOS; the **odd** moments (direction sign, signed semivariance asymmetry) are unpredictable **for the NN and for the econometric baselines alike** — HAR-RS on the semivariance ratio does worse than the constant. This is not a model-capacity limit: it is a property of the process.
+2. **The val→test distribution shift is a property of the TARGET, not of the pipeline.** On the directional target, in-sample metrics (`val_nll`, walk-forward Spearman/WHR) **anti-correlate** with the OOS backtest; on vol (`log_rv`) val and test are **coherent** (val QLIKE predicts test QLIKE). Same pipeline, same scaler, same split scheme: only the target changes.
+3. **The 1m directional wall was one of MAGNITUDE, not of sign** (~1.5 bps effect vs ~26 bps round-trip cost). At 1h the cost wall falls (cost/σ from ~1.9–3.3× to ~0.25–0.42×, raw |μ| ≈ 43 bps) **yet no directional skill emerges OOS**: the failure was not attributable to friction, and removing it produces no edge.
 
-| Esperimento · Experiment | Esito · Outcome | Sintesi · Synthesis |
-|---|---|---|
-| **Timeframe pivot 1m→1h** (directional) | **KILL 2026-06-10** | 1h breaks the cost wall (raw |μ| ≈43 bps ≫ 26 bps round-trip; cost/σ from ~1.9–3.3× to ~0.25–0.42×) but **zero directional skill OOS**; val→test anti-correlation confirmed at 1h. Probe + 1 pre-registered tuning (lr 3e-5/drop 0.3/5-seed), gate 4/4 failed at 13 **and** 23 bps. "Same method, other timeframe" line closed. |
-| **Vol-S `log_rv`** (PRODUCTION line) | **PASS 2026-06-10 at 1h · FAIL at 1m** | NN beats HAR-RV by ~30% in test QLIKE (0.257 vs 0.368; naive 0.807), val→test coherent → real OOS edge. The cross-resolution check at RV-30min fails (NN/HAR 1.0127 > 0.95): the edge is **1h-resolution-specific**. No trading backtest on vol models. |
-| **Signed semivariance `log_rs_ratio`** | **FAIL 2026-06-11** | `log(RS⁺/RS⁻)` fwd (signed jump variation, Barndorff-Nielsen 2010 / Patton–Sheppard 2015): NN/HAR-RS MSE 0.9952 > 0.95 gate, signDA 0.459, and HAR-RS does worse than the constant → asymmetry is unpredictable **for all**. Confirms the even/odd moment dichotomy. |
-| **Directional threshold / rank edge** | **FAIL OOS** | Discrete rank-based entry (Quiet regime) and continuous (exposure ∝ causal μ-percentile), decision cadence, σ calibration: all validated val-first and failed. The **rank** edge (Quiet R0 Spearman) does not survive the SL/TP realization machinery; inert documented flags remain. |
-| **Ensembling on the directional line** | **useless (ρ≈0.995)** | Cross-arch error ρ ≈ 0.995 → variance reduction ≈ 0. Combining models does not help where the edge is regime-conditioned. (On the vol line instead ρ_err ≈ 0.83 → headroom; see §7.) |
-
-🇮🇹 **Sintesi unificante.** Tutti i kill convergono su una sola legge empirica: **i momenti PARI (livello di volatilità, RV) generalizzano OOS; i momenti DISPARI (segno della direzione, asimmetria firmata della semivarianza) no.** È il principio che orienta i filoni vivi (monetizzazione vol 1h RV-vs-IV, order-book L2, paper "price+volume enough?").
-
-**EN** **Unifying synthesis.** All kills converge on a single empirical law: **EVEN moments (volatility level, RV) generalize OOS; ODD moments (direction sign, signed semivariance asymmetry) do not.** This principle steers the live lines of work (1h vol monetization RV-vs-IV, order-book L2, the "price+volume enough?" paper).
+**EN** Operational corollary: weigh every new hypothesis with this prior and pre-register every gate **before** running. The experiment **chronicle** (dates, gates, run-by-run numbers) does not live here: `CHANGELOG.md`, `STATUS.md` (current period + open gates), `docs/STATUS_ARCHIVE_2026H1.md` (pre-2026-07-08 history, read-only).
 
 ---
 
@@ -689,9 +627,9 @@ Log rendimenti + 104 feature (VWAP, VP short/mid, CVD, momentum,
                                 microstructure, funding, interactions, tempo, lag)
       │
       ├─── Feature macro (FRED + yFinance, 90 feature → MacroEncoder 16-dim)
-      ├─── BTC → realized vol oraria → RegimeMarkovBTC (Markov-Switching,
-      │                                                    3 regimi data-driven:
-      │                                                    Quiet / Trending / Stress)
+      ├─── BTC → realized vol oraria → RegimeMarkovBTC (Markov-Switching causale,
+      │                                                    filtered probs, 3 regimi
+      │                                                    data-driven R0/R1/R2)
       │
       ▼
 Finestre 120×104 normalizzate (RobustScaler globale) → dataset NPZ
@@ -710,20 +648,24 @@ Architettura selezionata con --arch (o --distill per ensemble):
       │              shuffle-safe → student con 60% epoch
       │
       ▼
-Output: μ (direzione) + σ (incertezza) + ν (code pesanti)  in z-score
+Output: μ + σ + ν  in z-score  (μ = 1° momento se target=ret, log-RV se target=log_rv)
       │
-      ▼
-PipelineState.denormalize_predictions(μ, σ)  →  spazio raw
+      ├─ target = log_rv  (PRODUZIONE):
+      │     inversione completa  log_rv = μ_z·scale + center  →  RV = exp(log_rv)
+      │     → QLIKE vs HAR-RV  →  segnale RV-vs-IV  →  straddle Deribit (04b)
       │
-      ▼
-Monte Carlo 2000 scenari × 30 barre (30h a 1h; GJR-GARCH per volatilità)
-      │
-      ▼
-Conviction score (direzione × ampiezza × calibrazione × regime)
-      │
-      ▼
-RiskManager (Kelly size, ATR stop, trailing, circuit breaker 15% MtM)
-      │
-      ▼
-Segnale: BUY / SELL / HOLD  +  size  +  stop loss  +  take profit
+      └─ target = ret  (LEGACY, KILLED OOS):
+            PipelineState.denormalize_predictions(μ, σ)  →  spazio raw
+                  │
+                  ▼
+            Monte Carlo 2000 scenari × 30 barre (30h a 1h; GJR-GARCH per volatilità)
+                  │
+                  ▼
+            Conviction score (direzione × ampiezza × calibrazione × regime)
+                  │
+                  ▼
+            RiskManager (Kelly size, ATR stop, trailing, circuit breaker 15% MtM)
+                  │
+                  ▼
+            Segnale: BUY / SELL / HOLD  +  size  +  stop loss  +  take profit
 ```
