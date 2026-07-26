@@ -97,8 +97,8 @@ def build_dvol_features(timestamps: pd.DatetimeIndex, dvol: pd.DataFrame,
 
 
 def main() -> None:
-    # IT: boilerplate UTF-8 (checklist nuovo script, CLAUDE.md).
-    # EN: UTF-8 boilerplate (new-script checklist, CLAUDE.md).
+    # IT: boilerplate UTF-8 (checklist nuovo script).
+    # EN: UTF-8 boilerplate (new-script checklist).
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")

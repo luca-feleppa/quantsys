@@ -470,9 +470,9 @@ L_distill = 0.5·MSE(μ_s, μ_t)/Var(μ_t) + 0.3·MSE(σ_s, σ_t)/Var(σ_t) + 0.
 
 ## 7quater. Distribution shift val→test · 7quater. Distribution shift val→test
 
-🇮🇹 **Fatto empirico strutturale (misurato sul dataset 1m, ri-confermato a 1h sulla linea direzionale).** Sulla linea **direzionale** le metriche in-sample (`val_nll`, Spearman/WHR walk-forward) **anti-correlano** col backtest OOS: ottimizzare regole guidate da metriche in-sample peggiora sistematicamente il PnL. Conseguenze operative codificate nel `PROTOCOLLO SPERIMENTALE` (val-first, gate pre-registrati, flag inerti): ogni lever di trading è stato validato su `QUANTSYS_BACKTEST_SPLIT=val` e **FALLITO OOS** (entry a soglia/rango, calibrazione σ, cadenza, esposizione continua: il corpus dei flag inerti è elencato in `CLAUDE.md`, i numeri in `STATUS.md`). L'edge direzionale reale esiste **solo regime-condizionato** (R0 Quiet: Spearman +0.13÷0.19 stabile OOS) ma è edge di **rango**, non catturato da una entry a soglia |μ|.
+🇮🇹 **Fatto empirico strutturale (misurato sul dataset 1m, ri-confermato a 1h sulla linea direzionale).** Sulla linea **direzionale** le metriche in-sample (`val_nll`, Spearman/WHR walk-forward) **anti-correlano** col backtest OOS: ottimizzare regole guidate da metriche in-sample peggiora sistematicamente il PnL. Conseguenze operative codificate nel `PROTOCOLLO SPERIMENTALE` (val-first, gate pre-registrati, flag inerti): ogni lever di trading è stato validato su `QUANTSYS_BACKTEST_SPLIT=val` e **FALLITO OOS** (entry a soglia/rango, calibrazione σ, cadenza, esposizione continua: il corpus dei flag inerti è elencato in §12.5, i numeri in `STATUS.md`). L'edge direzionale reale esiste **solo regime-condizionato** (R0 Quiet: Spearman +0.13÷0.19 stabile OOS) ma è edge di **rango**, non catturato da una entry a soglia |μ|.
 
-**EN** **Structural empirical fact (measured on the 1m dataset, re-confirmed at 1h on the directional line).** On the **directional** line, in-sample metrics (`val_nll`, walk-forward Spearman/WHR) **anti-correlate** with the OOS backtest: optimizing rules guided by in-sample metrics systematically worsens PnL. Operational consequences are codified in the `EXPERIMENTAL PROTOCOL` (val-first, pre-registered gates, inert flags): every trading lever was validated on `QUANTSYS_BACKTEST_SPLIT=val` and **FAILED OOS** (threshold/rank entry, σ calibration, cadence, continuous exposure: the inert-flag corpus is listed in `CLAUDE.md`, the numbers in `STATUS.md`). The real directional edge exists **only regime-conditioned** (R0 Quiet: Spearman +0.13÷0.19 stable OOS) but it is a **rank** edge, not captured by a |μ| threshold entry.
+**EN** **Structural empirical fact (measured on the 1m dataset, re-confirmed at 1h on the directional line).** On the **directional** line, in-sample metrics (`val_nll`, walk-forward Spearman/WHR) **anti-correlate** with the OOS backtest: optimizing rules guided by in-sample metrics systematically worsens PnL. Operational consequences are codified in the `EXPERIMENTAL PROTOCOL` (val-first, pre-registered gates, inert flags): every trading lever was validated on `QUANTSYS_BACKTEST_SPLIT=val` and **FAILED OOS** (threshold/rank entry, σ calibration, cadence, continuous exposure: the inert-flag corpus is listed in §12.5, the numbers in `STATUS.md`). The real directional edge exists **only regime-conditioned** (R0 Quiet: Spearman +0.13÷0.19 stable OOS) but it is a **rank** edge, not captured by a |μ| threshold entry.
 
 🇮🇹 ⚠ L'anti-correlazione è **specifica del target direzionale**: sulla vol (`log_rv`) val e test sono coerenti, ed è la ragione per cui il PASS vol-S conta come edge OOS e non come overfit del test split. Formulazione generale del fatto: **Parte VI, punto 2**. Diversità cross-arch degli errori e razionale dell'ensembling: §7.
 
@@ -611,6 +611,102 @@ The remaining ones (funding-refresh thread safety under `threading.Lock()`, Wind
 3. **The 1m directional wall was one of MAGNITUDE, not of sign** (~1.5 bps effect vs ~26 bps round-trip cost). At 1h the cost wall falls (cost/σ from ~1.9–3.3× to ~0.25–0.42×, raw |μ| ≈ 43 bps) **yet no directional skill emerges OOS**: the failure was not attributable to friction, and removing it produces no edge.
 
 **EN** Operational corollary: weigh every new hypothesis with this prior and pre-register every gate **before** running. The experiment **chronicle** (dates, gates, run-by-run numbers) does not live here: `CHANGELOG.md`, `STATUS.md` (current period + open gates), `docs/STATUS_ARCHIVE_2026H1.md` (pre-2026-07-08 history, read-only).
+
+---
+
+## 12. Protocollo sperimentale e corpus dei risultati negativi · 12. Experimental protocol and negative-results corpus
+
+🇮🇹 Questa sezione è la **sintesi degli esiti**, non la cronaca: ogni filone chiuso è riportato con la metrica di gate, la soglia pre-dichiarata e il numero ottenuto. È deliberatamente asimmetrica verso i fallimenti — sono la parte del progetto con il maggior valore informativo, perché delimitano dove l'edge NON è.
+
+**EN** This section is the **synthesis of outcomes**, not the chronicle: every closed line of work is reported with its gate metric, pre-declared threshold and realized number. It is deliberately skewed towards the failures — they carry the highest information value in this project, because they delimit where the edge is NOT.
+
+### 12.1 Protocollo — 5 passi obbligatori · 12.1 Protocol — 5 mandatory steps
+
+🇮🇹
+1. **Pre-registrare il gate PRIMA di girare**: metriche, soglie e numero minimo di osservazioni, scritti e committati. Vieta il goalpost-moving a risultati visti.
+2. **Val-first**: si valida su `val`; il test split si tocca **una volta sola**, a gate val superato.
+3. **Ogni lever sperimentale è un env-flag inerte di default**: zero impatto sul path di produzione, reversibile, documentato con il suo **esito**.
+4. **Esito negativo = scritto comunque.** I kill documentati sono il vaccino contro il re-test involontario.
+5. **Dopo ogni sweep si ripristina lo stato di produzione**: env azzerati, sandbox eliminate, run pulito.
+
+🇮🇹 **Condizione di conteggio ex-ante.** Se un gate ha una condizione sul numero minimo di osservazioni (per regime, per expiry), va verificata **prima** di consumare GPU: se è model-independent l'esito è predeterminato, e l'esperimento restituisce "nessuna conclusione" invece di un risultato. Due gate sono stati chiusi così senza spendere un'ora di training.
+
+🇮🇹 **Confronti solo a parità di scaler.** Un candidato va giudicato contro una **baseline riaddestrata sullo stesso dataset e scaler**, mai contro il modello in carica: il distribution shift dello scaler produce differenze dell'ordine del 4-5% in QLIKE, cioè più grandi dell'effetto che si sta misurando.
+
+**EN**
+1. **Pre-register the gate BEFORE running**: metrics, thresholds and minimum sample size, written and committed. Forbids goalpost-moving once results are visible.
+2. **Val-first**: validate on `val`; the test split is touched **exactly once**, after the val gate passes.
+3. **Every experimental lever is an env-flag, inert by default**: zero impact on the production path, reversible, documented with its **outcome**.
+4. **A negative outcome gets written down anyway.** Documented kills are the vaccine against involuntary re-testing.
+5. **After every sweep the production state is restored**: env cleared, sandboxes deleted, clean run.
+
+**EN** **Ex-ante count condition.** If a gate carries a minimum-sample condition (per regime, per expiry), verify it **before** spending GPU: if it is model-independent the outcome is predetermined, and the experiment returns "no conclusion" instead of a result. Two gates were closed this way without an hour of training.
+
+**EN** **Comparisons only at equal scaler.** A candidate must be judged against a **baseline retrained on the same dataset and scaler**, never against the incumbent model: scaler distribution shift produces QLIKE differences of order 4-5%, i.e. larger than the effect being measured.
+
+### 12.2 Linea attiva — volatilità a 1h · 12.2 Active line — 1h volatility
+
+🇮🇹 **PASS validato.** Con target `log_rv` il forecast NN batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive per persistenza 0.807), con val→test coerenti. Giudice: `scripts/vol/dev_vols_qlike.py` (gate pre-registrato: `QLIKE_NN ≤ 0.95·QLIKE_HAR` **e** `< QLIKE_naive`). Modello: iTransformer a 5 membri. ⚠ Nessun backtest di trading sui modelli vol: `03_backtest.py` non ha senso su un target di varianza.
+
+🇮🇹 **L'edge è specifico della risoluzione oraria.** La verifica cross-risoluzione a RV-30min è **FAIL su val** (QLIKE NN/HAR 1.0127 > 0.95): il risultato non si trasferisce cambiando la scala della barra.
+
+🇮🇹 **Monetizzazione (braccio short-vol, forward test).** L'edge VRP è strutturalmente confermato sul backtest storico FHS-GJR-GARCH 2019→2026 (n=2538; l'edge è **Trending-driven**, non Stress: la lettura "Stress = miglior Sharpe" era artefatto di un haircut costante). Ma il gate vero è il live: su Deribit testnet il **gate v1 pre-registrato è FAIL 0/3**, con `always-short` a +0.0396 — cioè il VRP è positivo e il braccio resta sensato, mentre **la regola v1 non lo monetizza**. Distinzione permanente da tenere: *skill predittiva misurata* ≠ *monetizzazione*.
+
+**EN** **Validated PASS.** With the `log_rv` target the NN forecast beats HAR-RV by **30% in test QLIKE** (0.257 vs 0.368; persistence naive 0.807), with coherent val→test. Judge: `scripts/vol/dev_vols_qlike.py` (pre-registered gate: `QLIKE_NN ≤ 0.95·QLIKE_HAR` **and** `< QLIKE_naive`). Model: 5-member iTransformer. ⚠ No trading backtest on the vol models: `03_backtest.py` is meaningless on a variance target.
+
+**EN** **The edge is specific to the hourly resolution.** The cross-resolution check at 30min RV is a **val FAIL** (NN/HAR QLIKE 1.0127 > 0.95): the result does not transfer by changing bar scale.
+
+**EN** **Monetization (short-vol arm, forward test).** The VRP edge is structurally confirmed by the 2019→2026 FHS-GJR-GARCH historical backtest (n=2538; the edge is **Trending-driven**, not Stress: the "Stress = best Sharpe" reading was a constant-haircut artifact). But the real gate is live: on Deribit testnet the **pre-registered v1 gate is FAIL 0/3**, with `always-short` at +0.0396 — i.e. VRP is positive and the arm remains sound, while **the v1 rule does not monetize it**. A permanent distinction: *measured predictive skill* ≠ *monetization*.
+
+### 12.3 Corpus KILL — filoni chiusi · 12.3 KILL corpus — closed lines
+
+🇮🇹 Da non riaprire senza un'**ipotesi nuova** (non un nuovo iperparametro):
+
+| Filone | Esito e numero |
+|---|---|
+| Direzionale a 1m | Muro dei **costi**: effetto ~1.5 bps contro ~26 bps di costo round-trip |
+| Pivot 1m→1h | A 1h il muro dei costi cade (cost/σ da ~1.9-3.3× a ~0.25-0.42×, \|μ\| ≈ 43 bps) ma **nessuna skill direzionale OOS**: gate pre-registrato fallito **4/4** a 13 **e** 23 bps |
+| Probe cross-sectional | KILL: nessun IC cross-sezionale sfruttabile |
+| Semivarianza firmata (`log_rs_ratio`) | FAIL su test: NN/HAR-RS MSE 0.9952 (gate ≤0.95), signDA 0.459, e **HAR-RS fa peggio della costante** → l'asimmetria è impredicibile *per tutti* |
+| IVS relative-value | KILL **net-of-cost**: struttura reale (i residui revertono) ma netto −2.3/−3.8 vol-pt per leg, ~50× sotto lo spread — vivrebbe solo da market-maker |
+
+**EN** Not to be reopened without a **new hypothesis** (not a new hyperparameter):
+
+| Line | Outcome and number |
+|---|---|
+| 1m directional | **Cost** wall: ~1.5 bps effect against ~26 bps round-trip cost |
+| 1m→1h pivot | At 1h the cost wall falls (cost/σ from ~1.9-3.3× to ~0.25-0.42×, \|μ\| ≈ 43 bps) yet **no OOS directional skill**: pre-registered gate failed **4/4** at both 13 and 23 bps |
+| Cross-sectional probe | KILL: no exploitable cross-sectional IC |
+| Signed semivariance (`log_rs_ratio`) | Test FAIL: NN/HAR-RS MSE 0.9952 (gate ≤0.95), signDA 0.459, and **HAR-RS does worse than the constant** → the asymmetry is unpredictable *for everyone* |
+| IVS relative value | **Net-of-cost** KILL: real structure (residuals revert) but −2.3/−3.8 vol pt net per leg, ~50× below the spread — viable only as a market maker |
+
+### 12.4 Lever di training falsificati sulla linea vol · 12.4 Falsified training levers on the vol line
+
+🇮🇹 Tutti giudicati **contro una baseline riaddestrata** sullo stesso dataset e scaler, soglia di PASS −3% in QLIKE:
+
+- **Mixup** (`mixup_alpha` 0→0.2): −0.79% → FAIL. Nota metodologica di primo ordine: una misura descrittiva precedente dava −4.94%, ma era **artefatto di distribution shift** (confronto cross-scaler contro il modello in carica). È l'origine della regola in §12.1.
+- **DVOL come feature** (IV risk-neutral di Deribit, 3 colonne, asof causale): −1.02% → FAIL. L'MSE in log migliora del 6% ma **QLIKE no** → il segnale sposta la media della log-RV senza migliorare la calibrazione della varianza, che è ciò che QLIKE penalizza. Lettura: mismatch di tenor 30d→30h + il NN cattura già l'informazione IV attraverso le non-linearità sui lag di RV.
+- **Calibrazione dei quantili** e **pesi di membro per-QLIKE**: FAIL su val.
+
+**EN** All judged **against a retrained baseline** on the same dataset and scaler, PASS threshold −3% in QLIKE:
+
+- **Mixup** (`mixup_alpha` 0→0.2): −0.79% → FAIL. First-order methodological note: an earlier descriptive measure gave −4.94%, but it was a **distribution-shift artifact** (cross-scaler comparison against the incumbent). It is the origin of the rule in §12.1.
+- **DVOL as a feature** (Deribit risk-neutral IV, 3 columns, causal asof): −1.02% → FAIL. Log-MSE improves by 6% but **QLIKE does not** → the signal moves the log-RV mean without improving variance calibration, which is what QLIKE penalizes. Reading: 30d→30h tenor mismatch + the NN already captures IV information through non-linearities on lagged RV.
+- **Quantile calibration** and **per-QLIKE member weights**: val FAIL.
+
+### 12.5 Realizzazione: perché l'edge di rango non diventa PnL · 12.5 Realization: why a rank edge does not become PnL
+
+🇮🇹 Sul direzionale sono stati implementati e validati sette lever di realizzazione, **tutti inerti di default** in `scripts/03_backtest.py` e tutti falliti OOS: gating per regime (`QUANTSYS_REGIME_ALLOW`, `_INVERT`), entry rank-based discreta, cadenza decisionale (`QUANTSYS_DECISION_CADENCE`), esposizione continua proporzionale al percentile causale di μ (`QUANTSYS_RANK_EXPOSURE`), uscita puramente temporale (`QUANTSYS_HORIZON_EXIT`), ricalibrazione di σ (`QUANTSYS_SIGMA_SCALE`: l'ottimo è ≈1.0, ridurre σ **peggiora**), gate cost-aware su |μ| (`QUANTSYS_MIN_EXPECTED_RET`: a 1h non vincolante). Restano nel codice come **documentazione eseguibile del fallimento**.
+
+🇮🇹 **Lettura unica del corpus:** l'edge direzionale è di **rango**, non di soglia, e **non sopravvive alla macchina di realizzazione** — la PnL è dominata dal path di SL/TP, non dal rendimento all'orizzonte. Né il gating per regime né la ricalibrazione di σ producono PnL OOS.
+
+🇮🇹 **Safety net da non rimuovere** (guard fail-fast deliberati, non difensivismo): `RuntimeError` se `σ_max ≥ 0.05·√interval_minutes` in spazio raw (scala con √Δt: intercetta i bug di denormalizzazione da 30-100×, non la crescita legittima della vol di barra); validazione di `forecast_horizon` **e** `interval` fra training e inferenza; allineamento `merge_asof` test↔candele raw con `len == n_test`; floor `sl_d = max(sl_d, price×1e-4)`; checkpoint atomici (`.tmp` + `os.replace`).
+
+**EN** On the directional line seven realization levers were implemented and validated, **all inert by default** in `scripts/03_backtest.py` and all OOS failures: regime gating (`QUANTSYS_REGIME_ALLOW`, `_INVERT`), discrete rank-based entry, decision cadence (`QUANTSYS_DECISION_CADENCE`), continuous exposure proportional to the causal percentile of μ (`QUANTSYS_RANK_EXPOSURE`), purely temporal exit (`QUANTSYS_HORIZON_EXIT`), σ recalibration (`QUANTSYS_SIGMA_SCALE`: the optimum is ≈1.0, shrinking σ makes it **worse**), cost-aware |μ| gate (`QUANTSYS_MIN_EXPECTED_RET`: non-binding at 1h). They stay in the code as **executable documentation of the failure**.
+
+**EN** **Single reading of the corpus:** the directional edge is one of **rank**, not of threshold, and **does not survive the realization machinery** — PnL is dominated by the SL/TP path, not by the horizon return. Neither regime gating nor σ recalibration produces OOS PnL.
+
+**EN** **Safety nets not to be removed** (deliberate fail-fast guards, not defensiveness): `RuntimeError` if `σ_max ≥ 0.05·√interval_minutes` in raw space (scales with √Δt: catches 30-100× denormalization bugs, not legitimate per-bar vol growth); validation of `forecast_horizon` **and** `interval` between training and inference; `merge_asof` test↔raw-candle alignment with `len == n_test`; floor `sl_d = max(sl_d, price×1e-4)`; atomic checkpoints (`.tmp` + `os.replace`).
 
 ---
 

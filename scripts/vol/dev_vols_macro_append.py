@@ -25,7 +25,7 @@ log = logging.getLogger("quantsys.script.vols_macro")
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script, CLAUDE.md) | EN: UTF-8 boilerplate (new-script checklist)
+    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")

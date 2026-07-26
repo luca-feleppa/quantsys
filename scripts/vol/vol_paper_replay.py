@@ -192,8 +192,8 @@ def macro_asof(fc, t: pd.Timestamp, device):
 
 
 def main() -> int:
-    # IT: boilerplate UTF-8 console Windows (checklist CLAUDE.md — bug cp1252).
-    # EN: Windows console UTF-8 boilerplate (CLAUDE.md checklist — cp1252 bug).
+    # IT: boilerplate UTF-8 console Windows (checklist nuovo script — bug cp1252).
+    # EN: Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")

@@ -15,8 +15,8 @@
 | Cosa | Dove |
 |---|---|
 | **Il risultato.** Il forecast NN della realized variance batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive 0.807), con val→test coerenti | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
-| **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `STATUS.md` (pre-registrazioni in testa) · `.claude/skills/preregister/` |
-| **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `CLAUDE.md` § STATO NOTO (corpus KILL) |
+| **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `TEORIA.md` §12.1 (protocollo in 5 passi) · `STATUS.md` (pre-registrazioni in testa) |
+| **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `TEORIA.md` §12.3-12.4 (corpus KILL, con i numeri) |
 | **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **298 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
 
 🇮🇹 Il progetto è organizzato attorno a un'asimmetria dichiarata: **i momenti pari (varianza, RV) generalizzano fuori campione su questo asset, i momenti dispari (segno, asimmetria) no** — per la rete *e* per le baseline econometriche. Le tre linee di codice (vol-forecasting, monetizzazione short-vol, direzionale) esistono per documentare quella asimmetria, non per nasconderla.
@@ -26,8 +26,8 @@
 | What | Where |
 |---|---|
 | **The result.** The NN realized-variance forecast beats HAR-RV by **30% in test QLIKE** (0.257 vs 0.368; naive 0.807), val→test coherent | `scripts/vol/dev_vols_qlike.py` — the judge that produces the number, val-first split |
-| **How an idea lives or dies.** Every experiment is **pre-registered**: metrics, thresholds and minimum n written and committed *before* running | `STATUS.md` (pre-registrations on top) · `.claude/skills/preregister/` |
-| **What was tried and does NOT work**, with numbers: directional at 1m and 1h, signed semivariance, IVS relative-value, 4 training levers, regime gating | `CLAUDE.md` § STATO NOTO (KILL corpus) |
+| **How an idea lives or dies.** Every experiment is **pre-registered**: metrics, thresholds and minimum n written and committed *before* running | `TEORIA.md` §12.1 (5-step protocol) · `STATUS.md` (pre-registrations on top) |
+| **What was tried and does NOT work**, with numbers: directional at 1m and 1h, signed semivariance, IVS relative-value, 4 training levers, regime gating | `TEORIA.md` §12.3-12.4 (KILL corpus, with numbers) |
 | **What an outside reader can verify** without downloading data | `pytest tests/` → **298 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
 
 **EN** The project is organized around a stated asymmetry: **even moments (variance, RV) generalize out-of-sample on this asset, odd moments (sign, skew) do not** — for the network *and* for the econometric baselines. The three code lines (vol forecasting, short-vol monetization, directional) exist to document that asymmetry, not to hide it.
@@ -55,7 +55,7 @@
 - **[TEORIA.md](TEORIA.md)** — **matematica**: derivazioni di loss, regime detection, Monte Carlo, distillation, trading layer.
 - **[CHANGELOG.md](CHANGELOG.md)** — milestone in ordine cronologico inverso.
 - **[STATUS.md](STATUS.md)** — **fonte canonica** dello stato: periodo corrente + tutti i gate pre-registrati aperti. Storico antecedente al 2026-07-08 in **[docs/STATUS_ARCHIVE_2026H1.md](docs/STATUS_ARCHIVE_2026H1.md)** (read-only).
-- **[CLAUDE.md](CLAUDE.md)** — manifesto operativo + § STATO NOTO (corpus KILL sintetizzato).
+- **[TEORIA.md](TEORIA.md) §12** — protocollo sperimentale + corpus dei risultati negativi (KILL) con le soglie di gate.
 - **[docs/MODEL_IMPROVEMENTS.md](docs/MODEL_IMPROVEMENTS.md)** · **[docs/ROADMAP_VOL_BOOK.md](docs/ROADMAP_VOL_BOOK.md)** — backlog e item aperti.
 
 **EN** **Single-file bilingual** documentation (IT + EN per paragraph, markers 🇮🇹/**EN**). Disjoint roles — every fact lives in exactly one place:
@@ -65,7 +65,7 @@
 - **[TEORIA.md](TEORIA.md)** — **mathematics**: derivations for the loss, regime detection, Monte Carlo, distillation, trading layer.
 - **[CHANGELOG.md](CHANGELOG.md)** — milestones, reverse chronological.
 - **[STATUS.md](STATUS.md)** — **canonical source of truth** for state: current period + every open pre-registered gate. History predating 2026-07-08 in **[docs/STATUS_ARCHIVE_2026H1.md](docs/STATUS_ARCHIVE_2026H1.md)** (read-only).
-- **[CLAUDE.md](CLAUDE.md)** — operating manifesto + § STATO NOTO (synthesized KILL corpus).
+- **[TEORIA.md](TEORIA.md) §12** — experimental protocol + negative-results (KILL) corpus with gate thresholds.
 - **[docs/MODEL_IMPROVEMENTS.md](docs/MODEL_IMPROVEMENTS.md)** · **[docs/ROADMAP_VOL_BOOK.md](docs/ROADMAP_VOL_BOOK.md)** — backlog and open items.
 
 ---
@@ -260,9 +260,9 @@ python run_all.py     # menu interattivo / interactive menu
 
 **EN** Chain: forward → `PipelineState.denormalize_predictions(μ, σ)` (z-score → raw) → conviction score (direction × magnitude × calibration × regime) → **Risk Manager** (fractional Kelly ∝ edge ∝ 1/variance, max 1%/trade; ATR SL 3×; trailing; 15% MtM intra-trade drawdown circuit breaker) → BUY/SELL/HOLD + size + SL + TP. Production live path: `LiveCandleBuffer`(50k) → `FeatureAssembler` → `FeatureBuilder.build(fit=False)` (104 canonical, scaler from `PipelineState`) → `LiveEngine._deterministic_predict` (deterministic core shared with the backtest) → `denormalize_predictions` → `SignalGenerator`. Binance WebSocket feed with exponential-backoff reconnect, state persistence, incremental Volume Profile, thread-safe funding refresh. ⚠ This is the **legacy line with no OOS alpha**: it runs as a negative control, not as a strategy.
 
-🇮🇹 ⚠ Il path contiene una serie di **guard fail-fast deliberati** (cap su σ raw, validazione `forecast_horizon` e `interval` train-vs-inferenza, allineamento `merge_asof`, floor sullo stop, checkpoint atomici): sono lì per intercettare i bug di denormalizzazione e di contratto train↔inference, **non vanno rimossi**. Elenco puntuale in [CLAUDE.md](CLAUDE.md) § REGOLE SCIENTIFICHE.
+🇮🇹 ⚠ Il path contiene una serie di **guard fail-fast deliberati** (cap su σ raw, validazione `forecast_horizon` e `interval` train-vs-inferenza, allineamento `merge_asof`, floor sullo stop, checkpoint atomici): sono lì per intercettare i bug di denormalizzazione e di contratto train↔inference, **non vanno rimossi**. Elenco puntuale in [TEORIA.md](TEORIA.md) §12.5.
 
-**EN** ⚠ The path carries a set of **deliberate fail-fast guards** (raw-σ cap, `forecast_horizon` and `interval` train-vs-inference validation, `merge_asof` alignment, stop floor, atomic checkpoints): they exist to catch denormalization and train↔inference contract bugs and **must not be removed**. Itemized list in [CLAUDE.md](CLAUDE.md) § REGOLE SCIENTIFICHE.
+**EN** ⚠ The path carries a set of **deliberate fail-fast guards** (raw-σ cap, `forecast_horizon` and `interval` train-vs-inference validation, `merge_asof` alignment, stop floor, atomic checkpoints): they exist to catch denormalization and train↔inference contract bugs and **must not be removed**. Itemized list in [TEORIA.md](TEORIA.md) §12.5.
 
 ### 6.2 Forward test vol & collector 24/7 · Vol forward test & 24/7 collectors
 
@@ -288,9 +288,9 @@ python run_all.py     # menu interattivo / interactive menu
 
 **EN** Every experiment follows a pre-registered protocol (gates written BEFORE running, val-first validation, levers as inert-by-default flags) and **every negative outcome is kept**: kill-records are documental, the "vaccine against involuntary re-testing". The synthesis of years of gates is sharp: the **vol line** is the project's only OOS PASS (`log_rv` beats HAR-RV by 30% in QLIKE, coherent val→test), whereas the **directional line has no OOS alpha at any tested timeframe** — at 1m the wall is transaction cost, at 1h the cost falls away but no skill emerges; neither regime gating, nor threshold/rank entries, nor σ recalibration produce OOS PnL. The cross-cutting prior that follows: **even moments (variance, RV) generalize OOS, odd ones (sign, signed asymmetry) do not**.
 
-🇮🇹 **Dove leggere cosa:** [CHANGELOG.md](CHANGELOG.md) per i milestone in ordine cronologico · [STATUS.md](STATUS.md) per la fonte canonica (periodo corrente + tutti i gate aperti, con i numeri decisionali) · [docs/STATUS_ARCHIVE_2026H1.md](docs/STATUS_ARCHIVE_2026H1.md) per lo storico antecedente al 2026-07-08 (scorporo letterale, read-only) · [CLAUDE.md](CLAUDE.md) § STATO NOTO per il corpus KILL sintetizzato e i flag sperimentali inerti da non ri-testare.
+🇮🇹 **Dove leggere cosa:** [CHANGELOG.md](CHANGELOG.md) per i milestone in ordine cronologico · [STATUS.md](STATUS.md) per la fonte canonica (periodo corrente + tutti i gate aperti, con i numeri decisionali) · [docs/STATUS_ARCHIVE_2026H1.md](docs/STATUS_ARCHIVE_2026H1.md) per lo storico antecedente al 2026-07-08 (scorporo letterale, read-only) · [TEORIA.md](TEORIA.md) §12 per il protocollo sperimentale, il corpus KILL con i numeri e i flag inerti da non ri-testare.
 
-**EN** **Where to read what:** [CHANGELOG.md](CHANGELOG.md) for milestones in chronological order · [STATUS.md](STATUS.md) for the canonical source (current period + every open gate, with the decisional numbers) · [docs/STATUS_ARCHIVE_2026H1.md](docs/STATUS_ARCHIVE_2026H1.md) for history predating 2026-07-08 (literal split-off, read-only) · [CLAUDE.md](CLAUDE.md) § STATO NOTO for the synthesized KILL corpus and the inert experimental flags not to be re-tested.
+**EN** **Where to read what:** [CHANGELOG.md](CHANGELOG.md) for milestones in chronological order · [STATUS.md](STATUS.md) for the canonical source (current period + every open gate, with the decisional numbers) · [docs/STATUS_ARCHIVE_2026H1.md](docs/STATUS_ARCHIVE_2026H1.md) for history predating 2026-07-08 (literal split-off, read-only) · [TEORIA.md](TEORIA.md) §12 for the experimental protocol, the KILL corpus with numbers and the inert flags not to be re-tested.
 
 ---
 
@@ -394,7 +394,7 @@ quantsys_project/
 ├── tests/                        suite pytest (feature, NLL, PipelineState, parity, regime, greeks, regression)
 ├── avvio_sessione.ps1            routine di sessione lato casa (pull VPS + freshness regime + monitoraggio vol)
 ├── run_all.py                    orchestratore: dati → macro → train → walkfwd → backtest → live → dashboard
-├── README.md · AVVIO.md · TEORIA.md · CHANGELOG.md · STATUS.md · CLAUDE.md
+├── README.md · AVVIO.md · TEORIA.md · CHANGELOG.md · STATUS.md
 ├── docs/                         MODEL_IMPROVEMENTS · ROADMAP_VOL_BOOK · STATUS_ARCHIVE_2026H1 · paper/
 ├── data/                         generato (gitignored) — ⚠ data/iv, data/orderbook, data/deribit_trades NON rigenerabili
 ├── models/                       checkpoint per architettura (gitignored)

@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg, models_root, dataset_npz_path  # noqa: E402
 # IT: QLIKE + ε ora vivono nel modulo condiviso (single source of truth con l'harness 02b).
 # EN: QLIKE + ε now live in the shared module (single source of truth with the 02b harness).
-from quantsys.model.vol_metrics import qlike, EPS  # noqa: E402
+from quantsys.model.vol_metrics import qlike, qlike_series, diebold_mariano, EPS  # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.vols_qlike")
@@ -52,7 +52,7 @@ H = 30
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist CLAUDE.md) | EN: UTF-8 boilerplate (CLAUDE.md checklist)
+    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -208,12 +208,39 @@ def main():
     # ── Giudizio ────────────────────────────────────────────────────────────────
     rv_true = np.exp(ev["y"].values)  # IT/EN: = rv_fwd + EPS
     res = {}
+    losses = {}  # IT: loss QLIKE per-campione, per il DM | EN: per-sample QLIKE losses, for DM
     for name, lp in [("nn", log_pred_nn), ("har", log_pred_har), ("naive", log_pred_naive)]:
+        losses[name] = qlike_series(rv_true, np.exp(lp))
         res[name] = {
             "qlike":   qlike(rv_true, np.exp(lp)),
             "mse_log": float(np.mean((ev["y"].values - lp) ** 2)),
         }
         log.info(f"{name:6s} QLIKE={res[name]['qlike']:.5f}  MSE(log)={res[name]['mse_log']:.4f}")
+
+    # IT: INFERENZA sul confronto (Diebold-Mariano, aggiunto 2026-07-26) — il rapporto
+    #     di QLIKE è una stima PUNTUALE: senza HAC lo standard error è sottostimato di
+    #     ~sqrt(h) perché il target somma h barre (finestre sovrapposte). DESCRITTIVO,
+    #     NON GATING: le condizioni di PASS pre-registrate restano quelle sui rapporti
+    #     di QLIKE (0.95·HAR e < naive) e NON vengono toccate da questi p-value.
+    #     Fail-soft: un errore qui non invalida il verdetto aggregato.
+    # EN: INFERENCE on the comparison (Diebold-Mariano, added 2026-07-26) — the QLIKE
+    #     ratio is a POINT estimate: without HAC the standard error is understated by
+    #     ~sqrt(h) because the target sums h bars (overlapping windows). DESCRIPTIVE,
+    #     NOT GATING: the pre-registered PASS conditions remain the QLIKE ratios
+    #     (0.95·HAR and < naive) and are untouched by these p-values.
+    #     Fail-soft: an error here does not invalidate the aggregate verdict.
+    dm = {}
+    try:
+        for label, (a, b) in {"nn_vs_har": ("nn", "har"),
+                              "nn_vs_naive": ("nn", "naive")}.items():
+            dm[label] = diebold_mariano(losses[a], losses[b], h=h)
+            r = dm[label]
+            log.info(f"DM {label}: stat={r['dm_hln']:+.3f} p={r['p_value']:.2e} "
+                     f"(HAC lag={r['hac_lag']}, n={r['n']}, n_eff≈{r['n_eff']:.0f}, "
+                     f"migliore/better={r['better']})")
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"blocco Diebold-Mariano fallito / DM block failed: {e}")
+    res["diebold_mariano"] = dm
 
     # IT: A8-bis (pre-reg 2026-07-19) — breakdown QLIKE per-regime: label = argmax del
     #     gate causale (model-independent), allineate ai sample `ev` via `sel`. Serve
@@ -269,6 +296,13 @@ def main():
     for name in ("nn", "har", "naive"):
         print(f"  {name:6s} QLIKE={res[name]['qlike']:.5f}  MSE(log)={res[name]['mse_log']:.4f}")
     print(f"  NN/HAR ratio: {gate['nn_vs_har_ratio']:.4f}  (gate ≤ 0.95)")
+    # IT: inferenza descrittiva (non gating) — vedi blocco DM sopra.
+    # EN: descriptive inference (not gating) — see the DM block above.
+    for label in ("nn_vs_har", "nn_vs_naive"):
+        r = res.get("diebold_mariano", {}).get(label)
+        if r and np.isfinite(r.get("dm_hln", float("nan"))):
+            print(f"  DM {label:12s} stat={r['dm_hln']:+7.3f}  p={r['p_value']:.2e}"
+                  f"  (HAC lag={r['hac_lag']}, n_eff≈{r['n_eff']:.0f}) [descrittivo/descriptive]")
     print(f"  VERDETTO [{split}]: {gate['verdict']}   → {out_path}")
 
 

@@ -1478,8 +1478,8 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script, CLAUDE.md — bug cp1252 ricorrente).
-    # EN: UTF-8 boilerplate (new-script checklist, CLAUDE.md — recurring cp1252 bug).
+    # IT: boilerplate UTF-8 (checklist nuovo script — bug cp1252 ricorrente).
+    # EN: UTF-8 boilerplate (new-script checklist — recurring cp1252 bug).
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")

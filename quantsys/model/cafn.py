@@ -9,7 +9,7 @@ IT: Layer di coordinamento a monte dei tre modelli predittivi del progetto
     lookahead), e produce in più una **penalità causale** scalare che il loop di
     training congiunto somma alla loss per *stabilizzare le relazioni causali*.
 
-    ⚠ ONESTÀ SCIENTIFICA (CLAUDE.md): la "penalità causale" è un **regolarizzatore**
+    ⚠ ONESTÀ SCIENTIFICA (TEORIA.md §12): la "penalità causale" è un **regolarizzatore**
     (prossimità temporale + stabilità del pattern di attenzione), NON una garanzia
     di causalità in senso do-calculus / Granger. Inoltre il latente si addestra
     SUL TENSORE CANONICO 104-feature (che ha storia 2019→oggi); i dati Deribit
@@ -25,7 +25,7 @@ EN: Coordination layer upstream of the project's three forecasting models
     returns a scalar **causal penalty** that the joint training loop adds to the
     loss to *stabilize causal relationships*.
 
-    ⚠ SCIENTIFIC HONESTY (CLAUDE.md): the "causal penalty" is a **regularizer**
+    ⚠ SCIENTIFIC HONESTY (TEORIA.md §12): the "causal penalty" is a **regularizer**
     (temporal proximity + attention-pattern stability), NOT a do-calculus / Granger
     causality guarantee. Moreover the latent is trained ON THE CANONICAL 104-feature
     tensor (which has history 2019→today); raw Deribit data (greeks/book/IV) is

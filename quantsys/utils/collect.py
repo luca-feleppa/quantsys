@@ -1,12 +1,12 @@
 # IT: Helper condivisi dei collector forward (01c IV, 01d L2, 01e trades) —
 #     estratti 2026-07-16 (boy-scout rule: terza copia identica = si estrae).
 #     Unica funzione: append su parquet con dedup a chiave e scrittura ATOMICA
-#     (tmp + os.replace, safety net CLAUDE.md): un crash a metà tick non
+#     (tmp + os.replace, safety net TEORIA.md §12.5): un crash a metà tick non
 #     corrompe mai lo storico accumulato.
 # EN: Shared helpers for the forward collectors (01c IV, 01d L2, 01e trades) —
 #     extracted 2026-07-16 (boy-scout rule: third identical copy = extract).
 #     Single function: keyed-dedup parquet append with ATOMIC write
-#     (tmp + os.replace, CLAUDE.md safety net): a mid-tick crash can never
+#     (tmp + os.replace, TEORIA.md §12.5 safety net): a mid-tick crash can never
 #     corrupt the accumulated history.
 from pathlib import Path
 

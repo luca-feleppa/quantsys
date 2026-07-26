@@ -8,7 +8,7 @@ IT: Loop di training end-to-end. La CAFN estrae un latente causale dal tensore
     CAFN: i modelli massimizzano l'accuratezza, la CAFN stabilizza le relazioni
     causali (prossimità + stabilità dell'attenzione mascherata causalmente).
 
-    ⚠ PROBE PRE-REGISTRATO, INERTE DI DEFAULT (CLAUDE.md §protocollo sperimentale):
+    ⚠ PROBE PRE-REGISTRATO, INERTE DI DEFAULT (TEORIA.md §12.1 (protocollo sperimentale)):
       • Output ISOLATO in `models/cafn/` e `results/cafn/` — NON tocca i modelli
         production `models/{arch}` né la parity live (BLOCKER #1).
       • La CAFN si addestra sul tensore CANONICO 104-feature (storia 2019→oggi).
@@ -29,7 +29,7 @@ EN: End-to-end training loop. The CAFN extracts a causal latent from the market
     the models maximize accuracy, the CAFN stabilizes causal relationships
     (proximity + stability of the causally-masked attention).
 
-    ⚠ PRE-REGISTERED PROBE, INERT BY DEFAULT (CLAUDE.md §experimental protocol):
+    ⚠ PRE-REGISTERED PROBE, INERT BY DEFAULT (TEORIA.md §12.1 (experimental protocol)):
       • Output ISOLATED in `models/cafn/` and `results/cafn/` — does NOT touch the
         production models `models/{arch}` nor the live parity (BLOCKER #1).
       • The CAFN trains on the CANONICAL 104-feature tensor (history 2019→today).

@@ -272,8 +272,8 @@ LAMBDA_GRID = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist CLAUDE.md — bug cp1252 ricorrente).
-    # EN: UTF-8 boilerplate (CLAUDE.md checklist — recurring cp1252 bug).
+    # IT: boilerplate UTF-8 (checklist nuovo script — bug cp1252 ricorrente).
+    # EN: UTF-8 boilerplate (new-script checklist — recurring cp1252 bug).
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")

@@ -20,10 +20,109 @@ EPS = 1e-12
 # EN: QLIKE on RV levels — canonical variance-forecast loss
 #     (Patton 2011: robust to noise in the RV proxy).
 def qlike(rv_true: np.ndarray, rv_pred: np.ndarray) -> float:
+    return float(np.mean(qlike_series(rv_true, rv_pred)))
+
+
+# IT: QLIKE PER-CAMPIONE (loss non aggregata) — serve al test di Diebold-Mariano,
+#     che opera sui differenziali di loss e non sulle medie. `qlike()` è la media
+#     di questa serie: un solo punto in cui vive la formula.
+# EN: PER-SAMPLE QLIKE (unaggregated loss) — needed by the Diebold-Mariano test,
+#     which operates on loss differentials rather than means. `qlike()` is the mean
+#     of this series: the formula lives in exactly one place.
+def qlike_series(rv_true: np.ndarray, rv_pred: np.ndarray) -> np.ndarray:
     rv_true = np.asarray(rv_true, dtype=np.float64)
     rv_pred = np.asarray(rv_pred, dtype=np.float64)
     r = rv_true / np.maximum(rv_pred, EPS)
-    return float(np.mean(r - np.log(r) - 1.0))
+    return r - np.log(r) - 1.0
+
+
+# IT: TEST DI DIEBOLD-MARIANO (1995) con varianza HAC e correzione small-sample di
+#     Harvey-Leybourne-Newbold (1997). Risponde a: "la differenza di loss media fra
+#     due forecast è distinguibile da zero?" — indispensabile qui perché il target
+#     somma h barre, quindi le finestre si SOVRAPPONGONO e i differenziali sono
+#     fortemente autocorrelati: con la varianza iid lo standard error sarebbe
+#     sottostimato di ~sqrt(h) e ogni p-value sarebbe fittizio.
+#     Convenzione: d_t = loss_a − loss_b → DM < 0 ⇒ il forecast A perde MENO (è
+#     migliore). Lag HAC di default q = h−1 (scelta canonica per forecast a h passi);
+#     kernel di Bartlett (pesi 1 − j/(q+1)) → varianza garantita non negativa.
+#     N_eff ≈ n/h è la numerosità che governa davvero l'incertezza, riportata perché
+#     è la prima obiezione che un lettore competente muove al confronto.
+# EN: DIEBOLD-MARIANO (1995) TEST with HAC variance and the Harvey-Leybourne-Newbold
+#     (1997) small-sample correction. Answers: "is the mean loss difference between
+#     two forecasts distinguishable from zero?" — essential here because the target
+#     sums h bars, so windows OVERLAP and the differentials are strongly
+#     autocorrelated: under an iid variance the standard error would be understated
+#     by ~sqrt(h) and any p-value would be fictitious.
+#     Convention: d_t = loss_a − loss_b → DM < 0 ⇒ forecast A loses LESS (is better).
+#     Default HAC lag q = h−1 (canonical for h-step forecasts); Bartlett kernel
+#     (weights 1 − j/(q+1)) → guarantees a non-negative variance.
+#     N_eff ≈ n/h is the sample size that truly governs the uncertainty, reported
+#     because it is the first objection a competent reader raises.
+def diebold_mariano(loss_a: np.ndarray, loss_b: np.ndarray, h: int,
+                    lag: int | None = None) -> dict:
+    from scipy import stats  # IT/EN: import locale (scipy non serve al path training)
+
+    d = np.asarray(loss_a, dtype=np.float64) - np.asarray(loss_b, dtype=np.float64)
+    n = int(d.size)
+
+    # IT: contratto di ritorno UNIFORME — ogni ramo (anche i degeneri) restituisce le
+    #     stesse chiavi con nan, così i consumer non devono difendersi da KeyError.
+    # EN: UNIFORM return contract — every branch (degenerate ones included) returns
+    #     the same keys with nan, so consumers need no KeyError defence.
+    def _null(note: str, lag_used: int = -1) -> dict:
+        return {"dm": float("nan"), "dm_hln": float("nan"), "p_value": float("nan"),
+                "mean_diff": float(d.mean()) if n else float("nan"),
+                "hac_lag": int(lag_used), "n": n,
+                "n_eff": float(n / max(h, 1)), "better": None, "note": note}
+
+    if n < 10:
+        return _null("campione troppo piccolo / sample too small")
+
+    q = int(h - 1 if lag is None else lag)
+    q = max(0, min(q, n - 1))
+    d_bar = float(d.mean())
+    dev = d - d_bar
+
+    # IT: varianza HAC (Newey-West, kernel di Bartlett) della MEDIA di d.
+    # EN: HAC (Newey-West, Bartlett kernel) variance of the MEAN of d.
+    gamma0 = float(np.mean(dev ** 2))
+    var_hac = gamma0
+    for j in range(1, q + 1):
+        gamma_j = float(np.mean(dev[j:] * dev[:-j]))
+        var_hac += 2.0 * (1.0 - j / (q + 1.0)) * gamma_j
+    var_hac = max(var_hac, 0.0)
+
+    # IT: differenziale costante (varianza nulla) o identicamente zero → nessuna
+    #     statistica definita. Caso reale: due forecast che differiscono di una
+    #     costante additiva sulla loss.
+    # EN: constant differential (null variance) or identically zero → no statistic is
+    #     defined. Real case: two forecasts differing by an additive loss constant.
+    if var_hac <= 0.0 or d_bar == 0.0:
+        return _null("varianza HAC nulla / null HAC variance", lag_used=q)
+
+    dm = d_bar / np.sqrt(var_hac / n)
+
+    # IT: correzione HLN 1997 — con n finito e orizzonte h la DM è sovradimensionata;
+    #     il fattore corregge la statistica e si confronta con una t di Student a n−1
+    #     gradi di libertà invece della normale.
+    # EN: HLN 1997 correction — with finite n and horizon h the DM statistic is
+    #     oversized; the factor rescales it and it is compared against a Student-t
+    #     with n−1 degrees of freedom rather than the normal.
+    hln = (n + 1.0 - 2.0 * h + (h * (h - 1.0)) / n) / n
+    dm_hln = dm * np.sqrt(hln) if hln > 0 else float("nan")
+    stat = dm_hln if np.isfinite(dm_hln) else dm
+    p = float(2.0 * stats.t.sf(abs(stat), df=n - 1))
+
+    return {
+        "dm": float(dm),                       # IT/EN: statistica non corretta / uncorrected
+        "dm_hln": float(dm_hln),               # IT/EN: corretta HLN / HLN-corrected
+        "p_value": p,                          # IT/EN: bilaterale sulla t / two-sided, t-dist
+        "mean_diff": d_bar,                    # IT/EN: loss_a − loss_b medio / mean
+        "hac_lag": q,
+        "n": n,
+        "n_eff": float(n / max(h, 1)),         # IT/EN: osservazioni non sovrapposte / non-overlapping
+        "better": ("a" if d_bar < 0 else "b"), # IT/EN: chi perde meno / who loses less
+    }
 
 
 # IT: inversione COMPLETA z→raw del target log-RV: log_rv = z·scale + center.

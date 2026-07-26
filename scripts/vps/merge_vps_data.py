@@ -6,7 +6,7 @@
 #       - deribit_trades/*.parquet (giornalieri): dedup su trade_id
 #     Il doppio poller (casa acceso + VPS) produce tick duplicati by design:
 #     il dedup è la semantica di merge, non un workaround. Scritture atomiche
-#     (atomic_save_parquet: tmp + os.replace — safety net CLAUDE.md).
+#     (atomic_save_parquet: tmp + os.replace — safety net TEORIA.md §12.5).
 #     HEARTBEAT: avvisa se l'ultimo tick VPS (file di staging, NON il merged)
 #     è più vecchio di --stale-hours → collector giù sul VPS.
 # EN: VPS DATA MERGE → CANONICAL COPY (home side). Reconciles the files pulled
@@ -17,7 +17,7 @@
 #       - deribit_trades/*.parquet (dailies): dedup on trade_id
 #     Dual polling (home on + VPS) duplicates ticks by design: dedup IS the
 #     merge semantics, not a workaround. Atomic writes (atomic_save_parquet:
-#     tmp + os.replace — CLAUDE.md safety net).
+#     tmp + os.replace — TEORIA.md §12.5 safety net).
 #     HEARTBEAT: warns when the latest VPS tick (staging file, NOT the merged
 #     one) is older than --stale-hours → collector down on the VPS.
 import argparse
@@ -224,8 +224,8 @@ def heartbeat(stale_hours: float) -> bool:
 
 
 def main() -> int:
-    # IT: boilerplate UTF-8 console Windows (checklist CLAUDE.md — bug cp1252).
-    # EN: Windows console UTF-8 boilerplate (CLAUDE.md checklist — cp1252 bug).
+    # IT: boilerplate UTF-8 console Windows (checklist nuovo script — bug cp1252).
+    # EN: Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")

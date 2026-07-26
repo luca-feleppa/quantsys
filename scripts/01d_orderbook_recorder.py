@@ -219,8 +219,8 @@ def poll_once(symbol: str, levels: int) -> dict:
 
 
 def main():
-    # IT: reconfigure UTF-8 (bug cp1252 ricorrente su console Windows — checklist CLAUDE.md).
-    # EN: reconfigure UTF-8 (recurring cp1252 bug on Windows console — CLAUDE.md checklist).
+    # IT: reconfigure UTF-8 (bug cp1252 ricorrente su console Windows — checklist nuovo script).
+    # EN: reconfigure UTF-8 (recurring cp1252 bug on Windows console — new-script checklist).
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8")
