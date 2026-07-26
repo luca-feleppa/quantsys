@@ -126,7 +126,7 @@
 
 **Problemi aperti (invariati):** (a) gate forward a calendario: leg opzioni n≥30 ~29/07 (n=27), hedged n≥20 ~09-10/08 (n=6 posizioni), MFIV n≥40 ~metà agosto (19); (b) refresh macro `01b --skip-regime` pendente, da fare a gate n≥30 chiuso e prima di qualunque restart di 04b (razionale 25/07 ⑤); (c) nessun item GPU attivo (A10 sparsity unico candidato training superstite, non pre-registrato).
 
-**▶️ RIPARTI DA QUI:** `.\avvio_sessione.ps1` a ogni sessione; alla prima con `n=30 executed` (~29/07) → valutazione pre-registrata POST_GATE_V1 §0.2, poi refresh macro, poi pre-reg sizing v2 (A13+A14+A7).
+**▶️ RIPARTI DA QUI (2026-07-27 — PUBBLICAZIONE, decisione utente):** il repo è **pronto**, resta solo la sequenza lato utente. ① Flip a **public** su GitHub (Settings → Danger Zone) — decisione e click sono dell'utente, non automatizzabili da qui. ② Subito dopo: **secret scanning + push protection** (Settings → Code security), che sui repo pubblici sono gratuiti e coprono i commit futuri. ③ Occhiata di verifica al repo pubblico: nessun co-autore sui commit, `CLAUDE.md`/`.claude/` assenti, descrizione e 10 topics presenti, README che apre su "Da dove iniziare". ④ A verifica fatta: `git tag -d pre-rewrite-backup` (+ `git gc --prune=now`) — il tag tiene in vita la storia pre-rewrite e **un `git push --tags` distratto la esporterebbe**. ⑤ Solo dopo il flip, mettere il link nel CV (prima è un 404). Poi si torna alla routine: `.\avvio_sessione.ps1` a ogni sessione; alla prima con `n=30 executed` (~29/07) → valutazione pre-registrata POST_GATE_V1 §0.2, poi refresh macro `01b --skip-regime`, poi pre-reg sizing v2 (A13+A14+A7).
 
 ---
 
