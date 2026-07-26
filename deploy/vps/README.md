@@ -1,8 +1,8 @@
 # Deploy collector 24/7 su VPS · 24/7 collector VPS deploy
 
-🇮🇹 Kit per i tre collector leggeri (`01c_iv_poller`, `01d_orderbook_recorder`, `01e_trades_recorder`) su un VPS Linux always-on (Ubuntu 24.04 o Debian 12+; l'istanza reale monta Debian) (decisione 2026-06-24; acquisto netcup VPS Lite 1 G12s 2026-07-14; 01e aggiunto 2026-07-16). Obiettivo: eliminare i buchi PC-off nella serie IV (dato non rigenerabile), sbloccare B1 (book L2 continuo), rendere replayabile offline il forward test `04b` e accumulare i trade opzioni per gli spread realizzati (retention API ~24h: anche questo non ricostruibile ex-post). Nessun secret sul VPS: tutti i collector usano solo endpoint pubblici non autenticati. Training/GPU restano a casa.
+🇮🇹 Kit per i tre collector leggeri (`01c_iv_poller`, `01d_orderbook_recorder`, `01e_trades_recorder`) su un VPS Linux always-on (Ubuntu 24.04 o Debian 12+) (decisione 2026-06-24; acquisto VPS EU entry-level 2026-07-14; 01e aggiunto 2026-07-16). Obiettivo: eliminare i buchi PC-off nella serie IV (dato non rigenerabile), sbloccare B1 (book L2 continuo), rendere replayabile offline il forward test `04b` e accumulare i trade opzioni per gli spread realizzati (retention API ~24h: anche questo non ricostruibile ex-post). Nessun secret sul VPS: tutti i collector usano solo endpoint pubblici non autenticati. Training/GPU restano a casa.
 
-**EN** Kit for the three lightweight collectors (`01c_iv_poller`, `01d_orderbook_recorder`, `01e_trades_recorder`) on an always-on Linux VPS (Ubuntu 24.04 or Debian 12+; the actual instance runs Debian) (2026-06-24 decision; netcup VPS Lite 1 G12s purchased 2026-07-14; 01e added 2026-07-16). Goal: remove PC-off gaps in the IV series (non-regenerable data), unblock B1 (continuous L2 book), make the `04b` forward test replayable offline, and accumulate option trades for realized spreads (API retention ~24h: also not reconstructible ex-post). No secrets on the VPS: all collectors only hit public unauthenticated endpoints. Training/GPU stay home.
+**EN** Kit for the three lightweight collectors (`01c_iv_poller`, `01d_orderbook_recorder`, `01e_trades_recorder`) on an always-on Linux VPS (Ubuntu 24.04 or Debian 12+) (2026-06-24 decision; entry-level EU VPS purchased 2026-07-14; 01e added 2026-07-16). Goal: remove PC-off gaps in the IV series (non-regenerable data), unblock B1 (continuous L2 book), make the `04b` forward test replayable offline, and accumulate option trades for realized spreads (API retention ~24h: also not reconstructible ex-post). No secrets on the VPS: all collectors only hit public unauthenticated endpoints. Training/GPU stay home.
 
 ## Sequenza di deploy · Deploy sequence
 
@@ -25,6 +25,10 @@ bash geo_test.sh          # atteso/expected: VERDETTO PASS
 ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "quantsys-vps"
 cat ~/.ssh/id_ed25519.pub   # → incolla su GitHub / paste into GitHub
 ```
+
+🇮🇹 ⚠ La chiave è **senza passphrase per necessità**: i `git pull` girano non presidiati da systemd, una passphrase li bloccherebbe. Mitigazioni: deploy key **read-only** e **scoped a questo solo repo** (non una user key), permessi `600`, `ufw` solo-SSH. La chiave usata **da casa verso il VPS** è un'altra cosa: quella è interattiva e **deve** avere una passphrase.
+
+**EN** ⚠ The key is **passphrase-less out of necessity**: `git pull` runs unattended under systemd and a passphrase would block it. Mitigations: **read-only** deploy key **scoped to this repo only** (not a user key), `600` permissions, SSH-only `ufw`. The key used **from the workstation to the VPS** is a different thing: that one is interactive and **must** carry a passphrase.
 
 🇮🇹 **2. Setup one-shot** (da root; fa pacchetti, utente `quantsys`, ufw, clone, venv con torch-CPU, smoke `--once`, unit systemd attive):
 

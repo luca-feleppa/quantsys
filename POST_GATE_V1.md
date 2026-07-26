@@ -88,7 +88,7 @@
 2. ✅ **FATTO 2026-07-19** — **Sblocco candele + refresh macro**: rebuild dataset esteso →2026-07-19 (`01b --skip-regime` label-preserving + regime incrementale +27 barre); nuovo invariante = npz esteso congelato fino a chiusura A8-BIS.
 3. **Eventuale retrain con A4 (HAR-CJ) / A9 (MaxPool)** = rigen dataset + gate QLIKE **da pre-registrare** (nuova sezione STATUS). A8-BIS FALLITO 2026-07-20 → **A10 sparsity = unico candidato training residuo** (prior basso, nessuna urgenza).
 4. **Derivazione `mfiv_30h`**: ✅ **FATTA** (D4 2026-07-18, incrementale periodica via `scripts/vol/derive_mfiv.py`; wedge MFIV−ATM stabile +3.39 vol pt su 1.911 tick). **Promozione a comparatore dell'edge di `04b` = pre-reg v2 PROMOSSA nella roadmap 2026-07-20** (subito dopo la chiusura A8-BIS, prima di B4-bis): break-even short-vol ri-stimato col wedge di convessità. Indipendente dall'esito del probe DVOL; dettaglio: memoria `idea_mfiv_30h`.
-5. **Decisioni utente:** pubblicazione GitHub (audit secret PASS 07-14); ✅ migrazione `04b`→VPS **FATTA 2026-07-18** (con fix C1; servizio `quantsys-volpaper` attivo, health PASS); tenor ladder v2 (memoria, richiede nuova pre-reg). Promemoria: **disdetta netcup ~dicembre 2026**.
+5. **Decisioni utente:** pubblicazione GitHub (audit secret PASS 07-14); ✅ migrazione `04b`→VPS **FATTA 2026-07-18** (con fix C1; servizio `quantsys-volpaper` attivo, health PASS); tenor ladder v2 (memoria, richiede nuova pre-reg). Promemoria: **disdetta VPS ~dicembre 2026**.
 6. A piano completato: eliminare questo file (checklist esaurita, esiti in STATUS).
 
 **EN**
@@ -96,5 +96,5 @@
 2. ✅ **DONE 2026-07-19** — **Candle unfreeze + macro refresh**: extended dataset rebuilt →2026-07-19 (label-preserving `01b --skip-regime` + incremental regime +27 bars); new invariant = extended npz frozen until A8-BIS closes.
 3. **Possible retrain with A4 (HAR-CJ) / A9 (MaxPool)** = dataset regen + QLIKE gate **to pre-register** (new STATUS section). A8-BIS FAILED 2026-07-20 → **A10 sparsity = only residual training candidate** (low prior, no urgency).
 4. **`mfiv_30h` derivation**: ✅ **DONE** (D4 2026-07-18, periodic incremental via `scripts/vol/derive_mfiv.py`; MFIV−ATM wedge stable at +3.39 vol pt over 1,911 ticks). **Promotion to `04b` edge comparator = v2 pre-reg PROMOTED in the 2026-07-20 roadmap** (right after A8-BIS closes, ahead of B4-bis): short-vol break-even re-estimated with the convexity wedge. Independent of the DVOL probe outcome; detail: `idea_mfiv_30h` memory.
-5. **User decisions:** GitHub publication (secret audit PASS 07-14); ✅ `04b`→VPS migration **DONE 2026-07-18** (with the C1 fix; `quantsys-volpaper` service active, health PASS); v2 tenor ladder (memory, needs a new pre-reg). Reminder: **netcup cancellation ~December 2026**.
+5. **User decisions:** GitHub publication (secret audit PASS 07-14); ✅ `04b`→VPS migration **DONE 2026-07-18** (with the C1 fix; `quantsys-volpaper` service active, health PASS); v2 tenor ladder (memory, needs a new pre-reg). Reminder: **VPS cancellation ~December 2026**.
 6. When the plan is complete: delete this file (checklist exhausted, outcomes in STATUS).

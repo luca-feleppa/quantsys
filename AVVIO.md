@@ -470,7 +470,7 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 
 #### 5.3bis Collector 24/7 su VPS · 24/7 collectors on the VPS
 
-🇮🇹 Quattro servizi **systemd** su un VPS EU always-on (netcup, deployato 2026-07-14): `quantsys-iv` (`01c`), `quantsys-ob` (`01d`), `quantsys-trades` (`01e`), `quantsys-volpaper` (`04b`). **Host/IP sono privati: SOLO in `config/secrets.yaml` → blocco `vps:`**, mai nel repo o nella doc. Deploy completo: `deploy/vps/README.md` (geo-test 451 Binance → deploy key → `setup_vps.sh` one-shot → verify). Comandi lato casa, dalla root di progetto:
+🇮🇹 Quattro servizi **systemd** su un VPS EU always-on (deployato 2026-07-14): `quantsys-iv` (`01c`), `quantsys-ob` (`01d`), `quantsys-trades` (`01e`), `quantsys-volpaper` (`04b`). **Host/IP sono privati: SOLO in `config/secrets.yaml` → blocco `vps:`**, mai nel repo o nella doc. Deploy completo: `deploy/vps/README.md` (geo-test 451 Binance → deploy key → `setup_vps.sh` one-shot → verify). Comandi lato casa, dalla root di progetto:
 
 ```powershell
 .\avvio_sessione.ps1              # tutto-in-uno di sessione: pull+merge + check B7 + monitoraggio vol (§5.3)
@@ -480,7 +480,7 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 
 🇮🇹 Il merge (`scripts/vps/merge_vps_data.py`) deduplica i tick doppi e avvisa se l'ultimo tick VPS è stale (default 3h → collector remoto giù). La copia canonica dei dati resta a casa (`data/iv/`, `data/orderbook/`, `data/deribit_trades/`); il VPS garantisce continuità H24 dell'asset IV. ⚠ Il PC di casa non riavvia collector locali (§5.3).
 
-**EN** Four **systemd** services on an always-on EU VPS (netcup, deployed 2026-07-14): `quantsys-iv` (`01c`), `quantsys-ob` (`01d`), `quantsys-trades` (`01e`), `quantsys-volpaper` (`04b`). **Host/IP are private: ONLY in `config/secrets.yaml` → `vps:` block**, never in repo or docs. Full deploy: `deploy/vps/README.md` (Binance 451 geo-test → deploy key → one-shot `setup_vps.sh` → verify). Home-side commands, from the project root: block above. The merge (`scripts/vps/merge_vps_data.py`) dedups double ticks and warns when the latest VPS tick is stale (default 3h → remote collector down). The canonical data copy stays home (`data/iv/`, `data/orderbook/`, `data/deribit_trades/`); the VPS guarantees 24/7 continuity of the IV asset. ⚠ The home PC starts no local collector (§5.3).
+**EN** Four **systemd** services on an always-on EU VPS (deployed 2026-07-14): `quantsys-iv` (`01c`), `quantsys-ob` (`01d`), `quantsys-trades` (`01e`), `quantsys-volpaper` (`04b`). **Host/IP are private: ONLY in `config/secrets.yaml` → `vps:` block**, never in repo or docs. Full deploy: `deploy/vps/README.md` (Binance 451 geo-test → deploy key → one-shot `setup_vps.sh` → verify). Home-side commands, from the project root: block above. The merge (`scripts/vps/merge_vps_data.py`) dedups double ticks and warns when the latest VPS tick is stale (default 3h → remote collector down). The canonical data copy stays home (`data/iv/`, `data/orderbook/`, `data/deribit_trades/`); the VPS guarantees 24/7 continuity of the IV asset. ⚠ The home PC starts no local collector (§5.3).
 
 #### Poller IV Deribit · Deribit IV poller
 

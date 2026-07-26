@@ -8,6 +8,44 @@
 
 **EN** **Stack:** Python 3.12 | PyTorch (CUDA) | NumPy/Pandas | Binance REST+WebSocket | FRED API · Deribit public REST (dashboard/IV/vol forward test).
 
+### Da dove iniziare · Start here
+
+🇮🇹 Lettura in 60 secondi — quattro puntatori, in ordine di importanza:
+
+| Cosa | Dove |
+|---|---|
+| **Il risultato.** Il forecast NN della realized variance batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive 0.807), con val→test coerenti | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
+| **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `STATUS.md` (pre-registrazioni in testa) · `.claude/skills/preregister/` |
+| **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `CLAUDE.md` § STATO NOTO (corpus KILL) |
+| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **298 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
+
+🇮🇹 Il progetto è organizzato attorno a un'asimmetria dichiarata: **i momenti pari (varianza, RV) generalizzano fuori campione su questo asset, i momenti dispari (segno, asimmetria) no** — per la rete *e* per le baseline econometriche. Le tre linee di codice (vol-forecasting, monetizzazione short-vol, direzionale) esistono per documentare quella asimmetria, non per nasconderla.
+
+**EN** 60-second read — four pointers, most important first:
+
+| What | Where |
+|---|---|
+| **The result.** The NN realized-variance forecast beats HAR-RV by **30% in test QLIKE** (0.257 vs 0.368; naive 0.807), val→test coherent | `scripts/vol/dev_vols_qlike.py` — the judge that produces the number, val-first split |
+| **How an idea lives or dies.** Every experiment is **pre-registered**: metrics, thresholds and minimum n written and committed *before* running | `STATUS.md` (pre-registrations on top) · `.claude/skills/preregister/` |
+| **What was tried and does NOT work**, with numbers: directional at 1m and 1h, signed semivariance, IVS relative-value, 4 training levers, regime gating | `CLAUDE.md` § STATO NOTO (KILL corpus) |
+| **What an outside reader can verify** without downloading data | `pytest tests/` → **298 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
+
+**EN** The project is organized around a stated asymmetry: **even moments (variance, RV) generalize out-of-sample on this asset, odd moments (sign, skew) do not** — for the network *and* for the econometric baselines. The three code lines (vol forecasting, short-vol monetization, directional) exist to document that asymmetry, not to hide it.
+
+### Riproducibilità · Reproducibility
+
+🇮🇹 `data/`, `models/` e `results/` sono **gitignored**: pesi e parquet sono grandi e i dati di mercato non sono ridistribuibili. Cosa significa in pratica per chi clona:
+
+- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (298 test, ~30s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
+- **Rigenerabile:** dataset (`scripts/01_download_data.py`, Binance pubblico + una chiave FRED gratuita per la macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min per 5 seed iTransformer su RTX 2070 Super) → giudice QLIKE (`scripts/vol/dev_vols_qlike.py`).
+- **NON rigenerabile** (raccolta forward, per costruzione): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — snapshot IV/book/trade e forward test su testnet. I numeri del braccio short-vol non sono riproducibili da un clone: sono un log d'esperimento, e sono presentati come tali.
+
+**EN** `data/`, `models/` and `results/` are **gitignored**: weights and parquets are large and market data is not redistributable. What that means when you clone:
+
+- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (298 tests, ~30s, CPU), including golden tests on the 104-feature list and live↔training parity.
+- **Regenerable:** dataset (`scripts/01_download_data.py`, public Binance + a free FRED key for macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min for 5 iTransformer seeds on an RTX 2070 Super) → QLIKE judge (`scripts/vol/dev_vols_qlike.py`).
+- **NOT regenerable** (forward collection, by construction): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — IV/book/trade snapshots and the testnet forward test. The short-vol arm's numbers cannot be reproduced from a clone: they are an experiment log, and are presented as such.
+
 ### Mappa della documentazione · Documentation map
 
 🇮🇹 Documentazione **bilingue in un unico file** (IT + EN per paragrafo, marker 🇮🇹/**EN**). Ruoli disgiunti — ogni fatto vive in un solo posto:
@@ -372,6 +410,10 @@ quantsys_project/
 
 ## Licenza · License
 
-🇮🇹 [MIT License](LICENSE) — codice di ricerca, non consulenza finanziaria.
+🇮🇹 [MIT License](LICENSE) — codice di ricerca, **non consulenza finanziaria**.
 
-**EN** [MIT License](LICENSE) — research code, not financial advice.
+🇮🇹 **Disclaimer.** Questo repository è un progetto di ricerca personale. Nessuna delle linee esegue ordini con capitale reale: il braccio direzionale è **paper-only** e il braccio short-vol gira su **Deribit testnet** (fondi di carta). Le metriche pubblicate sono out-of-sample dove dichiarato e provengono da gate pre-registrati — inclusi i **fallimenti**, riportati con gli stessi numeri dei successi. Nulla qui è una raccomandazione d'investimento né un'aspettativa di rendimento; il trading di derivati crypto comporta rischio di perdita totale. I dati di mercato appartengono ai rispettivi venue (Binance, Deribit) e non sono ridistribuiti in questo repo.
+
+**EN** [MIT License](LICENSE) — research code, **not financial advice**.
+
+**EN** **Disclaimer.** This repository is a personal research project. No line executes orders with real capital: the directional arm is **paper-only** and the short-vol arm runs on **Deribit testnet** (paper funds). Published metrics are out-of-sample where stated and come from pre-registered gates — including the **failures**, reported with the same numbers as the successes. Nothing here is investment advice or a return expectation; trading crypto derivatives carries a risk of total loss. Market data belongs to the respective venues (Binance, Deribit) and is not redistributed in this repo.
