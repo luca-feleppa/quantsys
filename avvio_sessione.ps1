@@ -188,9 +188,33 @@ if tp.exists():
     rows = [json.loads(l) for l in tp.open(encoding='utf-8') if l.strip()]
     n_rows = len(rows)
     n_exec = sum(1 for r in rows if r.get('executed'))
-n_hedge = sum(1 for l in hp.open(encoding='utf-8') if l.strip()) if hp.exists() else 0
+# IT: il campione pre-registrato del giudice hedged conta i TRADE aperti con
+#     hedge attivo, NON gli eventi di ledger (1 posizione = open + N rebalance +
+#     flatten): stampare gli eventi invitava a leggere '22 >= 20' e a lanciare il
+#     giudice in anticipo. Unita' di misura = position_key distinte con >=1 hedge
+#     eseguito. Esclusa la posizione 19JUL26 (aperta UNHEDGED, hedge solo da
+#     meta' vita: esclusione pre-dichiarata in STATUS 2026-07-18).
+# EN: the hedged judge's pre-registered sample counts TRADES opened with the hedge
+#     active, NOT ledger events (1 position = open + N rebalance + flatten):
+#     printing events invited reading '22 >= 20' and running the judge early.
+#     Unit = distinct position_key with >=1 executed hedge. The 19JUL26 position
+#     is excluded (opened UNHEDGED, hedge only from mid-life: exclusion
+#     pre-declared in STATUS 2026-07-18).
+EXCLUDED_EXPIRY_MS = 1784448000000  # 2026-07-19 08:00 UTC
+n_hedge_ev = 0
+hedged_pos = set()
+if hp.exists():
+    for l in hp.open(encoding='utf-8'):
+        if not l.strip():
+            continue
+        r = json.loads(l)
+        n_hedge_ev += 1
+        pk = r.get('position_key') or {}
+        if not r.get('executed') or pk.get('expiry_ms') == EXCLUDED_EXPIRY_MS:
+            continue
+        hedged_pos.add(json.dumps(pk, sort_keys=True))
 print(f'[gate] leg opzioni / option legs: n={n_exec} executed ({n_rows} righe/rows) - soglia/threshold n>=30')
-print(f'[gate] hedge_ledger: {n_hedge} eventi/events - giudice hedged a/at n>=20 hedge-attivi/hedge-active')
+print(f'[gate] hedged: n={len(hedged_pos)} posizioni hedge-attive/hedge-active positions ({n_hedge_ev} eventi/events nel ledger) - soglia/threshold n>=20')
 '@
     & $Py -c $pyGateCounters
     if ($LASTEXITCODE -ne 0) { Write-Warning "contatori gate FALLITI/FAILED (exit $LASTEXITCODE)" }
