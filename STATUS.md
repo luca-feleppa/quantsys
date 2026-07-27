@@ -102,6 +102,22 @@
 
 ---
 
+## 🟢 2026-07-28 — Audit dei claim pubblici del README (sessione doc-only, nessun consumo GPU, routine NON lanciata)
+
+**① Contesto.** Preparazione della scheda progetto per il profilo pubblico dell'utente (fuori repo) → verifica dei claim del `README.md` contro codice, config e stato su disco. Nessun run, nessun modello toccato, nessuna pre-registrazione aperta o chiusa. La routine ricorrente **non è stata lanciata**: i contatori dei gate forward restano quelli del 27/07 (leg n=28, hedged n=8 posizioni, MFIV 20 expiry).
+
+**② Claim VERIFICATI e confermati (nessuna modifica).** 104 feature e finestra 120×104 (`window_size: 120`, `forecast_horizon: 30`); iTransformer 5 seed (`n_ensemble: 5`, `best_model_0..4.pt` presenti); banda **−27% val ÷ −36% test** in QLIKE con DM HAC p = 1.67e-06 e vantaggio in tutti e tre i regimi, stress incluso (⑧quater del 27/07); purged k-fold con embargo; RobustScaler train-only; Markov-Switching causale con refresh incrementale bit-exact; parità Δ=0 live↔training; braccio short-vol attivo su testnet con delta-hedge e 3 collector; stack come dichiarato (runtime 3.12, `requires-python >=3.11`).
+
+**③ DUE CLAIM STALE CORRETTI in `README.md` (10 righe, IT+EN).** (a) **Conteggio test sottostimato di 9**: suite rieseguita oggi → **308 raccolti, 307 passed, 1 skipped, 29.2s**, contro il `298 passed` fermo al refactor C2 del 18/07 (⑥ di quella sezione) e ripetuto in 4 punti. Corretto a 307 nelle due righe di verifica e a 308 (test raccolti) nelle due righe di riproducibilità. (b) **Output distribuzionale**: §1 e §1.1 dichiaravano `(μ, σ, ν di una t-Student)` come *la* forma dell'output, mentre il default di produzione è `loss_type: quantile` (`config/default.yaml:113`) → il forward ritorna `(quantile_preds, dir_logits)` e μ è la mediana q2. Riscritte dichiarando **entrambi** i path con la chiave di config che li seleziona e il rimando a §4.3; in §4.3 rimosso il solo inciso parametrico dall'apertura, che veniva già contraddetto tre frasi dopo nello stesso paragrafo. Il resto di §4.3 era corretto e resta invariato. **Nota di metodo:** il claim (b) non era falso ma **non autoportante** — la qualifica esisteva 130 righe più in basso; un numero e una forma d'output sono i due claim che un lettore esterno verifica per primi, e il README è il file che il link pubblico apre.
+
+**④ Residuo NOTO, non toccato (fuori dal perimetro dell'intervento).** `TEORIA.md` §7 deriva la **t-Student NLL** ma **non** la pinball/quantile loss, che è il default di produzione; la nota di notazione in testa definisce μ/σ/ν come parametri della densità t-Student senza menzionare il path quantile. Asimmetria documentale reale: la loss effettivamente in uso è l'unica senza derivazione. Candidato a un §7.x, non urgente, nessun impatto sul codice.
+
+**Problemi aperti:** invariati rispetto al 27/07 — (a) gate forward a calendario (leg n≥30 ~29/07, hedged n≥20 ~09-10/08, MFIV n≥40 ~metà agosto); (b) refresh macro `01b --skip-regime` pendente, da fare a gate n≥30 chiuso e prima di qualunque restart di 04b; (c) nessun item GPU attivo; (d) nuovo: ④ sopra. Il guard di attribuzione pre-commit ha lasciato passare questo commit con grep a 0.
+
+**▶️ RIPARTI DA QUI:** invariato rispetto al 27/07 — `.\avvio_sessione.ps1` a ogni sessione; alla prima con `n executed ≥ 30` chiudere il gate leg opzioni (`POST_GATE_V1.md §0.2`), subito dopo il refresh macro, e solo dopo la pre-reg sizing v2 (A13+A14+A7); run one-shot MANUALE del giudice MFIV alla prima sessione con ≥40 expiry qualificati.
+
+---
+
 ## 🟢 2026-07-27 — Monitoraggio ricorrente + fix dell'invariante di attribuzione sulla tip + decisione sulla storia
 
 **① Routine OK (CPU-only, nessun consumo GPU).** `avvio_sessione.ps1 -Days 7`: heartbeat **4/4 freschi** (IV 0.1h · L2 0.0h · Trades 0.1h · 04b forecasts 1.5h). Merge: `atm_30h` +306, `dvol` +26, `atm_greeks` +306, chain 26–27/07 (+261k righe), orderbook +18k, deribit_trades +8.4k, `vol_paper/forecasts` 401→427, `exec_diag` +27. **`trades.jsonl` 28 → 29 righe (+1) → n=28 executed** (verso n≥30: mancano **2** → gate atteso ~29/07, invariato). B7 fresco (0 barre nuove, candele di casa congelate al 07-19 by design).
