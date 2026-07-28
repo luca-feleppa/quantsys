@@ -1,7 +1,7 @@
 # RIPRESA — lista residua · remaining list
 
-> 🇮🇹 Riscritto 2026-07-20 (v4, roadmap riordinata su decisione utente). File EFFIMERO: eliminarlo a lista esaurita. Pre-registrazioni vincolanti e dettaglio: `STATUS.md` (pre-reg A8-BIS in cima + sezioni 2026-07-19/20).
-> **EN** Rewritten 2026-07-20 (v4, roadmap reordered by user decision). EPHEMERAL file: delete when exhausted. Binding pre-registrations and detail: `STATUS.md` (A8-BIS pre-reg on top + 2026-07-19/20 sections).
+> 🇮🇹 Riscritto 2026-07-28 (v5, riordinata per scadenza: il gate leg è a un giorno, la finestra GPU è tornata non vuota). File EFFIMERO: eliminarlo a lista esaurita. Pre-registrazioni vincolanti e dettaglio: `STATUS.md` (C1 e A10 in cima + sezione 2026-07-28 sessione 2).
+> **EN** Rewritten 2026-07-28 (v5, reordered by due date: the leg gate is one day out and the GPU queue is non-empty again). EPHEMERAL file: delete when exhausted. Binding pre-registrations and detail: `STATUS.md` (C1 and A10 on top + the 2026-07-28 session-2 section).
 
 ## Fatto · Done
 
@@ -11,19 +11,27 @@
 🇮🇹 **2026-07-23:** **B4-bis DVOL-come-feature CHIUSO FAIL su val** (pre-reg `5a6112d`, close `526659d`): candidato 0.25939 vs baseline riaddestrata 0.26206 = −1.02%, soglia −3% → ① FAIL, nessun one-shot su test. Filone chiuso. **2026-07-25:** igiene disco B4-bis verificata già fatta; routine di sessione automatizzata (blocco ③ di `avvio_sessione.ps1`). **2026-07-26:** fix unità di misura del contatore hedged (posizioni hedge-attive, NON eventi di ledger: rischio one-shot introdotto dall'automazione) + commit del doc-refactor 25/07 (scorporo archivio verificato letterale, 0 righe perse). Nessun item GPU attivo residuo.
 **EN** 2026-07-23: **B4-bis DVOL-as-feature CLOSED FAIL on val** (−1.02% vs the −3% threshold → ① FAIL, no test one-shot); line closed. 2026-07-25: B4-bis disk hygiene verified done; session routine automated (block ③ of `avvio_sessione.ps1`). 2026-07-26: hedged-counter unit fixed (hedge-active positions, NOT ledger events — a one-shot risk introduced by yesterday's automation) + 25/07 doc-refactor committed (archive split verified literal, 0 lines lost). No residual active GPU item.
 
+🇮🇹 **2026-07-28:** audit dei claim pubblici del `README` (2 claim stale corretti) + `TEORIA.md` §7.0 sulla loss di produzione (3 termini di config scoperti INERTI sul ramo quantile) + **due pre-registrazioni scritte, C1 smearing e A10 sparsity** — la coda GPU torna non vuota per la prima volta dal 23/07. Nessun run.
+**EN** 2026-07-28: public `README` claim audit (2 stale claims fixed) + `TEORIA.md` §7.0 on the production loss (3 config terms found INERT on the quantile branch) + **two pre-registrations written, C1 smearing and A10 sparsity** — the GPU queue is non-empty for the first time since 23/07. No runs.
+
 ## Da fare (ordine = roadmap corrente) · To do (order = current roadmap)
 
-1. 🇮🇹 **MFIV-comparatore v2 — ✅ PRE-REG + GIUDICE SCRITTI 2026-07-20** (in cima a STATUS): gate Δρ Spearman appaiato MFIV-vs-ATM sui PnL short-straddle per-expiry, ③ n≥40 qualificati (**20 il 27/07**, +~1/giorno → run one-shot ~metà agosto). Residuo: **solo attesa campione** — il monitoraggio per-sessione (`derive_mfiv.py` + `--count-only`) è **automatizzato dal blocco ③ di `avvio_sessione.ps1`** dal 2026-07-25: niente da lanciare a mano. Run one-shot **MANUALE** alla prima sessione in cui la routine stampa ≥40.
-   **EN** MFIV-comparator v2 — ✅ PRE-REG + JUDGE WRITTEN 2026-07-20 (**18 qualifying on 25/07**). Remaining: sample wait only — per-session monitoring is now **automated by block ③ of `avvio_sessione.ps1`** (since 2026-07-25). The one-shot run stays **MANUAL** at the first session printing ≥40.
+1. 🇮🇹 **DOMANI 29/07 (n=29 il 28/07, manca 1):** valutazione pre-registrata **n≥30** leg opzioni (POST_GATE_V1 §0.2); subito dopo: refresh macro `01b --skip-regime` (rimandato per non perturbare il live a campione aperto — STATUS 25/07 ⑤); il refresh è **prerequisito vincolante** dei due item GPU sotto; solo dopo: pre-reg sizing v2 (A13+A14+A7).
+   **EN** TOMORROW 29/07 (n=29 on 28/07, 1 to go): pre-registered n≥30 evaluation; right after: macro refresh `01b --skip-regime` (deferred to avoid perturbing the live path mid-sample), which is a **binding prerequisite** of the two GPU items below; only then the v2 sizing pre-reg.
 
-2. 🇮🇹 **A3-bis regime-MoE: PARCHEGGIATO** (prior sfavorevole, descrittivo −2.02% < 3%; il ramo "baseline cambia con PASS mixup" è decaduto col FAIL): rivalutare SOLO se un episodio stress porta massa a r1. **CAFN: parcheggiato a prior basso**, riapribile solo con re-scope. **A10 sparsity = unico candidato training residuo** (prior basso, effort M). Razionale: STATUS 2026-07-20 ③④.
-   **EN** A3-bis PARKED (the "baseline changes on mixup PASS" branch lapsed with the FAIL); CAFN parked low-prior; A10 sparsity = only residual training candidate (rationale: STATUS 2026-07-20 ③④).
+2. 🇮🇹 **FINESTRA GPU — due gate pre-registrati il 2026-07-28, MAI eseguiti, nell'ordine C1 → A10** (entrambi dopo il refresh macro: se l'npz cambia, una coppia addestrata prima è da buttare).
+   - **C1 smearing (Duan 1983) sul giudice QLIKE:** controllo di **specificazione**, non leva di modello; può muovere un claim già pubblicato → vincolo anti-goalpost esplicito + soglia di materialità ≥0.02 di ratio. Leva `QUANTSYS_QLIKE_SMEARING=1` inerte. Prerequisito: test di inerzia. ~30 min GPU.
+   - **A10 sparsity dell'attention (λ=0.01, fissato da regola):** ultimo lever di training superstite; include un **manipulation check** (④) che distingue "ipotesi falsificata" da "penalità che non ha morso". Prerequisito: scrivere il codice + test di inerzia a λ=0. ~70-80 min GPU totali (2 bracci).
+   **EN** GPU WINDOW — two gates pre-registered 2026-07-28, NEVER run, in the order C1 → A10 (both after the macro refresh). C1 = smearing specification check on the judge (can move a published claim → explicit anti-goalpost constraint + ≥0.02 materiality); A10 = attention sparsity, last surviving training lever, with a manipulation check separating "hypothesis falsified" from "penalty didn't bite".
 
-3. 🇮🇹 **~29/07 (n=27 il 26/07, +~1/giorno):** valutazione pre-registrata **n≥30** leg opzioni (POST_GATE_V1 §0.2); subito dopo: refresh macro `01b --skip-regime` (rimandato per non perturbare il live a campione aperto — STATUS 25/07 ⑤); solo dopo: pre-reg sizing v2 (A13+A14+A7).
-   **EN** ~29/07 (n=27 on 26/07): pre-registered n≥30 evaluation; right after: macro refresh `01b --skip-regime` (deferred to avoid perturbing the live path mid-sample — STATUS 25/07 ⑤); only then the v2 sizing pre-reg.
+3. 🇮🇹 **~09-10/08:** giudice `hedged_vs_unhedged_judge.py` a n≥20 **posizioni hedge-attive** (28/07: **n=8**, invariato con +4 *eventi* in ledger = ribilanciamenti su posizioni già contate; unità: STATUS 26/07 ③).
+   **EN** ~09-10/08: hedged-vs-unhedged judge at n≥20 **hedge-active positions** (28/07: n=8, unchanged despite +4 ledger *events* — rebalances on already-counted positions).
 
-4. 🇮🇹 **~09-10/08:** giudice `hedged_vs_unhedged_judge.py` a n≥20 **posizioni hedge-attive** (27/07: **n=8**, il ledger ha 26 *eventi*, unità diversa: vedi STATUS 26/07 ③; il 27/07 il passo è stato +2 in un giorno — ETA non ricalibrata su n=1, vedi STATUS 27/07 ③).
-   **EN** ~09-10/08: hedged-vs-unhedged judge at n≥20 **hedge-active positions** (27/07: n=8; the ledger holds 26 *events* — different unit, see STATUS 26/07 ③).
+4. 🇮🇹 **~metà agosto — MFIV-comparatore v2** (pre-reg + giudice scritti 2026-07-20, in cima a STATUS): gate Δρ Spearman appaiato MFIV-vs-ATM sui PnL short-straddle per-expiry, ③ n≥40 qualificati (**21 il 28/07**, +~1/giorno). Residuo: **solo attesa campione** — il monitoraggio per-sessione è automatizzato dal blocco ③ di `avvio_sessione.ps1`. Run one-shot **MANUALE** alla prima sessione in cui la routine stampa ≥40.
+   **EN** ~mid-August — MFIV comparator v2 (pre-reg + judge written 2026-07-20): **21 qualifying on 28/07**, n_min=40. Sample wait only; monitoring automated. The one-shot run stays **MANUAL**.
 
-5. 🇮🇹 A lista esaurita: eliminare questo file (esiti in STATUS).
+5. 🇮🇹 **Parcheggiati (nessuna azione):** A3-bis regime-MoE (prior sfavorevole; rivalutare SOLO se un episodio stress porta massa a r1), CAFN (prior basso, riapribile solo con re-scope). Razionale: STATUS 2026-07-20 ③④.
+   **EN** PARKED (no action): A3-bis regime-MoE (revisit only if a stress episode adds mass to r1), CAFN (low prior, re-scope only).
+
+6. 🇮🇹 A lista esaurita: eliminare questo file (esiti in STATUS).
    **EN** When exhausted: delete this file (outcomes in STATUS).

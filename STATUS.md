@@ -5,6 +5,76 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — C1 CORREZIONE SMEARING (DUAN 1983) SUL CONFRONTO QLIKE NN-vs-HAR · 2026-07-28 · **APERTA, MAI ESEGUITA**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** i fattori di smearing ŝ, i QLIKE corretti e i ratio corretti non sono MAI stati calcolati, su nessuno split. Nasce dal residuo (e) del 2026-07-28 e dalla nota aperta `TEORIA.md` §12.2. ⚠ **Natura diversa da tutte le pre-reg precedenti:** questa NON è una leva di modello ma un **controllo di specificazione del giudice**, e può spostare un claim **già pubblicato** (banda −27% ÷ −36% QLIKE) → la disciplina è più stretta, non meno: un solo run per split, nessuna variante di estimatore, e il numero che esce viene riportato qualunque sia il segno.
+
+**① Ipotesi/prior onesto (pre-dichiarato, con DIREZIONE attesa).** QLIKE è minimizzata dalla **media** condizionale di RV; entrambi i lati del confronto prevedono oggi una **mediana** (il NN ottimizza τ=0.5 su log-RV, `qlike_from_z` inverte con `exp()`; HAR esponenzia l'OLS senza smearing) → entrambi sottostimano, e QLIKE penalizza la sottostima in modo asimmetrico. Sotto residui log-normali il fattore di Duan ŝ = E[exp(ε)] > 1 cresce con la **dispersione dei residui in log**: poiché il NN ha MSE-log strutturalmente più basso di HAR, si attende **ŝ_NN < ŝ_HAR**, cioè un beneficio maggiore per la baseline. **Scenario base atteso: entrambi i QLIKE migliorano e il vantaggio misurato del NN si RIDUCE.** Di quanto è ignoto — è esattamente la quantità che l'esperimento misura. Un esito che *aumentasse* il vantaggio sarebbe sorprendente e va riportato come tale.
+
+**② Estimatore pre-dichiarato (UNO solo, nessuna variante).** Fattore di smearing di Duan (1983) `ŝ = (1/n_tr)·Σ_{i∈train} exp(ε_i)` con `ε_i = log RV_i − log RV_pred,i`, stimato **esclusivamente sui residui del TRAIN split** e applicato moltiplicativamente in valutazione: `RV_corr = exp(log_pred) · ŝ`.
+- **NN:** ε dai forward dell'ensemble 5 membri sul train split, stessa inversione z→log-RV del giudice (`invert_log_rv`, centro+IQR dal `PipelineState`).
+- **HAR:** ε dai residui OLS in-sample sulla porzione train già calcolata in `har_fold_qlike` (`y_tr − X_tr·β`).
+- **naive:** stessa correzione sui residui train di `xh` — **descrittivo, non gating**.
+- **Escluse ex-ante** (qualunque di queste = NUOVA pre-registrazione): smearing per-regime o condizionale, forma analitica log-normale `exp(σ̂²/2)`, stimatori shrinked, ŝ ristimato su val/test, correzione applicata a un solo lato.
+
+**③ Coppia modello/dati e controllo di riproducibilità.** Entrambi i lati sullo **stesso npz**, vintage congelato al momento del run; NN = **5 seed riaddestrati in sandbox `QUANTSYS_MODELS_ROOT=models_smear_sandbox`** (`models/itransformer` production READ-ONLY; `models_dm_sandbox` del 26/07 è stata eliminata e i suoi loss per-sample sono irrecuperabili). **Controllo pre-dichiarato:** se l'npz è ancora il vintage 07-19, il `QLIKE_val` del NN **non corretto** deve riprodurre **0.26206** (già osservato in due retrain indipendenti); scostamento > 0.0005 ⇒ **ABORT**, nessuna conclusione (segnala un cambio d'ambiente, non un risultato). Se il refresh macro pendente ha rigenerato l'npz, il controllo **decade** e i valori non corretti dello stesso run fanno da baseline.
+
+**Script/giudice:** `scripts/vol/dev_vols_qlike.py` esteso; `qlike_from_z` e `har_fold_qlike` guadagnano un parametro opzionale `smear: float = 1.0` (**default = identità**, path numerico bit-invariato). Il report JSON contiene **entrambe** le colonne, raw e smeared, dallo stesso run.
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a decisione di adozione presa su val, one-shot.
+**Leva sperimentale:** `QUANTSYS_QLIKE_SMEARING=1` — **inerte di default** (a 0 il giudice è bit-identico all'attuale). Test di inerzia obbligatorio PRIMA del run, pattern B4-bis (`QUANTSYS_DATASET_NPZ`). Nessun file production toccato, nessun impatto sul path di training né sul live.
+
+**Condizioni di ADOZIONE (tutte, AND, su val):**
+1. **Coerenza di specificazione su ENTRAMBI i lati:** `QLIKE_smear ≤ QLIKE_raw` sia per il NN sia per HAR. Se un lato peggiora, la correzione non è un miglioramento uniforme di specificazione → **NON adottata**, item chiuso.
+2. **Materialità:** `|ratio_smear − ratio_raw| ≥ 0.02` con `ratio = QLIKE_NN / QLIKE_HAR`. Sotto 0.02 → correzione **immateriale**: giudice invariato, banda pubblicata invariata, nota §12.2 chiusa come "testata, immateriale".
+3. **Validità campione e non-leakage:** `n_val ≥ 5000` **E** ŝ stimato esclusivamente su train (condizione **strutturale**, verificabile nel codice prima del run — non un risultato). Sotto: NESSUN run.
+
+**Vincolo anti-goalpost (pre-dichiarato, decisione utente):** qualunque sia il **segno** di `ratio_smear − ratio_raw`, il numero corretto viene riportato e — se adottato — **diventa la banda pubblicata**, anche se riduce il vantaggio del NN. Il verdetto PASS pre-registrato del 2026-06-10 **non si rivaluta**: qui non c'è soglia di promozione in gioco (stessa logica di ⑧ter del 26/07, esercizio inferenziale/di specificazione).
+
+**One-shot su test:** solo ad adozione decisa su val, stesse definizioni, un solo run; la banda pubblicata si riscrive con la coppia corretta val÷test.
+
+**Conseguenze pre-dichiarate:** ADOZIONE → lo smearing diventa il **default** del giudice su entrambi i lati, §12.2 passa da "nota aperta" a "risolta", README e claim aggiornati con la nuova banda; resta comunque **fuori dal path di training** (nessuna modifica della loss: il modello continua a ottimizzare τ=0.5, la correzione vive nel giudice). NON-ADOZIONE (① fallita o ② immateriale) → giudice invariato, flag inerte documentato, §12.2 aggiornata da "aperta" a "testata e non adottata" **con i numeri**; scritto comunque.
+
+**Costo:** ~30 min GPU (5 seed sandbox) + una passata di inferenza sul train split (~52k finestre × 5 membri) + CPU per HAR. Nessuna contesa col live (04b è sul VPS).
+
+**Sequenziamento vincolante:** eseguire **dopo** il refresh macro `01b --skip-regime` e l'eventuale rigenerazione dell'npz — spendere GPU su un vintage che sta per cambiare produrrebbe una coppia da buttare (lezione A8-BIS: mai confrontare attraverso scaler diversi).
+
+---
+
+## 🎯 PRE-REGISTRAZIONE GATE — A10 SPARSITY DELL'ATTENTION (penalità entropica, linea vol 1h, target log_rv) · 2026-07-28 · **APERTA, MAI ESEGUITA**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun training A10 è mai stato lanciato, il codice della penalità **non esiste ancora**. Ultimo candidato di training superstite della linea vol (A2a/A5/A8-A8-BIS/B4-bis falliti, A3 parcheggiato, drop_path obsoleto): il suo esito chiude o riapre l'intera classe. UN solo valore di λ, nessuno sweep.
+
+**① Ipotesi/prior onesto (prior BASSO, pre-dichiarato).** Nell'iTransformer i token sono le **variate** (F=104): con 104 token e ~1.7k finestre effettivamente indipendenti (overlap target 29/30), l'attention può disperdersi su correlazioni **spurie** fra feature. Una penalità entropica sulle mappe la concentra sulle poche variate informative — regolarizzazione **strutturale** (dove guarda il modello), non riduzione di capacità. CONTRO, in ordine di forza: (a) il modello è già fortemente regolarizzato dal tuning 1h pre-registrato (dropout 0.3, drop_path 0.2, wd 3e-3, lr 3e-5) e il collo di bottiglia **misurato** è il campione effettivo, non la capacità di attenzione; (b) il prior empirico di progetto su questa classe è **basso per evidenza diretta**: ogni leva di training testata sulla linea vol è fallita su val a baseline riaddestrata; (c) costo di stabilità: materializzare le mappe rinuncia a Flash-Attention (`F.scaled_dot_product_attention` in `iTransformerLayer`) su quel path → fp16 sotto AMP meno stabile e training più lento. **Scenario base atteso: nessun effetto materiale (|Δ| < 3%).** Un PASS sarebbe il **primo** lever di training a passare sulla linea vol, e come tale andrebbe replicato prima di qualunque deployment.
+
+**② Leva pre-dichiarata (UN solo valore, nessuno sweep).** Chiave `model.attn_entropy_lambda` in overlay `config/arch/itransformer_a10_sparsity.yaml` (copia di `itransformer.yaml` + la sola chiave nuova). Penalità = **entropia normalizzata media**: per ogni riga della matrice di attention, `H = −Σ_j p_j·log p_j`, normalizzata per `log N` (N = numero di token della sequenza di attention, variate-as-token) → `H_norm ∈ [0,1]`, mediata su righe, teste, layer e batch. Obiettivo effettivo del ramo quantile: **`0.7·pinball + 0.3·CE + λ·H_norm`**. **λ = 0.01**, scelto ex-ante con una regola dichiarata e non tunabile: `H_norm` è **limitata in [0,1]**, quindi λ è per costruzione il costo **massimo** in unità di loss; con pinball tipico ≈0.3-0.5 in spazio z, λ=0.01 è una perturbazione ≤3% dell'obiettivo — abbastanza da spostare le mappe, troppo poco da dominare la loss. Qualunque altro λ, o una penalità definita diversamente (top-k, entropia non normalizzata, α-entropia, sparsemax) = **NUOVA pre-registrazione**.
+
+**③ Vincolo di inerzia (pre-condizione IMPLEMENTATIVA, verificata prima di spendere GPU).** Con `attn_entropy_lambda: 0.0` (default production) il path numerico deve restare **bit-identico**: nessuna materializzazione della matrice, `F.scaled_dot_product_attention` invariata, `state_dict` e `forward` invariati, checkpoint esistenti caricabili. Test dedicato `tests/test_attn_entropy.py` (pattern A9 MaxPool / A12 banda WW). Se il test di inerzia non passa: **nessun run**, si corregge prima.
+
+**Bracci — ENTRAMBI riaddestrati sullo STESSO npz** (vintage al momento del run; se il refresh macro lo rigenera, si riaddestra comunque anche la baseline — mai riusare una baseline di un altro vintage/scaler, lezione A8-BIS 2026-07-20 ④):
+- **baseline:** `QUANTSYS_ARCH=itransformer`, sandbox `QUANTSYS_MODELS_ROOT=models_a10_base`, `02_train.py --n-ensemble 5`, config invariata.
+- **candidato:** `QUANTSYS_ARCH=itransformer_a10_sparsity`, sandbox `models_a10_sparsity`, 5 seed, stessa config a meno di λ (il lever è la penalità, non gli iperparametri).
+- `models/itransformer` (vol PASS production, mirror del VPS) **READ-ONLY**.
+
+**Script/giudice:** `scripts/vol/dev_vols_qlike.py` su entrambi i bracci, stesso split, stessi sample, report suffissato per-`models_root` (anti-clobber, commit `a5d06cf`).
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a gate val superato, one-shot.
+
+**Condizioni di PASS (tutte, AND, su val)** — pattern-③ standard ratificato il 2026-07-20 ②:
+1. `QLIKE_val(A10) ≤ 0.97 · QLIKE_val(baseline riaddestrata)` (miglioramento relativo ≥3%, stessi sample).
+2. Nessun regime **qualificato** distrutto: per ogni regime con ≥800 sample val, `QLIKE_val(A10) ≤ 1.05 · QLIKE_val(baseline)` in quel regime. Regimi sotto soglia: descrittivi, non gating.
+3. **Validità campione:** ≥5000 sample val **E** ≥2 regimi qualificati, con **conteggi ricalcolati ex-ante sull'npz effettivo del run** (condizione ③ model-independent, da verificare PRIMA di consumare GPU — successo del pattern B2/B3). Sul vintage 07-19 erano r0=2075 · r1=613 · r2=3797 → qualificati r0 e r2, r1 strutturalmente sotto soglia su val; se l'npz cambia, si ricontano.
+4. **Validità della LEVA (manipulation check, pre-dichiarato):** `H_norm` media finale del candidato deve essere **almeno il 5% più bassa** di quella della baseline. Se la penalità non ha morso le mappe, il run misura l'implementazione e non l'ipotesi → esito **"NESSUNA CONCLUSIONE"**, non FAIL, e l'item resta aperto con il difetto implementativo documentato.
+
+**One-shot su test:** solo a gate val superato; stesse ①+②, con ② estesa a tutti i regimi qualificati su test (sul vintage 07-19 lo erano tutti e tre, stress incluso).
+
+**Conseguenze pre-dichiarate:** PASS val+test → λ **candidato** per il ciclo di retrain SUCCESSIVO della linea vol (MAI swap del live a forward aperto; il deployment richiede pre-reg dedicata). FAIL → A10 marcato **FALLITO**, overlay eliminato, codice della penalità lasciato **inerte a 0.0** come documentazione eseguibile, e — conseguenza più importante, dichiarata ora — **la classe "lever di training sulla linea vol" si chiude**: A10 era l'ultimo candidato, quindi il prossimo guadagno va cercato in **dati nuovi** (order-book L2, A4 HAR-CJ) o nella **monetizzazione** (braccio short-vol), non in un'altra variante di training. NESSUNA CONCLUSIONE (③ o ④) → nessuna delle due conseguenze si applica. Scritto comunque in ogni caso.
+
+**Costo:** 2 bracci × 5 seed ≈ 30 min (baseline) + 35-45 min (candidato, più lento senza Flash-Attention) di GPU. Nessuna contesa col live (04b gira sul VPS).
+**Diagnostica non decisionale:** `H_norm` per layer a fine training nei due bracci (oltre alla ④ aggregata); spread QLIKE fra i 5 membri per braccio; MSE-log; confronto con l'incumbent production (old-scaler) **senza valore di gate**.
+
+**Sequenziamento vincolante:** come C1 — **dopo** il refresh macro e l'eventuale rigenerazione dell'npz. Se entrambe le pre-reg vengono eseguite nella stessa finestra GPU, **C1 prima** (usa una sola sandbox e non tocca il training) e **A10 dopo**; la baseline riaddestrata di C1 **non** è riutilizzabile come baseline di A10 se cambia l'npz fra i due run.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — B4-BIS PROBE DVOL-COME-FEATURE (linea vol 1h, target log_rv) · 2026-07-23 · **CHIUSO: FAIL SU VAL 2026-07-23 (⑥ sotto)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti.** Ri-pre-registrazione sul dataset esteso della pre-reg DVOL 2026-07-17 (RINVIATA/mai eseguita): due modifiche di disegno vincolanti rispetto alla v1 — **(A) baseline RIADDESTRATA** (non l'incumbent production) e **(B) condizione ③ col pattern-③ standard** (gate ② solo sui regimi qualificati su val, stress al one-shot su test). Razionale in ⑤ sotto. UN solo run per braccio: nessuno sweep su trasformazioni/finestre/lag DVOL; qualunque variante suggerita dai risultati (VRP-spread dvol−rv, MFIV@30h-come-feature, lag alternativi) = NUOVA pre-registrazione. Le sole quantità osservate ex-ante sono model-independent: conteggi regime (③, dal npz congelato) e copertura `dvol_avail` (dal Passo 1).
@@ -99,6 +169,26 @@
 **Conseguenze pre-dichiarate:** PASS val+test → `mixup_alpha: 0.2` **candidato** per il prossimo ciclo di retrain della linea vol (MAI swap del live durante il forward v1/v2; il deployment richiederebbe pre-reg dedicata); la baseline-ext NON è promossa da questo esperimento (misura il lever, non il modello in carica). FAIL (val o test) → mixup marcato **FALLITO sul dataset esteso** (chiusura definitiva del lever: il descrittivo −4.94% resta un falso segnale documentato), overlay eliminato, A10 unico candidato training residuo; scritto comunque. A chiusura: sandbox eliminabili, env azzerati, stato production invariato.
 
 **Diagnostica non decisionale:** spread QLIKE tra i 5 membri per braccio; ratio r1 descrittivo su val; confronto candidato vs incumbent production (old-scaler) senza valore di gate.
+
+---
+
+## 🟢 2026-07-28 (sessione 2) — Routine ricorrente + DUE pre-registrazioni scritte (C1 smearing, A10 sparsity)
+
+**① Routine OK (CPU-only, nessun consumo GPU).** `avvio_sessione.ps1 -Days 7`: heartbeat **4/4 freschi** (IV 0.0h · L2 0.0h · Trades 0.2h · 04b forecasts 1.2h). Merge: `atm_30h` +225, `dvol` +19, `atm_greeks` +225, chain 27–28/07 (+188k righe), orderbook +13.5k, `deribit_trades` +7.5k, `vol_paper/forecasts` 427→446, `exec_diag` +20, `hedge_ledger` 26→30 eventi. `position.json`/`hedge_state.json` assenti sul VPS = flat al pull (normale). B7 fresco (0 barre nuove). **`trades.jsonl` 29 → 30 righe → n=29 executed**: manca **1** alla soglia, gate atteso **domani 29/07** (invariato).
+
+**② MFIV v2 (disciplina one-shot intatta).** `derive_mfiv.py` incrementale: **4256 → 4481 righe (+225)**; wedge convessità MFIV−ATM **mediana +3.08 vol pt** (p10 +1.99 / p90 +4.36) — **stabile a 7 sessioni** (+3.39 → +3.13 → +3.15 → +3.17 → +3.17 → +3.11 → +3.08: nessuna deriva). `--count-only` = **21 expiry qualificati** (era 20 il 27/07; n_min=40) → **NESSUN run one-shot**, PnL/edge/correlazioni MAI calcolati.
+
+**③ Contatore hedged: n=8 posizioni hedge-attive** (30 eventi in ledger, unità corretta dal fix del 26/07), invariato rispetto al 27/07 nonostante +4 eventi → i 4 nuovi eventi sono ribilanciamenti/flatten su posizioni **già contate**, non aperture nuove. Conferma che l'unità "eventi" avrebbe dato 30 ≥ 20 e fatto scattare il giudice **12 posizioni in anticipo**: il fix del 26/07 sta reggendo esattamente il caso che doveva coprire. ETA invariata ~09-10/08.
+
+**④ DUE PRE-REGISTRAZIONI SCRITTE (in cima al file), nessuna eseguita.** Entrambe nascono da residui già documentati, non da idee nuove: nessun numero decisionale è stato calcolato per nessuna delle due.
+- **C1 — correzione smearing (Duan 1983) sul confronto QLIKE.** Chiude formalmente il residuo (e) di stamattina e la nota aperta `TEORIA.md` §12.2. ⚠ È l'unica pre-reg del progetto che può muovere un claim **già pubblicato** (banda −27% ÷ −36%): per questo il vincolo anti-goalpost è esplicito (il numero che esce diventa la banda, anche se **riduce** il vantaggio del NN) e la **direzione attesa è dichiarata** — poiché ŝ cresce con la dispersione dei residui in log e il NN ha MSE-log più basso di HAR, ci si attende ŝ_NN < ŝ_HAR, cioè che la baseline guadagni **di più**. Adozione condizionata a due soglie: coerenza su entrambi i lati (①) e **materialità ≥0.02 di ratio** (②), che è il presidio contro il riscrivere un claim per rumore. Leva `QUANTSYS_QLIKE_SMEARING=1`, inerte di default.
+- **A10 — sparsity dell'attention (penalità entropica, λ=0.01).** Ultimo candidato di training superstite. Due scelte di disegno vale la pena isolare: (a) λ è fissato **da una regola**, non da uno sweep — `H_norm` è normalizzata in [0,1], quindi λ è per costruzione il costo massimo in unità di loss (≤3% dell'obiettivo `0.7·pinball + 0.3·CE`); (b) è stata aggiunta una condizione ④ di **manipulation check**: se l'entropia media non scende di almeno il 5% rispetto alla baseline, l'esito è **"NESSUNA CONCLUSIONE"** e non FAIL — senza, un bug nella penalità si travestirebbe da falsificazione dell'ipotesi. Pre-dichiarata anche la conseguenza di sistema: un FAIL **chiude la classe** "lever di training sulla linea vol" e sposta la ricerca su dati nuovi (L2, A4) o sulla monetizzazione.
+
+**⑤ Sequenziamento vincolante, dichiarato in entrambe le pre-reg.** Nessuna delle due si esegue prima del **refresh macro `01b --skip-regime`** (a sua volta bloccato fino alla chiusura del gate leg n≥30, per non perturbare il `MacroNormalizer` dentro un campione forward aperto): il refresh può rigenerare l'npz, e spendere GPU su un vintage che sta per cambiare produrrebbe una coppia da buttare. Ordine intra-finestra: **C1 prima** (non tocca il training), **A10 dopo**; la baseline riaddestrata di C1 non è riutilizzabile per A10 se l'npz cambia fra i due run (invariante anti-cross-scaler, lezione A8-BIS).
+
+**Problemi aperti:** (a) gate forward a calendario — leg n≥30 **domani 29/07** (n=29), hedged n≥20 ~09-10/08 (n=8 posizioni), MFIV n≥40 ~metà agosto (21); (b) refresh macro `01b --skip-regime` pendente, prerequisito di C1/A10; (c) due item GPU ora **pre-registrati ma non eseguiti** (C1, A10) — prima volta dal 23/07 che la coda GPU non è vuota; (d) residuo (e) del 28/07 mattina **CHIUSO in giornata**: la correzione smearing non è più "lever non pre-registrato" ma pre-reg aperta.
+
+**▶️ RIPARTI DA QUI:** `.\avvio_sessione.ps1`. La sessione di domani dovrebbe aprire con `n executed ≥ 30` → ① chiudere il gate leg opzioni con la valutazione pre-registrata in `POST_GATE_V1.md §0.2`; ② subito dopo il **refresh macro `01b --skip-regime`**; ③ solo allora la finestra GPU è sbloccata, nell'ordine **C1 → A10** (entrambe le pre-reg sono già scritte e committate: si parte dal test di inerzia del flag, non dalla scrittura del gate); ④ la pre-reg sizing v2 (A13+A14+A7) resta dopo. Run one-shot MANUALE del giudice MFIV alla prima sessione con ≥40 expiry qualificati (oggi 21).
 
 ---
 
