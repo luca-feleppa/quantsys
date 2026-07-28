@@ -776,6 +776,27 @@ def main():
         sample_weights_tr = None
         log.info("Sample weighting disabilitato (sample_weight_alpha=0)")
 
+    # ── Guard anti-trappola: chiavi di loss INERTI sul ramo quantile ───────────
+    # IT: asymmetry_alpha/crps_weight entrano solo in student_t_nll e dv_lambda e'
+    #     dietro una guardia esplicita (loss_type != "quantile"): sul ramo quantile
+    #     valgono zero. Hanno pero' valori non nulli in config e SEMBRANO leve
+    #     attive -> un tuning su di esse restituirebbe "nessun effetto" per ragioni
+    #     implementative, non scientifiche. Solo logging: path numerico invariato.
+    # EN: asymmetry_alpha/crps_weight only feed student_t_nll and dv_lambda sits
+    #     behind an explicit guard (loss_type != "quantile"): on the quantile branch
+    #     they are no-ops. They still hold non-zero config values and LOOK like live
+    #     levers -> tuning them would return "no effect" for implementation, not
+    #     scientific, reasons. Logging only: numeric path unchanged.
+    if mcfg.get("loss_type", "quantile") == "quantile":
+        _inert = [(k, tcfg.get(k, 0.0)) for k in
+                  ("asymmetry_alpha", "crps_weight", "dv_lambda")
+                  if float(tcfg.get(k, 0.0)) != 0.0]
+        if _inert:
+            log.warning(
+                "loss_type=quantile: %s NON hanno effetto su questo ramo "
+                "(termini del ramo t_student) - vedi TEORIA.md 7.0",
+                ", ".join(f"{k}={v}" for k, v in _inert))
+
     _nw = hwcfg["num_workers"]
     if sys.platform == "win32":
         _nw = 0

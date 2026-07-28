@@ -339,9 +339,19 @@ update:   P(S_t=j | y_{1:t})   ∝ f(y_t | S_t=j) · P(S_t=j | y_{1:t-1})
 
 ### Output probabilistico (comune a tutte) · Probabilistic output (common to all)
 
-🇮🇹 Non un singolo numero, ma **i parametri di una distribuzione**: media μ (direzione), σ (incertezza), ν (parametro di code pesanti — quanto sono probabili movimenti estremi). Il sistema conosce non solo la direzione ma anche la propria confidenza.
+🇮🇹 Non un singolo numero, ma **un'intera distribuzione condizionale**. La forma dipende da `loss_type` (§7.0):
 
-**EN** Not a single number, but **the parameters of a distribution**: mean μ (direction), σ (uncertainty), ν (heavy-tails parameter — how likely extreme moves are). The system knows not just the direction but its own confidence.
+- **`quantile` (default di produzione)** — una griglia di 5 quantili; da essa `predict()` deriva **μ = q(0.5)** (mediana condizionale) e **σ = q(0.9) − q(0.1)** (ampiezza interdecile, ≈2.56 deviazioni standard per una gaussiana). `ν` non è definito su questo ramo.
+- **`t_student`** — i parametri di una t di Student: media μ (direzione), σ (scala), ν (code pesanti — quanto sono probabili movimenti estremi).
+
+In entrambi i casi il sistema conosce non solo la direzione ma anche la propria incertezza; ⚠ **μ e σ non sono lo stesso estimando sui due rami** — dettaglio e trappole in §7.0.
+
+**EN** Not a single number, but **a full conditional distribution**. Its form depends on `loss_type` (§7.0):
+
+- **`quantile` (production default)** — a grid of 5 quantiles, from which `predict()` derives **μ = q(0.5)** (conditional median) and **σ = q(0.9) − q(0.1)** (interdecile range, ≈2.56 standard deviations for a Gaussian). `ν` is undefined on this branch.
+- **`t_student`** — the parameters of a Student-t: mean μ (direction), σ (scale), ν (heavy tails — how likely extreme moves are).
+
+Either way the system knows not just direction but its own uncertainty; ⚠ **μ and σ are not the same estimand across the two branches** — detail and pitfalls in §7.0.
 
 🇮🇹 Output in **spazio z-score** (target_ret normalizzato dal RobustScaler globale, §5). Denormalizzato esplicitamente con `PipelineState.denormalize_predictions()` prima del trading layer.
 
@@ -363,19 +373,99 @@ update:   P(S_t=j | y_{1:t})   ∝ f(y_t | S_t=j) · P(S_t=j | y_{1:t-1})
 
 ## 7. Training
 
-### Loss — t-Student NLL
+### 7.0 Loss in uso: pinball / quantile regression · 7.0 The loss actually in use: pinball / quantile regression
+
+🇮🇹 ⚠ **Leggere questa sottosezione prima delle tre successive.** `loss_type` (`config/default.yaml → training`) seleziona **due rami mutuamente esclusivi**, e il default di produzione è `quantile`. I termini descritti in "t-Student NLL", "Penalità asimmetrica" e "CRPS" appartengono **tutti** al ramo `t_student` e sono **inerti** sul path di produzione, anche se le rispettive chiavi di config hanno valori non nulli (vedi la tabella in fondo alla sottosezione).
+
+**EN** ⚠ **Read this subsection before the next three.** `loss_type` (`config/default.yaml → training`) selects **two mutually exclusive branches**, and the production default is `quantile`. The terms described under "Student-t NLL", "Asymmetric penalty" and "CRPS" **all** belong to the `t_student` branch and are **inert** on the production path, even though their config keys hold non-zero values (see the table at the end of this subsection).
+
+🇮🇹 **Definizione.** Per un livello di quantile τ ∈ (0,1) e un errore `e = y − q̂_τ`, la **pinball loss** (o *check loss*, Koenker–Bassett 1978) è
+
+```
+L_τ(e) = τ · e          se e ≥ 0     (sotto-stima: y sta sopra la previsione)
+         (τ − 1) · e    se e < 0     (sovra-stima: y sta sotto la previsione)
+```
+
+**EN** **Definition.** For a quantile level τ ∈ (0,1) and an error `e = y − q̂_τ`, the **pinball loss** (or *check loss*, Koenker–Bassett 1978) is the expression above.
+
+🇮🇹 Entrambi i rami sono non negativi (nel secondo `e < 0` e `τ − 1 < 0`), ma le pendenze sono **τ** e **1 − τ**: è un errore assoluto pesato asimmetricamente. A τ = 0.5 le pendenze coincidono e `L = ½·|e|`, cioè l'MAE riscalato. A τ = 0.9 sotto-stimare costa 9 volte più che sovra-stimare, quindi l'ottimo si sposta verso l'alto finché il 90% della massa non sta sotto la previsione.
+
+**EN** Both branches are non-negative (in the second, `e < 0` and `τ − 1 < 0`), but the slopes are **τ** and **1 − τ**: an asymmetrically weighted absolute error. At τ = 0.5 the slopes coincide and `L = ½·|e|`, i.e. rescaled MAE. At τ = 0.9 under-predicting costs 9× more than over-predicting, so the optimum moves up until 90% of the mass lies below the forecast.
+
+🇮🇹 **Proprietà che la giustifica.** Il minimizzatore in popolazione di `E[L_τ(Y − q)]` è **esattamente il quantile τ-esimo di Y**. Non è un surrogato: è per i quantili ciò che l'MSE è per la media condizionale e la MAE per la mediana. Minimizzando la somma su più τ si stima la distribuzione condizionale **senza postularne la forma** — la differenza sostanziale rispetto alla t-Student NLL, che stima tre parametri di una famiglia *assunta*. Il prezzo: non si ottiene una densità ma una griglia di quantili, e nulla nella loss impedisce che si **incrocino**.
+
+**EN** **The property that justifies it.** The population minimizer of `E[L_τ(Y − q)]` is **exactly the τ-th quantile of Y**. It is not a surrogate: it is to quantiles what MSE is to the conditional mean and MAE to the median. Summing over several τ estimates the conditional distribution **without postulating its shape** — the substantive difference from the Student-t NLL, which estimates three parameters of an *assumed* family. The price: no density, just a grid of quantiles, and nothing in the loss prevents them from **crossing**.
+
+🇮🇹 **Implementazione** (`quantile_loss` in `quantsys/model/__init__.py`). Cinque livelli, `QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]`; la testa emette 5 valori e la loss media su asse batch **e** su asse quantile. Pesi per-campione ∝ |y| opzionali (`sample_weight_alpha`, **0 in produzione** → disattivi). Il **non-crossing non è imposto nella loss**: è risolto *post-hoc* da un `sort()` lungo l'asse quantile dentro `predict()` — scelta pragmatica standard, ma è un vincolo che il training non vede mai.
+
+**EN** **Implementation** (`quantile_loss` in `quantsys/model/__init__.py`). Five levels, `QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]`; the head emits 5 values and the loss averages over the batch axis **and** the quantile axis. Optional per-sample weights ∝ |y| (`sample_weight_alpha`, **0 in production** → disabled). **Non-crossing is not enforced in the loss**: it is fixed *post-hoc* by a `sort()` along the quantile axis inside `predict()` — the standard pragmatic choice, but a constraint training never sees.
+
+🇮🇹 **Le due grandezze che il resto del sistema consuma** sono derivate da quella griglia, e le loro definizioni **non** coincidono con gli omonimi del ramo t-Student:
+
+- **μ = q(0.5)** — la **mediana** condizionale, non la media condizionale.
+- **σ = q(0.9) − q(0.1)** — un'**ampiezza interdecile**, NON una deviazione standard: per una gaussiana quel range vale ≈ **2.56 σ**. Chi legge `sigma` nel codice assumendo uno scarto quadratico medio sbaglia di un fattore ~2.5.
+
+⚠ `predict()` indicizza **posizionalmente** (`[:, 2]` per μ, `[:, 4] − [:, 0]` per σ): modificare `QUANTILES` senza aggiornare quelle posizioni produce μ/σ silenziosamente sbagliati. Il contratto è sotto golden test (`tests/test_quantile_loss.py`).
+
+**EN** **The two quantities the rest of the system consumes** are derived from that grid, and their definitions do **not** match the same-named objects of the Student-t branch:
+
+- **μ = q(0.5)** — the conditional **median**, not the conditional mean.
+- **σ = q(0.9) − q(0.1)** — an **interdecile range**, NOT a standard deviation: for a Gaussian that range equals ≈ **2.56 σ**. Reading `sigma` in the code as a standard deviation is off by a factor of ~2.5.
+
+⚠ `predict()` indexes **positionally** (`[:, 2]` for μ, `[:, 4] − [:, 0]` for σ): changing `QUANTILES` without updating those positions silently corrupts μ/σ. The contract is under a golden test (`tests/test_quantile_loss.py`).
+
+🇮🇹 **Obiettivo effettivo di produzione.** Con `loss_type: quantile` e `use_multitask: true` (default) la loss ottimizzata è
+
+```
+L  =  multitask_alpha · pinball(y, q̂)  +  (1 − multitask_alpha) · CE(soft_label, dir_logits)
+   =  0.7 · pinball                     +  0.3 · CE
+```
+
+dove la CE è la testa direzionale a 3 classi con soft label ∝ tanh(|y|/soglia). **Nient'altro.**
+
+**EN** **Effective production objective.** With `loss_type: quantile` and `use_multitask: true` (default) the optimized loss is the expression above, where CE is the 3-class directional head with soft labels ∝ tanh(|y|/threshold). **Nothing else.**
+
+🇮🇹 **Quali termini sono attivi su quale ramo** (single source of truth: il branching in `scripts/02_train.py`, funzione di epoca):
+
+| Termine | Chiave di config (valore) | Ramo `quantile` (**produzione**) | Ramo `t_student` |
+|---|---|---|---|
+| Pinball | `QUANTILES` (5 livelli) | ✅ attivo | — |
+| t-Student NLL | — | — | ✅ attivo |
+| Penalità asimmetrica | `asymmetry_alpha: 2.0` | ❌ **inerte** | ✅ attivo |
+| CRPS | `crps_weight: 0.1` | ❌ **inerte** | ✅ attivo |
+| Direction-Value | `dv_lambda: 0.3` | ❌ **inerte** (guardia esplicita) | ✅ attivo |
+| Multitask CE | `multitask_alpha: 0.7` | ✅ attivo | ✅ attivo |
+| Pesi ∝ \|y\| | `sample_weight_alpha: 0.0` | disattivi | disattivi |
+
+**EN** **Which terms are active on which branch** (single source of truth: the branching in `scripts/02_train.py`, epoch function):
+
+| Term | Config key (value) | `quantile` branch (**production**) | `t_student` branch |
+|---|---|---|---|
+| Pinball | `QUANTILES` (5 levels) | ✅ active | — |
+| Student-t NLL | — | — | ✅ active |
+| Asymmetric penalty | `asymmetry_alpha: 2.0` | ❌ **inert** | ✅ active |
+| CRPS | `crps_weight: 0.1` | ❌ **inert** | ✅ active |
+| Direction-Value | `dv_lambda: 0.3` | ❌ **inert** (explicit guard) | ✅ active |
+| Multitask CE | `multitask_alpha: 0.7` | ✅ active | ✅ active |
+| Weights ∝ \|y\| | `sample_weight_alpha: 0.0` | disabled | disabled |
+
+🇮🇹 ⚠ **Trappola di tuning.** Le tre chiavi marcate inerti hanno valori non nulli in `config/default.yaml` e *sembrano* leve attive: modificarle sul path di produzione non cambia **nulla**, e un esperimento costruito su di esse restituirebbe "nessun effetto" per ragioni implementative, non scientifiche. `02_train.py` emette un **warning esplicito** all'avvio quando il ramo quantile è attivo e una di quelle chiavi è non nulla (solo logging, path numerico bit-invariato).
+
+**EN** ⚠ **Tuning trap.** The three keys marked inert hold non-zero values in `config/default.yaml` and *look* like live levers: changing them on the production path changes **nothing**, and an experiment built on them would return "no effect" for implementation reasons, not scientific ones. `02_train.py` emits an **explicit warning** at start-up when the quantile branch is active and any of those keys is non-zero (logging only, numeric path bit-invariant).
+
+### Loss — t-Student NLL (ramo `loss_type: t_student`) · Student-t NLL loss (`loss_type: t_student` branch)
 
 🇮🇹 Penalizza il modello quando la distribuzione prevista è lontana dal valore osservato. Distribuzione **t di Student** invece di gaussiana: i rendimenti finanziari hanno code più pesanti (crash e rally violenti sono più frequenti della normale).
 
 **EN** Penalizes the model when the predicted distribution is far from the observed value. **Student-t** instead of Gaussian: financial returns have heavier tails (crashes and rallies happen more often than a Gaussian would predict).
 
-### Penalità asimmetrica · Asymmetric penalty
+### Penalità asimmetrica (ramo `t_student`) · Asymmetric penalty (`t_student` branch)
 
 🇮🇹 Penalità extra quando il modello sbaglia direzione (dice "sale" e scende). Errori di segno costano più degli errori di ampiezza: una posizione nella direzione sbagliata perde, una sottostima dell'ampiezza peggiora solo il rendimento.
 
 **EN** Extra penalty when the model gets the direction wrong (says "up" but it goes down). Sign errors cost more than magnitude errors: a position in the wrong direction loses money, while underestimating the magnitude only hurts returns.
 
-### CRPS
+### CRPS (ramo `t_student`) · CRPS (`t_student` branch)
 
 🇮🇹 Continuous Ranked Probability Score — metrica ausiliaria di **calibrazione**: se il modello dice "80% di probabilità", dovrebbe avere ragione l'80% delle volte. Un modello che dice sempre "95%" ma azzecca il 60% è pericoloso per eccesso di fiducia.
 
@@ -655,6 +745,10 @@ The remaining ones (funding-refresh thread safety under `threading.Lock()`, Wind
 🇮🇹 **Significatività del confronto (Diebold-Mariano, 2026-07-26).** Il rapporto di QLIKE è una stima puntuale: l'inferenza richiede una varianza **HAC**, perché il target somma h=30 barre e le finestre si sovrappongono (§7ter). Su una coppia modello/scaler riaddestrata sullo stesso dataset — 5 seed, nessun contatto col test in training — il vantaggio su HAR-RV è: **val −26.6%** (0.26206 vs 0.35698), DM = −3.97, **p = 7.3·10⁻⁵**; **test −36.1%** (0.23631 vs 0.36998), DM = −4.79, **p = 1.7·10⁻⁶**; HAC lag 29, n ≈ 6.5k, **n_eff ≈ 216**. Il vantaggio **sopravvive** alla correzione per sovrapposizione. Il NN batte HAR in **ogni regime**, stress incluso e validato su test (r0 0.570 · r1 0.542 · r2 0.695 come rapporti NN/HAR). ⚠ Il −36.1% e il −30.2% storico **non sono la stessa misura**: finestre di test diverse (il dataset è stato esteso) e modello riaddestrato — la banda onesta del claim è **−27% ÷ −36% secondo split e vintage**, con p ≤ 1.7·10⁻⁶.
 
 **EN** **Comparison significance (Diebold-Mariano, 2026-07-26).** The QLIKE ratio is a point estimate: inference requires a **HAC** variance, since the target sums h=30 bars and windows overlap (§7ter). On a model/scaler pair retrained on the same dataset — 5 seeds, no test contact during training — the edge over HAR-RV is: **val −26.6%** (0.26206 vs 0.35698), DM = −3.97, **p = 7.3·10⁻⁵**; **test −36.1%** (0.23631 vs 0.36998), DM = −4.79, **p = 1.7·10⁻⁶**; HAC lag 29, n ≈ 6.5k, **n_eff ≈ 216**. The edge **survives** the overlap correction. The NN beats HAR in **every regime**, stress included and validated on test (r0 0.570 · r1 0.542 · r2 0.695 as NN/HAR ratios). ⚠ The −36.1% and the historical −30.2% are **not the same measurement**: different test windows (the dataset was extended) and a retrained model — the honest band for the claim is **−27% to −36% depending on split and vintage**, at p ≤ 1.7·10⁻⁶.
+
+🇮🇹 **Estimando ottimizzato vs estimando giudicato (nota aperta, il claim NON è intaccato).** QLIKE è una loss propria per previsioni di varianza: la sua speranza è minimizzata dalla **media** condizionale di RV. Il modello di produzione ottimizza invece τ=0.5, cioè la **mediana** condizionale di log-RV (§7.0), e il giudice inverte con `exp()` senza correzione di Jensen (`qlike_from_z` in `quantsys/model/vol_metrics.py`): poiché `exp` è monotona si ottiene la mediana di RV, che sotto asimmetria sta sistematicamente **sotto** la media. La stessa omissione vale per la baseline — `har_fold_qlike` esponenzia la previsione OLS senza smearing — quindi **il confronto resta simmetrico e il PASS regge**. Due asimmetrie fini restano da tenere a mente: (i) l'OLS di HAR stima la **media** condizionale di log-RV mentre il NN ne stima la **mediana**, e coincidono solo se i residui in log sono simmetrici; (ii) una correzione di tipo **smearing** (Duan 1983) applicata a **entrambi** i lati è un lever mai testato — come tale richiede una pre-registrazione (§12.1) prima di qualunque run, e **non** va applicata al volo a un claim già pubblicato.
+
+**EN** **Optimized estimand vs judged estimand (open note, the claim is NOT affected).** QLIKE is a proper loss for variance forecasts: its expectation is minimized by the conditional **mean** of RV. The production model instead optimizes τ=0.5, i.e. the conditional **median** of log-RV (§7.0), and the judge inverts with `exp()` without a Jensen correction (`qlike_from_z` in `quantsys/model/vol_metrics.py`): since `exp` is monotone this yields the median of RV, which under skewness sits systematically **below** the mean. The same omission applies to the baseline — `har_fold_qlike` exponentiates the OLS forecast without smearing — so **the comparison stays symmetric and the PASS holds**. Two fine asymmetries remain worth noting: (i) HAR's OLS estimates the conditional **mean** of log-RV while the NN estimates its **median**, and they coincide only if log residuals are symmetric; (ii) a **smearing** correction (Duan 1983) applied to **both** sides is an untested lever — as such it requires a pre-registration (§12.1) before any run, and must **not** be retrofitted to an already published claim.
 
 🇮🇹 **L'edge è specifico della risoluzione oraria.** La verifica cross-risoluzione a RV-30min è **FAIL su val** (QLIKE NN/HAR 1.0127 > 0.95): il risultato non si trasferisce cambiando la scala della barra.
 

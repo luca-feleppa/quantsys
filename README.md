@@ -17,7 +17,7 @@
 | **Il risultato.** Il forecast NN della realized variance batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive 0.807 — Diebold-Mariano HAC **p ≤ 1.7·10⁻⁶**, vedi `TEORIA.md` §12.2), con val→test coerenti | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
 | **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `TEORIA.md` §12.1 (protocollo in 5 passi) · `STATUS.md` (pre-registrazioni in testa) |
 | **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `TEORIA.md` §12.3-12.4 (corpus KILL, con i numeri) |
-| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **307 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
+| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **319 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
 
 🇮🇹 Il progetto è organizzato attorno a un'asimmetria dichiarata: **i momenti pari (varianza, RV) generalizzano fuori campione su questo asset, i momenti dispari (segno, asimmetria) no** — per la rete *e* per le baseline econometriche. Le tre linee di codice (vol-forecasting, monetizzazione short-vol, direzionale) esistono per documentare quella asimmetria, non per nasconderla.
 
@@ -28,7 +28,7 @@
 | **The result.** The NN realized-variance forecast beats HAR-RV by **30% in test QLIKE** (0.257 vs 0.368; naive 0.807), val→test coherent | `scripts/vol/dev_vols_qlike.py` — the judge that produces the number, val-first split |
 | **How an idea lives or dies.** Every experiment is **pre-registered**: metrics, thresholds and minimum n written and committed *before* running | `TEORIA.md` §12.1 (5-step protocol) · `STATUS.md` (pre-registrations on top) |
 | **What was tried and does NOT work**, with numbers: directional at 1m and 1h, signed semivariance, IVS relative-value, 4 training levers, regime gating | `TEORIA.md` §12.3-12.4 (KILL corpus, with numbers) |
-| **What an outside reader can verify** without downloading data | `pytest tests/` → **307 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
+| **What an outside reader can verify** without downloading data | `pytest tests/` → **319 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
 
 **EN** The project is organized around a stated asymmetry: **even moments (variance, RV) generalize out-of-sample on this asset, odd moments (sign, skew) do not** — for the network *and* for the econometric baselines. The three code lines (vol forecasting, short-vol monetization, directional) exist to document that asymmetry, not to hide it.
 
@@ -36,13 +36,13 @@
 
 🇮🇹 `data/`, `models/` e `results/` sono **gitignored**: pesi e parquet sono grandi e i dati di mercato non sono ridistribuibili. Cosa significa in pratica per chi clona:
 
-- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (308 test, ~30s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
+- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (320 test, ~30s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
 - **Rigenerabile:** dataset (`scripts/01_download_data.py`, Binance pubblico + una chiave FRED gratuita per la macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min per 5 seed iTransformer su RTX 2070 Super) → giudice QLIKE (`scripts/vol/dev_vols_qlike.py`).
 - **NON rigenerabile** (raccolta forward, per costruzione): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — snapshot IV/book/trade e forward test su testnet. I numeri del braccio short-vol non sono riproducibili da un clone: sono un log d'esperimento, e sono presentati come tali.
 
 **EN** `data/`, `models/` and `results/` are **gitignored**: weights and parquets are large and market data is not redistributable. What that means when you clone:
 
-- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (308 tests, ~30s, CPU), including golden tests on the 104-feature list and live↔training parity.
+- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (320 tests, ~30s, CPU), including golden tests on the 104-feature list and live↔training parity.
 - **Regenerable:** dataset (`scripts/01_download_data.py`, public Binance + a free FRED key for macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min for 5 iTransformer seeds on an RTX 2070 Super) → QLIKE judge (`scripts/vol/dev_vols_qlike.py`).
 - **NOT regenerable** (forward collection, by construction): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — IV/book/trade snapshots and the testnet forward test. The short-vol arm's numbers cannot be reproduced from a clone: they are an experiment log, and are presented as such.
 
@@ -201,9 +201,19 @@ python scripts/00_check_setup.py
 
 ### 4.3 Loss & output probabilistico · Loss & probabilistic output
 
-🇮🇹 Ogni predizione è una **distribuzione completa**, non una stima puntuale — la σ predetta è ciò che alimenta sia il sizing sia il confronto RV-vs-IV della linea vol. La loss combina quattro termini con ruoli distinti: **t-Student NLL** (code pesanti, il crypto non è gaussiano), **penalità asimmetrica** sugli errori di segno oltre una soglia di magnitudine, **CRPS** (calibrazione della distribuzione, non solo della media) e **Direction-Value joint loss** (accoppia il segno al valore). Con `loss_type=quantile` (default) `model(x)` ritorna `(quantile_preds, dir_logits)`: per un μ scalare usa `model.predict(x)["mu"]` (mediana q2). L'output è in **spazio z-score** e va denormalizzato a monte del trading layer (§3.4). Forme chiuse, gradienti e razionale dei pesi in [TEORIA.md](TEORIA.md) §7; iperparametri in `config/default.yaml → training`.
+🇮🇹 Ogni predizione è una **distribuzione condizionale completa**, non una stima puntuale — la σ predetta è ciò che alimenta sia il sizing sia il confronto RV-vs-IV della linea vol. `loss_type` (`config/default.yaml → model`) seleziona **due rami mutuamente esclusivi**:
 
-**EN** Each prediction is a **full distribution**, not a point estimate — the predicted σ is what feeds both position sizing and the vol line's RV-vs-IV comparison. The loss combines four terms with distinct roles: **Student-t NLL** (heavy tails, crypto is not Gaussian), an **asymmetric penalty** on sign errors beyond a magnitude threshold, **CRPS** (calibration of the whole distribution, not just the mean) and a **Direction-Value joint loss** (couples sign to value). With `loss_type=quantile` (default) `model(x)` returns `(quantile_preds, dir_logits)`: for a scalar μ use `model.predict(x)["mu"]` (median q2). Output lives in **z-score space** and must be denormalized upstream of the trading layer (§3.4). Closed forms, gradients and weight rationale in [TEORIA.md](TEORIA.md) §7; hyperparameters in `config/default.yaml → training`.
+- **`quantile` — default di produzione.** Pinball loss su 5 livelli `[0.1, 0.25, 0.5, 0.75, 0.9]`; `model(x)` ritorna `(quantile_preds, dir_logits)` e `model.predict(x)` deriva **μ = q(0.5)** (mediana condizionale) e **σ = q(0.9) − q(0.1)** (ampiezza interdecile, **non** una deviazione standard). Obiettivo effettivo: `0.7 · pinball + 0.3 · CE` della testa direzionale multitask.
+- **`t_student`.** NLL t-Student (code pesanti, il crypto non è gaussiano) + **penalità asimmetrica** sugli errori di segno oltre una soglia di magnitudine + **CRPS** (calibrazione della distribuzione, non solo della media) + **Direction-Value joint loss** (accoppia il segno al valore).
+
+⚠ I tre termini additivi del secondo ramo sono **inerti** su quello di produzione pur avendo valori non nulli in config (`asymmetry_alpha`, `crps_weight`, `dv_lambda`) — tabella dei termini attivi per ramo, definizione della pinball e trappole di lettura di μ/σ in [TEORIA.md](TEORIA.md) §7.0. L'output è in **spazio z-score** e va denormalizzato a monte del trading layer (§3.4). Forme chiuse, gradienti e razionale dei pesi in [TEORIA.md](TEORIA.md) §7.
+
+**EN** Each prediction is a **full conditional distribution**, not a point estimate — the predicted σ is what feeds both position sizing and the vol line's RV-vs-IV comparison. `loss_type` (`config/default.yaml → model`) selects **two mutually exclusive branches**:
+
+- **`quantile` — production default.** Pinball loss over 5 levels `[0.1, 0.25, 0.5, 0.75, 0.9]`; `model(x)` returns `(quantile_preds, dir_logits)` and `model.predict(x)` derives **μ = q(0.5)** (conditional median) and **σ = q(0.9) − q(0.1)** (interdecile range, **not** a standard deviation). Effective objective: `0.7 · pinball + 0.3 · CE` from the multitask directional head.
+- **`t_student`.** Student-t NLL (heavy tails, crypto is not Gaussian) + an **asymmetric penalty** on sign errors beyond a magnitude threshold + **CRPS** (calibration of the whole distribution, not just the mean) + a **Direction-Value joint loss** (couples sign to value).
+
+⚠ The three additive terms of the second branch are **inert** on the production one despite holding non-zero config values (`asymmetry_alpha`, `crps_weight`, `dv_lambda`) — per-branch table of active terms, the pinball definition and the μ/σ misreading traps in [TEORIA.md](TEORIA.md) §7.0. Output lives in **z-score space** and must be denormalized upstream of the trading layer (§3.4). Closed forms, gradients and weight rationale in [TEORIA.md](TEORIA.md) §7.
 
 ### 4.4 Simulazione Monte Carlo · Monte Carlo simulation
 
