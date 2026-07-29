@@ -1,0 +1,39 @@
+# IT: A10 — overlay SPERIMENTALE della penalità entropica sull'attention (gate
+#     pre-registrato in STATUS.md il 2026-07-28). Copia esatta di itransformer.yaml
+#     più la SOLA chiave `model.attn_entropy_lambda`: il lever è la penalità, non gli
+#     iperparametri — qualunque altra differenza invaliderebbe il confronto col
+#     braccio baseline riaddestrato sullo stesso npz.
+#     λ = 0.01 è fissato EX-ANTE da una regola dichiarata, non da uno sweep: H_norm è
+#     l'entropia normalizzata per log N, quindi limitata in [0,1], e λ è per
+#     costruzione il costo MASSIMO in unità di loss (pinball tipico ≈0.3-0.5 in spazio
+#     z → perturbazione ≤3% dell'obiettivo). Qualsiasi altro λ = NUOVA pre-registrazione.
+# EN: A10 — EXPERIMENTAL overlay for the attention entropy penalty (gate pre-registered
+#     in STATUS.md on 2026-07-28). Exact copy of itransformer.yaml plus the SINGLE key
+#     `model.attn_entropy_lambda`: the lever is the penalty, not the hyper-parameters —
+#     any other difference would invalidate the comparison against the baseline arm
+#     retrained on the same npz.
+#     λ = 0.01 is fixed EX-ANTE by a declared rule, not by a sweep: H_norm is the entropy
+#     normalized by log N, hence bounded in [0,1], so λ is by construction the MAXIMUM
+#     cost in loss units (typical pinball ≈0.3-0.5 in z-space → ≤3% perturbation of the
+#     objective). Any other λ = NEW pre-registration.
+
+model:
+  architecture: "itransformer"
+  tft_d_model: 128
+  tft_n_heads: 4
+  tft_n_layers: 3
+  tft_dropout: 0.3
+  patch_size: 5             # IT: patching 5-barre | EN: 5-bar patching
+  drop_path_rate: 0.2
+  # IT: LA SOLA chiave nuova rispetto a itransformer.yaml.
+  # EN: THE ONLY new key relative to itransformer.yaml.
+  attn_entropy_lambda: 0.01
+
+training:
+  learning_rate: 3.0e-5
+  weight_decay: 3.0e-03
+  grad_clip_norm: 0.5
+  output_dir: "./models/itransformer_a10_sparsity"
+
+backtest:
+  output_dir: "./results/itransformer_a10_sparsity"

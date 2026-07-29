@@ -125,6 +125,30 @@ def diebold_mariano(loss_a: np.ndarray, loss_b: np.ndarray, h: int,
     }
 
 
+# IT: FATTORE DI SMEARING DI DUAN (1983) — ŝ = (1/n)·Σ exp(ε_i) sui residui IN LOG.
+#     Motivo: QLIKE è minimizzata dalla MEDIA condizionale di RV, ma sia il NN
+#     (quantile τ=0.5 su log-RV) sia HAR (OLS su log-RV) prevedono una MEDIANA;
+#     esponenziare una mediana SOTTOSTIMA il livello, e QLIKE penalizza la
+#     sottostima in modo asimmetrico. ŝ ≥ 1 riporta la previsione sul livello medio
+#     senza assumere log-normalità (stimatore non parametrico: usa i residui
+#     empirici, non exp(σ̂²/2)). ⚠ Va stimato ESCLUSIVAMENTE sui residui di TRAIN:
+#     stimarlo su val/test sarebbe leakage del livello del target.
+# EN: DUAN (1983) SMEARING FACTOR — ŝ = (1/n)·Σ exp(ε_i) over the LOG residuals.
+#     Rationale: QLIKE is minimized by the conditional MEAN of RV, yet both the NN
+#     (τ=0.5 quantile on log-RV) and HAR (OLS on log-RV) predict a MEDIAN;
+#     exponentiating a median UNDERSTATES the level, and QLIKE penalizes
+#     understatement asymmetrically. ŝ ≥ 1 restores the mean level without assuming
+#     log-normality (non-parametric estimator: empirical residuals, not exp(σ̂²/2)).
+#     ⚠ Must be estimated EXCLUSIVELY on TRAIN residuals: estimating it on val/test
+#     would leak the target level.
+def duan_smearing(eps_log: np.ndarray) -> float:
+    e = np.asarray(eps_log, dtype=np.float64)
+    e = e[np.isfinite(e)]
+    if e.size == 0:
+        return 1.0                      # IT/EN: nessun residuo → identità / no residuals → identity
+    return float(np.mean(np.exp(e)))
+
+
 # IT: inversione COMPLETA z→raw del target log-RV: log_rv = z·scale + center.
 #     NB `denormalize_predictions` (solo z·scale) NON basta: il log-RV ha mediana
 #     ≈ −7, serve anche il centro del RobustScaler persistito nel PipelineState.
@@ -143,12 +167,22 @@ def invert_log_rv(z: np.ndarray, center: float, scale: float) -> np.ndarray:
 #     log-RV (center+scale) and exponentiates → RV levels, then QLIKE + MSE(log).
 #     Used by the walk-forward harness to judge folds without re-deriving RV from
 #     raw candles (the npz `y` IS already the log-RV z-scored with the same scaler).
+#     `smear` (C1, pre-reg 2026-07-28): correzione moltiplicativa di Duan sul LIVELLO,
+#     RV_pred = exp(log_pred)·ŝ. Default 1.0 = IDENTITÀ → path numerico bit-invariato
+#     (x·1.0 è esatto in IEEE754). ⚠ `mse_log` resta sul log_pred NON corretto: sul
+#     log la loss quadratica è minimizzata dalla mediana, che è ciò che il modello
+#     stima — la correzione riguarda il solo estimando di livello giudicato da QLIKE.
+# EN: `smear` (C1, 2026-07-28 pre-reg): Duan multiplicative LEVEL correction,
+#     RV_pred = exp(log_pred)·ŝ. Default 1.0 = IDENTITY → bit-invariant numeric path
+#     (x·1.0 is exact in IEEE754). ⚠ `mse_log` stays on the UNCORRECTED log_pred: on
+#     the log scale squared loss is minimized by the median, which is what the model
+#     estimates — the correction concerns only the level estimand judged by QLIKE.
 def qlike_from_z(y_true_z: np.ndarray, mu_pred_z: np.ndarray,
-                 center: float, scale: float) -> dict:
+                 center: float, scale: float, smear: float = 1.0) -> dict:
     log_true = invert_log_rv(y_true_z, center, scale)
     log_pred = invert_log_rv(mu_pred_z, center, scale)
     return {
-        "qlike":   qlike(np.exp(log_true), np.exp(log_pred)),
+        "qlike":   qlike(np.exp(log_true), np.exp(log_pred) * float(smear)),
         "mse_log": float(np.mean((log_true - log_pred) ** 2)),
     }
 
@@ -194,20 +228,37 @@ def build_har_frame(raw: pd.DataFrame, h: int, bars_day: int) -> pd.DataFrame:
 # EN: OLS-fit HAR on the fold's train timestamps, evaluate on the held-out timestamps:
 #     QLIKE on RV levels (HAR) + naive persistence (trailing h-bar RV). Same info set
 #     as the per-fold NN → fair comparison. NaN if alignment is insufficient.
-def har_fold_qlike(har: pd.DataFrame, t_train, t_eval) -> dict:
+#     `smear`/`smear_naive` (C1, pre-reg 2026-07-28): correzione di Duan sul livello,
+#     default 1.0 = IDENTITÀ (fold-metric bit-invariata). I fattori stimati sui residui
+#     IN-SAMPLE di train (`smear_har_hat`, `smear_naive_hat`) sono SEMPRE riportati ma
+#     MAI applicati d'ufficio: applicarli è una scelta del chiamante, così la funzione
+#     resta un giudice puro e il fattore usato è sempre esplicito nel report.
+# EN: `smear`/`smear_naive` (C1, 2026-07-28 pre-reg): Duan level correction, default
+#     1.0 = IDENTITY (bit-invariant fold-metric). The factors estimated on the
+#     IN-SAMPLE train residuals (`smear_har_hat`, `smear_naive_hat`) are ALWAYS
+#     reported but NEVER applied implicitly: applying them is the caller's choice, so
+#     the function stays a pure judge and the factor used is explicit in the report.
+def har_fold_qlike(har: pd.DataFrame, t_train, t_eval,
+                   smear: float = 1.0, smear_naive: float = 1.0) -> dict:
     tr_idx = _to_naive(t_train)
     ev_idx = _to_naive(t_eval)
     tr = har.loc[har.index.intersection(tr_idx)]
     ev = har.loc[har.index.intersection(ev_idx)]
+    # IT: contratto di ritorno UNIFORME anche sul ramo degenere (pattern `_null` del DM).
+    # EN: UNIFORM return contract on the degenerate branch too (DM's `_null` pattern).
     if len(tr) < 50 or len(ev) < 1:
         return {"qlike_har": float("nan"), "qlike_naive": float("nan"),
-                "n_har": int(len(ev)), "n_eval": int(len(ev_idx))}
+                "n_har": int(len(ev)), "n_eval": int(len(ev_idx)),
+                "smear_har_hat": float("nan"), "smear_naive_hat": float("nan")}
     Xtr = np.column_stack([np.ones(len(tr)), tr[["xh", "xw", "xm"]].values])
     beta, *_ = np.linalg.lstsq(Xtr, tr["y"].values, rcond=None)
     Xev = np.column_stack([np.ones(len(ev)), ev[["xh", "xw", "xm"]].values])
     rv_true = np.exp(ev["y"].values)
     return {
-        "qlike_har":   qlike(rv_true, np.exp(Xev @ beta)),
-        "qlike_naive": qlike(rv_true, np.exp(ev["xh"].values)),
+        "qlike_har":   qlike(rv_true, np.exp(Xev @ beta) * float(smear)),
+        "qlike_naive": qlike(rv_true, np.exp(ev["xh"].values) * float(smear_naive)),
         "n_har": int(len(ev)), "n_eval": int(len(ev_idx)),
+        # IT: ŝ dai residui in-sample di TRAIN (nessun uso di `ev`) | EN: ŝ from IN-SAMPLE train residuals (no `ev` use)
+        "smear_har_hat":   duan_smearing(tr["y"].values - Xtr @ beta),
+        "smear_naive_hat": duan_smearing(tr["y"].values - tr["xh"].values),
     }

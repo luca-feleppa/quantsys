@@ -740,7 +740,25 @@ def load_model(checkpoint: str, config_path: str = None):
             # EN: A3 — key absent from legacy config.json → "single" = bit-identical
             #     path for existing checkpoints.
             head_type        = cfg.get("head_type", "single"),
+            # IT: A10 — chiave assente nei config.json storici → 0.0. Il valore è
+            #     tenuto come RECORD di come il modello è stato addestrato; la misura
+            #     viene poi spenta esplicitamente (riga sotto).
+            # EN: A10 — key absent from legacy config.json → 0.0. The value is kept as a
+            #     RECORD of how the model was trained; measurement is then explicitly
+            #     switched off (line below).
+            attn_entropy_lambda = cfg.get("attn_entropy_lambda", 0.0),
         )
+        # IT: A10 — in INFERENCE la misura è SEMPRE spenta, anche per un modello
+        #     addestrato con λ>0: la penalità è un regolarizzatore di training, e il
+        #     giudice deve valutare i due bracci con LA STESSA implementazione di
+        #     attention (Flash). Materializzare per il solo candidato introdurrebbe
+        #     un'asimmetria di implementazione dentro il QLIKE giudicato.
+        # EN: A10 — at INFERENCE measurement is ALWAYS off, even for a model trained
+        #     with λ>0: the penalty is a training-time regularizer, and the judge must
+        #     evaluate both arms with THE SAME attention implementation (Flash).
+        #     Materializing for the candidate only would inject an implementation
+        #     asymmetry into the judged QLIKE.
+        model.set_attn_entropy(False)
         log.info(f"load_model: QuantiTransformer (F={n_feat}, T={T}, n_macro={n_mac}, "
                  f"head_type={cfg.get('head_type', 'single')})")
     elif model_type == "QuantTFT":
@@ -1104,12 +1122,27 @@ class iTransformerLayer(nn.Module):
     # IT: Costruisce qkv/out proj, FFN e DropPath; init gain ridotto per fp16.
     # EN: Builds qkv/out proj, FFN and DropPath; reduced init gain for fp16.
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1,
-                 drop_path: float = 0.0):
+                 drop_path: float = 0.0, attn_entropy: bool = False):
         super().__init__()
         assert d_model % n_heads == 0
         self.n_heads   = n_heads
         self.d_head    = d_model // n_heads
         self.dropout_p = dropout
+        # ── A10 (pre-reg STATUS 2026-07-28): misura dell'entropia dell'attention ──
+        # IT: attributo SEMPLICE (non parametro, non buffer) → `state_dict` invariato e
+        #     i checkpoint storici restano caricabili. A False (default) il forward NON
+        #     materializza la matrice N×N e resta su F.scaled_dot_product_attention:
+        #     path numerico bit-identico. A True la matrice viene materializzata per
+        #     poter calcolare l'entropia riga-per-riga — è il costo dichiarato della leva
+        #     (si rinuncia a Flash-Attention su quel path).
+        # EN: PLAIN attribute (not a parameter, not a buffer) → `state_dict` unchanged and
+        #     legacy checkpoints stay loadable. At False (default) the forward does NOT
+        #     materialize the N×N matrix and stays on F.scaled_dot_product_attention:
+        #     bit-identical numeric path. At True the matrix is materialized so row-wise
+        #     entropy can be computed — the lever's declared cost (Flash-Attention is
+        #     given up on that path).
+        self.attn_entropy = bool(attn_entropy)
+        self._last_attn_entropy = None
 
         self.norm1    = nn.LayerNorm(d_model)
         self.qkv_proj = nn.Linear(d_model, 3 * d_model, bias=False)
@@ -1138,12 +1171,36 @@ class iTransformerLayer(nn.Module):
         q = q.view(B, N, self.n_heads, self.d_head).transpose(1, 2)
         k = k.view(B, N, self.n_heads, self.d_head).transpose(1, 2)
         v = v.view(B, N, self.n_heads, self.d_head).transpose(1, 2)
-        # IT: Flash Attention: stabile in float16, nessun overflow del softmax.
-        # EN: Flash Attention: stable in float16, no softmax overflow.
-        a = F.scaled_dot_product_attention(
-            q, k, v,
-            dropout_p=self.dropout_p if self.training else 0.0,
-        )
+        if self.attn_entropy:
+            # IT: A10 — path di MISURA: softmax esplicito per calcolare l'entropia di
+            #     riga. Softmax in float32 anche sotto AMP (la matrice materializzata in
+            #     fp16 è la fonte di instabilità che Flash-Attention evita), poi cast al
+            #     dtype di v per il matmul. `torch.special.entr` = −p·log p con entr(0)=0
+            #     definito per continuità → nessun eps arbitrario. Normalizzazione per
+            #     log N (N = token della sequenza di attention) → H_norm ∈ [0,1], quindi
+            #     λ è per costruzione il costo MASSIMO in unità di loss.
+            # EN: A10 — MEASUREMENT path: explicit softmax so row entropy can be computed.
+            #     Softmax in float32 even under AMP (the materialized fp16 matrix is the
+            #     instability source Flash-Attention avoids), then cast to v's dtype for
+            #     the matmul. `torch.special.entr` = −p·log p with entr(0)=0 defined by
+            #     continuity → no arbitrary eps. Normalized by log N (N = tokens of the
+            #     attention sequence) → H_norm ∈ [0,1], so λ is by construction the
+            #     MAXIMUM cost in loss units.
+            scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_head)
+            p = torch.softmax(scores.float(), dim=-1)                      # (B, n_heads, N, N)
+            h_norm = torch.special.entr(p).sum(dim=-1) / math.log(max(N, 2))
+            self._last_attn_entropy = h_norm.mean()                        # IT/EN: media su righe/teste/batch
+            p = p.to(v.dtype)
+            if self.training and self.dropout_p > 0:
+                p = F.dropout(p, p=self.dropout_p, training=True)
+            a = torch.matmul(p, v)
+        else:
+            # IT: Flash Attention: stabile in float16, nessun overflow del softmax.
+            # EN: Flash Attention: stable in float16, no softmax overflow.
+            a = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=self.dropout_p if self.training else 0.0,
+            )
         a = a.transpose(1, 2).contiguous().view(B, N, D)
         x = x + self.drop_path(self.out_proj(a))
         x = x + self.drop_path(self.ffn(self.norm2(x)))
@@ -1193,6 +1250,7 @@ class QuantiTransformer(nn.Module):
         use_revin:        bool  = False,
         revin_target_idx: int   = 0,
         head_type:        str   = "single",
+        attn_entropy_lambda: float = 0.0,
     ):
         # IT: Costruisce embedding multi-scala, layer iTransformer e teste output.
         # EN: Builds multi-scale embeddings, iTransformer layers and output heads.
@@ -1278,8 +1336,21 @@ class QuantiTransformer(nn.Module):
         # IT: DropPath scheduling: intensità crescente per layer.
         # EN: DropPath scheduling: increasing intensity per layer.
         dpr = [drop_path_rate * i / max(1, n_layers - 1) for i in range(n_layers)]
+        # ── A10 (pre-reg STATUS 2026-07-28): penalità entropica sull'attention ──────
+        # IT: λ=0.0 (default production) → i layer NON materializzano la matrice e il
+        #     path resta bit-identico; nessun parametro nuovo, `state_dict` invariato.
+        #     λ>0 accende la misura in training e il termine λ·H_norm nell'obiettivo
+        #     (sommato in `02_train.py`, non qui: il modello espone la penalità, non la
+        #     applica — la loss vive in un solo posto).
+        # EN: λ=0.0 (production default) → layers do NOT materialize the matrix and the
+        #     path stays bit-identical; no new parameters, `state_dict` unchanged.
+        #     λ>0 turns on measurement during training and the λ·H_norm term in the
+        #     objective (added in `02_train.py`, not here: the model exposes the penalty,
+        #     it does not apply it — the loss lives in exactly one place).
+        self.attn_entropy_lambda = float(attn_entropy_lambda)
         self.layers = nn.ModuleList([
-            iTransformerLayer(d_model, n_heads, dropout, drop_path=dpr[i])
+            iTransformerLayer(d_model, n_heads, dropout, drop_path=dpr[i],
+                              attn_entropy=self.attn_entropy_lambda > 0.0)
             for i in range(n_layers)
         ])
         self.out_norm = nn.LayerNorm(d_model)
@@ -1333,6 +1404,38 @@ class QuantiTransformer(nn.Module):
             if not _QS_SN_ON_MU_ONLY:
                 self.out_logsig2 = spectral_norm(self.out_logsig2)
                 self.out_lognu   = spectral_norm(self.out_lognu)
+
+    # ── A10: API di misura/penalità dell'entropia dell'attention ─────────────────
+    # IT: la MISURA è deliberatamente separata dalla PENALIZZAZIONE. Il braccio
+    #     baseline (λ=0) non ha nessuna penalità ma la sua H_norm va comunque
+    #     misurata: è il termine di confronto del manipulation check ④ della pre-reg
+    #     ("la penalità ha morso le mappe?"). Toggle esplicito → una passata
+    #     diagnostica può accendere la misura su QUALSIASI checkpoint, incluso uno
+    #     addestrato senza la leva. Non tocca `state_dict` né i parametri.
+    # EN: MEASUREMENT is deliberately decoupled from PENALIZATION. The baseline arm
+    #     (λ=0) carries no penalty, yet its H_norm must still be measured: it is the
+    #     comparison term of the pre-reg's manipulation check ④ ("did the penalty bite
+    #     the maps?"). Explicit toggle → a diagnostic pass can enable measurement on
+    #     ANY checkpoint, including one trained without the lever. Touches neither
+    #     `state_dict` nor the parameters.
+    def set_attn_entropy(self, enabled: bool) -> None:
+        for layer in self.layers:
+            layer.attn_entropy = bool(enabled)
+            layer._last_attn_entropy = None
+
+    # IT: media di H_norm sui layer dopo l'ULTIMO forward. None se la misura è spenta
+    #     o se nessun forward è stato eseguito → il chiamante non può sommare per
+    #     sbaglio una penalità stantia (i valori vengono azzerati a ogni lettura).
+    # EN: mean H_norm across layers after the LAST forward. None if measurement is off
+    #     or no forward has run → the caller cannot accidentally add a stale penalty
+    #     (values are cleared on every read).
+    def attn_entropy_penalty(self):
+        vals = [l._last_attn_entropy for l in self.layers if l._last_attn_entropy is not None]
+        for l in self.layers:
+            l._last_attn_entropy = None
+        if not vals:
+            return None
+        return torch.stack(vals).mean()
 
     # IT: Forward: RevIN → multi-scala embed → attention inter-feature → testa output.
     #     g (opzionale, in coda): gate regime causale (B, 3) per head_type="regime_moe";

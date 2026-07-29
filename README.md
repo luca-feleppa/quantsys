@@ -36,13 +36,13 @@
 
 🇮🇹 `data/`, `models/` e `results/` sono **gitignored**: pesi e parquet sono grandi e i dati di mercato non sono ridistribuibili. Cosa significa in pratica per chi clona:
 
-- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (320 test, ~30s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
+- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (342 test, ~35s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
 - **Rigenerabile:** dataset (`scripts/01_download_data.py`, Binance pubblico + una chiave FRED gratuita per la macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min per 5 seed iTransformer su RTX 2070 Super) → giudice QLIKE (`scripts/vol/dev_vols_qlike.py`).
 - **NON rigenerabile** (raccolta forward, per costruzione): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — snapshot IV/book/trade e forward test su testnet. I numeri del braccio short-vol non sono riproducibili da un clone: sono un log d'esperimento, e sono presentati come tali.
 
 **EN** `data/`, `models/` and `results/` are **gitignored**: weights and parquets are large and market data is not redistributable. What that means when you clone:
 
-- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (320 tests, ~30s, CPU), including golden tests on the 104-feature list and live↔training parity.
+- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (342 tests, ~35s, CPU), including golden tests on the 104-feature list and live↔training parity.
 - **Regenerable:** dataset (`scripts/01_download_data.py`, public Binance + a free FRED key for macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min for 5 iTransformer seeds on an RTX 2070 Super) → QLIKE judge (`scripts/vol/dev_vols_qlike.py`).
 - **NOT regenerable** (forward collection, by construction): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — IV/book/trade snapshots and the testnet forward test. The short-vol arm's numbers cannot be reproduced from a clone: they are an experiment log, and are presented as such.
 

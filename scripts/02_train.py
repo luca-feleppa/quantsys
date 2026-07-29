@@ -169,7 +169,8 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
               use_sample_weights: bool = False,
               mixup_alpha: float = 0.0,
               crps_distill_weight: float = 0.0,
-              use_regime_gate: bool = False):
+              use_regime_gate: bool = False,
+              attn_entropy_lambda: float = 0.0):
     """Training con loss asimmetrica + CRPS ausiliario + distillation + direction-value loss.
 
     Se use_distillation=True, il dataloader contiene soft labels come tensori
@@ -207,6 +208,11 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
     model.train(); total = 0.0
     _grad_norms_acc = []  # IT: norme pre-clip per detect exploding/vanishing
                           # EN: pre-clip norms to detect exploding/vanishing grads
+    # IT: A10 — accumulatori di H_norm (solo se λ>0). Restano a zero sul path
+    #     production, dove il ramo che li incrementa non viene mai eseguito.
+    # EN: A10 — H_norm accumulators (only if λ>0). They stay at zero on the
+    #     production path, where the branch that increments them never runs.
+    entropy_sum, entropy_n = 0.0, 0
     opt.zero_grad(set_to_none=True)
     for step, batch in enumerate(loader):
         # IT: sample weights, se presenti, sono SEMPRE l'ultimo tensore del batch
@@ -324,6 +330,25 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
             else:
                 loss = loss_real
 
+            # IT: A10 (pre-reg STATUS 2026-07-28) — penalità entropica sull'attention.
+            #     Obiettivo effettivo sul ramo quantile: 0.7·pinball + 0.3·CE + λ·H_norm.
+            #     H_norm ∈ [0,1] (entropia normalizzata per log N), quindi λ è il costo
+            #     MASSIMO in unità di loss. A λ=0 il blocco è saltato per intero e
+            #     `attn_entropy_penalty()` non viene nemmeno chiamata → path invariato.
+            #     `getattr`: solo iTransformer espone la penalità (nhits/tcnmamba no).
+            # EN: A10 (STATUS 2026-07-28 pre-reg) — attention entropy penalty. Effective
+            #     objective on the quantile branch: 0.7·pinball + 0.3·CE + λ·H_norm.
+            #     H_norm ∈ [0,1] (entropy normalized by log N), so λ is the MAXIMUM cost
+            #     in loss units. At λ=0 the block is skipped entirely and
+            #     `attn_entropy_penalty()` is never called → unchanged path.
+            #     `getattr`: only the iTransformer exposes the penalty (nhits/tcnmamba don't).
+            if attn_entropy_lambda > 0:
+                _pen_fn = getattr(model, "attn_entropy_penalty", None)
+                _pen = _pen_fn() if _pen_fn is not None else None
+                if _pen is not None:
+                    loss = loss + attn_entropy_lambda * _pen
+                    entropy_sum += float(_pen.detach()); entropy_n += 1
+
             loss = loss / grad_accum_steps
         loss_val = loss.item() * grad_accum_steps
         # IT: NaN/Inf skip per non corrompere le statistiche di AMP scaler
@@ -361,6 +386,13 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
             "p95":  float(_np_g.percentile(_grad_norms_acc, 95)),
             "max":  float(max(_grad_norms_acc)),
         }
+    # IT: A10 — H_norm media dell'epoca appesa a `opt` (stesso pattern delle
+    #     grad-norm): il contratto di ritorno di run_train resta invariato, e il
+    #     main loop può loggare la traiettoria di H_norm senza firma nuova.
+    # EN: A10 — epoch-mean H_norm stashed on `opt` (same pattern as the grad
+    #     norms): run_train's return contract stays unchanged and the main loop can
+    #     log the H_norm trajectory without a new signature.
+    opt._qs_attn_entropy = (entropy_sum / entropy_n) if entropy_n else None
     return total / len(loader)
 
 
@@ -1025,6 +1057,11 @@ def main():
                 # IT: A3 — default "single" = path storico bit-identico.
                 # EN: A3 — default "single" = bit-identical legacy path.
                 head_type       = _head_type,
+                # IT: A10 — default 0.0 = nessuna materializzazione della matrice di
+                #     attention, path bit-identico. >0 accende misura + penalità.
+                # EN: A10 — default 0.0 = no attention-matrix materialization,
+                #     bit-identical path. >0 turns on measurement + penalty.
+                attn_entropy_lambda = mcfg.get("attn_entropy_lambda", 0.0),
             ).to(device)
             log.info(f"Architettura: QuantiTransformer  d_model={mcfg.get('tft_d_model', 128)}  layers={mcfg.get('tft_n_layers', 3)}  T={_T}  head_type={_head_type}")
         elif architecture == "tft":
@@ -1273,7 +1310,19 @@ def main():
                 mixup_alpha         = tcfg.get("mixup_alpha",            0.0),
                 crps_distill_weight = tcfg.get("crps_distill_weight",    0.0),
                 use_regime_gate     = use_regime_gate,
+                # IT: A10 — λ della penalità entropica (0.0 default = leva spenta).
+                # EN: A10 — entropy-penalty λ (0.0 default = lever off).
+                attn_entropy_lambda = mcfg.get("attn_entropy_lambda",     0.0),
             )
+            # IT: A10 — traiettoria di H_norm nella history: serve al manipulation
+            #     check ④ (la penalità ha davvero concentrato le mappe?) e a vedere
+            #     se il termine satura. Assente sul path production (λ=0 → None).
+            # EN: A10 — H_norm trajectory in the history: feeds manipulation check ④
+            #     (did the penalty actually concentrate the maps?) and shows whether
+            #     the term saturates. Absent on the production path (λ=0 → None).
+            _attn_h = getattr(_opt, "_qs_attn_entropy", None)
+            if _attn_h is not None:
+                _history.setdefault("attn_entropy", []).append(float(_attn_h))
             vl_nll, _all_mu, _all_y, _val_metrics, _val_sig, _val_nu = run_eval(_model, val_dl, device, has_macro, use_regime_gate=use_regime_gate)
             da = _val_metrics["directional_acc"]
             sp = _val_metrics["spearman"]
@@ -1425,6 +1474,13 @@ def main():
         "n_output_experts":    mcfg.get("n_output_experts", 1),
         "patch_size":          mcfg.get("patch_size", 1),
         "drop_path_rate":      mcfg.get("drop_path_rate", 0.0),
+        # IT: A10 — record del λ con cui il modello è stato addestrato (0.0 =
+        #     nessuna penalità). Serve a rendere il checkpoint auto-descrittivo:
+        #     il giudice valuta comunque con Flash attention su entrambi i bracci.
+        # EN: A10 — record of the λ the model was trained with (0.0 = no penalty).
+        #     Makes the checkpoint self-describing: the judge evaluates both arms
+        #     with Flash attention regardless.
+        "attn_entropy_lambda": mcfg.get("attn_entropy_lambda", 0.0),
         # TCNMamba parameters
         "d_model":             mcfg.get("d_model", 128),
         "tcn_layers":          mcfg.get("tcn_layers", 4),

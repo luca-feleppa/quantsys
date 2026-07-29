@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from quantsys.utils import setup_logging, load_config, interval_minutes_from_cfg, models_root, dataset_npz_path  # noqa: E402
 # IT: QLIKE + ε ora vivono nel modulo condiviso (single source of truth con l'harness 02b).
 # EN: QLIKE + ε now live in the shared module (single source of truth with the 02b harness).
-from quantsys.model.vol_metrics import qlike, qlike_series, diebold_mariano, EPS  # noqa: E402
+from quantsys.model.vol_metrics import qlike, qlike_series, diebold_mariano, duan_smearing, EPS  # noqa: E402
 
 setup_logging()
 log = logging.getLogger("quantsys.script.vols_qlike")
@@ -77,9 +77,16 @@ def main():
     #     sandbox); without the choice the judge cannot target the right dir.
     #     2026-07-19: same fix for itransformer_a8_mixup (models_a8_mixup sandbox,
     #     B3 run) — added EX-ANTE, before any A8 training.
+    #     2026-07-29: stesso fix EX-ANTE per itransformer_a10_sparsity (pre-reg A10
+    #     del 28/07, sandbox models_a10_sparsity) — aggiunto prima di scrivere il
+    #     primo checkpoint, così il giudice non blocca il run a GPU già spesa.
+    # EN: 2026-07-29: same EX-ANTE fix for itransformer_a10_sparsity (A10 pre-reg of
+    #     28/07, models_a10_sparsity sandbox) — added before the first checkpoint
+    #     exists, so the judge cannot block the run after the GPU is already spent.
     ap.add_argument("--arch", default="itransformer",
                     choices=["itransformer", "nhits", "tcnmamba", "lstm",
-                             "itransformer_regime_moe", "itransformer_a8_mixup"],
+                             "itransformer_regime_moe", "itransformer_a8_mixup",
+                             "itransformer_a10_sparsity"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
     args = ap.parse_args()
@@ -105,6 +112,24 @@ def main():
     # EN: split to judge — val by default (val-first); test ONLY once val sanity passes.
     split = os.environ.get("QUANTSYS_VOLS_SPLIT", "val")
     assert split in ("val", "test")
+
+    # IT: C1 (pre-reg STATUS 2026-07-28) — leva della correzione di smearing di Duan
+    #     (1983) sul giudice. INERTE di default: a flag spento non si stima nulla, non
+    #     si esegue la passata di inferenza sul train e il path numerico è quello
+    #     storico bit-per-bit (le metriche `res`/`gate` non vengono MAI toccate dalla
+    #     correzione: il blocco smeared vive in una sezione separata del report).
+    #     Non è una leva di modello ma un controllo di SPECIFICAZIONE del giudice.
+    # EN: C1 (STATUS 2026-07-28 pre-reg) — Duan (1983) smearing-correction lever on the
+    #     judge. INERT by default: with the flag off nothing is estimated, the train
+    #     inference pass is skipped and the numeric path is the historical one
+    #     bit-for-bit (the correction NEVER touches `res`/`gate`: the smeared block
+    #     lives in a separate report section). This is a judge SPECIFICATION check,
+    #     not a model lever.
+    smearing = os.environ.get("QUANTSYS_QLIKE_SMEARING", "0") == "1"
+    if smearing:
+        log.info("C1 SMEARING ATTIVO / ACTIVE (QUANTSYS_QLIKE_SMEARING=1): "
+                 "ŝ stimato SOLO su train, riportato accanto ai valori raw / "
+                 "ŝ estimated on TRAIN only, reported alongside the raw values")
 
     # ── Ground truth + feature HAR dai raw candles (stessa definizione del target) ──
     raw = pd.read_parquet("data/raw_candles.parquet")
@@ -182,19 +207,28 @@ def main():
         G = torch.from_numpy(build_regime_gate(d[f"t_{split}"]))
         log.info(f"regime_moe: gate (N,3) costruito per t_{split} / gate built for t_{split}")
 
-    mus = []
-    # IT: EnsembleModel.__call__ → (mu_ens, sigma_ens, nu_ens) in spazio z (AMP off interno).
-    # EN: EnsembleModel.__call__ → (mu_ens, sigma_ens, nu_ens) in z-space (AMP off internally).
-    with torch.no_grad():
-        for i in range(0, len(X), 256):
-            xb = X[i:i + 256].to(device)
-            xmb = Xm[i:i + 256].to(device) if Xm is not None else None
-            if G is not None:
-                mu, _, _ = model(xb, xmb, g=G[i:i + 256].to(device))
-            else:
-                mu, _, _ = model(xb, xmb)
-            mus.append(mu.detach().cpu().numpy().ravel())
-    mu_z = np.concatenate(mus)
+    # IT: forward dell'ensemble in batch da 256 → μ in spazio z. Estratto in funzione
+    #     (C1) per riusare lo STESSO batching sul train split quando serve stimare ŝ:
+    #     operazioni e ordine invariati rispetto al loop inline storico → bit-identico.
+    #     EnsembleModel.__call__ → (mu_ens, sigma_ens, nu_ens) in spazio z (AMP off interno).
+    # EN: ensemble forward in 256-sized batches → μ in z-space. Extracted into a function
+    #     (C1) to reuse the SAME batching on the train split when ŝ must be estimated:
+    #     operations and order unchanged vs the historical inline loop → bit-identical.
+    #     EnsembleModel.__call__ → (mu_ens, sigma_ens, nu_ens) in z-space (AMP off internally).
+    def _forward_mu_z(Xa, Xma, Ga) -> np.ndarray:
+        mus = []
+        with torch.no_grad():
+            for i in range(0, len(Xa), 256):
+                xb = Xa[i:i + 256].to(device)
+                xmb = Xma[i:i + 256].to(device) if Xma is not None else None
+                if Ga is not None:
+                    mu, _, _ = model(xb, xmb, g=Ga[i:i + 256].to(device))
+                else:
+                    mu, _, _ = model(xb, xmb)
+                mus.append(mu.detach().cpu().numpy().ravel())
+        return np.concatenate(mus)
+
+    mu_z = _forward_mu_z(X, Xm, G)
     # IT: inversione COMPLETA z→raw: μ·IQR + centro (vedi nota in testa).
     # EN: FULL z→raw inversion: μ·IQR + center (see header note).
     log_pred_nn_full = mu_z * s + c
@@ -267,6 +301,83 @@ def main():
     except Exception as e:  # pragma: no cover
         log.warning(f"breakdown per-regime non disponibile / unavailable: {e}")
 
+    # ── C1: correzione di smearing di Duan (1983), SIMMETRICA sui due lati ──────
+    # IT: pre-reg STATUS 2026-07-28. ŝ = media di exp(ε) sui residui in log del solo
+    #     TRAIN, applicato in valutazione come RV_corr = exp(log_pred)·ŝ. Entrambi i
+    #     lati del confronto (NN e HAR) sono corretti con il PROPRIO fattore: correggere
+    #     un lato solo è escluso ex-ante dalla pre-registrazione. `naive` è descrittivo.
+    #     Le condizioni ①②③ di adozione sono calcolate qui ma NON decidono nulla da
+    #     sole: la decisione (e la riscrittura della banda pubblicata) resta manuale.
+    #     Il blocco `metrics` e il `gate` pre-registrato del 2026-06-10 restano INTATTI.
+    # EN: STATUS 2026-07-28 pre-reg. ŝ = mean of exp(ε) over the TRAIN-only log
+    #     residuals, applied at evaluation as RV_corr = exp(log_pred)·ŝ. BOTH sides of
+    #     the comparison (NN and HAR) get their OWN factor: correcting one side only is
+    #     excluded ex-ante by the pre-registration. `naive` is descriptive. Adoption
+    #     conditions ①②③ are computed here but decide nothing on their own: the
+    #     decision (and rewriting the published band) stays manual. The `metrics` block
+    #     and the pre-registered 2026-06-10 `gate` are left UNTOUCHED.
+    smear_block = {"enabled": bool(smearing)}
+    if smearing:
+        # IT: ŝ_HAR e ŝ_naive dai residui IN-SAMPLE di train (stesso campione dell'OLS).
+        # EN: ŝ_HAR and ŝ_naive from the IN-SAMPLE train residuals (same sample as the OLS).
+        eps_har = tr["y"].values - Xtr @ beta
+        eps_naive = tr["y"].values - tr["xh"].values
+
+        # IT: ŝ_NN — passata di inferenza sul TRAIN split (~52k finestre × 5 membri).
+        #     `from_numpy` (zero-copy) invece di `tensor` per non duplicare i 2.6 GB;
+        #     tensori liberati subito dopo. Residuo in log: (y_z − μ_z)·scale (il centro
+        #     si cancella nella differenza — stessa inversione del giudice).
+        # EN: ŝ_NN — inference pass over the TRAIN split (~52k windows × 5 members).
+        #     `from_numpy` (zero-copy) rather than `tensor` to avoid duplicating 2.6 GB;
+        #     tensors freed right after. Log residual: (y_z − μ_z)·scale (the center
+        #     cancels in the difference — same inversion as the judge).
+        import gc
+        Xtr_t = torch.from_numpy(np.ascontiguousarray(d["X_train"]))
+        Xmtr_t = (torch.from_numpy(np.ascontiguousarray(d["X_macro_train"]))
+                  if "X_macro_train" in d.files else None)
+        Gtr = None
+        if _head_type == "regime_moe":
+            from quantsys.model.regime_gate import build_regime_gate as _brg_tr
+            Gtr = torch.from_numpy(_brg_tr(d["t_train"]))
+        log.info(f"C1: forward sul train per ŝ_NN / train forward for ŝ_NN "
+                 f"({len(Xtr_t)} finestre/windows)...")
+        mu_z_train = _forward_mu_z(Xtr_t, Xmtr_t, Gtr)
+        eps_nn = (np.asarray(d["y_train"], dtype=np.float64) - mu_z_train) * s
+        del Xtr_t, Xmtr_t, Gtr
+        gc.collect()
+
+        s_nn, s_har, s_naive = (duan_smearing(eps_nn), duan_smearing(eps_har),
+                                duan_smearing(eps_naive))
+        log.info(f"C1 fattori di Duan / Duan factors: ŝ_NN={s_nn:.4f}  ŝ_HAR={s_har:.4f}  "
+                 f"ŝ_naive={s_naive:.4f}  (n_train NN={len(eps_nn)}, HAR={len(eps_har)})")
+
+        factors = {"nn": s_nn, "har": s_har, "naive": s_naive}
+        preds = {"nn": log_pred_nn, "har": log_pred_har, "naive": log_pred_naive}
+        metrics_smear = {}
+        for name, lp in preds.items():
+            metrics_smear[name] = {"qlike": qlike(rv_true, np.exp(lp) * factors[name])}
+            log.info(f"{name:6s} QLIKE_smear={metrics_smear[name]['qlike']:.5f} "
+                     f"(raw {res[name]['qlike']:.5f}, ŝ={factors[name]:.4f})")
+
+        ratio_raw = res["nn"]["qlike"] / res["har"]["qlike"]
+        ratio_smear = metrics_smear["nn"]["qlike"] / metrics_smear["har"]["qlike"]
+        smear_block.update({
+            "factors": {k: float(v) for k, v in factors.items()},
+            "n_train": {"nn": int(len(eps_nn)), "har": int(len(eps_har))},
+            "metrics_smeared": metrics_smear,
+            "ratio_raw": float(ratio_raw),
+            "ratio_smear": float(ratio_smear),
+            "delta_ratio": float(ratio_smear - ratio_raw),
+            # IT: ① coerenza di specificazione su ENTRAMBI i lati | EN: ① specification coherence on BOTH sides
+            "cond1_coherent_both_sides": bool(
+                metrics_smear["nn"]["qlike"] <= res["nn"]["qlike"]
+                and metrics_smear["har"]["qlike"] <= res["har"]["qlike"]),
+            # IT: ② materialità ≥0.02 di ratio | EN: ② materiality ≥0.02 of ratio
+            "cond2_material": bool(abs(ratio_smear - ratio_raw) >= 0.02),
+            # IT: ③ validità campione (non-leakage è strutturale nel codice) | EN: ③ sample validity
+            "cond3_n_obs": bool(len(ev) >= 5000),
+        })
+
     gate = {
         "split": split,
         "nn_vs_har_ratio": res["nn"]["qlike"] / res["har"]["qlike"],
@@ -290,7 +401,7 @@ def main():
     out_path = out_dir / f"qlike_report_{interval}_{split}{_sandbox}.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"metrics": res, "gate": gate, "per_regime": per_regime,
-                   "har_beta": list(map(float, beta))}, f, indent=2)
+                   "har_beta": list(map(float, beta)), "smearing": smear_block}, f, indent=2)
 
     print(f"\n══════ VOL-S QLIKE [{interval}·{split}] ══════")
     for name in ("nn", "har", "naive"):
@@ -303,6 +414,21 @@ def main():
         if r and np.isfinite(r.get("dm_hln", float("nan"))):
             print(f"  DM {label:12s} stat={r['dm_hln']:+7.3f}  p={r['p_value']:.2e}"
                   f"  (HAC lag={r['hac_lag']}, n_eff≈{r['n_eff']:.0f}) [descrittivo/descriptive]")
+    # IT: C1 — stampa raw-vs-smeared affiancati; le tre condizioni sono INFORMATIVE
+    #     (la decisione di adozione è manuale, con il vincolo anti-goalpost).
+    # EN: C1 — prints raw-vs-smeared side by side; the three conditions are INFORMATIVE
+    #     (the adoption decision is manual, under the anti-goalpost constraint).
+    if smear_block["enabled"]:
+        print(f"  ── C1 smearing (Duan 1983) ── ŝ: NN={smear_block['factors']['nn']:.4f}  "
+              f"HAR={smear_block['factors']['har']:.4f}  naive={smear_block['factors']['naive']:.4f}")
+        for name in ("nn", "har", "naive"):
+            print(f"     {name:6s} QLIKE raw={res[name]['qlike']:.5f} → "
+                  f"smear={smear_block['metrics_smeared'][name]['qlike']:.5f}")
+        print(f"     ratio NN/HAR: raw={smear_block['ratio_raw']:.4f} → "
+              f"smear={smear_block['ratio_smear']:.4f}  (Δ={smear_block['delta_ratio']:+.4f})")
+        print(f"     ① coerenza/coherence={smear_block['cond1_coherent_both_sides']}  "
+              f"② materiale/material(≥0.02)={smear_block['cond2_material']}  "
+              f"③ n≥5000={smear_block['cond3_n_obs']}")
     print(f"  VERDETTO [{split}]: {gate['verdict']}   → {out_path}")
 
 
