@@ -185,3 +185,52 @@ def test_il_frame_cj_parte_al_piu_una_barra_dopo():
     raw = _raw_from_returns(rng.normal(0, 0.01, N))
     f_rv, f_cj = build_har_frame(raw, H, BARS_DAY), build_har_cj_frame(raw, H, BARS_DAY)
     assert 0 <= len(f_rv) - len(f_cj) <= 1
+
+
+# ── (d) allineamento appaiato · paired alignment (audit 2026-07-30) ──────────
+
+def test_indici_identici_non_solo_di_pari_lunghezza():
+    # IT: il disegno appaiato richiede gli STESSI sample nello STESSO ordine. Due indici
+    #     di pari lunghezza ma ordine diverso accoppierebbero previsione e verita'
+    #     sbagliate producendo un QLIKE plausibile ma falso: e' l'errore che non si vede
+    #     guardando il numero, quindi va intercettato qui.
+    # EN: the paired design requires the SAME samples in the SAME order. Two indices of
+    #     equal length but different order would pair predictions with the wrong ground
+    #     truth, yielding a plausible-looking but false QLIKE: the kind of error you
+    #     cannot spot by looking at the number, so it must be caught here.
+    rng = np.random.default_rng(9)
+    raw = _raw_from_returns(rng.normal(0, 0.01, N))
+    f_rv, f_cj = build_har_frame(raw, H, BARS_DAY), build_har_cj_frame(raw, H, BARS_DAY)
+    ev = f_rv.iloc[250:]
+    ev_cj = f_cj.loc[f_cj.index.intersection(ev.index)]
+    assert ev_cj.index.equals(ev.index) or len(ev_cj) < len(ev)
+    if ev_cj.index.equals(ev.index):
+        assert ev_cj.index.is_monotonic_increasing
+        np.testing.assert_array_equal(ev.loc[ev_cj.index, "y"].values, ev_cj["y"].values)
+
+
+def test_coefficienti_sui_salti_non_sono_identificati():
+    # IT: DIAGNOSTICA documentata dall'audit 2026-07-30, non un requisito: i regressori
+    #     di salto hanno scala ~1000x piu' piccola delle componenti continue, quindi
+    #     l'OLS compensa con coefficienti enormi e instabili. Il test FISSA il fatto
+    #     osservato (scala minuscola) cosi' che una futura ri-specificazione che lo
+    #     corregga faccia fallire questo test e obblighi a rileggere la nota in
+    #     TEORIA.md §12.2 invece di cambiare i numeri in silenzio.
+    # EN: DIAGNOSTIC documented by the 2026-07-30 audit, not a requirement: the jump
+    #     regressors are ~1000x smaller in scale than the continuous components, so OLS
+    #     compensates with huge, unstable coefficients. The test PINS the observed fact
+    #     (tiny scale) so that a future respecification fixing it makes this test fail
+    #     and forces a re-read of the TEORIA.md §12.2 note instead of silently changing
+    #     the numbers.
+    rng = np.random.default_rng(10)
+    r = rng.normal(0, 0.01, N)
+    r[N // 3] = 0.3                      # IT/EN: qualche salto, come nei dati reali
+    f = build_har_cj_frame(_raw_from_returns(r), H, BARS_DAY)
+    std_c = f[["xc_h", "xc_w", "xc_m"]].values.std()
+    std_j = f[["xj_h", "xj_w", "xj_m"]].values.std()
+    assert std_j < std_c / 10, (
+        f"scala dei salti non piu' trascurabile (std_j={std_j:.2e} vs std_c={std_c:.2e}): "
+        f"se e' una ri-specificazione voluta, aggiorna la nota di multicollinearita' in "
+        f"TEORIA.md 12.2 / if this is an intended respecification, update the "
+        f"multicollinearity note in TEORIA.md 12.2"
+    )

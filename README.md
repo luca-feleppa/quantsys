@@ -17,7 +17,7 @@
 | **Il risultato.** Il forecast NN della realized variance batte **HAR-CJ** (decomposizione continua/salti — la baseline forte, non quella comoda) del **32% in QLIKE su test** e del 23% su val (0.236 vs 0.346; naive 0.793 — Diebold-Mariano HAC **p ≤ 4.3·10⁻⁴**, vedi `TEORIA.md` §12.2). Contro HAR-RV semplice la banda sarebbe −27%÷−36%: la differenza è la misura di **quanto del vantaggio veniva da una baseline debole**, quantificata con un gate pre-registrato invece che assunta | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
 | **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `TEORIA.md` §12.1 (protocollo in 5 passi) · `STATUS.md` (pre-registrazioni in testa) |
 | **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `TEORIA.md` §12.3-12.4 (corpus KILL, con i numeri) |
-| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **353 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
+| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **355 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
 
 🇮🇹 Il progetto è organizzato attorno a un'asimmetria dichiarata: **i momenti pari (varianza, RV) generalizzano fuori campione su questo asset, i momenti dispari (segno, asimmetria) no** — per la rete *e* per le baseline econometriche. Le tre linee di codice (vol-forecasting, monetizzazione short-vol, direzionale) esistono per documentare quella asimmetria, non per nasconderla.
 
@@ -28,7 +28,7 @@
 | **The result.** The NN realized-variance forecast beats **HAR-CJ** (continuous/jump decomposition — the strong baseline, not the convenient one) by **32% in test QLIKE** and 23% on val (0.236 vs 0.346; naive 0.793 — Diebold-Mariano HAC **p ≤ 4.3·10⁻⁴**), val→test coherent. Against plain HAR-RV the band would be −27% to −36%: the gap measures **how much of the edge came from a weak baseline**, quantified by a pre-registered gate rather than assumed | `scripts/vol/dev_vols_qlike.py` — the judge that produces the number, val-first split |
 | **How an idea lives or dies.** Every experiment is **pre-registered**: metrics, thresholds and minimum n written and committed *before* running | `TEORIA.md` §12.1 (5-step protocol) · `STATUS.md` (pre-registrations on top) |
 | **What was tried and does NOT work**, with numbers: directional at 1m and 1h, signed semivariance, IVS relative-value, 4 training levers, regime gating | `TEORIA.md` §12.3-12.4 (KILL corpus, with numbers) |
-| **What an outside reader can verify** without downloading data | `pytest tests/` → **353 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
+| **What an outside reader can verify** without downloading data | `pytest tests/` → **355 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
 
 **EN** The project is organized around a stated asymmetry: **even moments (variance, RV) generalize out-of-sample on this asset, odd moments (sign, skew) do not** — for the network *and* for the econometric baselines. The three code lines (vol forecasting, short-vol monetization, directional) exist to document that asymmetry, not to hide it.
 
@@ -36,13 +36,13 @@
 
 🇮🇹 `data/`, `models/` e `results/` sono **gitignored**: pesi e parquet sono grandi e i dati di mercato non sono ridistribuibili. Cosa significa in pratica per chi clona:
 
-- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (353 test, ~30s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
+- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (355 test, ~30s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
 - **Rigenerabile:** dataset (`scripts/01_download_data.py`, Binance pubblico + una chiave FRED gratuita per la macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min per 5 seed iTransformer su RTX 2070 Super) → giudice QLIKE (`scripts/vol/dev_vols_qlike.py`).
 - **NON rigenerabile** (raccolta forward, per costruzione): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — snapshot IV/book/trade e forward test su testnet. I numeri del braccio short-vol non sono riproducibili da un clone: sono un log d'esperimento, e sono presentati come tali.
 
 **EN** `data/`, `models/` and `results/` are **gitignored**: weights and parquets are large and market data is not redistributable. What that means when you clone:
 
-- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (353 tests, ~30s, CPU), including golden tests on the 104-feature list and live↔training parity.
+- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (355 tests, ~30s, CPU), including golden tests on the 104-feature list and live↔training parity.
 - **Regenerable:** dataset (`scripts/01_download_data.py`, public Binance + a free FRED key for macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min for 5 iTransformer seeds on an RTX 2070 Super) → QLIKE judge (`scripts/vol/dev_vols_qlike.py`).
 - **NOT regenerable** (forward collection, by construction): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — IV/book/trade snapshots and the testnet forward test. The short-vol arm's numbers cannot be reproduced from a clone: they are an experiment log, and are presented as such.
 

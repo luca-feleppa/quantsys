@@ -204,11 +204,24 @@ def main():
         har_cj = build_har_cj_frame(raw, h, bars_day)
         tr_cj = har_cj.loc[har_cj.index.intersection(tr.index)]
         ev_cj = har_cj.loc[har_cj.index.intersection(ev.index)]
-        if len(ev_cj) != len(ev):
+        # IT: guard sull'IDENTITÀ dell'indice, non sul solo conteggio: due indici della
+        #     stessa lunghezza ma di ordine diverso accoppierebbero previsioni e verità
+        #     sbagliate producendo un QLIKE plausibile ma falso — il tipo di errore che
+        #     non si vede guardando il numero. (Audit 2026-07-30: verificato che nel run
+        #     reale gli indici erano identici elemento per elemento; il guard debole non
+        #     aveva prodotto danni, ma non lo avrebbe intercettato.)
+        # EN: guard on index IDENTITY, not just count: two indices of equal length but
+        #     different order would pair predictions with the wrong ground truth, giving
+        #     a plausible-looking but false QLIKE — the kind of error you cannot spot by
+        #     looking at the number. (2026-07-30 audit: verified the real run had
+        #     element-wise identical indices; the weak guard did no harm but would not
+        #     have caught it.)
+        if not ev_cj.index.equals(ev.index):
             raise RuntimeError(
                 f"C2: allineamento HAR-CJ↔HAR-RV non esatto sull'eval "
-                f"({len(ev_cj)} vs {len(ev)}) — il disegno appaiato della pre-reg ③ "
-                f"richiede gli STESSI sample / non-exact HAR-CJ↔HAR-RV eval alignment"
+                f"({len(ev_cj)} vs {len(ev)} righe, indici {'di pari lunghezza ma diversi' if len(ev_cj)==len(ev) else 'di lunghezza diversa'}) "
+                f"— il disegno appaiato della pre-reg ③ richiede gli STESSI sample nello "
+                f"STESSO ordine / non-exact HAR-CJ↔HAR-RV eval alignment"
             )
         Xtr_cj = np.column_stack([np.ones(len(tr_cj)), tr_cj[HAR_CJ_COLS].values])
         beta_cj, *_ = np.linalg.lstsq(Xtr_cj, tr_cj["y"].values, rcond=None)
