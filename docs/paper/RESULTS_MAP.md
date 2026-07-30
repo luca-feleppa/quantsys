@@ -41,7 +41,7 @@
 
 ### 2a. VOL-S 1h — PASS (positive control del paper / the paper's positive control)
 - **Artefatto/Artifact:** `results/vols/qlike_report_1h_{val,test}.json` ✓; modelli in `models/backup_1h_vols/` (= `models/itransformer/` correnti); giudice `scripts/vol/dev_vols_qlike.py`.
-- **Numeri/Numbers:** QLIKE test NN **0.2572** vs HAR-RV 0.3681 vs naive 0.8067 → **NN/HAR = 0.699 (−30%)**; val 0.744 → test 0.699 **coerenti** (niente anti-correlazione). Test: Spearman +0.4532 (p≈0), DA 71.3%, ICIR +3.56 su 5 sotto-periodi, coverage 95.2%.
+- **Numeri/Numbers:** QLIKE test NN **0.2572** vs HAR-RV 0.3681 vs naive 0.8067 → **NN/HAR = 0.699 (−30%)** ⚠ **AGGIORNAMENTO 2026-07-30 (gate C2): la baseline di riferimento non e' piu' HAR-RV ma HAR-CJ** (decomposizione continua/salti). Contro HAR-CJ il vantaggio e' **22.6% su val e 31.6% su test** (NN 0.23637 vs 0.34572 su test), p <= 4.3e-04. Il paper deve citare la banda **-23% / -32%**; i numeri contro HAR-RV qui sotto restano validi come confronto storico ma NON sono il claim corrente. Dettaglio: `TEORIA.md` §12.2 e `STATUS.md` sezione C2.; val 0.744 → test 0.699 **coerenti** (niente anti-correlazione). Test: Spearman +0.4532 (p≈0), DA 71.3%, ICIR +3.56 su 5 sotto-periodi, coverage 95.2%.
 
 ### 2b. Robustezza purged k-fold + gate HAR-per-fold (1h) · Purged k-fold robustness + HAR-per-fold gate — **NUOVO 2026-06-22**
 - **Artefatto/Artifact:** `results/vols/wf_har_baseline_1h.json` ✓ (script `scripts/vol/wf_har_baseline.py`, helper `build_har_frame`/`har_fold_qlike` in `quantsys/model/vol_metrics.py`); QLIKE NN per-fold in `results/{arch}/walkforward_metrics_log_rv.json` (harness `scripts/02b_walkforward_validate.py`, fold-metric QLIKE). Pre-registrazione `STATUS.md` 2026-06-22.
