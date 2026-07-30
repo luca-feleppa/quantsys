@@ -5,7 +5,7 @@
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — C2 HAR-CJ COME BASELINE PIÙ FORTE NEL CONFRONTO QLIKE (linea vol 1h) · 2026-07-30 · **APERTA, MAI ESEGUITA**
+## 🎯 PRE-REGISTRAZIONE GATE — C2 HAR-CJ COME BASELINE PIÙ FORTE NEL CONFRONTO QLIKE (linea vol 1h) · 2026-07-30 · **CHIUSO: PASS 4/4 SU VAL E SU TEST → HAR-CJ ADOTTATA COME BASELINE DI RIFERIMENTO (⑤ in fondo)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun QLIKE di HAR-CJ è mai stato calcolato, su nessuno split; il codice della baseline **non esiste ancora** (`quantsys/model/vol_metrics.py` ha solo `build_har_frame`/`har_fold_qlike`, cioè HAR-RV semplice — verificato). ⚠ **Stessa natura di C1: controllo di SPECIFICAZIONE del giudice, non leva di modello** — non riapre la classe "lever di training" chiusa oggi con A10, e può spostare un **claim già pubblicato** (banda −27% ÷ −36%). Disciplina C1: un solo run per split, un solo estimatore, e il numero che esce viene riportato qualunque sia il segno.
 
@@ -39,6 +39,31 @@
 **Costo:** ~28 min GPU (5 seed sandbox, riproduzione deterministica) + CPU trascurabile per le due regressioni OLS. Nessuna contesa col live (04b è sul VPS). Nessuna dipendenza da dati VPS: eseguibile integralmente offline.
 
 **Sequenziamento:** nessun vincolo di calendario — non tocca campioni forward aperti. Prerequisito implementativo: `build_har_cj_frame`/`har_cj_fold_qlike` + test di inerzia del flag, da scrivere e verificare **prima** di spendere GPU.
+
+**⑤ ESITO — PASS 4/4 su val, one-shot su test PASS 4/4 → HAR-CJ ADOTTATA come baseline di riferimento, banda pubblicata riscritta.** Braccio pre-registrato rispettato alla lettera: 5 seed riaddestrati in sandbox `models_c2_sandbox` (~28 min, exit 0), `models/itransformer` production mai toccato, un solo run del giudice per split, nessuna variante di estimatore. Report: `results/vols/qlike_report_1h_{val,test}_models_c2_sandbox.json`.
+
+| | val | test |
+|---|---|---|
+| NN (5 membri) | 0.26143 | 0.23637 |
+| HAR-RV | 0.35698 | 0.36998 |
+| **HAR-CJ** | **0.33788** (−5.35%) | **0.34572** (−6.56%) |
+| ratio NN/HAR-RV | 0.7323 | 0.6389 |
+| **ratio NN/HAR-CJ** | **0.7737** | **0.6837** |
+| Δratio | **+0.0414** | **+0.0448** |
+| DM `nn_vs_har_cj` | −3.523, p=4.30e-04 | −4.298, p=1.75e-05 |
+| DM `har_cj_vs_har` | −3.703, p=2.15e-04 | −4.337, p=1.46e-05 |
+
+- **① la baseline è davvero più forte = TRUE**, e non per stima puntuale: HAR-CJ batte HAR-RV con **p ≈ 2·10⁻⁴ su val e 1.5·10⁻⁵ su test** (DM con varianza HAC). **Il contro-argomento pre-dichiarato non si è verificato:** a risoluzione oraria la bipower variation *ha* contenuto informativo, contro l'attesa che il rumore la rendesse inutile. È il primo risultato della giornata in cui il prior sfavorevole viene smentito.
+- **② il claim sopravvive = TRUE** su entrambi gli split: il NN batte HAR-CJ del **22.6% su val e del 31.6% su test**, ampiamente dentro il gate originale 0.95, con p ≤ 4.3·10⁻⁴.
+- **③ materiale = TRUE** (Δ = +0.0414 / +0.0448 ≫ 0.02) → la banda pubblicata **si riscrive**, come pre-dichiarato.
+- **④ n ≥ 5000 = TRUE** (6485 / 6486).
+- **Controllo di riproducibilità superato esattamente:** `QLIKE_val` del NN = **0.26143**, il valore atteso, alla quinta cifra. È la **terza** riproduzione indipendente della giornata (`models_smear_sandbox`, `models_a10_base`, `models_c2_sandbox`) — il path di training è deterministico e il controllo è ormai un invariante utilizzabile.
+
+**Lettura scientifica.** (a) **L'obiezione era fondata e il claim la supera.** Circa **un sesto** del vantaggio misurato (4.1-4.5 punti di ratio) era attribuibile alla debolezza della baseline, non alla bravura del modello; il restante 22-32% sopravvive a una baseline econometricamente seria. (b) **Il Δratio è stabile fra gli split** (+0.0414 val, +0.0448 test): l'irrobustimento della baseline costa al NN quasi la stessa quantità nei due periodi, quindi si tratta di un effetto **strutturale** e non di un'idiosincrasia di campione — è la ragione principale per cui il risultato è credibile. (c) La banda si stringe ma **il claim ne esce più difendibile**: la prima obiezione che un lettore competente muove al confronto è ora chiusa con un numero invece che con un'assunzione.
+
+**⚠ Diagnostica da documentare (non invalidante, non gating).** I coefficienti OLS sui salti sono numericamente estremi — `J[h,w,m] = (+44.164, −1.227, −89.441)` contro `C[h,w,m] = (0.241, 0.423, 0.228)`, normalissimi. Coefficienti giganti e di segno opposto sono la firma della **multicollinearità fra regressori a scala minuscola**: a 1h i salti sono piccoli, `log(1+J) ≈ J`, e l'OLS compensa con pesi enormi. **Non invalida il risultato** — la regressione è stimata sui soli residui di train e migliora QLIKE **fuori campione** su entrambi gli split con p ≤ 2·10⁻⁴, quindi generalizza. Ma una ri-specificazione (scalatura diversa dei salti, regolarizzazione, standardizzazione dei regressori) potrebbe fare meglio: sarebbe una **NUOVA pre-registrazione**, esclusa ex-ante dalla ② di questa.
+
+**Conseguenze pre-dichiarate applicate:** HAR-CJ è la **baseline di riferimento** del giudice; `QUANTSYS_HAR_CJ` resta il flag che la attiva (non è stato reso default per non toccare il path storico senza una decisione esplicita, ma la banda pubblicata è ora quella contro HAR-CJ); **banda riscritta a −23% ÷ −32%** (era −27% ÷ −36% contro HAR-RV), con i numeri HAR-RV conservati come contesto storico; `TEORIA.md` §12.2 e `README.md` aggiornati **nominando esplicitamente la baseline**; sandbox `models_c2_sandbox` eliminabile.
 
 ---
 
