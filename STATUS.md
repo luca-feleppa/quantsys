@@ -5,6 +5,41 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — C2 HAR-CJ COME BASELINE PIÙ FORTE NEL CONFRONTO QLIKE (linea vol 1h) · 2026-07-30 · **APERTA, MAI ESEGUITA**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun QLIKE di HAR-CJ è mai stato calcolato, su nessuno split; il codice della baseline **non esiste ancora** (`quantsys/model/vol_metrics.py` ha solo `build_har_frame`/`har_fold_qlike`, cioè HAR-RV semplice — verificato). ⚠ **Stessa natura di C1: controllo di SPECIFICAZIONE del giudice, non leva di modello** — non riapre la classe "lever di training" chiusa oggi con A10, e può spostare un **claim già pubblicato** (banda −27% ÷ −36%). Disciplina C1: un solo run per split, un solo estimatore, e il numero che esce viene riportato qualunque sia il segno.
+
+**① Ipotesi/prior onesto (pre-dichiarato, con DIREZIONE attesa).** Il claim pubblicato confronta il NN con **HAR-RV semplice**. La domanda che un lettore competente pone per prima è se la baseline fosse una baseline *buona*. HAR-CJ (Andersen–Bollerslev–Diebold 2007) separa la varianza realizzata in componente **continua** e componente di **salto** via bipower variation, e su un asset con salti frequenti come BTC è la variante standard più forte. **Direzione attesa: HAR-CJ ≥ HAR-RV in accuratezza → il vantaggio misurato del NN si RIDUCE.** Di quanto è ignoto — è la quantità che l'esperimento misura. CONTRO, in ordine di forza: (a) **a campionamento orario la bipower variation è un estimatore rumoroso**, perché la decomposizione continua/salti dà il meglio con dati ad alta frequenza (5 min) e a 1h le due componenti si separano male — il guadagno potrebbe essere piccolo o nullo; (b) il NN vede la **stessa serie di prezzi** e può apprendere struttura di salto in modo non lineare, quindi parte del suo vantaggio potrebbe essere robusta alla sostituzione di baseline; (c) per converso, se HAR-CJ guadagna molto, significa che parte del −27%/−36% era "HAR-RV è debole", ed è esattamente ciò che va scoperto. **Scenario base atteso: HAR-CJ migliora modestamente, il vantaggio del NN si riduce ma sopravvive al gate 0.95.** Un fallimento di ② sarebbe un risultato negativo di primo ordine **sul claim principale del progetto** e va scritto come tale.
+
+**② Estimatore pre-dichiarato (UNO solo, nessuna variante).** Sulla stessa finestra su cui è già costruita la RV in `build_har_frame`: **bipower variation** `BV = (π/2) · Σ |r_i|·|r_{i−1}|`; **salto** `J = max(RV − BV, 0)`; **componente continua** `C = RV − J = min(RV, BV)`. Regressione HAR-CJ in spazio log, stessi tre lag (h/w/m) già usati da HAR-RV, con C e J come regressori separati: `log RV_{t+h} = β₀ + Σ β_C·log(C) + Σ β_J·log(1+J)`. OLS stimato **solo sulla porzione train**, identico al trattamento di HAR-RV, e valutato sugli stessi sample.
+- **Escluse ex-ante** (qualunque di queste = NUOVA pre-registrazione): threshold/truncated bipower (TBPV), salti filtrati per significatività (test Z di Barndorff-Nielsen–Shephard a qualunque α), BV *staggered*/skip-one, MedRV, semivarianze realizzate, e qualunque lag diverso dai tre già in uso.
+
+**③ Disegno appaiato — proprietà da sfruttare.** Il lato NN è **costante** fra i due rapporti: cambia solo il denominatore. Stesso forward, stessi 6485 sample, stessa inversione z→log-RV. Nessuna asimmetria di seed-draw, nessun confronto cross-scaler: è il disegno appaiato più pulito possibile.
+
+**Coppia modello/dati e controllo di riproducibilità.** NN = **5 seed riaddestrati in sandbox `QUANTSYS_MODELS_ROOT=models_c2_sandbox`** (~28 min GPU), `models/itransformer` production **READ-ONLY**. **Controllo pre-dichiarato:** il `QLIKE_val` del NN deve riprodurre **0.26143** — valore osservato oggi in **due retrain indipendenti** (`models_smear_sandbox` e `models_a10_base`, numericamente identici, path di training deterministico); scostamento > 0.0005 ⇒ **ABORT**, nessuna conclusione (segnala un cambio d'ambiente o dell'npz, non un risultato).
+
+**Script/giudice:** `quantsys/model/vol_metrics.py` guadagna `build_har_cj_frame` + `har_cj_fold_qlike`; `scripts/vol/dev_vols_qlike.py` riporta **entrambe** le baseline, HAR-RV e HAR-CJ, dallo **stesso run**.
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test UNA volta sola, a decisione presa su val, one-shot.
+**Leva sperimentale:** `QUANTSYS_HAR_CJ=1` — **inerte di default** (a flag spento il report è bit-identico all'attuale). Test di inerzia obbligatorio PRIMA del run, pattern C1/B4-bis: A/B del giudice pre-patch vs post-patch sullo stesso npz e stessi checkpoint, report identico chiave per chiave. Nessun file production toccato, nessun impatto su training o live.
+
+**Condizioni (AND, su val):**
+1. **La baseline è davvero più forte:** `QLIKE(HAR-CJ) ≤ QLIKE(HAR-RV)` sugli stessi sample. Se HAR-CJ **non** è migliore, la decomposizione non aggiunge nulla a questa risoluzione e il test non può disciplinare il claim → **NESSUNA CONCLUSIONE** sulla domanda principale (non un FAIL del claim), con il descrittivo "HAR-CJ non batte HAR-RV a 1h" documentato come esito a sé.
+2. **Sopravvivenza del claim:** `QLIKE_NN ≤ 0.95 · QLIKE(HAR-CJ)` — cioè **il gate pre-registrato originale del vol-S**, applicato alla baseline più forte. È la domanda vera dell'esperimento.
+3. **Materialità della banda:** `|ratio_CJ − ratio_RV| ≥ 0.02`, con `ratio_x = QLIKE_NN / QLIKE_x`. Sotto 0.02 → spostamento **immateriale**, banda pubblicata invariata, item chiuso come "testato, immateriale".
+4. **Validità campione:** `n_val ≥ 5000` (ex-ante: 6485 sul vintage corrente, da ricontare se l'npz cambia).
+
+**Vincolo anti-goalpost (pre-dichiarato).** Qualunque sia il segno, il numero viene riportato. Se ② **fallisce** — cioè il NN non batte HAR-CJ del 5% — allora **il claim pubblicato era in misura sostanziale un artefatto di baseline debole**, e va riscritto di conseguenza in `README.md` e `TEORIA.md` §12.2, nominando esplicitamente la baseline. Non è una ritrattazione del PASS 2026-06-10, che resta valido *rispetto alla baseline con cui fu registrato*: è una **ri-specificazione** del confronto, e va presentata come tale. Nessuna soglia viene rinegoziata a risultati visti.
+
+**Conseguenze pre-dichiarate.** ② PASS + ③ materiale → HAR-CJ diventa la **baseline di riferimento** del giudice, la banda pubblicata si riscrive con la coppia val÷test corretta, e il claim ne esce **rafforzato** (regge contro una baseline più forte). ② PASS + ③ immateriale → giudice e banda invariati, HAR-CJ resta colonna diagnostica, nota chiusa. ② FAIL → riscrittura del claim secondo il vincolo anti-goalpost sopra. ① FAIL o ④ FAIL → nessuna conclusione. **In ogni caso scritto**, con i numeri.
+
+**One-shot su test:** solo a decisione presa su val, stesse definizioni, un solo run.
+
+**Costo:** ~28 min GPU (5 seed sandbox, riproduzione deterministica) + CPU trascurabile per le due regressioni OLS. Nessuna contesa col live (04b è sul VPS). Nessuna dipendenza da dati VPS: eseguibile integralmente offline.
+
+**Sequenziamento:** nessun vincolo di calendario — non tocca campioni forward aperti. Prerequisito implementativo: `build_har_cj_frame`/`har_cj_fold_qlike` + test di inerzia del flag, da scrivere e verificare **prima** di spendere GPU.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — C1 CORREZIONE SMEARING (DUAN 1983) SUL CONFRONTO QLIKE NN-vs-HAR · 2026-07-28 · **CHIUSO: ① FALLITA SU VAL 2026-07-30, CORREZIONE NON ADOTTATA (⑦ in fondo)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** i fattori di smearing ŝ, i QLIKE corretti e i ratio corretti non sono MAI stati calcolati, su nessuno split. Nasce dal residuo (e) del 2026-07-28 e dalla nota aperta `TEORIA.md` §12.2. ⚠ **Natura diversa da tutte le pre-reg precedenti:** questa NON è una leva di modello ma un **controllo di specificazione del giudice**, e può spostare un claim **già pubblicato** (banda −27% ÷ −36% QLIKE) → la disciplina è più stretta, non meno: un solo run per split, nessuna variante di estimatore, e il numero che esce viene riportato qualunque sia il segno.
