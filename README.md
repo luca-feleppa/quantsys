@@ -17,7 +17,7 @@
 | **Il risultato.** Il forecast NN della realized variance batte HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive 0.807 — Diebold-Mariano HAC **p ≤ 1.7·10⁻⁶**, vedi `TEORIA.md` §12.2), con val→test coerenti | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
 | **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `TEORIA.md` §12.1 (protocollo in 5 passi) · `STATUS.md` (pre-registrazioni in testa) |
 | **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `TEORIA.md` §12.3-12.4 (corpus KILL, con i numeri) |
-| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **319 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
+| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **353 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
 
 🇮🇹 Il progetto è organizzato attorno a un'asimmetria dichiarata: **i momenti pari (varianza, RV) generalizzano fuori campione su questo asset, i momenti dispari (segno, asimmetria) no** — per la rete *e* per le baseline econometriche. Le tre linee di codice (vol-forecasting, monetizzazione short-vol, direzionale) esistono per documentare quella asimmetria, non per nasconderla.
 
@@ -28,7 +28,7 @@
 | **The result.** The NN realized-variance forecast beats HAR-RV by **30% in test QLIKE** (0.257 vs 0.368; naive 0.807), val→test coherent | `scripts/vol/dev_vols_qlike.py` — the judge that produces the number, val-first split |
 | **How an idea lives or dies.** Every experiment is **pre-registered**: metrics, thresholds and minimum n written and committed *before* running | `TEORIA.md` §12.1 (5-step protocol) · `STATUS.md` (pre-registrations on top) |
 | **What was tried and does NOT work**, with numbers: directional at 1m and 1h, signed semivariance, IVS relative-value, 4 training levers, regime gating | `TEORIA.md` §12.3-12.4 (KILL corpus, with numbers) |
-| **What an outside reader can verify** without downloading data | `pytest tests/` → **319 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
+| **What an outside reader can verify** without downloading data | `pytest tests/` → **353 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
 
 **EN** The project is organized around a stated asymmetry: **even moments (variance, RV) generalize out-of-sample on this asset, odd moments (sign, skew) do not** — for the network *and* for the econometric baselines. The three code lines (vol forecasting, short-vol monetization, directional) exist to document that asymmetry, not to hide it.
 

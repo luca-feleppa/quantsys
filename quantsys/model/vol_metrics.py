@@ -262,3 +262,103 @@ def har_fold_qlike(har: pd.DataFrame, t_train, t_eval,
         "smear_har_hat":   duan_smearing(tr["y"].values - Xtr @ beta),
         "smear_naive_hat": duan_smearing(tr["y"].values - tr["xh"].values),
     }
+
+
+# IT: C2 (pre-reg STATUS 2026-07-30) — costante di scala della bipower variation.
+#     BV = μ₁⁻² · Σ|r_i||r_{i−1}| con μ₁ = E|Z| = √(2/π) per Z standard normale,
+#     quindi μ₁⁻² = π/2. Sotto il nullo "nessun salto" BV stima la stessa quantità
+#     di RV; la differenza RV − BV isola la parte di varianza dovuta ai salti.
+# EN: C2 (STATUS 2026-07-30 pre-reg) — bipower variation scale constant.
+#     BV = μ₁⁻² · Σ|r_i||r_{i−1}| with μ₁ = E|Z| = √(2/π) for standard normal Z,
+#     hence μ₁⁻² = π/2. Under the no-jump null BV estimates the same quantity as
+#     RV; the difference RV − BV isolates the jump part of the variance.
+_BV_SCALE = np.pi / 2.0
+
+
+# IT: componenti HAR-CJ (Andersen-Bollerslev-Diebold 2007): decomposizione della RV in
+#     parte CONTINUA e parte di SALTO. Stesse finestre e stesso riscalamento di
+#     `build_har_frame` (h barre / 7g / 30g, weekly+monthly riportate all'orizzonte h),
+#     così le due baseline differiscono SOLO per i regressori, mai per il campione.
+#     J = max(RV − BV, 0) (troncamento a zero: un salto negativo non ha senso ed è
+#     rumore di stima); C = RV − J = min(RV, BV), quindi C + J ≡ RV per costruzione.
+#     I salti entrano in log(1+J) e NON in log(J+ε): J è esattamente 0 su molte barre
+#     (ogni volta che BV ≥ RV) e log(1+·) è la trasformazione standard che lo gestisce
+#     senza inventare un floor arbitrario.
+#     ⚠ Caveat dichiarato nella pre-reg ①: a campionamento ORARIO la BV è un estimatore
+#     jump-robust rumoroso — la decomposizione dà il meglio ad alta frequenza (5 min).
+# EN: HAR-CJ components (Andersen-Bollerslev-Diebold 2007): RV split into a CONTINUOUS
+#     and a JUMP part. Same windows and same rescaling as `build_har_frame` (h bars /
+#     7d / 30d, weekly+monthly brought back to the h-bar horizon), so the two baselines
+#     differ ONLY in their regressors, never in the sample.
+#     J = max(RV − BV, 0) (truncation at zero: a negative jump is meaningless and is
+#     estimation noise); C = RV − J = min(RV, BV), hence C + J ≡ RV by construction.
+#     Jumps enter as log(1+J), NOT log(J+ε): J is exactly 0 on many bars (whenever
+#     BV ≥ RV) and log(1+·) is the standard transform that handles it without an
+#     arbitrary floor.
+#     ⚠ Caveat declared in pre-reg ①: at HOURLY sampling BV is a noisy jump-robust
+#     estimator — the decomposition performs best at high frequency (5 min).
+def build_har_cj_frame(raw: pd.DataFrame, h: int, bars_day: int) -> pd.DataFrame:
+    raw = raw.sort_values("open_time").reset_index(drop=True)
+    lr = np.log(raw["close"] / raw["close"].shift(1))
+    lr2 = lr ** 2
+    # IT: prodotto dei valori assoluti di rendimenti ADIACENTI — porta un lag in più
+    #     di lr2, quindi il frame CJ parte una barra dopo quello HAR-RV (gestito a
+    #     valle allineando sugli stessi timestamp, mai riusando indici diversi).
+    # EN: product of ADJACENT absolute returns — one lag deeper than lr2, so the CJ
+    #     frame starts one bar later than the HAR-RV one (handled downstream by
+    #     aligning on identical timestamps, never by reusing different indices).
+    ap = lr.abs() * lr.abs().shift(1)
+
+    rv_h = lr2.rolling(h).sum()
+    rv_w = lr2.rolling(7 * bars_day).sum() / 7
+    rv_m = lr2.rolling(30 * bars_day).sum() / 30
+    bv_h = ap.rolling(h).sum() * _BV_SCALE
+    bv_w = ap.rolling(7 * bars_day).sum() * _BV_SCALE / 7
+    bv_m = ap.rolling(30 * bars_day).sum() * _BV_SCALE / 30
+    rv_fwd = rv_h.shift(-h)
+
+    # IT: scala orizzonte identica a build_har_frame per w/m (coerenza dimensionale)
+    # EN: same horizon scaling as build_har_frame for w/m (dimensional consistency)
+    k = h / bars_day
+    cols = {"open_time": raw["open_time"], "y": np.log(rv_fwd + EPS)}
+    for tag, rv, bv, scale in (("h", rv_h, bv_h, 1.0), ("w", rv_w, bv_w, k), ("m", rv_m, bv_m, k)):
+        jump = (rv - bv).clip(lower=0.0) * scale
+        cont = (rv * scale) - jump                      # IT/EN: C + J ≡ RV per costruzione / by construction
+        cols[f"xc_{tag}"] = np.log(cont + EPS)
+        cols[f"xj_{tag}"] = np.log1p(jump)
+
+    har_cj = pd.DataFrame(cols).dropna().set_index("open_time")
+    har_cj.index = _to_naive(har_cj.index)
+    return har_cj
+
+
+# IT: gemello di `har_fold_qlike` per la baseline HAR-CJ (C2). Stessa meccanica —
+#     OLS chiuso sui soli timestamp di TRAIN, valutazione sui timestamp held-out,
+#     QLIKE su RV in livelli — con 7 regressori (costante + 3 continue + 3 salti)
+#     invece di 4. Nessun parametro di smearing: C1 è stato testato e NON adottato
+#     (STATUS 2026-07-30), quindi qui non esiste proprio come opzione.
+# EN: twin of `har_fold_qlike` for the HAR-CJ baseline (C2). Same mechanics —
+#     closed-form OLS on TRAIN timestamps only, evaluation on held-out timestamps,
+#     QLIKE on RV levels — with 7 regressors (constant + 3 continuous + 3 jump)
+#     instead of 4. No smearing parameter: C1 was tested and NOT adopted
+#     (STATUS 2026-07-30), so it does not exist as an option here.
+HAR_CJ_COLS = ["xc_h", "xc_w", "xc_m", "xj_h", "xj_w", "xj_m"]
+
+
+def har_cj_fold_qlike(har_cj: pd.DataFrame, t_train, t_eval) -> dict:
+    tr_idx = _to_naive(t_train)
+    ev_idx = _to_naive(t_eval)
+    tr = har_cj.loc[har_cj.index.intersection(tr_idx)]
+    ev = har_cj.loc[har_cj.index.intersection(ev_idx)]
+    # IT/EN: stesso contratto di ritorno uniforme sul ramo degenere di har_fold_qlike
+    if len(tr) < 50 or len(ev) < 1:
+        return {"qlike_har_cj": float("nan"), "n_har_cj": int(len(ev)),
+                "n_eval": int(len(ev_idx))}
+    Xtr = np.column_stack([np.ones(len(tr)), tr[HAR_CJ_COLS].values])
+    beta, *_ = np.linalg.lstsq(Xtr, tr["y"].values, rcond=None)
+    Xev = np.column_stack([np.ones(len(ev)), ev[HAR_CJ_COLS].values])
+    return {
+        "qlike_har_cj": qlike(np.exp(ev["y"].values), np.exp(Xev @ beta)),
+        "n_har_cj": int(len(ev)), "n_eval": int(len(ev_idx)),
+        "beta": [float(b) for b in beta],
+    }
