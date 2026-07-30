@@ -5,7 +5,7 @@
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — C1 CORREZIONE SMEARING (DUAN 1983) SUL CONFRONTO QLIKE NN-vs-HAR · 2026-07-28 · **APERTA, MAI ESEGUITA**
+## 🎯 PRE-REGISTRAZIONE GATE — C1 CORREZIONE SMEARING (DUAN 1983) SUL CONFRONTO QLIKE NN-vs-HAR · 2026-07-28 · **CHIUSO: ① FALLITA SU VAL 2026-07-30, CORREZIONE NON ADOTTATA (⑦ in fondo)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** i fattori di smearing ŝ, i QLIKE corretti e i ratio corretti non sono MAI stati calcolati, su nessuno split. Nasce dal residuo (e) del 2026-07-28 e dalla nota aperta `TEORIA.md` §12.2. ⚠ **Natura diversa da tutte le pre-reg precedenti:** questa NON è una leva di modello ma un **controllo di specificazione del giudice**, e può spostare un claim **già pubblicato** (banda −27% ÷ −36% QLIKE) → la disciplina è più stretta, non meno: un solo run per split, nessuna variante di estimatore, e il numero che esce viene riportato qualunque sia il segno.
 
@@ -40,9 +40,27 @@
 
 **Sequenziamento vincolante:** eseguire **dopo** il refresh macro `01b --skip-regime` e l'eventuale rigenerazione dell'npz — spendere GPU su un vintage che sta per cambiare produrrebbe una coppia da buttare (lezione A8-BIS: mai confrontare attraverso scaler diversi).
 
+**⑦ ESITO — ① FALLITA su val, correzione NON ADOTTATA, item CHIUSO. Nessun one-shot su test** (era subordinato all'adozione decisa su val). Braccio pre-registrato rispettato alla lettera: 5 seed riaddestrati in sandbox `models_smear_sandbox` (~22 min, exit 0, 5/5 checkpoint), `models/itransformer` production mai toccato, un solo run del giudice su val, nessuna variante di estimatore. Report: `results/vols/qlike_report_1h_val_models_smear_sandbox.json`.
+
+| | ŝ (da soli residui train) | QLIKE raw | QLIKE smeared | esito |
+|---|---|---|---|---|
+| **NN** (5 membri) | **1.6186** | 0.26143 | **0.40257** | **PEGGIORA (+54%)** |
+| **HAR** | **1.5836** | 0.35698 | 0.34075 | migliora |
+| naive (descrittivo) | 1.9145 | 0.71288 | 0.54442 | migliora |
+
+- **① coerenza su ENTRAMBI i lati = False** → il gate cade qui. La ① era pre-dichiarata il 28/07 in questi termini: *"se un lato peggiora, la correzione non è un miglioramento uniforme di specificazione → NON adottata, item chiuso"*.
+- **② materialità = True** (ratio NN/HAR: raw 0.7323 → smear 1.1814, **Δ = +0.4491** ≫ 0.02) e **③ n≥5000 = True** (n_val 6485, ŝ strutturalmente da soli residui train) — entrambe irrilevanti: il criterio è AND.
+- **Vincolo anti-goalpost onorato:** il numero è riportato con il suo segno, qui e in `TEORIA.md` §12.2. Non diventa la banda pubblicata perché la ① — condizione di adozione scritta **prima** di vedere i numeri — non è soddisfatta, non perché sfavorevole al NN.
+
+**Lettura scientifica.** (a) **La direzione attesa è stata FALSIFICATA**, non solo la magnitudine: la ① pre-dichiarava `ŝ_NN < ŝ_HAR` (il NN ha MSE-log più basso → residui meno dispersi → beneficio maggiore per la baseline); è uscito `ŝ_NN = 1.6186 > ŝ_HAR = 1.5836` con MSE-log 0.6021 vs 0.6944. Il motivo è che **ŝ = E[exp(ε)] è dominato dalla coda destra** dei residui in log (le sottostime grosse), non dalla dispersione complessiva: il NN ha coda destra più pesante pur essendo complessivamente più accurato. (b) **Simmetria del disegno rispettata e non compromessa:** entrambi i ŝ sono stimati in-sample sul train (il NN vi è stato addestrato, i β di HAR vi sono stimati) — nessun lato gode di vantaggio informativo; che il NN peggiori *nonostante* ŝ sia stimato su dati visti rafforza la conclusione. (c) **Cosa NON è dimostrato:** non che il vantaggio del NN sia immune dal disallineamento mediana-vs-media, ma che **questa** correzione globale non lo risolve — inflaziona di un fattore costante un modello la cui dispersione condizionale dei residui non è costante, e QLIKE presenta il conto sulla sovrastima. §12.2 va quindi da "aperta" a **"testata e non adottata"**, NON a "risolta".
+
+**Conseguenze pre-dichiarate applicate:** giudice **invariato**, banda pubblicata **−27% ÷ −36% invariata**, `QUANTSYS_QLIKE_SMEARING` resta **flag inerte documentato** (documentazione eseguibile del fallimento, non rimuovere), `TEORIA.md` §12.2 aggiornata **con i numeri** (IT+EN). Sandbox `models_smear_sandbox` eliminabile. Nessun file production toccato.
+
+**Nota sul controllo di riproducibilità (③).** Era **decaduto** per la clausola esplicita della pre-reg (l'npz è stato rigenerato dal refresh macro di oggi), quindi i valori non corretti dello stesso run fanno da baseline. Per trasparenza: il `QLIKE_val` non corretto è **0.26143** contro i **0.26206** di riferimento → **Δ = 0.00063**, cioè la sola rinormalizzazione macro sposta QLIKE dello 0.24%. Se il controllo fosse stato vivo avrebbe **sforato di poco la soglia ABORT** (0.0005): è precisamente il motivo per cui la clausola di decadenza era stata scritta ex-ante, ed è anche una misura utile della sensibilità del giudice al vintage macro.
+
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — A10 SPARSITY DELL'ATTENTION (penalità entropica, linea vol 1h, target log_rv) · 2026-07-28 · **APERTA, MAI ESEGUITA**
+## 🎯 PRE-REGISTRAZIONE GATE — A10 SPARSITY DELL'ATTENTION (penalità entropica, linea vol 1h, target log_rv) · 2026-07-28 · **CHIUSO: ① FALLITA SU VAL 2026-07-30 → CLASSE "LEVER DI TRAINING" CHIUSA (⑤ in fondo)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun training A10 è mai stato lanciato, il codice della penalità **non esiste ancora**. Ultimo candidato di training superstite della linea vol (A2a/A5/A8-A8-BIS/B4-bis falliti, A3 parcheggiato, drop_path obsoleto): il suo esito chiude o riapre l'intera classe. UN solo valore di λ, nessuno sweep.
 
@@ -77,6 +95,24 @@
 **Diagnostica non decisionale:** `H_norm` per layer a fine training nei due bracci (oltre alla ④ aggregata); spread QLIKE fra i 5 membri per braccio; MSE-log; confronto con l'incumbent production (old-scaler) **senza valore di gate**.
 
 **Sequenziamento vincolante:** come C1 — **dopo** il refresh macro e l'eventuale rigenerazione dell'npz. Se entrambe le pre-reg vengono eseguite nella stessa finestra GPU, **C1 prima** (usa una sola sandbox e non tocca il training) e **A10 dopo**; la baseline riaddestrata di C1 **non** è riutilizzabile come baseline di A10 se cambia l'npz fra i due run.
+
+**⑤ ESITO — ① FALLITA su val, A10 FALLITO, niente one-shot su test. La classe "lever di training sulla linea vol" È CHIUSA.** Entrambi i bracci addestrati puliti sullo stesso npz (5/5 seed ciascuno, exit 0; baseline `models_a10_base` ~28 min, candidato `models_a10_sparsity` ~34 min — più lento come previsto per la rinuncia a Flash-Attention). Giudici su val, stessi 6485 sample, report suffissati per-sandbox.
+
+| | baseline | candidato | soglia | esito |
+|---|---|---|---|---|
+| **① QLIKE_val** | **0.26143** | **0.26191** | ≤ 0.25359 (−3%) | **FAIL** (+0.18%, marginalmente PEGGIORE) |
+| ② r0 (n=2075) | 0.28433 | 0.28336 | ≤ 1.05× | PASS |
+| ② r2 (n=3797) | 0.25177 | 0.25387 | ≤ 1.05× | PASS |
+| ② r1 (n=613, descrittivo) | 0.24373 | 0.23908 | — | (migliora) |
+| ③ validità campione | n=6485, r0+r2 qualificati | | ≥5000, ≥2 regimi | PASS |
+| **④ manipulation check H_norm** | **0.82942** | **0.62725** | ≤ 0.95× | **PASS (−24.4%)** |
+
+- **Il gate cade su ①** e il criterio è AND → le altre tre sono irrilevanti ai fini dell'adozione, ma decisive per l'**interpretazione**.
+- **④ è il punto centrale.** La penalità ha concentrato le mappe di attention in modo massiccio (−24.4% di entropia normalizzata, contro una soglia di −5%) e il QLIKE non si è mosso. Questo NON è "nessuna conclusione": è il caso in cui **la leva funziona e l'ipotesi è falsificata**. La dispersione dell'attention su correlazioni spurie fra le 104 variate non era il collo di bottiglia — che resta il **campione effettivo** (~1.7k finestre indipendenti), esattamente il contro-argomento (a) pre-dichiarato in ①.
+- **Diagnostica non decisionale:** MSE-log migliora sul candidato (0.5939 vs 0.6021, −1.4%) mentre QLIKE no. **È la stessa firma di B4-bis** (DVOL: MSE-log −6%, QLIKE invariato): due leve indipendenti che spostano la media condizionale di log-RV senza migliorare la calibrazione della varianza dove QLIKE penalizza la sottostima. Da qui in avanti, un miglioramento di MSE-log **non** è evidenza a favore su questa linea. NN/HAR 0.7337 (candidato) vs 0.7323 (baseline). Dispersione di H_norm fra membri molto più ampia sul candidato (0.476–0.773 vs 0.709–0.880): la penalità morde in misura diversa per seed.
+- **Controllo di riproducibilità non pianificato, superato.** La baseline `models_a10_base` è risultata **numericamente identica** al braccio C1 `models_smear_sandbox` (QLIKE 0.26143, MSE-log 0.6021, stessi decimali): due ensemble da 5 seed addestrati in sessioni separate con stessi seed/config/npz danno lo stesso risultato. Il path di training è **deterministico** — rafforza tutti i confronti appaiati di oggi.
+
+**Conseguenze pre-dichiarate applicate:** A10 marcato **FALLITO**; overlay `config/arch/itransformer_a10_sparsity.yaml` **eliminato**; codice della penalità lasciato **inerte a 0.0** (documentazione eseguibile, non rimuovere) insieme alla sonda `attn_entropy_probe.py` e ai 12 test; sandbox `models_a10_base`/`models_a10_sparsity` eliminabili; `models/itransformer` production mai toccato. **E la conseguenza più pesante, dichiarata il 2026-07-28 prima di vedere qualunque numero: la classe "lever di training sulla linea vol" si CHIUDE.** A2a, A5, A8/A8-BIS, B4-bis e ora A10 sono tutti falliti su val contro baseline riaddestrata. Il prossimo guadagno va cercato in **dati nuovi** (order-book L2 in raccolta forward, A4 HAR-CJ) o nella **monetizzazione** (braccio short-vol), **non** in un'altra variante di training. Riaprire la classe richiede un'ipotesi nuova, non un altro iperparametro.
 
 ---
 
@@ -174,6 +210,42 @@
 **Conseguenze pre-dichiarate:** PASS val+test → `mixup_alpha: 0.2` **candidato** per il prossimo ciclo di retrain della linea vol (MAI swap del live durante il forward v1/v2; il deployment richiederebbe pre-reg dedicata); la baseline-ext NON è promossa da questo esperimento (misura il lever, non il modello in carica). FAIL (val o test) → mixup marcato **FALLITO sul dataset esteso** (chiusura definitiva del lever: il descrittivo −4.94% resta un falso segnale documentato), overlay eliminato, A10 unico candidato training residuo; scritto comunque. A chiusura: sandbox eliminabili, env azzerati, stato production invariato.
 
 **Diagnostica non decisionale:** spread QLIKE tra i 5 membri per braccio; ratio r1 descrittivo su val; confronto candidato vs incumbent production (old-scaler) senza valore di gate.
+
+---
+
+## 🔴 2026-07-30 — GATE LEG OPZIONI CHIUSO alla valutazione pre-registrata n≥30: **FAIL 0/3** su entrambi i campioni → sbloccata la catena (refresh macro + finestra GPU)
+
+**① Routine OK.** `avvio_sessione.ps1`: heartbeat **4/4 freschi** (IV 0.0h · L2 0.0h · Trades 0.2h · 04b forecasts 1.8h). Merge: `atm_30h` +382, `dvol` +32, `atm_greeks` +382, chain 29–30/07 (+334k righe), orderbook +22.9k, `deribit_trades` +14.8k, `vol_paper/forecasts` 468→500, `exec_diag` +33. B7 fresco (0 barre nuove). MFIV: `derive_mfiv` incrementale 4754 → **5136 righe (+382)**, wedge mediano **+3.10 vol pt** (p10 +2.01 / p90 +4.51) — **9ª sessione senza deriva**; `--count-only` = **23 expiry qualificati** (n_min=40) → **NESSUN run one-shot**. `hedge_ledger` 38 eventi → **n=10 posizioni hedge-attive** (soglia 20).
+
+**② Il gate leg È scattato: `trades.jsonl` 30 → 31 righe → n=30 executed.** Un settlement nuovo nelle ultime 24h (entry 2026-07-29 01:01 UTC, settlement 2026-07-30 08:01 UTC). Composizione verificata sui dati grezzi PRIMA di ogni aggregato: 31 righe, 30 `executed:true`, **31 chiavi `entry_ts+settled_ts` uniche, 0 duplicati**; la riga #0 resta l'unica `executed:false` (smoke pre-lancio, esclusa dal campione primario per `POST_GATE_V1.md §0.2`). Soglia n≥30 raggiunta → **valutazione pre-registrata eseguita in giornata**, one-shot, giudice invariato dal 18/07 (`scripts/04c_vol_paper_baselines.py`, `--min-trades` default già a 30).
+
+**③ VERDETTO sui 3 criteri congelati 2026-06-12** (run 2026-07-30 20:50 → `results/vol_paper/baseline_report.json`; aggregati ①③ ricalcolati indipendentemente sui due campioni, identici al giudice):
+
+| Criterio | Primario (30 executed) | Secondario (31, con #0 smoke) | Verdetto |
+|---|---|---|---|
+| ① PnL medio/trade > 0 net | **−0.00261** BTC (tot −0.07832; SE 0.00213, t=−1.23) | **−0.00285** BTC (tot −0.08833) | **FAIL** |
+| ② PnL tot NN > always-LONG **E** always-SHORT (replay, stesso calendario) | NN −0.03480 > LONG −0.07572 ✓ · NN < SHORT **+0.03972** ✗ | (replay unico, indipendente dal campione) | **FAIL** |
+| ③ hit-rate > 0.5 | **0.400** (12/30) | **0.387** (12/31) | **FAIL** |
+
+Il fail-safe sul verdetto peggiore NON è servito: i due campioni **concordano** (FAIL 0/3), esattamente come al checkpoint n=20. La perdita media resta non distinguibile da zero (t=−1.23), ma i criteri pre-registrati sono su point estimate: FAIL. **Caveat pre-dichiarato che si ripresenta:** il replay NN ricostruito ha **n=28 < 30** → a rigore di pre-reg originale il giudice marca il ② "non valutabile" (warning esplicito nel log); il confronto calcolato è comunque FAIL con margine ampio (NN −0.0348 vs SHORT +0.0397, cioè 0.075 BTC di distanza), quindi il caveat non è dirimente.
+
+**Lettura economica (diagnostica, non decisionale): conferma quantitativa del checkpoint n=20 su un campione 1.5×.** Always-SHORT **+0.03972 BTC, hit 0.567** su 30 expiry — il VRP positivo strutturale regge su tutta la finestra 12/06→30/07 ed è, di nuovo, l'unico segno robusto del braccio. Il NN batte always-LONG (+0.041 BTC di timing dentro il lato long) ma perde contro il premio strutturale perché è entrato **sistematicamente long**: il comparatore ATM sottostima il var-swap rate (wedge di convessità **+3.10 vol pt** mediano, misurato oggi su 5136 tick accoppiati e stabile da 9 sessioni) → l'edge long è sovrastimato **per costruzione del comparatore**, non per errore del forecast. Questo è precisamente ciò che la pre-reg MFIV-v2 misurerà a n≥40, e rafforza il prior della v2 short-vol senza modificarne le pre-reg.
+
+**④ Conseguenze pre-dichiarate applicate (`POST_GATE_V1.md` §0.2 + Fase D).** La valutazione dovuta dal 16/07 è **saldata**: il gate v1 è chiuso definitivamente, niente più ri-valutazioni della leg opzioni. Si sbloccano in cascata: (a) **A13/A14** (pin-close, vega-sizing), congelati fino a questa valutazione perché avrebbero alterato la leg opzioni contaminando il campione → ora ammessi alla pre-reg sizing v2 (A13+A14+A7); (b) **refresh macro `01b --skip-regime`**, differito dal 25/07 ⑤ per non perturbare il `MacroNormalizer` dentro un campione forward aperto; (c) **finestra GPU** C1 → A10.
+
+**⑤ Refresh macro eseguito — e ha rigenerato il blocco macro dell'npz (comportamento atteso, non un incidente).** `01b --skip-regime` non si ferma al parquet: l'ultimo passo ri-mergia le X_macro dentro `data/lstm_dataset.npz` e lo riscrive (`atomic_save_npz`). Verificato **staticamente** che la riscrittura è confinata: il merge rilegge tutte le chiavi e sovrascrive **solo** `X_macro_{train,val,test}`, `macro_feature_names`, `n_macro_features` — X price, y, `t_*` e `feature_names` passano per valore. Shape invariate (51882/6485/6486: le candele non si sono mosse, nessuna finestra nuova); ciò che cambia è la **normalizzazione** macro, col `MacroNormalizer` rifittato whole-df sui 3133 giorni (era 3122). `regime_probs.parquet` INTATTO (`--skip-regime`), `models/itransformer` mai toccato (01b ha scritto solo `models/lstm/pipeline_state.pkl`, default-arch).
+- **Conseguenza su C1, già pre-dichiarata:** il controllo di riproducibilità (`QLIKE_val` non corretto = 0.26206, ABORT se scostamento > 0.0005) **DECADE** per la clausola esplicita della pre-reg ③ — i valori non corretti dello stesso run fanno da baseline. Nessun goalpost si muove: il caso era previsto per iscritto prima di girare.
+- **⑥ C1 ESEGUITO E CHIUSO in giornata: ① fallita, correzione NON adottata** (ŝ_NN 1.6186 > ŝ_HAR 1.5836, QLIKE NN 0.26143 → 0.40257 peggiora, HAR 0.35698 → 0.34075 migliora; Δratio +0.4491 materiale ma il gate è AND). Dettaglio, numeri e lettura scientifica: sezione C1 in cima al file (⑦). Il prior pre-dichiarato è stato falsificato **nella direzione**; §12.2 passa da "aperta" a "testata e non adottata".
+- **⑦ A10 ESEGUITO E CHIUSO in giornata: ① fallita (QLIKE 0.26191 vs 0.26143 = +0.18%, soglia −3%), MA ④ superata con −24.4% di H_norm** → la penalità ha morso e l'ipotesi è falsificata, non l'implementazione. **Conseguenza dichiarata ex-ante e applicata: la classe "lever di training sulla linea vol" è CHIUSA** (A2a, A5, A8/A8-BIS, B4-bis, A10 tutti falliti). Ricompare la firma di B4-bis: MSE-log migliora, QLIKE no. Dettaglio: sezione A10 in cima al file (⑤).
+- **Conseguenza su A10: nessuna.** Conteggi per-regime ricalcolati ex-ante sull'npz effettivo (argmax `build_regime_gate`, model-independent, PRIMA di spendere GPU): val n=6485 **r0=2075 · r1=613 · r2=3797** → qualificati r0 e r2; test n=6486 **r0=1591 · r1=818 · r2=4077** → tutti e tre. **Identici** ai valori pre-registrati (coerente: regime probs intatte, confini di split invariati). Condizione ③ soddisfatta.
+
+**⑧ Igiene e ripristino (passo 5 del protocollo).** Sandbox `models_smear_sandbox`, `models_a10_base`, `models_a10_sparsity` **eliminate** (19 MB ciascuna); overlay `config/arch/itransformer_a10_sparsity.yaml` **eliminato**; env sperimentali azzerati. `models/itransformer` **verificato intatto** (checkpoint del 2026-06-10, mtime invariato) — production mai toccato in tutta la giornata. Tutti i report conservati in `results/vols/` (`qlike_report_1h_val_models_smear_sandbox.json`, `..._models_a10_base.json`, `..._models_a10_sparsity.json`, più i due `attn_entropy_*.json`). Suite piena: **341 passed, 1 skipped** (invariata — i test A10 verificano il codice, non l'overlay). Invariante di attribuzione verificato **vuoto**. Doc sincronizzate: `TEORIA.md` §12.2 (C1 testato e non adottato, con i numeri) e §12.4 (A10 falsificato + chiusura della classe), `POST_GATE_V1.md` Fase D item 1, `RIPRESA.md`.
+
+**Bilancio della giornata.** Tre gate chiusi in una sessione — leg opzioni (FAIL 0/3), C1 (non adottato), A10 (fallito) — e nessuno dei tre ha prodotto un'adozione. È l'esito modale atteso: tutti e tre avevano prior dichiarato sfavorevole, e tutti e tre sono stati scritti prima di girare. Il valore prodotto non è un miglioramento del modello ma **tre falsificazioni pulite**, di cui due particolarmente informative: C1 ha falsificato la *direzione* attesa di un effetto (ŝ_NN > ŝ_HAR, contro il prior), A10 ha falsificato l'*ipotesi* pur avendo la leva funzionante (−24.4% di entropia, QLIKE invariato).
+
+**Problemi aperti:** (a) **coda GPU vuota, e per la linea vol lo resta** — la classe dei lever di training è chiusa per decisione pre-dichiarata; riaprirla richiede un'ipotesi nuova, non un iperparametro; (b) **due gate forward ancora a calendario**: hedged n≥20 posizioni hedge-attive (oggi **n=10**, ETA ~09-10/08) e MFIV n≥40 expiry qualificati (oggi **23**, ETA ~metà agosto) — nessuno dei due va forzato; (c) **il refresh macro è solo su disco locale**: il push al VPS avviene al pull della prossima sessione e il nuovo `MacroNormalizer` entra in vigore al prossimo bootstrap di `04b` — **decisione utente pendente** se lasciarlo partire o sospenderlo fino alla chiusura del giudice hedged (argomento a favore: il confronto hedged è *within-trade*, quindi la validità interna non è intaccata; argomento contro: la popolazione di posizioni non sarebbe omogenea fra le due metà del campione); (d) nessun item residuo di scrittura codice.
+
+**▶️ RIPARTI DA QUI:** `.\avvio_sessione.ps1`. ① **Pre-registrazione sizing v2 (A13 pin-close + A14 vega-sizing + A7 cablaggio greeks-risk**, coda di rischio da HAR-q90) — sbloccata oggi dalla chiusura del gate leg, è l'unico item di scrittura attivo; scaffold con la skill `/preregister`. ② Prima di quello, **decidere il punto (c)**: se il push macro al VPS parte o si sospende. ③ I due giudici forward restano a calendario: `hedged_vs_unhedged_judge.py` one-shot a n≥20 posizioni, `mfiv_comparator_judge.py` one-shot a ≥40 expiry — **entrambi manuali**, la routine stampa solo i contatori. ④ Nessuna finestra GPU in coda: se ne servisse una sulla linea vol, prima serve un'ipotesi nuova pre-registrata.
 
 ---
 
