@@ -5,7 +5,7 @@
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — C3 ATTRIBUZIONE DEL GUADAGNO HAR-CJ: SOSTITUZIONE RV→C *vs* CONTENUTO INFORMATIVO DEI SALTI (linea vol 1h) · 2026-07-31 · **APERTO, MAI ESEGUITO**
+## 🎯 PRE-REGISTRAZIONE GATE — C3 ATTRIBUZIONE DEL GUADAGNO HAR-CJ: SOSTITUZIONE RV→C *vs* CONTENUTO INFORMATIVO DEI SALTI (linea vol 1h) · 2026-07-31 · **CHIUSO: CELLA A SU VAL E SU TEST → IL GUADAGNO È LA SOSTITUZIONE, I SALTI NON AGGIUNGONO NULLA (⑩ in fondo)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun QLIKE di HAR-C è mai stato calcolato, su nessuno split; il codice della baseline **non esiste ancora** (`quantsys/model/vol_metrics.py` ha `build_har_frame`/`har_fold_qlike` e `build_har_cj_frame`/`har_cj_fold_qlike`, nessuna variante a sole componenti continue — verificato). Nasce dalla **qualificazione ⑥ dell'audit C2** (30/07): HAR-CJ batte HAR-RV fuori campione, ma i coefficienti sui **salti non sono identificati** (segno invertito fra le due metà del train, condition number 5.4e+04, regressori di salto con std ~1000× più piccola delle continue) → è dimostrato che la **specificazione** prevede meglio, **NON** che i **salti** portino informazione. ⚠ **Terza pre-reg consecutiva di natura "controllo di specificazione del giudice"** (C1 → C2 → C3): non riapre la classe "lever di training" chiusa da A10. **Nessuna GPU, nessun NN nel confronto.**
 
@@ -58,6 +58,35 @@
 
 **Costo:** ~15 righe di codice + test, **secondi di CPU** per le tre regressioni, **zero GPU**. Nessuna contesa col live (04b è sul VPS). Nessuna dipendenza da dati VPS: eseguibile integralmente offline.
 **Sequenziamento:** nessun vincolo di calendario, non tocca campioni forward aperti. **Vincolo interno:** implementazione + test di inerzia **prima** di guardare qualunque numero di HAR-C.
+
+**⑩ ESITO — CELLA A su val E su test, concordanza piena. Il guadagno di C2 è la SOSTITUZIONE `RV → C`; i termini di salto non aggiungono nulla di misurabile. L'interpretazione scritta a caldo il 30/07 è FALSIFICATA.** Un solo run per split, nessuna variante di estimatore, `models/itransformer` in sola lettura. Report: `results/vols/qlike_report_1h_{val,test}_c3.json`.
+
+| | val (n=6485) | test (n=6486) |
+|---|---|---|
+| HAR-RV (3 regressori) | 0.35698 | 0.36998 |
+| **HAR-C (3 regressori)** | **0.33698** (−5.60%) | **0.34584** (−6.52%) |
+| HAR-CJ (6 regressori) | 0.33788 (−5.35%) | 0.34572 (−6.56%) |
+| **φ attribuzione** | **+1.047** | **+0.995** |
+| **Test A** — DM(C, RV) | **−3.735, p=1.89e-04 → SIG pro-C** | **−4.140, p=3.52e-05 → SIG pro-C** |
+| **Test B** — DM(CJ, C) | **+1.155, p=0.248 → non sig.** | **−0.100, p=0.920 → non sig.** |
+| cond(design) | C=119.9 · CJ=5.430e+04 | idem (β stimati sullo stesso train) |
+
+- **Controllo di riproducibilità del vintage (⑥.1) superato su ENTRAMBI gli split e su entrambe le baseline note:** HAR-RV = 0.35698/0.36998 e HAR-CJ = 0.33788/0.34572, cifra per cifra rispetto al 30/07. `data/raw_candles.parquet` è invariato dal 19/07 e l'npz è lo stesso: i tre numeri sono confrontabili per costruzione.
+- **Cella A, e per una ragione forte: `φ ≈ 1` su entrambi gli split** (1.047 e 0.995) — la sola sostituzione del regressore cattura **il 100%** del guadagno che C2 aveva attribuito alla decomposizione.
+- **Test B non è un nullo debole, è un nullo pulito.** Su test `DM = −0.100` con n=6486: la statistica è praticamente **zero**, non "non significativa per poca potenza". E il **segno si inverte fra gli split** (su val HAR-C è migliore di 0.27%, su test HAR-CJ lo è di 0.035%): due modelli che si scambiano il primato con magnitudini di quest'ordine sono lo stesso modello in termini predittivi. Lo stesso disegno appaiato aveva prodotto p ≈ 1e-4 ÷ 1e-5 quando una differenza c'era davvero — Test A qui — quindi la potenza c'è.
+- **Il confronto di Test A è NEUTRALE ALLA COMPLESSITÀ, ed è ciò che lo rende conclusivo.** HAR-RV e HAR-C hanno **lo stesso numero di regressori** (3 + costante): cambia solo la *definizione* del regressore. Non c'è alcun vantaggio di parsimonia da scontare — il guadagno è puramente informativo, `C = min(RV, BV)` è un **segnale migliore** di `RV`. E i 3 regressori aggiuntivi di HAR-CJ, che sono l'unica cosa che HAR-CJ ha in più, non comprano nulla: sono rumore stimato.
+
+**Lettura scientifica.** (a) **Il meccanismo vero è lo stimatore robusto, non la decomposizione.** `C = min(RV, BV)` è `BV` ogni volta che `BV < RV`, cioè quasi sempre quando c'è un salto: usare `C` al posto di `RV` significa dare all'OLS una misura di varianza **meno contaminata dai salti**, non aggiungere informazione sui salti. È `BV` a fare il lavoro, in quanto stimatore jump-robust — e `J`, che è l'unica cosa che *contiene* l'informazione di salto, si rivela inutile a prevedere la RV futura a 1h. Detto altrimenti: **i salti sono rumore da togliere dal predittore, non segnale da aggiungere**. (b) **È perfettamente coerente con la dicotomia momenti pari/dispari del progetto:** la componente di salto è un evento raro e firmato, cioè la stessa famiglia di quantità (asimmetria, semivarianza firmata, direzione) che su questo asset è risultata impredicibile per NN *e* per le baseline econometriche. C3 aggiunge un caso a quel prior invece di contraddirlo. (c) **L'audit del 30/07 aveva ragione e la sua cautela era ben calibrata:** aveva declassato l'interpretazione a "non dimostrata" senza dichiararla falsa, e aveva indicato esattamente l'esperimento che l'avrebbe decisa. Il contro-argomento pre-dichiarato in ②a — β instabili ma `Xβ` ben determinato — era legittimo e **non si è verificato**: qui i β non identificati non erano compensati da una combinazione utile, erano semplicemente inutili.
+
+**Nota di disciplina sul peeking (avvertenza ①).** Il vincolo è stato rispettato: la decisione è caduta **interamente** sui due DM, entrambi funzioni di HAR-C, la quantità ignota. `φ` è stata riportata come descrittiva e non ha mai fondato una soglia, esattamente perché il suo denominatore era un numero già visto. Nessuna soglia è stata toccata a risultati noti.
+
+**⑪ CONSEGUENZE PRE-DICHIARATE APPLICATE (cella A).**
+1. **HAR-C è la baseline di riferimento** del giudice: stessa accuratezza di HAR-CJ, **450× meglio condizionata** (119.9 contro 5.43e+04) e con parametri **identificati**. Fra due strumenti di misura equivalenti in accuratezza si tiene quello stabile — è il punto (b) dell'argomento con cui il default-on era stato sospeso.
+2. **Il default-on di `QUANTSYS_HAR_CJ` NON viene applicato**, come previsto: sarebbe stato cristallizzare nello strumento la specificazione sbagliata. ⚠ Nota di disegno per la decisione futura: `QUANTSYS_HAR_C` **richiede** `QUANTSYS_HAR_CJ` (riusa il frame CJ), quindi un eventuale default-on riguarda la **coppia**, non il solo HAR-C.
+3. **La banda pubblicata NON cambia — e questo è un risultato, non un non-risultato.** Con il NN già registrato da `models_c2_sandbox` (0.26143 val / 0.23637 test) e le baseline di oggi: **NN/HAR-C = 0.7758 (−22.4%) su val e 0.6835 (−31.7%) su test**, contro −22.6%/−31.6% verso HAR-CJ. Alla precisione pubblicata **−23% ÷ −32% resta identica**. ⚠ **Il retrain 5 seed pre-dichiarato come necessario (~28 min GPU) NON è servito**, e la ragione va scritta: la banda è il rapporto fra un numero NN già registrato e una baseline ricalcolata oggi, e il controllo di vintage ⑥.1 dimostra che i due sono sullo stesso npz. Non è stata spesa GPU. (Resta valida ⑥.4: il NN di *questo* run, 0.27470, è quello production 06-10 con scaler diverso e **non** è stato usato per nulla.)
+4. **La qualificazione ⑥ di C2 passa da "interpretazione non dimostrata" a "interpretazione FALSIFICATA"**, con i numeri. Il **verdetto** di C2 resta valido: HAR-CJ *è* più forte di HAR-RV fuori campione, e il claim vi sopravvive — semplicemente non per la ragione che le era stata attribuita. `TEORIA.md` §12.2 e `README.md` aggiornati nominando la baseline corretta.
+5. **La ri-specificazione di HAR-CJ (scalatura/regolarizzazione dei salti), aperta da C2, è ora priva di oggetto** e va tolta dalla coda: non si regolarizzano coefficienti di regressori che non portano informazione. Chiude un item senza spendere nulla.
+6. `QUANTSYS_HAR_C` resta **flag inerte di default**, inerzia provata end-to-end (43 chiavi comuni, 0 differenze, unica aggiunta `har_cj.har_c.enabled`). Suite: **364 passed / 1 skipped**.
 
 ---
 

@@ -362,3 +362,55 @@ def har_cj_fold_qlike(har_cj: pd.DataFrame, t_train, t_eval) -> dict:
         "n_har_cj": int(len(ev)), "n_eval": int(len(ev_idx)),
         "beta": [float(b) for b in beta],
     }
+
+
+# IT: C3 (pre-reg STATUS 2026-07-31) — baseline HAR-C: SOLE componenti continue
+#     della decomposizione, senza i termini di salto. Separa due spiegazioni del
+#     guadagno di HAR-CJ su HAR-RV misurato da C2:
+#       (a) SOSTITUZIONE del regressore — C = min(RV,BV) è jump-robust, cioè un
+#           segnale meno rumoroso di RV, e il guadagno è tutto lì;
+#       (b) DECOMPOSIZIONE — i salti portano informazione incrementale propria.
+#     ⚠ HAR-C è STRETTAMENTE ANNIDATA in HAR-CJ (3 dei 6 regressori): in-sample
+#     HAR-CJ non può perdere per costruzione, quindi il confronto è informativo
+#     SOLO fuori campione, dove i 3 coefficienti extra non identificati (audit
+#     2026-07-30: segno invertito fra le metà del train, cond ≈5.4e+04) pagano un
+#     costo di overfitting invece di essere gratis.
+#     Prende lo STESSO frame di `har_cj_fold_qlike` (non un frame proprio): così
+#     l'identità del campione fra le due baseline è garantita per COSTRUZIONE e
+#     non da un allineamento da verificare a valle. Nessuno smearing (C1 non
+#     adottato), stessa meccanica train-only del gemello.
+# EN: C3 (STATUS 2026-07-31 pre-reg) — HAR-C baseline: ONLY the continuous
+#     components, no jump terms. It separates two explanations of the HAR-CJ over
+#     HAR-RV gain measured by C2:
+#       (a) regressor SUBSTITUTION — C = min(RV,BV) is jump-robust, i.e. a less
+#           noisy signal than RV, and that is the whole gain;
+#       (b) DECOMPOSITION — jumps carry their own incremental information.
+#     ⚠ HAR-C is STRICTLY NESTED in HAR-CJ (3 of the 6 regressors): in-sample
+#     HAR-CJ cannot lose by construction, so the comparison is informative ONLY
+#     out of sample, where the 3 unidentified extra coefficients (2026-07-30
+#     audit: sign flip between train halves, cond ≈5.4e+04) pay an overfitting
+#     cost instead of being free.
+#     It takes the SAME frame as `har_cj_fold_qlike` (not its own): sample
+#     identity between the two baselines is then guaranteed BY CONSTRUCTION
+#     rather than by a downstream alignment check. No smearing (C1 not adopted),
+#     same train-only mechanics as its twin.
+HAR_C_COLS = ["xc_h", "xc_w", "xc_m"]
+
+
+def har_c_fold_qlike(har_cj: pd.DataFrame, t_train, t_eval) -> dict:
+    tr_idx = _to_naive(t_train)
+    ev_idx = _to_naive(t_eval)
+    tr = har_cj.loc[har_cj.index.intersection(tr_idx)]
+    ev = har_cj.loc[har_cj.index.intersection(ev_idx)]
+    # IT/EN: stesso contratto di ritorno uniforme sul ramo degenere dei gemelli
+    if len(tr) < 50 or len(ev) < 1:
+        return {"qlike_har_c": float("nan"), "n_har_c": int(len(ev)),
+                "n_eval": int(len(ev_idx))}
+    Xtr = np.column_stack([np.ones(len(tr)), tr[HAR_C_COLS].values])
+    beta, *_ = np.linalg.lstsq(Xtr, tr["y"].values, rcond=None)
+    Xev = np.column_stack([np.ones(len(ev)), ev[HAR_C_COLS].values])
+    return {
+        "qlike_har_c": qlike(np.exp(ev["y"].values), np.exp(Xev @ beta)),
+        "n_har_c": int(len(ev)), "n_eval": int(len(ev_idx)),
+        "beta": [float(b) for b in beta],
+    }
