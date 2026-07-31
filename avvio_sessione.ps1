@@ -170,6 +170,23 @@ if (-not $SkipMonitor) {
     & $Py (Join-Path $ProjRoot "scripts\vol\mfiv_comparator_judge.py") --count-only
     if ($LASTEXITCODE -ne 0) { Write-Warning "mfiv_comparator_judge --count-only FALLITO/FAILED (exit $LASTEXITCODE)" }
 
+    # IT: continuita' del recorder L2 - NON e' la stessa cosa della freschezza gia'
+    #     stampata dagli HEARTBEAT del merge. Il campione del filone order-book e' fatto
+    #     di ore CONTIGUE: una finestra richiede T+h barre consecutive, quindi un'ora di
+    #     buco non costa un'ora ma ~149 finestre (6.2 giorni di accumulo). Un file fresco
+    #     con un buco DENTRO passava il check heartbeat senza dire nulla, e l'epoca
+    #     "casa" ha gia' prodotto 32 giorni di raccolta con ZERO finestre utilizzabili.
+    #     Sola lettura dei timestamp: nessun valore di feature, nessun rischio one-shot.
+    # EN: L2 recorder continuity - NOT the same as the freshness already printed by the
+    #     merge HEARTBEATs. The order-book sample is made of CONTIGUOUS hours: a window
+    #     needs T+h consecutive bars, so one gap hour costs not one hour but ~149 windows
+    #     (6.2 days of accrual). A fresh file with a gap INSIDE passed the heartbeat check
+    #     silently, and the "home" epoch already produced 32 days of collection with ZERO
+    #     usable windows. Timestamps only: no feature values, no one-shot risk.
+    Write-Output "[sessione] monitoraggio vol: continuita' recorder L2 / L2 recorder continuity..."
+    & $Py (Join-Path $ProjRoot "scripts\vol\l2_continuity_check.py") --days $Days
+    if ($LASTEXITCODE -ne 0) { Write-Warning "l2_continuity_check FALLITO/FAILED (exit $LASTEXITCODE)" }
+
     # IT: contatori dei gate forward aperti (leg opzioni n>=30, hedged n>=20).
     #     Sola lettura dei ledger di 04b: nessun PnL aggregato, nessun verdetto.
     #     NOTA quoting: solo apici SINGOLI (PS 5.1 strippa le doppie virgolette
