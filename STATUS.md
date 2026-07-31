@@ -13,15 +13,51 @@
 
 **Problemi aperti.** (a) B1 stadio 1 ha una baseline inadeguata a 3 ore: riaprire richiede una nuova pre-registrazione, oppure si aspetta il campione a h=30 — **raccomandazione corrente: non riaprire ora** (un secondo gate girerebbe sugli **stessi 289 punti**, cioè multiple testing sullo stesso campione); (b) il fix del `MacroNormalizer` e la pre-reg sizing v2 toccano il live → schedulati a **metà agosto**, a campioni chiusi; (c) il breakpoint macro del **01/08 00:30 UTC** avviene comunque: il canonico VPS è già al vintage 2026-07-30 dal push di stamattina, e la nuova disciplina previene i breakpoint **futuri**, non quello già consegnato.
 
-**Azione esatta da cui ripartire:** al **prossimo pull** la routine stamperà `macro: vintage divergente - canonico VPS NON TRACCIATO (file regolare)`. Serve **una sola promozione esplicita** per stabilire il puntatore:
+**✅ Promozione ESEGUITA il 2026-07-31 16:45 UTC — il puntatore è stabilito.** `pull_vps_data.ps1 -PromoteMacro` → `archiviato vintage 20260730` + `PROMOSSO NON TRACCIATO (file regolare) -> 20260730`. **Verificata come no-op di contenuto PRIMA di eseguirla, non assunta:** md5 del canonico remoto `e366c59ee8ccaa44ccf5866e62200434` = md5 del file locale, e `ls` confermava un file regolare non ancora tracciato. Stato post-promozione: `readlink data/macro_features.parquet` → `macro/macro_features_20260730.parquet`, md5 **attraverso il link invariato**, archivio 716K. Eseguita **prima** del bootstrap delle 00:30 UTC di proposito: la discontinuità già datata al § breakpoint diventa così anche il primo bootstrap sotto regime tracciato, senza lasciare una finestra a vintage non tracciato. `04b` in esecuzione non è stato toccato (snapshot congelato al proprio bootstrap; e lo scambio è un `mv -T`, rename atomico). **Da qui in poi ogni cambio di vintage richiede un atto deliberato e datato.**
 
-```powershell
-.\scripts\vps\pull_vps_data.ps1 -PromoteMacro
-```
-
-⚠ È un **no-op di contenuto**: il vintage locale è `20260730` ed è esattamente ciò che il canonico VPS già contiene (push del 31/07 11:55 UTC, file locale invariato da allora) — quindi la promozione è ammissibile **dentro i campioni forward aperti**, perché non cambia un byte di ciò che `04b` legge, cambia solo *come* lo legge. Da quel momento ogni cambio di vintage richiede un atto deliberato e datato. Verificare nell'output: `archiviato vintage 20260730` poi `PROMOSSO ... -> 20260730`.
+**Azione esatta da cui ripartire:** coda vuota lato modello e lato test, ogni gate aperto è in attesa di campione. **Passo ① della sequenza ESEGUITO** (condizione ③ ex-ante su A13a, § sopra): il lever sopravvive ma consuma calendario a 0.33-0.40× il tasso di posizioni, e il conteggio ha **ri-ordinato la coda** — un gate sulla regola di entry contro always-short costa 32 giorni contro i 53-64 di A13, sulla domanda più a monte. **Decisione dell'utente in sospeso: quale dei due va nello slot di metà agosto.** Poi: **(2) implementare INERTE la persistenza del `MacroNormalizer`** (precedente del 29/07: codice spento, attivazione a campioni chiusi; ora il vintage di riferimento è nominabile perché è su disco).
 
 Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24**/40 (~metà agosto), finestre L2 a h=30 **n_eff 8.7** (+0.8/giorno col VPS al 100%).
+
+---
+
+## 📐 CONDIZIONE ③ EX-ANTE SU A13a (pin-close) — ESEGUITA: il lever sopravvive, ma il suo n_eff è 0.33-0.40× il tasso di posizioni · 2026-07-31 sessione 2
+
+> **Non è un gate e non calcola nessuna PnL.** Conta **eventi**: strike, expiry e prezzo del sottostante sono fatti registrati, indipendenti dal modello. Nessun controfattuale di rendimento è stato prodotto, perché il campione è **già stato guardato** (gate leg chiuso FAIL 0/3 il 30/07) e un numero di PnL calcolato ora non sarebbe evidenza, sarebbe post-hoc. Script: `scripts/vol/pin_close_feasibility.py`, report `results/vol_paper/pin_close_feasibility.json`. Il predicato è **importato da `04b_vol_paper.py`**: si conta con la funzione di produzione, non con una copia che potrebbe divergere.
+
+**Perché prima e non dopo.** Un gate forward su A13 non è avviabile prima di metà agosto (due campioni aperti) e poi costa mesi. Se il pin-close scattasse su 3 posizioni su 30, quel tempo produrrebbe *"nessuna conclusione"* per difetto di conteggio — la trappola che il protocollo impone di evitare misurando la condizione di conteggio **quando è model-independent** (successo B2/B3 il 19/07, budget campionario L2 il 31/07).
+
+**⚠ Scoperta di copertura — il campione effettivo è 15, non 31.** Delle 31 posizioni `executed`, quelle dell'epoca "casa" hanno **copertura dei tick del 2-6%** nella finestra del pin: **15 su 16 hanno ZERO tick osservabili**. Non è mancanza casuale ed è la parte che conta: le expiry sono alle **08:00 UTC**, quindi la finestra del pin cade fra le **02:00 e le 08:00 UTC** — le ore in cui il PC di casa era spento. È lo stesso **bias di selezione oraria** che motivò la migrazione al VPS il 18/07, e qui colpisce in modo *sistematico* esattamente la finestra d'interesse. I tick senza dato sono lasciati **NaN e mai riempiti**: contarli come "nessun innesco" avrebbe archiviato A13 per un difetto di dati scambiato per un fatto. **Epoca VPS: 15 posizioni, copertura tick 100%, zero posizioni non osservate.**
+
+**Superficie di conteggio (epoca VPS, n=15, copertura 100%).** Righe = `max_hours` X, colonne = `pin_band` f:
+
+| X \ f | 0.10% | 0.20% | 0.30% | 0.50% | 0.75% | 1.00% |
+|---|---|---|---|---|---|---|
+| **1h** | 2 | 2 | 2 | 4 | 5 | 6 |
+| **2h** | 2 | 2 | 2 | 4 | 6 | 6 |
+| **3h** | 3 | 4 | 4 | **5** | **6** | 6 |
+| **4h** | 3 | 4 | 5 | 5 | **6** | 7 |
+| **6h** | 4 | 5 | 5 | 5 | 7 | 8 |
+
+**Robustezza al proxy dell'indice: nessuna divergenza su tutta la griglia** fra i tre proxy testati (forward della expiry stessa, forward della expiry più vicina, close 1m Binance) → la conclusione non dipende dalla scelta del proxy.
+
+**⚠ Il fatto strutturale che cambia il disegno del gate: `n_eff = n_trig`, NON `n_posizioni`.** Le posizioni che **non** innescano sono bit-identiche sotto le due regole (pin-close vs hold-to-expiry) e contribuiscono **esattamente zero** alla differenza appaiata. Il campione di un gate A13 è quindi il solo **sottoinsieme che innesca**. A tasso 33-40% questo significa che A13 consuma calendario a **0.33-0.40× il tasso di arrivo delle posizioni** (misurato: **0.94 posizioni/giorno** nell'epoca VPS).
+
+**Regola a priori proposta per (X, f) — da congelare nella pre-reg, NON scelta su questa superficie.** La banda del pin è **una deviazione standard del sottostante sull'orizzonte residuo**, implicita dall'IV ATM: `f = IV·√(X/8760)`. A IV 30% annua: X=1h → 0.32% · X=2h → 0.45% · **X=3h → 0.56%** · X=4h → 0.64% · X=6h → 0.79%. La cella così determinata (X=3h, f≈0.56%) cade **in mezzo alla superficie**, non a un estremo → la regola non sta facendo cherry-picking. Innesco atteso **5-6 su 15 = 33-40%**.
+
+**Proiezione di calendario** (tasso 0.94 pos/giorno, CI Wilson 95% sul tasso di innesco):
+
+| cella | innesco | CI95 | giorni a n_trig=20 |
+|---|---|---|---|
+| X=3h, f=0.50% | 5/15 = 33% | [15%, 58%] | **64** (range 37-141) |
+| X=3h, f=0.75% | 6/15 = 40% | [20%, 64%] | **53** (range 33-108) |
+| X=6h, f=1.00% | 8/15 = 53% | [30%, 75%] | 40 (range 28-71) |
+
+**⑧ ESITO — A13 NON muore sul conteggio, ma è LENTA.** Non siamo nel caso "3 su 30": alla cella a priori il lever innesca su un terzo-due quinti delle posizioni, quindi un gate è **eseguibile**. Ma partendo a metà agosto, `n_trig = 20` cade fra **ottobre e novembre 2026**, con coda a dicembre per l'ampiezza del CI (e `n_trig = 30`, il numero della pre-reg originale del gate v1, slitterebbe a dicembre-gennaio).
+
+**Conseguenza sulla coda — il conteggio non ha solo dimensionato A13, ha ri-ordinato la coda.** Un gate sulla **regola di entry contro always-short** userebbe **ogni** posizione (`n_eff = 1.0×` il tasso di arrivo, contro 0.33-0.40× di A13) → `n=30` in **~32 giorni**, cioè metà settembre. Stesso slot di calendario, **tre volte l'informazione**, e sulla domanda che il FAIL del 30/07 ha effettivamente sollevato: *perché il condizionamento distrugge un VRP che l'incondizionato incassa* (always-short +0.0397). A13 risponde a una domanda di **realizzazione**; l'altra risponde a una domanda di **esistenza dell'edge** — e l'ordine logico corretto è esistenza prima di realizzazione.
+
+**Cosa NON è stato fatto.** Nessun parametro scelto, nessuna PnL calcolata, nessuna pre-registrazione consumata. La superficie è esplorativa e va usata solo per dimensionare, mai per selezionare la cella: la selezione spetta alla regola a priori sopra, dichiarata nella pre-reg. Test: `tests/test_pin_close_feasibility.py` **5/5** — proteggono il contratto anti-sotto-conteggio (buchi mai riempiti, tick solo dove il processo può agire, predicato di produzione).
 
 ---
 
