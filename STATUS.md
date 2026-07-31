@@ -5,6 +5,16 @@
 
 ---
 
+## ▶️ RIPARTI DA QUI — 2026-07-31, fine giornata
+
+**Fatto oggi (tutto committato e pushato).** C3 pre-registrato, eseguito e chiuso (cella A su val e test → **HAR-C è la baseline di riferimento**, banda −23%÷−32% invariata) · adozione delle baseline nel giudice con **rimozione** dei due flag · **breakpoint macro datato** per il bootstrap del 01/08 00:30 UTC · budget campionario L2 misurato ex-ante · **B1 stadio 1** pre-registrato, implementato ed eseguito → **NESSUNA CONCLUSIONE** (controllo positivo fallito) · **monitor di continuità L2** nel blocco ③ della routine. Suite 373/1.
+
+**Problemi aperti.** (a) il push macro al VPS è incondizionato e ha già consegnato la macro rifrescata dentro due campioni forward aperti — decisione dell'utente **arretrata**; (b) B1 stadio 1 ha una baseline inadeguata a 3 ore: riaprire richiede una nuova pre-registrazione, oppure si aspetta il campione a h=30; (c) il fix del `MacroNormalizer` e la pre-reg sizing v2 toccano il live → schedulati a **metà agosto**, a campioni chiusi.
+
+**Azione esatta da cui ripartire:** decidere sul **push macro** (ratificare il comportamento attuale, oppure aggiungere `-SkipMacroPush` a `scripts/vps/pull_vps_data.ps1`) — è l'unica cosa in scadenza, va decisa **prima del prossimo pull**. Subito dopo: decidere **se** riaprire B1 (dettaglio e vincoli in `RIPRESA.md` item 3). Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24**/40 (~metà agosto), finestre L2 a h=30 **n_eff 8.7** (+0.8/giorno col VPS al 100%).
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — B1 STADIO 1: L'ORDER-BOOK L2 PORTA INFORMAZIONE INCREMENTALE SULLA RV A BREVE? · 2026-07-31 · **APERTO, MAI ESEGUITO**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **⚠ CONFINE DICHIARATO — cosa è stato guardato e cosa no.** Sul lato L2 sono state calcolate diagnostiche **target-free** (SNR di aggregazione, collinearità, persistenza, stazionarietà) e una curva di potenza generica: sono servite a scegliere ② e ③ e i loro numeri sono riportati sotto per intero. **Nessuna relazione L2↔RV è mai stata calcolata, su nessun campione, in nessuna forma** — nessuna regressione, nessuna correlazione col target, nessuna occhiata. È l'unica ragione per cui questo gate vale qualcosa: il campione è troppo piccolo perché un peek possa essere assorbito.
