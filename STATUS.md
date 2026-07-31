@@ -5,6 +5,50 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — B1 STADIO 1: L'ORDER-BOOK L2 PORTA INFORMAZIONE INCREMENTALE SULLA RV A BREVE? · 2026-07-31 · **APERTO, MAI ESEGUITO**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). **⚠ CONFINE DICHIARATO — cosa è stato guardato e cosa no.** Sul lato L2 sono state calcolate diagnostiche **target-free** (SNR di aggregazione, collinearità, persistenza, stazionarietà) e una curva di potenza generica: sono servite a scegliere ② e ③ e i loro numeri sono riportati sotto per intero. **Nessuna relazione L2↔RV è mai stata calcolata, su nessun campione, in nessuna forma** — nessuna regressione, nessuna correlazione col target, nessuna occhiata. È l'unica ragione per cui questo gate vale qualcosa: il campione è troppo piccolo perché un peek possa essere assorbito.
+
+**① Ipotesi/prior onesto (pre-dichiarato, con DIREZIONE attesa).** L'order-book L2 è **l'unica informazione genuinamente nuova** entrata nel progetto: la microstruttura non è derivabile dall'OHLCV, a differenza di ogni feature testata finora. La letteratura microstrutturale (Cont-Kukanov-Stoikov 2014 sull'OFI; Easley-O'Hara sulla tossicità del flusso) trova contenuto informativo dell'ordine di **minuti-ore**, non di giorni. **Direzione attesa: se un effetto esiste, si vede a orizzonte breve e svanisce a orizzonte di produzione.** CONTRO, in ordine di forza: (a) **il campione è minuscolo** — un solo run contiguo di 410 ore, `n_eff ≈ 96`, contro i 216 dei gate vol; l'effetto minimo rilevabile è **1.37× quello di HAR-C vs HAR-RV**, che era un effetto forte e altamente significativo (p≈2·10⁻⁴). Serve quindi un effetto **grosso** per essere visto; (b) la RV a 3 ore è già ben predetta dai suoi lag, e l'informazione di book potrebbe essere ridondante con la RV recente; (c) 17 giorni di calendario sono un solo regime di mercato — un PASS non sarebbe generalizzabile senza replica. **Scenario base atteso: nessun effetto rilevabile.** Un FAIL a questa potenza **non chiude** il filone: dice che l'effetto, se c'è, è più piccolo di 1.37×δ_C3 — e va scritto in quei termini, non come "L2 non serve".
+
+**② Feature pre-dichiarate (TRE, scelte da diagnostiche TARGET-FREE).** Aggregazione oraria = **media** degli snapshot a 5s dentro l'ora, versioni **non firmate** (la varianza è un momento pari; il prior di progetto sui momenti dispari è il più solido che abbiamo):
+- **`ofi_abs`** = media di |`ofi_best`| — SNR 53, VIF 1.1, emivita **2.4h** (la più lunga);
+- **`log_depth`** = media di log(`total_bid_qty` + `total_ask_qty`) — SNR 1105, VIF 1.2, emivita 1.7h;
+- **`dimb25_abs`** = media di |`depth_imb_25bps`| — SNR 518, VIF 3.0, emivita 0.9h.
+
+**Come sono state scelte, e cosa è stato scartato.** SNR = `(var delle medie orarie − var_within/720) / var delle medie orarie`, cioè quanta della varianza della media oraria è segnale e non rumore di campionamento. **`spread_bps` — che era la mia proposta iniziale — è ELIMINATO: SNR 0.0 (4.7% di segnale) ed emivita 0.2h**, cioè la sua media oraria è rumore puro. Eliminati anche `microprice_tilt_abs` (SNR 0.7), `ofi_signed` (SNR 1.4, e firmato), `imbalance_L5/L20` (ρ=0.974 fra loro, VIF 20-27), `depth_imb_10bps` (ρ=0.799 con `dimb25`). I tre superstiti sono **quasi ortogonali fra loro** (VIF ≤ 3), che è ciò che serve con ~96 osservazioni effettive.
+- **Escluse ex-ante** (qualunque = NUOVA pre-registrazione): altre colonne L2, i livelli raw `raw_*_px/qty`, interazioni, trasformazioni non lineari, versioni firmate, aggregazioni diverse dalla media (mediana, ultimo valore, dispersione within-hour), lag di L2 oltre l'ora corrente.
+
+**③ Orizzonte e target — h=3 ore, RV costruita da barre a 1 MINUTO.** `n_eff = finestre/h` con finestre che costano `T+h` barre contigue, quindi **l'orizzonte agisce due volte** sul budget ed è la leva dominante: a h=30 (produzione) `n_eff = 12.7`, a h=3 `n_eff = 96.3`. Potenza e persistenza puntano nella **stessa** direzione — feature che si decorrelano in 1-2.4h sono diluite 3× a h=3 contro 6× a h=6. ⚠ **Ma un target a 3 ore costruito da 3 rendimenti orari al quadrato è un proxy di varianza pessimo**, e un target rumoroso riduce l'effetto misurato annullando il guadagno di potenza. Per questo la RV è costruita da **rendimenti a 1 minuto** (~180 quadrati per osservazione invece di 3): disaccoppia *quanto avanti si prevede* da *quanto bene si misura ciò che è successo*. Dati: `data/raw_candles_1m_l2.parquet`, 87.217 barre 1m dal 2026-06-01, **zero mancanti**, copertura 100% della finestra L2. ⚠ Il target NON è quello di produzione (RV a 30 barre orarie da rendimenti orari): questo stadio risponde a *"L2 predice la RV a breve"*, non a *"L2 migliora la linea vol"* — la seconda è lo stadio 2 e non è eseguibile prima del 2027.
+
+**④ Disegno — due OLS annidate, finestra espansiva, confronto appaiato.**
+- **baseline:** `log RV_{t+1..t+3} ~ 1 + log C_h + log C_w + log C_m` — cioè **HAR-C**, la baseline di riferimento adottata da C3, con componenti riscalate a h=3 e `C = min(RV, BV)` da barre 1m;
+- **candidato:** baseline **+ le tre feature L2 all'ora t** (3 parametri in più, 7 contro 4);
+- **schema:** finestra **espansiva** con burn-in **120 ore** (17 osservazioni per parametro al primo fit), poi per ogni ora successiva entrambi i modelli si rifittano su **tutto il passato disponibile** e prevedono l'ora seguente. Strettamente causale, e massimizza i punti di valutazione su un campione piccolo;
+- **loss:** **QLIKE su RV in livelli**, la stessa della linea vol;
+- **statistica di decisione:** **Diebold-Mariano appaiato** con varianza HAC (lag = h−1 = 2), `DM(candidato, baseline)`, convenzione del progetto (stat negativa = primo argomento migliore).
+
+**Numeri ex-ante VERIFICATI (condizione ③ del protocollo, model-independent, calcolati PRIMA di scrivere questo paragrafo):** run L2 contiguo **410 ore** (2026-07-14 10:00 → 2026-07-31 11:00 UTC), osservazioni utilizzabili dopo join e dropna **409**, zero NaN su tutte e 8 le colonne, indice monotono e senza duplicati, tutti i valori finiti. Con burn-in 120: **289 previsioni OOS valutate, `n_eff = 96.3`**, `δ_min` = **0.348** a α=0.01 e potenza 0.80 = **1.37×** l'effetto di C3.
+
+**⑤ Condizioni di PASS (tutte, AND).**
+1. **Significatività:** `DM(candidato, baseline)` con `p < 0.01`, a favore del candidato.
+2. **Materialità:** `QLIKE(candidato) ≤ 0.97 · QLIKE(baseline)` sugli stessi 289 punti (soglia −3%, la stessa usata per tutti i lever della linea vol).
+3. **Validità campione:** ≥240 previsioni OOS valutate (`n_eff ≥ 80`) — **già verificata ex-ante a 289/96.3**; da ricontare solo se il run L2 cambia.
+4. **CONTROLLO POSITIVO (obbligatorio, pre-dichiarato).** La baseline HAR-C a h=3 deve battere la **naive persistence** (`RV` trailing 3h) sugli stessi punti, con `p < 0.01`. Se a questo orizzonte e con questo target la baseline **non è nemmeno un previsore funzionante**, il confronto principale è ininterpretabile → esito **"NESSUNA CONCLUSIONE"**, non FAIL, e il difetto va documentato. È il controllo che manca a metà del corpus KILL.
+
+**⑥ Vincolo anti-goalpost.** Un solo run, un solo set di feature, un solo orizzonte, un solo burn-in. Il numero che esce viene riportato con il suo segno. Nessuna variante suggerita dai risultati può essere girata senza una NUOVA pre-registrazione — vale in particolare per: cambiare h, cambiare le tre feature, cambiare l'aggregazione, aggiungere lag, passare a un modello non lineare.
+
+**⑦ Conseguenze pre-dichiarate.**
+- **PASS** → l'L2 ha contenuto informativo incrementale a orizzonte breve, con un effetto **grande** (≥1.37×δ_C3, per costruzione della potenza). Sblocca la pre-registrazione dello **stadio 2** (integrazione nel NN), da eseguire quando `n_eff` a T=120 lo permetterà — e giustifica di **proteggere l'uptime del recorder** come priorità operativa (un'ora di downtime costa 149 finestre ≈ 6.2 giorni a h=30).
+- **FAIL** → l'effetto, se esiste, è **sotto 1.37×δ_C3 a 3 ore**. NON è "L2 non serve": è un limite superiore misurato, e va scritto così. Lo stadio 2 resta possibile ma senza supporto empirico, quindi scende in priorità sotto la raccolta.
+- **NESSUNA CONCLUSIONE** (④ fallita) → si indaga la specificazione della baseline a h=3 prima di qualunque altra affermazione.
+- **In ogni caso scritto**, con i numeri, in `STATUS.md` e in `TEORIA.md` §12.
+
+**Script/giudice:** `scripts/vol/l2_incremental_judge.py` (nuovo, da scrivere) + `data/raw_candles_1m_l2.parquet` (già acquisito). Nessuna GPU, nessun NN, secondi di CPU. Nessun impatto sul path production: non tocca `dev_vols_qlike.py`, né il gate vol-S, né il live.
+**Costo:** ~45 min di implementazione + test, esecuzione istantanea.
+
+---
+
 ## ✅ ADOZIONE — le baseline di C2/C3 entrano nello strumento, i due flag sono RIMOSSI · 2026-07-31
 
 **Decisione presa (utente): non "default-on" ma rimozione dei flag.** `QUANTSYS_HAR_CJ` e `QUANTSYS_HAR_C` non esistono più; HAR-C e HAR-CJ sono calcolate a **ogni** run del giudice. Razionale: un flag sempre acceso non è una leva, è una via di fallimento in più — spariscono con esso la combinazione incoerente `HAR_C=1` senza `HAR_CJ=1` e il guard che serviva a intercettarla. La proprietà che i flag proteggevano (riprodurre il report storico pre-C2) è già garantita dal **version control**: `git show <commit>:scripts/vol/dev_vols_qlike.py` è il meccanismo con cui sono state fatte tutte e tre le prove di inerzia. Duplicarlo con un flag di compatibilità sarebbe reimplementare git dentro l'applicazione.
