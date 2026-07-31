@@ -5,6 +5,62 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — C3 ATTRIBUZIONE DEL GUADAGNO HAR-CJ: SOSTITUZIONE RV→C *vs* CONTENUTO INFORMATIVO DEI SALTI (linea vol 1h) · 2026-07-31 · **APERTO, MAI ESEGUITO**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun QLIKE di HAR-C è mai stato calcolato, su nessuno split; il codice della baseline **non esiste ancora** (`quantsys/model/vol_metrics.py` ha `build_har_frame`/`har_fold_qlike` e `build_har_cj_frame`/`har_cj_fold_qlike`, nessuna variante a sole componenti continue — verificato). Nasce dalla **qualificazione ⑥ dell'audit C2** (30/07): HAR-CJ batte HAR-RV fuori campione, ma i coefficienti sui **salti non sono identificati** (segno invertito fra le due metà del train, condition number 5.4e+04, regressori di salto con std ~1000× più piccola delle continue) → è dimostrato che la **specificazione** prevede meglio, **NON** che i **salti** portino informazione. ⚠ **Terza pre-reg consecutiva di natura "controllo di specificazione del giudice"** (C1 → C2 → C3): non riapre la classe "lever di training" chiusa da A10. **Nessuna GPU, nessun NN nel confronto.**
+
+**⚠ ① AVVERTENZA DI PEEKING — dichiarata ex-ante: questo gate è STRUTTURALMENTE PIÙ DEBOLE di C1 e C2.** Due dei tre numeri del confronto sono **già stati visti** il 30/07: `QLIKE(HAR-RV)` = 0.35698 (val) / 0.36998 (test) e `QLIKE(HAR-CJ)` = 0.33788 (val) / 0.34572 (test). L'unica quantità genuinamente ignota è **`QLIKE(HAR-C)`**, e con essa l'ordinamento fra le tre specificazioni. Conseguenza vincolante sul disegno: **ogni statistica di decisione deve coinvolgere HAR-C**; è vietato costruire condizioni su rapporti fra i due numeri già noti, che sarebbero soddisfatte o violate per costruzione. Il limite è scritto qui, non nascosto, e va **riportato in ogni resoconto dell'esito**.
+
+**② Ipotesi/prior onesto (pre-dichiarato, con DIREZIONE attesa).** Con `BV` bipower variation, `J = max(RV − BV, 0)` e `C = RV − J = min(RV, BV)`, le tre specificazioni in spazio log sui **soliti tre lag** (h/w/m) sono:
+- **HAR-RV** — regressori `log RV` (3 colonne, `xh/xw/xm`);
+- **HAR-C** — regressori `log C` (3 colonne, `xc_*`) — **la nuova, ignota**;
+- **HAR-CJ** — regressori `log C` **e** `log(1+J)` (6 colonne, `xc_* + xj_*`).
+
+**Relazione di annidamento (asimmetrica, ed è il perno del disegno):** HAR-C ⊂ HAR-CJ **strettamente**, quindi in-sample `QLIKE(HAR-CJ) ≤ QLIKE(HAR-C)` per costruzione — ma **fuori campione no**: se `J` è rumore, i 3 coefficienti extra non identificati pagano un costo di overfitting e HAR-C può **battere** HAR-CJ. HAR-RV non è invece annidato in nessuna delle due (`log RV` non è combinazione lineare di `log C` e `log(1+J)`), quindi il confronto HAR-C vs HAR-RV è genuinamente non-annidato. **Direzione attesa: HAR-C ≈ HAR-CJ o migliore, ed entrambe ≪ HAR-RV** — cioè il guadagno misurato in C2 viene dalla **sostituzione del regressore** con la versione jump-robust, non dai termini di salto.
+**CONTRO, in ordine di forza:** (a) **la multicollinearità non implica inutilità predittiva** — è il caso da manuale in cui i singoli `β` sono instabili mentre la combinazione `Xβ` è ben determinata; l'audit ha misurato l'instabilità dei **coefficienti**, non l'inutilità della **previsione**, e questa è esattamente la ragione per cui serve un test invece di un'occhiata ai punti. È il contro-argomento più serio e la ragione d'essere del gate; (b) il troncamento `J ≥ 0` concentra il segnale sui pochi giorni di salto grosso, dove può portare informazione reale anche se il coefficiente medio è mal stimato; (c) il prior di C2 sfavorevole alla decomposizione a 1h è **già stato smentito una volta** (era atteso che la BV oraria fosse troppo rumorosa, e invece HAR-CJ ha vinto) → prudenza nel ripetere lo stesso prior.
+
+**③ Estimatore pre-dichiarato (UNO solo, nessuna variante).** HAR-C = OLS di `y` su `[1, xc_h, xc_w, xc_m]`, esattamente le colonne **già prodotte** da `build_har_cj_frame` — stesso frame, stesso `dropna`, stessi timestamp di `ev`, quindi **stesso campione delle altre due baseline per costruzione**. Stimato **solo sulla porzione train**, valutato su `ev`, QLIKE su RV in livelli, **nessuno smearing** (C1 testato e non adottato il 30/07).
+- **Escluse ex-ante** (qualunque di queste = NUOVA pre-registrazione): HAR-J a soli salti, ridge/regolarizzazione, standardizzazione dei regressori, riscalatura dei salti, TBPV/MedRV/BV *staggered*, salti filtrati per significatività, lag diversi dai tre in uso, semivarianze.
+
+**④ Statistiche di decisione — DUE test Diebold-Mariano appaiati, α pre-dichiarato.** Stessa configurazione di C2 (varianza HAC, `h=30`), stessa convenzione di segno della funzione `diebold_mariano(a, b)`: **DM negativo ⇒ il PRIMO argomento è il migliore**.
+- **Test A — la sostituzione RV→C aiuta?** `DM(loss_har_c, loss_har_rv)`.
+- **Test B — i salti aggiungono qualcosa OLTRE C?** `DM(loss_har_cj, loss_har_c)`.
+- **α = 0.01 per test**, cioè Bonferroni su 2 test a un familywise 0.02 — più stretto del 0.05 convenzionale, scelto ex-ante e **non rinegoziabile**. Non è una barra costruita per essere superata: in C2 i DM sono usciti a p ≈ 2·10⁻⁴ (val) e 1.5·10⁻⁵ (test).
+- **Statistica di attribuzione — RIPORTATA, NON GATING:** `φ = (Q_RV − Q_C) / (Q_RV − Q_CJ)`, quota del guadagno di C2 già ottenuta dalla sola sostituzione (`φ≈1` tutto dalla sostituzione · `φ≈0` tutto dai salti · `φ>1` i salti danneggiano OOS). **Non è gating perché il suo denominatore è una quantità già vista** — è precisamente la disciplina imposta dall'avvertenza ①.
+
+**⑤ Mappa decisionale pre-dichiarata (esaustiva, scritta ORA, su val).** Non è un PASS/FAIL: la domanda è di **attribuzione**, e comprimerla in un binario sarebbe il vero goalpost-moving.
+
+| Test A (C vs RV) | Test B (CJ vs C) | Conclusione pre-dichiarata |
+|---|---|---|
+| sig. pro-C | non sig. | **A — il guadagno è la SOSTITUZIONE.** I salti non aggiungono nulla di misurabile; l'interpretazione scritta a caldo il 30/07 è **falsificata**; la specificazione parsimoniosa e identificata è HAR-C. |
+| sig. pro-C | sig. pro-CJ | **B — contribuiscono ENTRAMBE.** L'interpretazione originale regge in parte; HAR-CJ resta la baseline. |
+| sig. pro-C | sig. **pro-C** | **E — i salti DANNEGGIANO fuori campione.** Conferma diretta e forte dell'audit ⑥ (parametri non identificati → costo di overfitting). HAR-C domina. |
+| non sig. | sig. pro-CJ | **C — il guadagno è nei SALTI**, nonostante i coefficienti non identificati (caso `β` instabili / `Xβ` ben determinato, contro-argomento ②a). Interpretazione originale di C2 **confermata**; il caveat di fragilità resta. |
+| non sig. | non sig. | **D — NESSUNA CONCLUSIONE, ed è un esito ANOMALO:** incoerente col gap CJ−RV già misurato a p ≈ 2·10⁻⁴ → segnala un problema di implementazione o di potenza, da indagare **prima** di qualunque altra affermazione. |
+| non sig. | sig. **pro-C** | **INCOMPATIBILE coi numeri noti** (implicherebbe CJ peggiore di C ≈ RV, mentre CJ < RV è misurato) → **ABORT per errore di implementazione**, nessuna conclusione. Cella scritta apposta come controllo di coerenza interno. |
+
+**⑥ Condizioni di validità (AND, verificate PRIMA di trarre qualunque conclusione).**
+1. **Riproducibilità del vintage (controllo, non gate):** nello stesso run `QLIKE(HAR-RV)` deve riprodurre **0.35698** e `QLIKE(HAR-CJ)` **0.33788** su val, con |Δ| ≤ 1e-4. Sono OLS deterministiche su `data/raw_candles.parquet` (mtime 2026-07-19, **verificato invariato**) e sui timestamp `t_val` dell'npz: uno scostamento significa che i **dati** sono cambiati, non che c'è un risultato. **|Δ| > 1e-4 ⇒ ABORT**, nessuna conclusione.
+2. **Identità del campione:** indici di `ev`, `ev_cj` ed `ev_c` identici **elemento per elemento** — guard fail-fast già irrobustito il 30/07, da estendere al terzo braccio.
+3. **`n_val ≥ 5000`** (atteso 6485, da ricontare sull'npz effettivo del run).
+4. **Nessun uso del NN — pre-dichiarato.** Le sandbox del 30/07 (`models_c2_sandbox` incluso) sono state **eliminate**, quindi i QLIKE del NN di questo run NON sono confrontabili con 0.26143/0.23637 (`models/itransformer` è il restore 06-10, scaler e span diversi). **I ratio NN/baseline prodotti da questo run vanno ignorati e non entrano in nessuna conclusione:** è un esperimento fra **tre OLS**. Il ratio contro HAR-C, se servirà, richiede il retrain 5 seed in sandbox (~28 min, path deterministico, val 0.26143 / test 0.23637) ed è un passo **successivo e separato**.
+
+**⑦ Leva sperimentale.** `QUANTSYS_HAR_C=1` — **inerte di default**; sub-blocco `har_c` **dentro** il blocco `har_cj` del report, che è già fuori da `metrics`/`gate` → il gate pre-registrato del vol-S resta non contaminabile **per costruzione**, una seconda volta. Fail-fast se `QUANTSYS_HAR_C=1` senza `QUANTSYS_HAR_CJ=1` (serve il frame CJ). **Test di inerzia obbligatorio PRIMA del run, pattern C1/C2 end-to-end:** giudice pre-patch estratto da `git show HEAD:` vs post-patch, stesso npz e stessi checkpoint, report **identico chiave per chiave** a flag spento, unica aggiunta `"har_c": {"enabled": false}`.
+
+**⑧ Script/giudice.** `quantsys/model/vol_metrics.py` guadagna `HAR_C_COLS` + `har_c_fold_qlike` (gemello di `har_cj_fold_qlike` su 3 colonne); `scripts/vol/dev_vols_qlike.py` riporta le **tre** baseline dallo stesso run, con i due DM e `φ`. Test dedicato `tests/test_har_c_baseline.py` (annidamento HAR-C ⊂ HAR-CJ in-sample, identità del campione fra i tre bracci, inerzia del flag, inerzia di HAR-RV e HAR-CJ).
+**Split:** val (`QUANTSYS_VOLS_SPLIT=val`); test **UNA volta sola**, a conclusione presa su val, one-shot, stesse definizioni e **stessa mappa ⑤**. **La conclusione richiede la CONCORDANZA dei due split:** se val e test cadono in celle diverse → esito **"instabile"**, nessuna adozione, scritto con i numeri. (Razionale: in C2 la stabilità del Δratio fra gli split è stata la ragione principale di credibilità del risultato — qui è promossa a requisito.)
+
+**⑨ Conseguenze pre-dichiarate.**
+- **Cella A o E** → **HAR-C diventa la baseline di riferimento**; il default-on di `QUANTSYS_HAR_CJ` **non** viene applicato (era già sospeso apposta) e al suo posto si valuta `QUANTSYS_HAR_C`; la banda pubblicata va **ri-espressa contro HAR-C**, il che richiede il retrain 5 seed (~28 min GPU) come **passo separato**; `TEORIA.md` §12.2 e `README.md` riscritti nominando la baseline corretta; la qualificazione ⑥ di C2 passa da "interpretazione non dimostrata" a "interpretazione **falsificata**", con i numeri.
+- **Cella B o C** → l'interpretazione originale di C2 regge (in parte o del tutto); **HAR-CJ resta la baseline**, banda **−23% ÷ −32% invariata**, decisione sul default-on di `QUANTSYS_HAR_CJ` **sbloccata** e da prendere separatamente; il caveat di fragilità dei coefficienti resta documentato.
+- **Cella D o cella incompatibile** → nessuna conclusione, indagine implementativa, banda e flag invariati.
+- **In ogni caso l'esito è scritto**, in `STATUS.md` **e** in `TEORIA.md` §12 (doppia copia da tenere in sincrono, direttiva #2).
+
+**Costo:** ~15 righe di codice + test, **secondi di CPU** per le tre regressioni, **zero GPU**. Nessuna contesa col live (04b è sul VPS). Nessuna dipendenza da dati VPS: eseguibile integralmente offline.
+**Sequenziamento:** nessun vincolo di calendario, non tocca campioni forward aperti. **Vincolo interno:** implementazione + test di inerzia **prima** di guardare qualunque numero di HAR-C.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — C2 HAR-CJ COME BASELINE PIÙ FORTE NEL CONFRONTO QLIKE (linea vol 1h) · 2026-07-30 · **CHIUSO: PASS 4/4 SU VAL E SU TEST → HAR-CJ ADOTTATA COME BASELINE DI RIFERIMENTO (⑤ in fondo)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun QLIKE di HAR-CJ è mai stato calcolato, su nessuno split; il codice della baseline **non esiste ancora** (`quantsys/model/vol_metrics.py` ha solo `build_har_frame`/`har_fold_qlike`, cioè HAR-RV semplice — verificato). ⚠ **Stessa natura di C1: controllo di SPECIFICAZIONE del giudice, non leva di modello** — non riapre la classe "lever di training" chiusa oggi con A10, e può spostare un **claim già pubblicato** (banda −27% ÷ −36%). Disciplina C1: un solo run per split, un solo estimatore, e il numero che esce viene riportato qualunque sia il segno.
