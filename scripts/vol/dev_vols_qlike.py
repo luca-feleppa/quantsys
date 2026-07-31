@@ -92,22 +92,6 @@ def main():
                          "vol model architecture to load (models/{arch})")
     args = ap.parse_args()
 
-    # IT: C3 (pre-reg STATUS 2026-07-31) — guard di COMBINAZIONE dei flag, anticipato
-    #     qui prima di caricare npz (~3 GB) e checkpoint: una combinazione incoerente
-    #     deve costare zero, non due minuti di I/O. HAR-C riusa il frame di HAR-CJ,
-    #     quindi da solo non ha nulla da stimare.
-    # EN: C3 (STATUS 2026-07-31 pre-reg) — flag COMBINATION guard, hoisted here before
-    #     loading the npz (~3 GB) and the checkpoints: an inconsistent combination must
-    #     cost zero, not two minutes of I/O. HAR-C reuses HAR-CJ's frame, so on its own
-    #     it has nothing to estimate.
-    if (os.environ.get("QUANTSYS_HAR_C", "0") == "1"
-            and os.environ.get("QUANTSYS_HAR_CJ", "0") != "1"):
-        raise RuntimeError(
-            "C3: QUANTSYS_HAR_C=1 richiede QUANTSYS_HAR_CJ=1 (HAR-C riusa il frame "
-            "HAR-CJ: stesse colonne xc_*, stesso campione) / QUANTSYS_HAR_C=1 "
-            "requires QUANTSYS_HAR_CJ=1 (HAR-C reuses the HAR-CJ frame)"
-        )
-
     # IT: root env-aware (QUANTSYS_MODELS_ROOT) — giudica la sandbox isolata se attiva.
     # EN: env-aware root (QUANTSYS_MODELS_ROOT) — judges the isolated sandbox if set.
     model_dir = models_root() / args.arch
@@ -192,96 +176,76 @@ def main():
     # ── Baseline 2: naive persistence ───────────────────────────────────────────
     log_pred_naive = ev["xh"].values
 
-    # ── Baseline 3 (C2, pre-reg STATUS 2026-07-30): HAR-CJ, env-gated e INERTE ──
-    # IT: a flag spento non viene costruito nulla e il report resta bit-identico —
-    #     l'unica differenza possibile è la PRESENZA del blocco `har_cj`. Il frame CJ
-    #     nasce SEPARATO (la bipower variation porta un lag in più: fonderlo nel frame
-    #     HAR-RV prima del dropna sposterebbe di una barra il campione della baseline
-    #     storica, cioè cambierebbe il claim mentre si cerca di verificarlo) e viene
-    #     poi ristretto ESATTAMENTE ai timestamp di `ev`: il disegno appaiato della
-    #     pre-reg ③ richiede che l'unica cosa a cambiare fra i due rapporti sia il
-    #     denominatore. Se l'allineamento non è esatto si fallisce subito: un confronto
-    #     su campioni diversi sarebbe peggio di nessun confronto.
-    # EN: with the flag off nothing is built and the report stays bit-identical — the
-    #     only possible difference is the PRESENCE of the `har_cj` block. The CJ frame
-    #     is built SEPARATELY (bipower variation carries one extra lag: merging it into
-    #     the HAR-RV frame before dropna would shift the historical baseline's sample by
-    #     one bar, i.e. change the claim while trying to verify it) and is then narrowed
-    #     to EXACTLY the `ev` timestamps: pre-reg ③'s paired design requires the
-    #     denominator to be the only thing that changes between the two ratios. If the
-    #     alignment is not exact we fail fast: comparing on different samples would be
-    #     worse than not comparing at all.
-    har_cj_on = os.environ.get("QUANTSYS_HAR_CJ", "0") == "1"
-    # ── Baseline 4 (C3, pre-reg STATUS 2026-07-31): HAR-C, sotto-leva di C2 ─────
-    # IT: sole componenti continue (`xc_*`), senza i termini di salto. Riusa lo
-    #     STESSO frame CJ — stesse colonne, stesso dropna, stessi timestamp — quindi
-    #     l'identità del campione fra le tre baseline è garantita per costruzione e
-    #     non da un secondo allineamento da verificare. Fail-fast se acceso da solo:
-    #     senza il frame CJ non c'è nulla da stimare, e un flag che tace quando non
-    #     può funzionare è peggio di un errore.
-    # EN: continuous components only (`xc_*`), no jump terms. It reuses the SAME CJ
-    #     frame — same columns, same dropna, same timestamps — so sample identity
-    #     across the three baselines holds by construction rather than through a
-    #     second alignment check. Fail-fast if switched on alone: without the CJ
-    #     frame there is nothing to estimate, and a flag that stays silent when it
-    #     cannot work is worse than an error.
-    #     La coerenza della combinazione è già stata verificata a inizio `main()`.
-    #     Consistency of the combination is already checked at the top of `main()`.
-    har_c_on = os.environ.get("QUANTSYS_HAR_C", "0") == "1"
-    log_pred_har_cj = None
-    log_pred_har_c = None
-    if har_cj_on:
-        from quantsys.model.vol_metrics import build_har_cj_frame            # noqa: PLC0415
-        log.info("C2 HAR-CJ ATTIVO / ACTIVE (QUANTSYS_HAR_CJ=1): baseline aggiuntiva, "
-                 "gate pre-registrato del vol-S INVARIATO / additional baseline, "
-                 "the pre-registered vol-S gate is UNCHANGED")
-        har_cj = build_har_cj_frame(raw, h, bars_day)
-        tr_cj = har_cj.loc[har_cj.index.intersection(tr.index)]
-        ev_cj = har_cj.loc[har_cj.index.intersection(ev.index)]
-        # IT: guard sull'IDENTITÀ dell'indice, non sul solo conteggio: due indici della
-        #     stessa lunghezza ma di ordine diverso accoppierebbero previsioni e verità
-        #     sbagliate producendo un QLIKE plausibile ma falso — il tipo di errore che
-        #     non si vede guardando il numero. (Audit 2026-07-30: verificato che nel run
-        #     reale gli indici erano identici elemento per elemento; il guard debole non
-        #     aveva prodotto danni, ma non lo avrebbe intercettato.)
-        # EN: guard on index IDENTITY, not just count: two indices of equal length but
-        #     different order would pair predictions with the wrong ground truth, giving
-        #     a plausible-looking but false QLIKE — the kind of error you cannot spot by
-        #     looking at the number. (2026-07-30 audit: verified the real run had
-        #     element-wise identical indices; the weak guard did no harm but would not
-        #     have caught it.)
-        if not ev_cj.index.equals(ev.index):
-            raise RuntimeError(
-                f"C2: allineamento HAR-CJ↔HAR-RV non esatto sull'eval "
-                f"({len(ev_cj)} vs {len(ev)} righe, indici {'di pari lunghezza ma diversi' if len(ev_cj)==len(ev) else 'di lunghezza diversa'}) "
-                f"— il disegno appaiato della pre-reg ③ richiede gli STESSI sample nello "
-                f"STESSO ordine / non-exact HAR-CJ↔HAR-RV eval alignment"
-            )
-        Xtr_cj = np.column_stack([np.ones(len(tr_cj)), tr_cj[HAR_CJ_COLS].values])
-        beta_cj, *_ = np.linalg.lstsq(Xtr_cj, tr_cj["y"].values, rcond=None)
-        Xev_cj = np.column_stack([np.ones(len(ev_cj)), ev_cj[HAR_CJ_COLS].values])
-        log_pred_har_cj = Xev_cj @ beta_cj
-        log.info(f"HAR-CJ beta: const={beta_cj[0]:.3f} "
-                 f"C[h,w,m]=({beta_cj[1]:.3f},{beta_cj[2]:.3f},{beta_cj[3]:.3f}) "
-                 f"J[h,w,m]=({beta_cj[4]:.3f},{beta_cj[5]:.3f},{beta_cj[6]:.3f})  "
-                 f"train={len(tr_cj)}")
+    # ── Baseline 3 e 4: HAR-C e HAR-CJ — SEMPRE calcolate (adottate 2026-07-31) ──
+    # IT: nate come leve env-gated di C2/C3, promosse a parte stabile dello strumento
+    #     alla chiusura di C3. I due flag `QUANTSYS_HAR_CJ`/`QUANTSYS_HAR_C` sono stati
+    #     RIMOSSI, non accesi: un flag sempre acceso non è una leva, è una via di
+    #     fallimento in più (spariscono con essi la combinazione incoerente e il suo
+    #     guard). Per riprodurre il report storico pre-C2 si usa il version control —
+    #     `git show <commit>:scripts/vol/dev_vols_qlike.py` — che è il meccanismo con
+    #     cui le tre prove di inerzia sono state fatte: duplicarlo con un flag di
+    #     compatibilità sarebbe reimplementare git dentro l'applicazione.
+    #     ⚠ INVARIANTE PRESERVATO: i blocchi restano FUORI da `metrics`/`gate`, quindi
+    #     il gate pre-registrato del vol-S (2026-06-10, denominatore HAR-RV) è
+    #     strutturalmente non contaminabile — la promozione non lo tocca.
+    #     Il frame CJ nasce SEPARATO (la bipower variation porta un lag in più: fonderlo
+    #     nel frame HAR-RV prima del dropna sposterebbe di una barra il campione della
+    #     baseline storica) e viene poi ristretto ESATTAMENTE ai timestamp di `ev`.
+    #     HAR-C riusa quel frame: identità del campione fra le tre baseline garantita
+    #     per COSTRUZIONE, non da un allineamento da verificare a valle.
+    # EN: born as C2/C3 env-gated levers, promoted to a stable part of the instrument
+    #     when C3 closed. The two flags were REMOVED, not switched on: an always-on flag
+    #     is not a lever, it is one more failure mode (the inconsistent combination and
+    #     its guard disappear with them). To reproduce the historical pre-C2 report use
+    #     version control — `git show <commit>:scripts/vol/dev_vols_qlike.py` — which is
+    #     how all three inertia proofs were done: duplicating it with a compatibility
+    #     flag would be reimplementing git inside the application.
+    #     ⚠ INVARIANT PRESERVED: the blocks stay OUTSIDE `metrics`/`gate`, so the
+    #     pre-registered vol-S gate (2026-06-10, HAR-RV denominator) is structurally
+    #     uncontaminable — the promotion does not touch it.
+    #     The CJ frame is built SEPARATELY (bipower variation carries one extra lag) and
+    #     is then narrowed to EXACTLY the `ev` timestamps. HAR-C reuses that frame:
+    #     sample identity across the three baselines holds BY CONSTRUCTION.
+    from quantsys.model.vol_metrics import build_har_cj_frame                # noqa: PLC0415
+    har_cj = build_har_cj_frame(raw, h, bars_day)
+    tr_cj = har_cj.loc[har_cj.index.intersection(tr.index)]
+    ev_cj = har_cj.loc[har_cj.index.intersection(ev.index)]
+    # IT: guard sull'IDENTITÀ dell'indice, non sul solo conteggio: due indici della
+    #     stessa lunghezza ma di ordine diverso accoppierebbero previsioni e verità
+    #     sbagliate producendo un QLIKE plausibile ma falso — il tipo di errore che
+    #     non si vede guardando il numero. (Audit 2026-07-30.)
+    # EN: guard on index IDENTITY, not just count: two indices of equal length but
+    #     different order would pair predictions with the wrong ground truth, giving
+    #     a plausible-looking but false QLIKE — the kind of error you cannot spot by
+    #     looking at the number. (2026-07-30 audit.)
+    if not ev_cj.index.equals(ev.index):
+        raise RuntimeError(
+            f"allineamento HAR-C/HAR-CJ ↔ HAR-RV non esatto sull'eval "
+            f"({len(ev_cj)} vs {len(ev)} righe, indici {'di pari lunghezza ma diversi' if len(ev_cj)==len(ev) else 'di lunghezza diversa'}) "
+            f"— il confronto appaiato richiede gli STESSI sample nello STESSO ordine / "
+            f"non-exact HAR-C/HAR-CJ ↔ HAR-RV eval alignment"
+        )
+    Xtr_cj = np.column_stack([np.ones(len(tr_cj)), tr_cj[HAR_CJ_COLS].values])
+    beta_cj, *_ = np.linalg.lstsq(Xtr_cj, tr_cj["y"].values, rcond=None)
+    Xev_cj = np.column_stack([np.ones(len(ev_cj)), ev_cj[HAR_CJ_COLS].values])
+    log_pred_har_cj = Xev_cj @ beta_cj
 
-        # IT: C3 — stessa meccanica su 3 colonne invece di 6, sullo STESSO train e
-        #     sullo STESSO eval: fra i due modelli cambia solo il set di regressori.
-        # EN: C3 — same mechanics on 3 columns instead of 6, on the SAME train and
-        #     the SAME eval: only the regressor set differs between the two models.
-        if har_c_on:
-            log.info("C3 HAR-C ATTIVO / ACTIVE (QUANTSYS_HAR_C=1): baseline a sole "
-                     "componenti continue, ANNIDATA in HAR-CJ → confronto informativo "
-                     "solo fuori campione / continuous-only baseline, NESTED in HAR-CJ "
-                     "→ informative out of sample only")
-            Xtr_c = np.column_stack([np.ones(len(tr_cj)), tr_cj[HAR_C_COLS].values])
-            beta_c, *_ = np.linalg.lstsq(Xtr_c, tr_cj["y"].values, rcond=None)
-            Xev_c = np.column_stack([np.ones(len(ev_cj)), ev_cj[HAR_C_COLS].values])
-            log_pred_har_c = Xev_c @ beta_c
-            log.info(f"HAR-C beta: const={beta_c[0]:.3f} "
-                     f"C[h,w,m]=({beta_c[1]:.3f},{beta_c[2]:.3f},{beta_c[3]:.3f})  "
-                     f"train={len(tr_cj)}")
+    # IT: HAR-C — stessa meccanica su 3 colonne invece di 6, stesso train, stesso eval:
+    #     fra i due modelli cambia SOLO il set di regressori. È la baseline di
+    #     riferimento del claim pubblicato dal 2026-07-31 (C3).
+    # EN: HAR-C — same mechanics on 3 columns instead of 6, same train, same eval: ONLY
+    #     the regressor set differs. It is the published claim's reference baseline
+    #     since 2026-07-31 (C3).
+    Xtr_c = np.column_stack([np.ones(len(tr_cj)), tr_cj[HAR_C_COLS].values])
+    beta_c, *_ = np.linalg.lstsq(Xtr_c, tr_cj["y"].values, rcond=None)
+    Xev_c = np.column_stack([np.ones(len(ev_cj)), ev_cj[HAR_C_COLS].values])
+    log_pred_har_c = Xev_c @ beta_c
+    log.info(f"HAR-C  beta: const={beta_c[0]:.3f} "
+             f"C[h,w,m]=({beta_c[1]:.3f},{beta_c[2]:.3f},{beta_c[3]:.3f})  "
+             f"train={len(tr_cj)}")
+    log.info(f"HAR-CJ beta: const={beta_cj[0]:.3f} "
+             f"C[h,w,m]=({beta_cj[1]:.3f},{beta_cj[2]:.3f},{beta_cj[3]:.3f}) "
+             f"J[h,w,m]=({beta_cj[4]:.3f},{beta_cj[5]:.3f},{beta_cj[6]:.3f})")
 
     # ── NN: ensemble forward su X_{split} → z → log-RV raw (center+scale) ───────
     from quantsys.model.ensemble import EnsembleModel
@@ -394,102 +358,89 @@ def main():
     #     printed verdict remains the original vol-S gate (NN vs HAR-RV and naive).
     #     Keeping the block outside `res`/`gate` is what makes contaminating an
     #     already-registered gate impossible by construction, not by discipline.
-    har_cj_block = {"enabled": bool(har_cj_on)}
-    if har_cj_on:
-        losses["har_cj"] = qlike_series(rv_true, np.exp(log_pred_har_cj))
-        q_cj = qlike(rv_true, np.exp(log_pred_har_cj))
-        q_rv = res["har"]["qlike"]
-        q_nn = res["nn"]["qlike"]
-        ratio_rv, ratio_cj = q_nn / q_rv, q_nn / q_cj
-        dm_cj = {}
-        try:
-            dm_cj["nn_vs_har_cj"] = diebold_mariano(losses["nn"], losses["har_cj"], h=h)
-            dm_cj["har_cj_vs_har"] = diebold_mariano(losses["har_cj"], losses["har"], h=h)
-        except Exception as e:  # noqa: BLE001
-            log.warning(f"DM HAR-CJ fallito / DM HAR-CJ failed: {e}")
-        har_cj_block.update({
-            "qlike_har_cj": float(q_cj),
-            "qlike_har_rv": float(q_rv),
-            "mse_log_har_cj": float(np.mean((ev["y"].values - log_pred_har_cj) ** 2)),
-            "beta": [float(b) for b in beta_cj],
-            "ratio_rv": float(ratio_rv), "ratio_cj": float(ratio_cj),
-            "delta_ratio": float(ratio_cj - ratio_rv),
-            "n_eval": int(len(ev)),
-            # IT/EN: ① la baseline è davvero più forte? / is the baseline actually stronger?
-            "cond1_cj_stronger": bool(q_cj <= q_rv),
-            # IT/EN: ② il claim sopravvive al gate originale 0.95 / claim survives the original 0.95 gate
-            "cond2_claim_survives": bool(q_nn <= 0.95 * q_cj),
-            # IT/EN: ③ lo spostamento della banda è materiale? / is the band shift material?
-            "cond3_material": bool(abs(ratio_cj - ratio_rv) >= 0.02),
-            # IT/EN: ④ validità campione / sample validity
-            "cond4_n_obs": bool(len(ev) >= 5000),
-            "diebold_mariano": dm_cj,
-        })
-        log.info(f"C2 HAR-CJ QLIKE={q_cj:.5f} (HAR-RV {q_rv:.5f})  "
-                 f"ratio NN/HAR: RV={ratio_rv:.4f} → CJ={ratio_cj:.4f} "
-                 f"(Δ={ratio_cj - ratio_rv:+.4f})")
+    # IT: `enabled` conservato a True per COMPATIBILITÀ di schema con i report già su
+    #     disco e con le tabelle committate in STATUS: la chiave non ha più un
+    #     interruttore dietro, ma toglierla renderebbe non diffabili i report di C2/C3.
+    # EN: `enabled` kept True for schema COMPATIBILITY with the reports already on disk
+    #     and the tables committed in STATUS: the key no longer has a switch behind it,
+    #     but removing it would make the C2/C3 reports non-diffable.
+    har_cj_block = {"enabled": True}
+    losses["har_cj"] = qlike_series(rv_true, np.exp(log_pred_har_cj))
+    q_cj = qlike(rv_true, np.exp(log_pred_har_cj))
+    q_rv = res["har"]["qlike"]
+    q_nn = res["nn"]["qlike"]
+    ratio_rv, ratio_cj = q_nn / q_rv, q_nn / q_cj
+    dm_cj = {}
+    try:
+        dm_cj["nn_vs_har_cj"] = diebold_mariano(losses["nn"], losses["har_cj"], h=h)
+        dm_cj["har_cj_vs_har"] = diebold_mariano(losses["har_cj"], losses["har"], h=h)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"DM HAR-CJ fallito / DM HAR-CJ failed: {e}")
+    har_cj_block.update({
+        "qlike_har_cj": float(q_cj),
+        "qlike_har_rv": float(q_rv),
+        "mse_log_har_cj": float(np.mean((ev["y"].values - log_pred_har_cj) ** 2)),
+        "beta": [float(b) for b in beta_cj],
+        "ratio_rv": float(ratio_rv), "ratio_cj": float(ratio_cj),
+        "delta_ratio": float(ratio_cj - ratio_rv),
+        "n_eval": int(len(ev)),
+        # IT: le quattro condizioni di C2 — gate CHIUSO il 2026-07-30. Restano calcolate
+        #     come monitoraggio continuo (② dice a ogni run se il claim regge ancora
+        #     contro la baseline forte), NON come condizioni vive.
+        # EN: C2's four conditions — gate CLOSED on 2026-07-30. Kept as continuous
+        #     monitoring (② tells every run whether the claim still holds against the
+        #     strong baseline), NOT as live conditions.
+        "cond1_cj_stronger": bool(q_cj <= q_rv),
+        "cond2_claim_survives": bool(q_nn <= 0.95 * q_cj),
+        "cond3_material": bool(abs(ratio_cj - ratio_rv) >= 0.02),
+        "cond4_n_obs": bool(len(ev) >= 5000),
+        "diebold_mariano": dm_cj,
+    })
 
-        # ── C3: sub-blocco HAR-C, ANNIDATO dentro `har_cj` ─────────────────────
-        # IT: essendo dentro un blocco già fuori da `metrics`/`gate`, il gate
-        #     pre-registrato del vol-S è non contaminabile una seconda volta, per
-        #     costruzione. Le due statistiche di decisione della pre-reg ④ sono i
-        #     DM appaiati; `phi` è DESCRITTIVA e non gating, perché il suo
-        #     denominatore (q_rv − q_cj) è una quantità già osservata il 30/07 —
-        #     l'avvertenza di peeking ① vieta di fondarci una soglia.
-        # EN: sitting inside a block already outside `metrics`/`gate`, the
-        #     pre-registered vol-S gate is uncontaminable a second time, by
-        #     construction. Pre-reg ④'s two decision statistics are the paired DM
-        #     tests; `phi` is DESCRIPTIVE, not gating, because its denominator
-        #     (q_rv − q_cj) is a quantity already observed on 30/07 — peeking
-        #     warning ① forbids anchoring a threshold to it.
-        if har_c_on:
-            losses["har_c"] = qlike_series(rv_true, np.exp(log_pred_har_c))
-            q_c = qlike(rv_true, np.exp(log_pred_har_c))
-            dm_c = {}
-            try:
-                # IT/EN: convenzione diebold_mariano(a,b) → stat NEGATIVA = `a` migliore
-                dm_c["test_a_har_c_vs_har_rv"] = diebold_mariano(
-                    losses["har_c"], losses["har"], h=h)
-                dm_c["test_b_har_cj_vs_har_c"] = diebold_mariano(
-                    losses["har_cj"], losses["har_c"], h=h)
-            except Exception as e:  # noqa: BLE001
-                log.warning(f"DM HAR-C fallito / DM HAR-C failed: {e}")
-            denom = q_rv - q_cj
-            phi = float((q_rv - q_c) / denom) if abs(denom) > 1e-12 else float("nan")
-            har_cj_block["har_c"] = {
-                "enabled": True,
-                "qlike_har_c": float(q_c),
-                "mse_log_har_c": float(np.mean((ev["y"].values - log_pred_har_c) ** 2)),
-                "beta": [float(b) for b in beta_c],
-                # IT/EN: attribuzione — quota del guadagno CJ dalla sola sostituzione
-                "phi_attribution": phi,
-                # IT: condizionamento dei due design (diagnostico, mai decisionale):
-                #     è la quantità che l'audit del 30/07 ha calcolato ad hoc, qui
-                #     resa riproducibile — sostiene l'argomento di STABILITÀ dello
-                #     strumento, non l'accuratezza.
-                # EN: conditioning of the two designs (diagnostic, never decisional):
-                #     the quantity the 30/07 audit computed ad hoc, made reproducible
-                #     here — it supports the instrument-STABILITY argument, not accuracy.
-                "cond_number_har_c": float(np.linalg.cond(Xtr_c)),
-                "cond_number_har_cj": float(np.linalg.cond(Xtr_cj)),
-                "diebold_mariano": dm_c,
-            }
-            log.info(f"C3 HAR-C QLIKE={q_c:.5f}  (HAR-RV {q_rv:.5f} · HAR-CJ {q_cj:.5f})  "
-                     f"phi={phi:+.3f}  cond: C={np.linalg.cond(Xtr_c):.1f} "
-                     f"CJ={np.linalg.cond(Xtr_cj):.3e}")
-            for label in ("test_a_har_c_vs_har_rv", "test_b_har_cj_vs_har_c"):
-                r = dm_c.get(label)
-                if r:
-                    log.info(f"DM {label}: stat={r['dm_hln']:+.3f} p={r['p_value']:.2e} "
-                             f"(migliore/better={r['better']})")
-
-    # IT: firma di inerzia di C3: a flag spento il report guadagna SOLO questa chiave,
-    #     in coda (l'ordine delle chiavi C2 resta quello storico). setdefault → no-op
-    #     quando il sub-blocco è già stato scritto sopra.
-    # EN: C3's inertia signature: with the flag off the report gains ONLY this key, at
-    #     the end (C2's key order stays historical). setdefault → no-op when the
-    #     sub-block was already written above.
-    har_cj_block.setdefault("har_c", {"enabled": bool(har_c_on)})
+    # ── HAR-C: sub-blocco annidato (schema stabile dai report C3) ──────────────
+    # IT: essendo dentro un blocco già fuori da `metrics`/`gate`, il gate
+    #     pre-registrato del vol-S è non contaminabile una seconda volta, per
+    #     costruzione. `phi` resta DESCRITTIVA: il suo denominatore (q_rv − q_cj) era
+    #     una quantità già osservata quando C3 fu pre-registrato, e l'avvertenza di
+    #     peeking vietava di fondarci una soglia — la nota resta valida per chiunque
+    #     rilegga il numero.
+    # EN: sitting inside a block already outside `metrics`/`gate`, the pre-registered
+    #     vol-S gate is uncontaminable a second time, by construction. `phi` stays
+    #     DESCRIPTIVE: its denominator (q_rv − q_cj) was an already-observed quantity
+    #     when C3 was pre-registered, and the peeking warning forbade anchoring a
+    #     threshold to it — the note still holds for anyone re-reading the number.
+    losses["har_c"] = qlike_series(rv_true, np.exp(log_pred_har_c))
+    q_c = qlike(rv_true, np.exp(log_pred_har_c))
+    dm_c = {}
+    try:
+        # IT/EN: convenzione diebold_mariano(a,b) → stat NEGATIVA = `a` migliore
+        dm_c["test_a_har_c_vs_har_rv"] = diebold_mariano(losses["har_c"], losses["har"], h=h)
+        dm_c["test_b_har_cj_vs_har_c"] = diebold_mariano(losses["har_cj"], losses["har_c"], h=h)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"DM HAR-C fallito / DM HAR-C failed: {e}")
+    denom = q_rv - q_cj
+    phi = float((q_rv - q_c) / denom) if abs(denom) > 1e-12 else float("nan")
+    har_cj_block["har_c"] = {
+        "enabled": True,
+        "qlike_har_c": float(q_c),
+        "mse_log_har_c": float(np.mean((ev["y"].values - log_pred_har_c) ** 2)),
+        "beta": [float(b) for b in beta_c],
+        # IT/EN: attribuzione — quota del guadagno CJ dalla sola sostituzione
+        "phi_attribution": phi,
+        # IT: condizionamento dei due design (diagnostico, mai decisionale): sostiene
+        #     l'argomento di STABILITÀ dello strumento, non l'accuratezza. È la ragione
+        #     per cui HAR-C, e non HAR-CJ, è la baseline del claim.
+        # EN: conditioning of the two designs (diagnostic, never decisional): it supports
+        #     the instrument-STABILITY argument, not accuracy. It is why HAR-C, not
+        #     HAR-CJ, is the claim's baseline.
+        "cond_number_har_c": float(np.linalg.cond(Xtr_c)),
+        "cond_number_har_cj": float(np.linalg.cond(Xtr_cj)),
+        # IT/EN: rapporto del CLAIM pubblicato (baseline di riferimento dal 2026-07-31)
+        "ratio_nn_over_har_c": float(q_nn / q_c),
+        "diebold_mariano": dm_c,
+    }
+    log.info(f"baseline: HAR-RV={q_rv:.5f} (gate) · HAR-C={q_c:.5f} (claim) · "
+             f"HAR-CJ={q_cj:.5f}   ratio NN/HAR-C={q_nn / q_c:.4f}  phi={phi:+.3f}")
 
     # IT: A8-bis (pre-reg 2026-07-19) — breakdown QLIKE per-regime: label = argmax del
     #     gate causale (model-independent), allineate ai sample `ev` via `sel`. Serve
@@ -645,43 +596,37 @@ def main():
         print(f"     ① coerenza/coherence={smear_block['cond1_coherent_both_sides']}  "
               f"② materiale/material(≥0.02)={smear_block['cond2_material']}  "
               f"③ n≥5000={smear_block['cond3_n_obs']}")
-    # IT: C2 — HAR-CJ affiancata a HAR-RV; le quattro condizioni sono INFORMATIVE, la
-    #     decisione è manuale sotto il vincolo anti-goalpost della pre-reg.
-    # EN: C2 — HAR-CJ shown next to HAR-RV; the four conditions are INFORMATIVE, the
-    #     decision is manual under the pre-reg's anti-goalpost constraint.
-    if har_cj_block["enabled"]:
-        print(f"  ── C2 baseline HAR-CJ (Andersen-Bollerslev-Diebold 2007) ──")
-        print(f"     HAR-RV QLIKE={har_cj_block['qlike_har_rv']:.5f} → "
-              f"HAR-CJ QLIKE={har_cj_block['qlike_har_cj']:.5f}  "
-              f"MSE(log)={har_cj_block['mse_log_har_cj']:.4f}")
-        print(f"     ratio NN/baseline: vs RV={har_cj_block['ratio_rv']:.4f} → "
-              f"vs CJ={har_cj_block['ratio_cj']:.4f}  (Δ={har_cj_block['delta_ratio']:+.4f})")
-        for label in ("nn_vs_har_cj", "har_cj_vs_har"):
-            r = har_cj_block.get("diebold_mariano", {}).get(label)
-            if r and np.isfinite(r.get("dm_hln", float("nan"))):
-                print(f"     DM {label:14s} stat={r['dm_hln']:+7.3f}  p={r['p_value']:.2e}"
-                      f"  [descrittivo/descriptive]")
-        print(f"     ① CJ più forte/stronger={har_cj_block['cond1_cj_stronger']}  "
-              f"② claim regge/survives(≤0.95)={har_cj_block['cond2_claim_survives']}  "
-              f"③ materiale/material(≥0.02)={har_cj_block['cond3_material']}  "
-              f"④ n≥5000={har_cj_block['cond4_n_obs']}")
-    # IT/EN: C3 — attribuzione del guadagno CJ / attribution of the CJ gain
-    _hc = har_cj_block.get("har_c", {})
-    if _hc.get("enabled"):
-        print(f"  [C3] HAR-C (sole componenti continue/continuous only) "
-              f"QLIKE={_hc['qlike_har_c']:.5f}  MSE(log)={_hc['mse_log_har_c']:.4f}")
-        print(f"     ordinamento/ordering: HAR-RV={har_cj_block['qlike_har_rv']:.5f} · "
-              f"HAR-C={_hc['qlike_har_c']:.5f} · HAR-CJ={har_cj_block['qlike_har_cj']:.5f}"
-              f"   φ={_hc['phi_attribution']:+.3f}")
-        print(f"     cond(design): HAR-C={_hc['cond_number_har_c']:.1f}  "
-              f"HAR-CJ={_hc['cond_number_har_cj']:.3e}  [diagnostico/diagnostic]")
-        for label, tag in (("test_a_har_c_vs_har_rv", "A  C vs RV "),
-                           ("test_b_har_cj_vs_har_c", "B  CJ vs C ")):
-            r = _hc.get("diebold_mariano", {}).get(label)
-            if r and np.isfinite(r.get("dm_hln", float("nan"))):
-                print(f"     Test {tag} DM={r['dm_hln']:+7.3f}  p={r['p_value']:.2e}  "
-                      f"migliore/better={r['better']}  "
-                      f"{'SIG' if r['p_value'] < 0.01 else 'non sig.'} (α=0.01)")
+    # IT: pannello a TRE baseline, con il RUOLO di ciascuna stampato accanto al numero.
+    #     È la ragione principale per cui il calcolo è stato reso incondizionato: chi
+    #     lancia il giudice deve vedere il denominatore del claim pubblicato senza
+    #     doversi ricordare di accendere un flag, e deve vedere che NON è lo stesso
+    #     denominatore del gate pre-registrato. Confondere i due è l'errore che questo
+    #     pannello esiste per rendere impossibile.
+    # EN: THREE-baseline panel, each one's ROLE printed next to its number. It is the
+    #     main reason the computation was made unconditional: whoever runs the judge
+    #     must see the published claim's denominator without remembering to set a flag,
+    #     and must see it is NOT the pre-registered gate's denominator. Confusing the
+    #     two is the mistake this panel exists to make impossible.
+    _hc = har_cj_block["har_c"]
+    print("  ── baseline econometriche / econometric baselines ──")
+    print(f"     HAR-RV  QLIKE={har_cj_block['qlike_har_rv']:.5f}   ratio NN={har_cj_block['ratio_rv']:.4f}"
+          f"   ← denominatore del GATE pre-registrato (2026-06-10)")
+    print(f"     HAR-C   QLIKE={_hc['qlike_har_c']:.5f}   ratio NN={_hc['ratio_nn_over_har_c']:.4f}"
+          f"   ← denominatore del CLAIM pubblicato (C3, 2026-07-31)")
+    print(f"     HAR-CJ  QLIKE={har_cj_block['qlike_har_cj']:.5f}   ratio NN={har_cj_block['ratio_cj']:.4f}"
+          f"   ← diagnostica (C2); φ={_hc['phi_attribution']:+.3f}")
+    print(f"     cond(design): HAR-C={_hc['cond_number_har_c']:.1f}  "
+          f"HAR-CJ={_hc['cond_number_har_cj']:.3e}  → HAR-C è la specificazione "
+          f"identificata / is the identified specification")
+    for label, tag in (("test_a_har_c_vs_har_rv", "C  vs RV"),
+                       ("test_b_har_cj_vs_har_c", "CJ vs C ")):
+        r = _hc.get("diebold_mariano", {}).get(label)
+        if r and np.isfinite(r.get("dm_hln", float("nan"))):
+            print(f"     DM {tag}  stat={r['dm_hln']:+7.3f}  p={r['p_value']:.2e}  "
+                  f"migliore/better={r['better']}  [descrittivo/descriptive]")
+    if not har_cj_block["cond2_claim_survives"]:
+        print("     ⚠ il claim NON regge più contro HAR-CJ (≤0.95) — verificare / "
+              "the claim no longer survives against HAR-CJ")
     print(f"  VERDETTO [{split}]: {gate['verdict']}   → {out_path}")
 
 

@@ -5,6 +5,19 @@
 
 ---
 
+## ✅ ADOZIONE — le baseline di C2/C3 entrano nello strumento, i due flag sono RIMOSSI · 2026-07-31
+
+**Decisione presa (utente): non "default-on" ma rimozione dei flag.** `QUANTSYS_HAR_CJ` e `QUANTSYS_HAR_C` non esistono più; HAR-C e HAR-CJ sono calcolate a **ogni** run del giudice. Razionale: un flag sempre acceso non è una leva, è una via di fallimento in più — spariscono con esso la combinazione incoerente `HAR_C=1` senza `HAR_CJ=1` e il guard che serviva a intercettarla. La proprietà che i flag proteggevano (riprodurre il report storico pre-C2) è già garantita dal **version control**: `git show <commit>:scripts/vol/dev_vols_qlike.py` è il meccanismo con cui sono state fatte tutte e tre le prove di inerzia. Duplicarlo con un flag di compatibilità sarebbe reimplementare git dentro l'applicazione.
+
+**⚠ Invariante preservato e VERIFICATO — gate ≠ claim.** I blocchi restano **fuori** da `metrics`/`gate`, quindi:
+- il **gate** pre-registrato del 2026-06-10 continua a usare **HAR-RV** come denominatore — non si riscrive il denominatore di un gate registrato, nemmeno quando l'esito non cambierebbe;
+- il **claim** pubblicato usa **HAR-C** (C3);
+- lo stdout stampa ora un **pannello a tre baseline con il RUOLO accanto a ogni numero**, che è la ragione principale della promozione: chi lancia il giudice deve vedere il denominatore del claim senza ricordarsi di accendere un flag, **e** deve vedere che non è quello del gate. Confonderli è l'errore che il pannello esiste per rendere impossibile.
+
+**Controllo:** run senza alcun flag → **103 chiavi identiche** al report C3 a flag accesi, 0 differenze, unica aggiunta `har_cj.har_c.ratio_nn_over_har_c` (rapporto del claim, prima ricavabile solo a mano); `metrics` e `gate` invariati, verdetto PASS, ratio NN/HAR-RV 0.7695. Le quattro condizioni di C2 restano calcolate come **monitoraggio continuo** (② segnala a ogni run se il claim regge ancora contro la baseline forte), non come condizioni vive. Suite **364 passed / 1 skipped**. Doc allineate: `TEORIA.md` §12.2 (IT+EN), `scripts/README.md`, tabella env del manifesto.
+
+---
+
 ## 📌 BREAKPOINT DATATO — l'input macro del live cambia vintage al bootstrap del 2026-08-01 00:30 UTC · annotato 2026-07-31
 
 > Annotato **prima** che avvenga, per non scoprirlo a posteriori. Riguarda **due campioni forward aperti** (hedged n=10/20, MFIV comparator n=24/40): la discontinuità va datata e quantificata, non nascosta.
