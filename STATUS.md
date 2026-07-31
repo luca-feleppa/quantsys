@@ -5,6 +5,33 @@
 
 ---
 
+## 📌 BREAKPOINT DATATO — l'input macro del live cambia vintage al bootstrap del 2026-08-01 00:30 UTC · annotato 2026-07-31
+
+> Annotato **prima** che avvenga, per non scoprirlo a posteriori. Riguarda **due campioni forward aperti** (hedged n=10/20, MFIV comparator n=24/40): la discontinuità va datata e quantificata, non nascosta.
+
+**Cosa succede.** Il 2026-07-31 alle 11:55:30 UTC la routine di sessione ha pushato sul VPS `data/macro_features.parquet` rifrescato il 30/07 (`scripts/vps/pull_vps_data.ps1:67-75` lo fa a **ogni pull, incondizionatamente**). Il file passa dal vintage **≤2026-07-19** al vintage **≤2026-07-30**. Il processo `04b` in esecuzione (avviato 06:54:31 UTC) **non è stato toccato**: `VolForecaster` è costruito una sola volta in `main()` (`04b_vol_paper.py:940`) e `xm` è calcolato al bootstrap e **congelato** — il log di quel bootstrap dice `macro snapshot: 90 feature, ultima data 2026-07-19 (12g fa)`. Il servizio riparte però **ogni notte alle 00:30 UTC** (cadenza verificata su 19 bootstrap dal 18/07), quindi il nuovo vintage entra in vigore al bootstrap del **2026-08-01 00:30 UTC**.
+
+**Quanto vale, decomposto** (riproducendo il path di `VolForecaster.__init__`: `RobustScaler` fit whole-df, transform dell'ultima riga, clip ±5):
+
+| componente | L2 | L∞ | colonne >0.01 | quota |
+|---|---|---|---|---|
+| **totale** (nuovo vs vecchio) | **3.2804** | 1.3702 | 54/90 | 100% |
+| di cui **STRUMENTO** (scaler ri-stimato su più storia) | **0.0891** | 0.0423 | 10/90 | **2.7%** |
+| di cui **STATO** (riga macro 11 giorni più fresca) | 3.2899 | 1.3702 | 49/90 | ~97% |
+
+- **Il grosso della variazione è legittimo e inevitabile:** i dati macro sono genuinamente più freschi, e il file era fermo al 19/07, cioè 12 giorni — oltre la soglia del warning `age_days > 7` già presente nel codice. 57 colonne su 90 hanno **scale identica** (le feature macro lente non muovono mediana/IQR con 11 giorni in più), il che è anche evidenza indiretta che il refresh ha solo **aggiunto** righe senza revisionare la storia — non verificabile direttamente, il file vecchio è stato sovrascritto e non è in git.
+- **La deriva dello strumento è il 2.7%**: è reale, è la ragione per cui il refit whole-df va eliminato, ma **non è ciò che sposta i numeri di questo breakpoint**.
+
+**Perché NON si interviene stanotte.** L'unico modo per evitare la discontinuità sarebbe pushare una macro troncata al 19/07, cioè alimentare deliberatamente il live con dati vecchi di 12 giorni per neutralizzare una variazione che al 97% è l'aggiornamento corretto dello stato del mondo. Il rimedio sarebbe peggiore del male.
+
+**Effetto sui due campioni aperti — perché resta difendibile.** Nessuno dei due giudici ricalcola previsioni: `hedged_vs_unhedged_judge.py` non importa affatto il modello (lavora su hedge ledger + API Deribit) e `mfiv_comparator_judge.py` legge le previsioni **già registrate** in `results/vol_paper/forecasts.parquet`. Quindi tutto il registrato è congelato e intatto; è interessata solo la porzione di campione che verrà aggiunta dal 01/08 in poi. Entrambi i confronti sono inoltre **within-position** (hedged vs unhedged sulla stessa posizione, MFIV vs ATM sulla stessa expiry): una perturbazione comune ai due rami si cancella al primo ordine, quindi la **validità interna** regge. Ciò che è intaccato è l'**omogeneità della popolazione** fra le due metà del campione, e va letto come tale al momento della chiusura.
+
+**Decisione presa (utente, 2026-07-31): fix della causa — persistere il `MacroNormalizer` e caricarlo invece di ri-stimarlo — RINVIATO a METÀ AGOSTO**, cioè a **entrambi** i campioni chiusi. ⚠ Il confine NON è la chiusura del giudice hedged (~08-09/08): il campione MFIV corre fino a ~metà agosto, quindi intervenire il 09/08 cadrebbe *dentro* un campione aperto. Vincoli di disegno da onorare quando si farà:
+- il campo esiste già in `PipelineState` (`quantsys/utils/__init__.py:301-304, 552-560`) ma la linea vol **non lo popola** (il log del giudice riporta `0 macro features`): va scelto e **dichiarato** il vintage di riferimento, perché quello sotto cui `models/itransformer` fu addestrato non è ricostruibile;
+- ⚠ `scripts/vol/vol_paper_replay.py:215` costruisce anch'esso un `VolForecaster`: passare da ri-stima a caricamento **rompe la riproducibilità del replay** per le decisioni antecedenti al congelamento — e il replay è lo strumento con cui è stata provata la parità live↔training. Serve il vecchio path dietro un flag, oppure una rottura accettata e **datata**.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — C3 ATTRIBUZIONE DEL GUADAGNO HAR-CJ: SOSTITUZIONE RV→C *vs* CONTENUTO INFORMATIVO DEI SALTI (linea vol 1h) · 2026-07-31 · **CHIUSO: CELLA A SU VAL E SU TEST → IL GUADAGNO È LA SOSTITUZIONE, I SALTI NON AGGIUNGONO NULLA (⑩ in fondo)**
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Zero numeri decisionali visti:** nessun QLIKE di HAR-C è mai stato calcolato, su nessuno split; il codice della baseline **non esiste ancora** (`quantsys/model/vol_metrics.py` ha `build_har_frame`/`har_fold_qlike` e `build_har_cj_frame`/`har_cj_fold_qlike`, nessuna variante a sole componenti continue — verificato). Nasce dalla **qualificazione ⑥ dell'audit C2** (30/07): HAR-CJ batte HAR-RV fuori campione, ma i coefficienti sui **salti non sono identificati** (segno invertito fra le due metà del train, condition number 5.4e+04, regressori di salto con std ~1000× più piccola delle continue) → è dimostrato che la **specificazione** prevede meglio, **NON** che i **salti** portino informazione. ⚠ **Terza pre-reg consecutiva di natura "controllo di specificazione del giudice"** (C1 → C2 → C3): non riapre la classe "lever di training" chiusa da A10. **Nessuna GPU, nessun NN nel confronto.**
