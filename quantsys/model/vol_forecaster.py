@@ -24,6 +24,67 @@ from quantsys.model.ensemble import EnsembleModel
 
 log = logging.getLogger("quantsys.model.vol_forecaster")
 
+# IT: modalita' legacy dello snapshot macro: ri-stima il MacroNormalizer whole-df a
+#     ogni bootstrap. E' il comportamento storico e resta il DEFAULT.
+# EN: legacy macro-snapshot mode: refits the MacroNormalizer whole-df at every
+#     bootstrap. Historical behavior, and it stays the DEFAULT.
+MACRO_NORM_REFIT = "refit"
+
+
+def macro_snapshot(df_macro: pd.DataFrame, macro_cols: list,
+                   macro_norm: str = MACRO_NORM_REFIT) -> tuple:
+    # IT: ultima riga macro normalizzata, cioe' l'input `x_macro` del live. DUE modi:
+    #     - "refit" (DEFAULT, legacy): il MacroNormalizer e' ri-stimato whole-df sul
+    #       parquet corrente. Conseguenza nota e misurata (breakpoint 2026-07-31):
+    #       allungare il parquet sposta mediana e IQR, quindi lo STRUMENTO di misura
+    #       cambia insieme allo stato del mondo che dovrebbe misurare. Sul breakpoint
+    #       del 31/07 quella deriva valeva il 2.7% della variazione totale;
+    #     - <path>: normalizer PINNATO, caricato da disco e solo APPLICATO. Lo
+    #       strumento resta fermo a un vintage dichiarato e varia solo lo stato.
+    #     ⚠ Inerte per costruzione: senza un path esplicito il ramo legacy e'
+    #     bit-identico, perche' e' letteralmente lo stesso codice di prima.
+    #     Ritorna (xm_np, info) con info sempre popolato per il logging del chiamante.
+    # EN: the normalized last macro row, i.e. the live `x_macro` input. TWO modes:
+    #     - "refit" (DEFAULT, legacy): the MacroNormalizer is refitted whole-df on the
+    #       current parquet. Known, measured consequence (2026-07-31 breakpoint):
+    #       extending the parquet moves median and IQR, so the measuring INSTRUMENT
+    #       changes together with the state of the world it is supposed to measure. On
+    #       the 31/07 breakpoint that drift was 2.7% of the total variation;
+    #     - <path>: PINNED normalizer, loaded from disk and only APPLIED. The
+    #       instrument stays at a declared vintage and only the state moves.
+    #     ⚠ Inert by construction: with no explicit path the legacy branch is
+    #     bit-identical, because it is literally the same code as before.
+    #     Returns (xm_np, info), info always populated for the caller's logging.
+    from quantsys.macro.regime import MacroNormalizer
+
+    last = df_macro[macro_cols].iloc[[-1]].fillna(0.0)
+    if macro_norm == MACRO_NORM_REFIT:
+        norm = MacroNormalizer()
+        norm.fit_transform(df_macro, macro_cols)
+        info = {"mode": MACRO_NORM_REFIT, "pinned_vintage": None}
+    else:
+        norm = MacroNormalizer.load(str(macro_norm))
+        # IT: guard fail-fast — le colonne del pin devono coincidere ORDINE COMPRESO
+        #     con quelle del parquet vivo. Senza questo, una colonna macro aggiunta o
+        #     riordinata applicherebbe mediana e IQR della colonna SBAGLIATA, in
+        #     silenzio e su ogni tick del live.
+        # EN: fail-fast guard — the pin's columns must match the live parquet's
+        #     ORDER INCLUDED. Without it, an added or reordered macro column would
+        #     apply the WRONG column's median and IQR, silently, on every live tick.
+        if list(norm.feature_cols) != list(macro_cols):
+            raise RuntimeError(
+                f"macro normalizer pinnato incompatibile / incompatible pinned macro "
+                f"normalizer: {len(norm.feature_cols)} colonne pinnate vs "
+                f"{len(macro_cols)} nel parquet, o ordine diverso / different order "
+                f"({macro_norm})")
+        info = {"mode": str(macro_norm),
+                "pinned_vintage": getattr(norm, "pinned_vintage", None)}
+
+    xm_np = np.clip(norm.scaler.transform(last.values.astype(np.float32)),
+                    -5, 5).astype(np.float32)
+    info["data_vintage"] = str(pd.Timestamp(df_macro.index[-1]).date())
+    return xm_np, info
+
 
 class VolForecaster:
     # IT: replica del wiring parity-blessed di FeatureAssembler (04_live_signals):
@@ -34,7 +95,8 @@ class VolForecaster:
     #     FeatureBuilder configured from config + interval/scaler/columns INJECTED
     #     from PipelineState → build(fit=False) identical to training. Candles
     #     live in memory (parquet bootstrap + REST delta per tick).
-    def __init__(self, cfg: dict, device, arch: str = "itransformer"):
+    def __init__(self, cfg: dict, device, arch: str = "itransformer",
+                 macro_norm: str = MACRO_NORM_REFIT):
         self.cfg = cfg
         self.device = device
         self.symbol = cfg["data"].get("symbol", "BTCUSDT")
@@ -102,31 +164,38 @@ class VolForecaster:
         log.info(f"Ensemble vol caricato: {getattr(self.model, 'n_members', '?')} membri | "
                  f"scaler target: center={self.c:.3f} scale={self.s:.3f} | h={self.h}")
 
-        # IT: macro dal parquet su disco + refit IDENTICO del MacroNormalizer (pattern
-        #     dev_vols_macro_append): l'ultima riga daily-ffillata è ESATTAMENTE ciò
-        #     che il training vedeva per i timestamp recenti. NO updater live (lo state
-        #     vol non persiste il normalizer; il parquet è la fonte coerente col training).
-        # EN: macro from the on-disk parquet + IDENTICAL MacroNormalizer refit (the
-        #     dev_vols_macro_append pattern): the last daily-ffilled row is EXACTLY what
-        #     training saw for recent timestamps. NO live updater (the vol state doesn't
-        #     persist the normalizer; the parquet is the training-coherent source).
+        # IT: macro dal parquet su disco. Lo STRUMENTO (MacroNormalizer) e' scelto da
+        #     `macro_norm`: default "refit" = comportamento storico bit-identico; un
+        #     path = normalizer pinnato a un vintage dichiarato (vedi `macro_snapshot`).
+        #     Il parametro e' ESPLICITO e mai letto da env, stesso principio di `arch`:
+        #     una env residua cambierebbe in silenzio l'input del live.
+        # EN: macro from the on-disk parquet. The INSTRUMENT (MacroNormalizer) is
+        #     chosen by `macro_norm`: default "refit" = bit-identical legacy behavior;
+        #     a path = normalizer pinned to a declared vintage (see `macro_snapshot`).
+        #     The parameter is EXPLICIT and never read from env, same principle as
+        #     `arch`: a stale env would silently change the live input.
         self.xm = None
+        self.macro_norm = macro_norm
         if self.n_macro_expected:
-            from quantsys.macro.regime import MacroNormalizer
             df_macro = pd.read_parquet("data/macro_features.parquet")
             macro_cols = list(df_macro.columns)
             assert len(macro_cols) == self.n_macro_expected, \
                 f"macro: {len(macro_cols)} colonne vs n_macro={self.n_macro_expected} del modello"
-            norm = MacroNormalizer()
-            norm.fit_transform(df_macro, macro_cols)
-            last = df_macro[macro_cols].iloc[[-1]].fillna(0.0)
-            xm_np = np.clip(norm.scaler.transform(last.values.astype(np.float32)),
-                            -5, 5).astype(np.float32)
+            xm_np, minfo = macro_snapshot(df_macro, macro_cols, macro_norm)
             self.xm = torch.tensor(xm_np, dtype=torch.float32).to(device)
             macro_date = pd.Timestamp(df_macro.index[-1])
             age_days = (pd.Timestamp.now(tz=getattr(macro_date, 'tz', None)) - macro_date).days
-            log.info(f"macro snapshot: {len(macro_cols)} feature, ultima data {macro_date.date()} "
-                     f"({age_days}g fa)")
+            # IT: i due vintage sono stampati SEPARATI perche' sono cose diverse: lo
+            #     strumento (normalizer) e lo stato (ultima riga). Confonderli e' il
+            #     malinteso che il breakpoint del 31/07 ha dovuto decomporre a mano.
+            # EN: the two vintages are logged SEPARATELY because they are different
+            #     things: the instrument (normalizer) and the state (last row).
+            #     Conflating them is the confusion the 31/07 breakpoint had to
+            #     decompose by hand.
+            pinned = minfo.get("pinned_vintage")
+            log.info(f"macro snapshot: {len(macro_cols)} feature | stato/state: "
+                     f"{macro_date.date()} ({age_days}g fa) | strumento/instrument: "
+                     f"{'REFIT whole-df (legacy)' if minfo['mode'] == MACRO_NORM_REFIT else f'PINNATO vintage {pinned}'}")
             if age_days > 7:
                 log.warning(f"macro_features.parquet vecchio di {age_days}g — "
                             f"valuta un refresh (01b, sezione macro)")

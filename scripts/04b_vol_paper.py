@@ -236,7 +236,7 @@ class DeribitTestnet:
 # EN: VolForecaster PROMOTED to quantsys/model/vol_forecaster.py (C2 2ter
 #     2026-07-18, unchanged body, bit-perfect A/B proof in STATUS) - 04b
 #     and vol_paper_replay consume it from there.
-from quantsys.model.vol_forecaster import VolForecaster                       # noqa: E402
+from quantsys.model.vol_forecaster import VolForecaster, MACRO_NORM_REFIT                       # noqa: E402
 
 
 # ──────────────────────────── IV + segnale ────────────────────────────
@@ -864,6 +864,22 @@ def main():
                     choices=["itransformer", "nhits", "tcnmamba", "lstm"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
+    # IT: normalizer macro — INERTE di default. Senza il flag lo strumento e'
+    #     ri-stimato whole-df a ogni bootstrap (comportamento storico bit-identico);
+    #     con un path lo strumento e' PINNATO a un vintage dichiarato e varia solo
+    #     lo stato. ⚠ Cambia l'input del live: attivarlo e' un atto DELIBERATO e va
+    #     datato in STATUS.md se un campione forward e' aperto. Flag esplicito e MAI
+    #     env, come --arch: una env residua cambierebbe l'input in silenzio.
+    # EN: macro normalizer — INERT by default. Without the flag the instrument is
+    #     refitted whole-df at every bootstrap (bit-identical legacy behavior); with
+    #     a path the instrument is PINNED at a declared vintage and only the state
+    #     moves. ⚠ It changes the live input: enabling it is a DELIBERATE act and must
+    #     be dated in STATUS.md if a forward sample is open. Explicit flag and NEVER
+    #     env, like --arch: a stale env would change the input silently.
+    ap.add_argument("--macro-norm", default=None, metavar="PATH",
+                    help="pickle del MacroNormalizer pinnato (default: ri-stima "
+                         "whole-df, comportamento storico) / pinned MacroNormalizer "
+                         "pickle (default: whole-df refit, legacy behavior)")
     # IT: V2 (B2/A1) — flag hedge, INERTI di default. ⚠ Attivarli SOLO post-gate
     #     n≥20 e SOLO con band/convenzione CONGELATE dalla pre-registrazione
     #     hedged-vs-unhedged in STATUS.md (i default qui sono placeholder di design).
@@ -937,7 +953,8 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    fc = VolForecaster(cfg, device, arch=args.arch)
+    fc = VolForecaster(cfg, device, arch=args.arch,
+                      macro_norm=(args.macro_norm or MACRO_NORM_REFIT))
     db = DeribitTestnet(cfg)
 
     # IT: config hedge SOLO se --hedge (None = path v1, nessun file hedge toccato).

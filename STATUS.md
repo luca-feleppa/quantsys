@@ -19,6 +19,8 @@
 
 **Giudice E1 implementato e STADIO 1 ESEGUITO** (§ dedicato): esplorativo, nessun verdetto. Il guard `--stage 2` → `NO_RUN` è stato verificato **prima** di produrre qualunque numero. Il prerequisito `01_update_data.py` è stato **evitato**: ricostruisce feature e `lstm_dataset.npz`, cioè artefatti di training estranei a E1 — le chiusure orarie mancanti si derivano dalle barre 1m già su disco, **verificate identiche** alla sorgente di produzione su 1166 ore su 1167 (l'unica divergenza è l'ultima riga del file 1h, una barra ancora in formazione al download, che il giudice scarta).
 
+**`MacroNormalizer` pinnabile implementato INERTE** (§ dedicato): inerzia bit-identica provata end-to-end sul parquet di produzione, attivazione a campioni chiusi (~metà agosto) e da datare qui.
+
 **Azione esatta da cui ripartire:** nulla è in scadenza. Lo **stadio 2 di E1** è ad attesa di campione → **~10 settembre 2026** (`n≥40` expiry liquidate dopo il 01/08, osservabilità misurata **100%** nel regime stabile dal 20/07). Il lavoro non bloccato disponibile è **implementare INERTE la persistenza del `MacroNormalizer`** (precedente del 29/07: codice spento, attivazione a campioni chiusi; ora il vintage di riferimento è nominabile perché i vintage sono su disco).
 
 Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24**/40 (~metà agosto), finestre L2 a h=30 **n_eff 8.7** (+0.8/giorno col VPS al 100%).
@@ -68,6 +70,29 @@ Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24
 
 **Script/giudice:** `scripts/vol/edge_information_judge.py` (nuovo, da scrivere) su `results/vol_paper/forecasts.parquet` + `data/raw_candles.parquet` (da rinfrescare) + `quantsys/model/vol_metrics.py` (`qlike`, `diebold_mariano` — riuso, non riscrittura). **Nessuna GPU, nessun NN da rilanciare** (le previsioni sono già registrate), secondi di CPU. Nessun impatto sul path production.
 **Calendario:** stadio 1 eseguibile **subito**; stadio 2 a `n≥40` expiry forward → **~fine settembre / inizio ottobre 2026** (1 expiry/giorno).
+
+---
+
+## 🔧 `MacroNormalizer` PINNABILE — implementato INERTE (la seconda metà del problema macro) · 2026-07-31 sessione 2
+
+**Cosa restava aperto.** I vintage datati risolvono *quale* file macro arriva al VPS. Restava che `VolForecaster` **ri-stimasse** il `MacroNormalizer` **whole-df a ogni bootstrap**: allungare `macro_features.parquet` sposta mediana e IQR, quindi **lo strumento di misura cambia insieme allo stato che deve misurare**. Sul breakpoint del 31/07 la decomposizione aveva attribuito a questa deriva **il 2.7%** della variazione totale (L2 0.0891 su 3.2804). È piccolo, ma non è misura: è rumore che si presenta come segnale, e dentro un campione forward pre-registrato non deve esistere.
+
+**Implementazione (inerte).** Estratta `macro_snapshot(df, cols, macro_norm)` in `quantsys/model/vol_forecaster.py`, due rami: `"refit"` (**default**, legacy) e `<path>` (pin caricato e solo applicato). Nuovo `scripts/vol/pin_macro_normalizer.py` → `models/macro_normalizer_pinned.pkl`. Flag `--macro-norm` aggiunto a **`04b`** *e* **al replay**. `MacroNormalizer` guadagna il campo opzionale `pinned_vintage` (retro-compatibile: i pickle di `01b` si caricano con `None`, nessuna migrazione).
+
+**Tre decisioni di disegno che vale la pena aver preso così.**
+1. **Parametro esplicito, MAI env** — stesso principio già scritto per `--arch` (*"una env residua redirigerebbe il caricamento in silenzio"*). Un env var qui cambierebbe l'input del **live** senza lasciare traccia nell'invocazione.
+2. **Il flag è dato anche al replay, non negato.** Il vincolo registrato il 31/07 diceva *"serve il vecchio path dietro un flag"*: la lettura giusta è che il replay deve poter scegliere il regime **in base alla DATA della decisione che sta riproducendo** — legacy per le decisioni antecedenti al pin, pin per quelle successive. Negargli il flag avrebbe reso irriproducibile metà della storia futura.
+3. **Guard fail-fast sulle colonne del pin, ORDINE COMPRESO.** Una colonna macro aggiunta o riordinata applicherebbe mediana e IQR della colonna **sbagliata**, in silenzio, su ogni tick del live. `RuntimeError`, mai un fallback.
+
+**Verifiche.**
+- **Inerzia end-to-end sul parquet di PRODUZIONE** (3133×90, vintage 2026-07-30): `macro_snapshot` col default vs l'aritmetica pre-modifica riprodotta letteralmente → **0 differenze su 90 colonne, max |Δ| = 0, bit-identico**.
+- **Il pin pinna davvero:** test che allunga la storia lasciando invariata l'ultima riga → il ramo refit **cambia**, il ramo pinnato **no**. Senza allungare il parquet un pin rotto passerebbe lo stesso, perché su dati identici i due rami coincidono per costruzione.
+- **Attivarlo oggi sarebbe un no-op di contenuto:** pin al vintage `20260730` vs refit sullo stesso vintage → Δ = 0. Il pin non corregge il passato, **impedisce la deriva futura**.
+- Test: `tests/test_macro_normalizer_pin.py` **5/5**. Suite **393 passed / 1 skipped**.
+
+**⚠ Il vintage di riferimento è DICHIARATO, non dedotto.** Quello sotto cui `models/itransformer` fu addestrato **non è ricostruibile** (il parquet di allora è stato sovrascritto e non è in git). Il pin quindi **non recupera** il vintage giusto: ne **fissa** uno esplicito e datato — `20260730`, cioè quello che il live sta già usando. Pinnarne uno più vecchio sarebbe inventare una storia.
+
+**Stato: NON attivato.** L'attivazione tocca l'input del live → resta schedulata a **campioni chiusi (~metà agosto)**, e va **datata qui** quando avverrà. L'artefatto è gitignored (`models/*`) ma **riproducibile in modo deterministico** da un vintage archiviato sul VPS — che è precisamente ciò che i vintage datati hanno reso possibile poche ore prima.
 
 ---
 

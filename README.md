@@ -375,7 +375,7 @@ quantsys_project/
 │   │   ├── distillation.py       Knowledge Distillation multi-teacher (scoring target-aware)
 │   │   ├── forecast.py           Monte Carlo GJR-GARCH(1,1) + neural-guided
 │   │   ├── vol_metrics.py        QLIKE / inversione log-RV / baseline HAR-RV (linea vol, condivisi)
-│   │   ├── vol_forecaster.py     VolForecaster (nucleo forecast del vol-paper, promosso da 04b)
+│   │   ├── vol_forecaster.py     VolForecaster (nucleo forecast del vol-paper, promosso da 04b) + macro_snapshot (strumento vs stato: refit legacy o normalizer pinnato)
 │   │   ├── regime_gate.py        build_regime_gate (gate causale: asof backward + staleness bound)
 │   │   ├── cafn.py               CausalAttentionFlowNetwork (coordinatore causale, probe inerte)
 │   │   └── revin.py              Reversible Instance Normalization (opzionale, use_revin)

@@ -204,6 +204,19 @@ def main() -> int:
     ap.add_argument("--end", default=None,
                     help="fine griglia (default: ultima candela chiusa) / grid end (default: last closed candle)")
     ap.add_argument("--arch", default="itransformer", help="dir modelli / model dir")
+    # IT: stesso flag di 04b, stesso default legacy. Il replay DEVE poterlo
+    #     scegliere: se il live passa al normalizer pinnato, riprodurre una
+    #     decisione ANTECEDENTE al pin richiede il vecchio path, e riprodurne una
+    #     successiva richiede il pin. Il regime va scelto in base alla DATA della
+    #     decisione che si sta riproducendo, non lasciato all'ambiente.
+    # EN: same flag as 04b, same legacy default. The replay MUST be able to pick:
+    #     if the live switches to the pinned normalizer, reproducing a decision
+    #     PREDATING the pin needs the old path, and reproducing a later one needs
+    #     the pin. Pick the regime by the DATE of the decision being reproduced.
+    ap.add_argument("--macro-norm", default=None, metavar="PATH",
+                    help="pickle del MacroNormalizer pinnato (default: ri-stima "
+                         "whole-df, comportamento storico) / pinned MacroNormalizer "
+                         "pickle (default: whole-df refit, legacy behavior)")
     ap.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
                     help="cpu di default: NON contende CUDA ai processi live / cpu default: no CUDA contention with live processes")
     args = ap.parse_args()
@@ -212,7 +225,8 @@ def main() -> int:
     device = torch.device(args.device)
     # IT: riuso del wiring parity-blessed di 04b (modello+scaler+builder+candele).
     # EN: reuse of 04b's parity-blessed wiring (model+scaler+builder+candles).
-    fc = M.VolForecaster(cfg, device, arch=args.arch)
+    fc = M.VolForecaster(cfg, device, arch=args.arch,
+                         macro_norm=(args.macro_norm or M.MACRO_NORM_REFIT))
     fc._refresh_candles()
     candles = fc.candles
 

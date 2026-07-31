@@ -1941,6 +1941,9 @@ class MacroNormalizer:
         self.scaler      = RobustScaler()
         self.feature_cols: list[str] = []
         self.fitted      = False
+        # IT: etichetta del vintage macro di fit (None = non pinnato). Vedi save().
+        # EN: label of the macro vintage fitted on (None = not pinned). See save().
+        self.pinned_vintage: str | None = None
 
     # IT: Memorizza le colonne, fitta lo scaler e ritorna i dati normalizzati (NaN→0, clip ±5).
     # EN: Stores the columns, fits the scaler and returns normalized data (NaN→0, clip ±5).
@@ -1962,20 +1965,32 @@ class MacroNormalizer:
         result = self.scaler.transform(X)
         return np.clip(result, -5, 5).astype(np.float32)
 
-    # IT: Serializza scaler + colonne su disco (pickle).
-    # EN: Serializes scaler + columns to disk (pickle).
+    # IT: Serializza scaler + colonne su disco (pickle). `pinned_vintage` è un campo
+    #     OPZIONALE (etichetta del vintage macro su cui il normalizer è stato fittato):
+    #     serve al normalizer PINNATO della linea vol, dove sapere a quale vintage lo
+    #     strumento è fermo è metà dell'informazione. Assente = pickle storico.
+    # EN: Serializes scaler + columns to disk (pickle). `pinned_vintage` is an OPTIONAL
+    #     field (label of the macro vintage the normalizer was fitted on): it serves
+    #     the vol line's PINNED normalizer, where knowing which vintage the instrument
+    #     is frozen at is half the information. Absent = legacy pickle.
     def save(self, path: str):
         with open(path, "wb") as f:
-            pickle.dump({"scaler": self.scaler, "feature_cols": self.feature_cols}, f)
+            pickle.dump({"scaler": self.scaler, "feature_cols": self.feature_cols,
+                         "pinned_vintage": getattr(self, "pinned_vintage", None)}, f)
 
     # IT: Ricostruisce un MacroNormalizer già fittato da un pickle salvato.
+    #     Retro-compatibile: i pickle scritti prima del campo `pinned_vintage`
+    #     si caricano con None, senza migrazione.
     # EN: Reconstructs an already-fitted MacroNormalizer from a saved pickle.
+    #     Backward compatible: pickles written before the `pinned_vintage` field
+    #     load with None, no migration needed.
     @classmethod
     def load(cls, path: str) -> "MacroNormalizer":
         with open(path, "rb") as f:
             data = pickle.load(f)
         obj = cls()
-        obj.scaler       = data["scaler"]
-        obj.feature_cols = data["feature_cols"]
-        obj.fitted       = True
+        obj.scaler         = data["scaler"]
+        obj.feature_cols   = data["feature_cols"]
+        obj.pinned_vintage = data.get("pinned_vintage")
+        obj.fitted         = True
         return obj
