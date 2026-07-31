@@ -5,13 +5,47 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-07-31, fine giornata
+## ▶️ RIPARTI DA QUI — 2026-07-31, sessione 2 (sera)
 
-**Fatto oggi (tutto committato e pushato).** C3 pre-registrato, eseguito e chiuso (cella A su val e test → **HAR-C è la baseline di riferimento**, banda −23%÷−32% invariata) · adozione delle baseline nel giudice con **rimozione** dei due flag · **breakpoint macro datato** per il bootstrap del 01/08 00:30 UTC · budget campionario L2 misurato ex-ante · **B1 stadio 1** pre-registrato, implementato ed eseguito → **NESSUNA CONCLUSIONE** (controllo positivo fallito) · **monitor di continuità L2** nel blocco ③ della routine. Suite 373/1.
+**Fatto in questa sessione (committato e pushato).** Chiusa la **decisione arretrata sul push macro**: non ratificata e non risolta con uno switch da ricordarsi, ma **eliminata alla radice** — lo snapshot macro che alimenta il live diventa un **artefatto versionato a vintage datati** (§ subito sotto). Nuovo helper `scripts/vps/macro_vintage.py` + riscrittura del blocco 0 di `scripts/vps/pull_vps_data.ps1` + `tests/test_macro_vintage.py` (4/4). Nessuna modifica al path live.
 
-**Problemi aperti.** (a) il push macro al VPS è incondizionato e ha già consegnato la macro rifrescata dentro due campioni forward aperti — decisione dell'utente **arretrata**; (b) B1 stadio 1 ha una baseline inadeguata a 3 ore: riaprire richiede una nuova pre-registrazione, oppure si aspetta il campione a h=30; (c) il fix del `MacroNormalizer` e la pre-reg sizing v2 toccano il live → schedulati a **metà agosto**, a campioni chiusi.
+**Fatto nella sessione precedente (stessa giornata).** C3 pre-registrato, eseguito e chiuso (cella A su val e test → **HAR-C è la baseline di riferimento**, banda −23%÷−32% invariata) · adozione delle baseline nel giudice con **rimozione** dei due flag · **breakpoint macro datato** per il bootstrap del 01/08 00:30 UTC · budget campionario L2 misurato ex-ante · **B1 stadio 1** pre-registrato, implementato ed eseguito → **NESSUNA CONCLUSIONE** (controllo positivo fallito) · **monitor di continuità L2** nel blocco ③ della routine.
 
-**Azione esatta da cui ripartire:** decidere sul **push macro** (ratificare il comportamento attuale, oppure aggiungere `-SkipMacroPush` a `scripts/vps/pull_vps_data.ps1`) — è l'unica cosa in scadenza, va decisa **prima del prossimo pull**. Subito dopo: decidere **se** riaprire B1 (dettaglio e vincoli in `RIPRESA.md` item 3). Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24**/40 (~metà agosto), finestre L2 a h=30 **n_eff 8.7** (+0.8/giorno col VPS al 100%).
+**Problemi aperti.** (a) B1 stadio 1 ha una baseline inadeguata a 3 ore: riaprire richiede una nuova pre-registrazione, oppure si aspetta il campione a h=30 — **raccomandazione corrente: non riaprire ora** (un secondo gate girerebbe sugli **stessi 289 punti**, cioè multiple testing sullo stesso campione); (b) il fix del `MacroNormalizer` e la pre-reg sizing v2 toccano il live → schedulati a **metà agosto**, a campioni chiusi; (c) il breakpoint macro del **01/08 00:30 UTC** avviene comunque: il canonico VPS è già al vintage 2026-07-30 dal push di stamattina, e la nuova disciplina previene i breakpoint **futuri**, non quello già consegnato.
+
+**Azione esatta da cui ripartire:** al **prossimo pull** la routine stamperà `macro: vintage divergente - canonico VPS NON TRACCIATO (file regolare)`. Serve **una sola promozione esplicita** per stabilire il puntatore:
+
+```powershell
+.\scripts\vps\pull_vps_data.ps1 -PromoteMacro
+```
+
+⚠ È un **no-op di contenuto**: il vintage locale è `20260730` ed è esattamente ciò che il canonico VPS già contiene (push del 31/07 11:55 UTC, file locale invariato da allora) — quindi la promozione è ammissibile **dentro i campioni forward aperti**, perché non cambia un byte di ciò che `04b` legge, cambia solo *come* lo legge. Da quel momento ogni cambio di vintage richiede un atto deliberato e datato. Verificare nell'output: `archiviato vintage 20260730` poi `PROMOSSO ... -> 20260730`.
+
+Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24**/40 (~metà agosto), finestre L2 a h=30 **n_eff 8.7** (+0.8/giorno col VPS al 100%).
+
+---
+
+## ✅ DECISIONE — lo snapshot macro del live diventa un ARTEFATTO VERSIONATO (chiude l'item arretrato) · 2026-07-31 sessione 2
+
+**Il problema, riformulato.** La decisione in sospeso era "il push macro va condizionato o ratificato?". È la domanda sbagliata: il push era il **sintomo**. Il difetto è che `data/macro_features.parquet` sul VPS — letto da `04b` al bootstrap notturno e **congelato** per tutta la giornata — era **stato mutabile** anziché artefatto versionato. La prova è nel breakpoint di stamattina: non è stato misurabile direttamente perché *"il file vecchio è stato sovrascritto e non è in git"*. Un artefatto che alimenta decisioni forward e non è recuperabile è il problema di fondo; l'incondizionatezza del push ne era solo la manifestazione.
+
+**Scartata l'alternativa "far girare `01b` anche sul VPS"** (valutata esplicitamente):
+1. **Divergerebbero sulla storia, non solo sull'ultima riga.** FRED revisiona retroattivamente e yfinance riadatta per split/dividendi → due fetch indipendenti producono due file diversi su tutto lo span 2018→oggi. Oggi il push garantisce che casa e VPS abbiano il file **byte-identico**, ed è l'unica ragione per cui `scripts/vol/vol_paper_replay.py` può ricostruire ciò che il live ha visto — lo strumento con cui è stata provata la parità live↔training.
+2. **Non risolve, aggrava.** Il difetto non è *come* il file arriva sul VPS, è che il vintage dell'input live cambi dentro un campione aperto. Un `01b` autonomo sul VPS lo farebbe cambiare **senza che nessuno lo veda**: toglie l'umano dal loop invece di rimettercelo. Il breakpoint di stamattina è stato databile e decomponibile solo perché il cambiamento è passato da un'azione locale.
+3. **Effetti collaterali:** `--skip-regime` salta il regime detector ma riscrive comunque `macro_normalizer.pkl` **e `lstm_dataset.npz`** (`01b_download_macro.py`, blocco riepilogo) — artefatti di training che sul VPS non hanno ragione di esistere. Più la key FRED da esporre su una seconda macchina.
+
+**Scartato anche `-SkipMacroPush`** come da proposta iniziale: uno switch da ricordarsi è la stessa via di fallimento rifiutata poche ore prima rimuovendo `QUANTSYS_HAR_CJ`/`QUANTSYS_HAR_C` — se ci si dimentica, il comportamento pericoloso è il default.
+
+**Disegno adottato (blocco 0 di `pull_vps_data.ps1`, riscritto).**
+- **(a) Archivio append-only.** Il pull archivia **sempre** il file in `data/macro/macro_features_<YYYYMMDD>.parquet` sul VPS, dove `<YYYYMMDD>` è l'**ultima data dell'indice** (`scripts/vps/macro_vintage.py`) — non il mtime, che cambierebbe anche per un ri-salvataggio senza dati nuovi. **716 KB a copia**: la retention costa nulla e rende ogni decisione forward riconducibile al suo vintage.
+- **(b) Il canonico è un symlink.** `data/macro_features.parquet` diventa un link relativo dentro l'archivio → il vintage live si legge con `readlink` e si **vede** in `ls -l`. Niente file-marker: un marker può mentire, il puntatore **è** la verità.
+- **(c) Promuovere richiede `-PromoteMacro`.** Il push smette di essere una decisione, promuovere lo diventa. A vintage divergente il pull emette un **warning** e lascia il live sul vintage che già usava. La promozione stampa `<vecchio> -> <nuovo>` e ricorda che il nuovo vintage entra in vigore al **bootstrap 04b successivo (00:30 UTC)** e va datato qui se un campione è aperto.
+
+**Perché è ammissibile a campioni forward aperti:** **zero modifiche al path live**. `quantsys/model/vol_forecaster.py` continua a leggere lo stesso percorso canonico (un symlink è trasparente a pandas/pyarrow), `04b` non è toccato, l'unità systemd non è toccata. Tutto l'intervento è lato casa, nel pull.
+
+**Si aggancia al fix di metà agosto.** Il § breakpoint dice che per persistere il `MacroNormalizer` andrà *"scelto e dichiarato il vintage di riferimento"*: con i vintage su disco quel vintage **esiste ed è nominabile**, invece di dover essere ricostruito a memoria.
+
+**Verifica.** `tests/test_macro_vintage.py` **4/4** — il contratto testato è che su stdout finisca **esattamente** il vintage e nient'altro (il chiamante PowerShell tratta come vintage tutto ciò che legge da stdout: una riga di diagnostica sfuggita lì dentro produrrebbe un nome di archivio sbagliato in silenzio), che il vintage sia lo stato del mondo incorporato e **non** il mtime, e che i fallimenti lascino stdout **vuoto** così il chiamante salti il push invece di archiviare sotto un nome inventato. I **5 rami** del blocco 0 (canonico non tracciato ± flag, vintage già allineato, vintage divergente ± flag) verificati con `ssh`/`scp` **stubbati**, controllando i comandi remoti generati — nessuna connessione al VPS. Suite completa **377 passed / 1 skipped**.
 
 ---
 
