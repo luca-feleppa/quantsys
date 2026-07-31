@@ -47,6 +47,29 @@
 **Script/giudice:** `scripts/vol/l2_incremental_judge.py` (nuovo, da scrivere) + `data/raw_candles_1m_l2.parquet` (già acquisito). Nessuna GPU, nessun NN, secondi di CPU. Nessun impatto sul path production: non tocca `dev_vols_qlike.py`, né il gate vol-S, né il live.
 **Costo:** ~45 min di implementazione + test, esecuzione istantanea.
 
+**⑧ ESITO — NESSUNA CONCLUSIONE: la condizione ④ (controllo positivo) è FALLITA. Il gate non ha prodotto informazione su L2, e il difetto è nel disegno della baseline.** Un solo run, costanti pre-registrate invariate (sentinella nei test). Report: `results/vols/l2_incremental_stage1.json`.
+
+| | QLIKE | ratio vs baseline |
+|---|---|---|
+| baseline **HAR-C** | 0.46389 | — |
+| candidato **HAR-C + L2** | 0.48615 | **1.0480** |
+| **naive persistence** | **0.40188** | 0.866 |
+
+| test | DM | p | migliore |
+|---|---|---|---|
+| ① candidato vs baseline | +1.704 | 0.089 | baseline |
+| **④ baseline vs naive** | **+1.724** | **0.086** | **NAIVE** |
+
+- **④ = False → verdetto NESSUNA CONCLUSIONE**, esattamente come pre-dichiarato. `n_eval = 289`, `n_eff = 96.3`, ③ soddisfatta; ① e ② irrilevanti perché **non interpretabili**.
+- **HAR-C a 3 ore NON batte la persistenza**: la perde del **13.4%** in stima puntuale, a p=0.086 — tecnicamente un pareggio, ma il punto è che il segno va nella direzione sbagliata. Una baseline che non batte il "non fare niente" non è un metro con cui misurare alcunché.
+- **④ ha giustificato la propria esistenza al primo impiego.** Senza quella condizione l'esito riportato sarebbe stato: *"candidato peggiore del 4.8%, DM non significativo → L2 non porta informazione incrementale"*. Sarebbe stata una conclusione **non autorizzata dai dati** — il candidato è peggiore di una baseline che è peggiore della naive, quindi il numero 1.0480 non dice nulla su L2, dice che l'apparato di misura non funziona a questo orizzonte. **È il controllo che manca a metà del corpus KILL, e alla prima occasione ha impedito un falso negativo pubblicabile.**
+
+**Difetto di disegno — è nella pre-registrazione, non nell'implementazione.** (a) **La baseline è stata affamata**: HAR-C stimata su **≤400 osservazioni** con finestra espansiva, contro le **51.882** su cui è fittato l'HAR di produzione. Lo schema espansivo fu scelto per massimizzare i punti di valutazione, e nel farlo ha dato 4 parametri da stimare su poche centinaia di punti a un modello che compete con una naive a **zero** parametri, quindi a zero errore di stima. (b) **Errore di prior in ①**: l'HAR dà il meglio a orizzonti giornalieri-settimanali, dove le componenti settimanale e mensile portano informazione; a 3 ore la componente dominante è quella recente, cioè quasi esattamente ciò che calcola la naive. Andava pesato nella ① e non lo è stato — il contro-argomento (a) della ① parlava di potenza, non di adeguatezza della baseline.
+
+**Cosa NON è stato fatto, ed è la parte che conta.** Nessuna variante è stata girata a numeri visti: né HAR-RV al posto di HAR-C, né un burn-in diverso, né un altro orizzonte, né la naive come baseline. Il vincolo ⑥ le vieta tutte senza una NUOVA pre-registrazione. Le due correzioni naturali, da valutare **solo** se il filone viene riaperto: (i) stimare le componenti HAR sulla **storia oraria lunga** (2019→oggi, già su disco) invece che sulla finestra L2 — richiede però un target a risoluzione mista, perché il dato 1m copre solo dal 2026-06-01; (ii) usare **direttamente la naive come baseline** a cui aggiungere L2, che è la baseline che questo run ha dimostrato essere la più forte a 3 ore.
+
+**Cosa sappiamo adesso.** (1) **Su L2: nulla** — il gate non ha prodotto informazione sulla domanda principale, e la pre-registrazione è consumata. (2) **Su HAR a orizzonte corto: un fatto nuovo** — su questo campione, con target da barre a 1 minuto, HAR-C non batte la persistenza a 3 ore. Coerente con la letteratura, non ovvio a priori, e da tenere presente per qualunque disegno futuro a orizzonte breve. (3) Il **dato L2 è intatto**: non è stato consumato da un FAIL ingiusto, e continua ad accumularsi a 0.8 n_eff/giorno di finestre a h=30.
+
 ---
 
 ## ✅ ADOZIONE — le baseline di C2/C3 entrano nello strumento, i due flag sono RIMOSSI · 2026-07-31
