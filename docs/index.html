@@ -7,10 +7,10 @@
 <meta name="description" content="Come funziona un motore predittivo su BTC/USDT, e la storia completa di cosa e' stato provato e com'e' andata.">
 <style>
 :root{--bg:#fbfaf7;--fg:#1b1a17;--mut:#6b6862;--line:#e2ded5;--accent:#8a5a2b;
---card:#fff;--warn-bg:#fdf6e8;--warn-line:#d9b56a;--ok:#2f6f4f;--no:#8c3b3b}
+--card:#fff;--warn-bg:#fdf6e8;--warn-line:#d9b56a;--ok:#2f6f4f;--no:#8c3b3b;--mid:#7a6a2f}
 @media (prefers-color-scheme:dark){:root{--bg:#14130f;--fg:#eae7df;--mut:#9a958a;
 --line:#2e2b25;--accent:#d0975a;--card:#1c1a16;--warn-bg:#241f14;--warn-line:#6b5322;
---ok:#6fbf95;--no:#e08b8b}}
+--ok:#6fbf95;--no:#e08b8b;--mid:#cbb46a}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);
 font:16px/1.65 Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
@@ -18,7 +18,7 @@ font:16px/1.65 Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
 .wrap{max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem 5rem}
 header{border-bottom:1px solid var(--line);padding-bottom:1.5rem;margin-bottom:2rem}
 h1{font-size:1.9rem;line-height:1.2;margin:0 0 .4rem;letter-spacing:-.01em}
-h2{font-size:1.3rem;margin:2.5rem 0 .75rem;letter-spacing:-.005em}
+h2{font-size:1.3rem;margin:3rem 0 .75rem;letter-spacing:-.005em}
 .sub{color:var(--mut);margin:0;font-size:1.02rem}
 .stamp{color:var(--mut);font-size:.82rem;margin-top:1rem;
 font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -30,19 +30,33 @@ border-radius:.5rem;padding:.9rem 1.1rem;margin:1.5rem 0;font-size:.95rem}
 .card h3{margin:0 0 .35rem;font-size:.78rem;text-transform:uppercase;
 letter-spacing:.09em;color:var(--mut);font-weight:600}
 .big{font-size:1.55rem;font-weight:600;letter-spacing:-.01em}
-.big.ok{color:var(--ok)}.big.no{color:var(--no)}
+.big.ok{color:var(--ok)}.big.no{color:var(--no)}.big.mid{color:var(--mid)}
 .card p{margin:.35rem 0 0;font-size:.9rem;color:var(--mut);line-height:1.5}
-.gates{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.92rem}
-.gates th,.gates td{text-align:left;padding:.55rem .6rem;border-bottom:1px solid var(--line);
-vertical-align:top}
-.gates th{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--mut)}
-.pill{display:inline-block;font-size:.72rem;padding:.12rem .5rem;border-radius:1rem;
-border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+.exp{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line);
+border-radius:.4rem;padding:1.1rem 1.2rem;margin:1.1rem 0}
+.exp.ok{border-left-color:var(--ok)}.exp.no{border-left-color:var(--no)}
+.exp.mid{border-left-color:var(--mid)}.exp.open{border-left-color:var(--accent)}
+.exp h3{margin:0 0 .5rem;font-size:1.03rem;line-height:1.35}
+.meta{font-size:.75rem;color:var(--mut);margin:0 0 .8rem;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.verdict{font-weight:600;letter-spacing:.02em}
+.verdict.ok{color:var(--ok)}.verdict.no{color:var(--no)}.verdict.mid{color:var(--mid)}
+.verdict.open{color:var(--accent)}
+dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.3rem .9rem;font-size:.91rem}
+dt{color:var(--mut);font-size:.74rem;text-transform:uppercase;letter-spacing:.07em;
+padding-top:.22rem;white-space:nowrap}
+dd{margin:0}
+.nums{margin:.8rem 0 0;font-size:.88rem;border-top:1px solid var(--line);padding-top:.7rem}
+.nums span{display:inline-block;margin-right:1.2rem;white-space:nowrap}
+.nums b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+.prov{font-size:.72rem;color:var(--mut);margin-top:.45rem}
+.none{color:var(--mut);font-style:italic;font-size:.9rem;margin:.8rem 0 0;
+border-top:1px solid var(--line);padding-top:.7rem}
 footer{margin-top:4rem;padding-top:1.25rem;border-top:1px solid var(--line);
 color:var(--mut);font-size:.85rem}
 a{color:var(--accent)}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
-background:var(--card);border:1px solid var(--line);border-radius:.25rem;padding:.05em .3em}
+background:var(--bg);border:1px solid var(--line);border-radius:.25rem;padding:.05em .3em}
 </style>
 </head>
 <body>
@@ -51,7 +65,7 @@ background:var(--card);border:1px solid var(--line);border-radius:.25rem;padding
   <h1>QUANTSYS</h1>
   <p class="sub">Un motore predittivo su BTC/USDT — e la storia completa,
   positiva e negativa, di cosa è stato provato.</p>
-  <p class="stamp">build 2026-07-31 18:30 UTC · commit 1971b50
+  <p class="stamp">build 2026-07-31 18:44 UTC · commit 40f9e8d
   · branch main</p>
 </header>
 
@@ -68,18 +82,18 @@ monetizzazione è una domanda separata, e finora senza risposta positiva.
     <h3>Linea volatilità · 1h</h3>
     <div class="big ok">PASS</div>
     <p>Previsione della varianza realizzata a 30 ore. Batte la baseline econometrica
-    del <b>30%</b> in QLIKE sullo split di test
-    (n = 6,392), con val→test coerenti.</p>
+    del <b>30%</b> in QLIKE sullo split di test (n = 6,392),
+    con val→test coerenti.</p>
   </div>
   <div class="card">
     <h3>Linea direzionale</h3>
     <div class="big no">nessun alpha OOS</div>
     <p>Nessuna skill direzionale fuori campione a nessun timeframe testato.
-    Il codice resta vivo come <b>controllo negativo</b>: serve a dimostrare
-    che l'apparato di misura funziona anche quando il segnale non c'è.</p>
+    Il codice resta vivo come <b>controllo negativo</b>: dimostra che l'apparato
+    di misura funziona anche quando il segnale non c'è.</p>
   </div>
   <div class="card">
-    <h3>Confronto, sullo split di test</h3>
+    <h3>Confronto, split di test</h3>
     <div class="big">0.257</div>
     <p>QLIKE del modello, contro <b>0.368</b> della baseline
     econometrica e <b>0.807</b> della persistenza ingenua.
@@ -93,24 +107,124 @@ PASS su un target di varianza, circondato da un corpus esteso di fallimenti
 la soglia esisteva prima del numero, e i risultati negativi sono scritti con la stessa
 cura di quello positivo.</p>
 
+
+<h2>Cosa è stato provato, e com'è andata</h2>
+<p>Ogni scheda riporta la domanda, il <b>prior dichiarato prima di girare</b>, la leva,
+la soglia numerica scritta in anticipo e l'esito — qualunque esso sia. Il campo che dà
+valore alla pagina è il prior: mostra che il criterio esisteva prima del risultato.
+Dove il prior è stato falsificato <i>nella direzione</i>, è detto esplicitamente.</p>
+
+<div class="exp ok">
+  <h3>VOL-S — il modello batte una baseline econometrica sulla varianza?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-06-10 → chiuso 2026-06-10 · split test
+  · <span class="verdict ok">PASS</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>Con target log-RV, la previsione a 30 ore batte HAR in QLIKE fuori campione?</dd><dt>Prior dichiarato</dt><dd>Incerto. La linea direzionale aveva fallito a ogni timeframe; il cambio di target era l&#x27;ultima ipotesi strutturalmente diversa rimasta.</dd><dt>Leva</dt><dd><code>features.target_type: ret → log_rv</code></dd><dt>Soglia</dt><dd>QLIKE_NN ≤ 0.95·QLIKE_HAR <b>e</b> &lt; QLIKE_naive</dd><dt>Conseguenza</dt><dd>Unico PASS OOS del progetto. Diventa la linea di produzione. ⚠ Nessun backtest di trading: su un target di varianza non ha senso.</dd></dl>
+  <div class="nums"><span>QLIKE modello <b>0.2572</b></span><span>QLIKE baseline HAR <b>0.3681</b></span><span>QLIKE persistenza <b>0.8067</b></span><span>rapporto NN/HAR <b>0.6986</b></span><span>osservazioni <b>6 392</b></span><div class="prov">letti dal report dei giudici a questa build</div></div>
+</div>
+<div class="exp ok">
+  <h3>C2 — la baseline del confronto era una baseline forte?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-07-30 → chiuso 2026-07-30 · split val+test
+  · <span class="verdict ok">PASS</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>HAR-CJ, che separa componente continua e salti, batte HAR-RV fuori campione? Se sì, quanto del vantaggio pubblicato era debolezza della baseline?</dd><dt>Prior dichiarato</dt><dd>Sfavorevole: a campionamento orario la bipower variation è rumorosa, la decomposizione dà il meglio a 5 minuti.</dd><dt>Leva</dt><dd>baseline del giudice, non il modello</dd><dt>Soglia</dt><dd>4 condizioni AND, con soglia di materialità</dd><dt>Conseguenza</dt><dd>Il prior è smentito: la baseline era debole. Banda pubblicata riscritta da −27%÷−36% a −23%÷−32%. Il claim ne esce <b>più difendibile</b>, perché la prima obiezione di un lettore competente è ora chiusa con un numero.</dd></dl>
+  <div class="nums"><span>vantaggio residuo su val <b>22.6%</b></span><span>vantaggio residuo su test <b>31.6%</b></span><span>quota dovuta alla baseline debole <b>15.5% su val, 12.4% su test</b></span><div class="prov">scritti a mano, veri al 2026-07-30</div></div>
+</div>
+<div class="exp ok">
+  <h3>C3 — il guadagno di HAR-CJ viene dai salti o dalla sostituzione del regressore?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-07-31 → chiuso 2026-07-31 · split val+test
+  · <span class="verdict ok">PASS</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>Confronto a tre — HAR-RV vs HAR-C vs HAR-CJ — per separare la sostituzione <code>RV→C</code> dal contenuto informativo dei salti.</dd><dt>Prior dichiarato</dt><dd>Atteso: HAR-C ≈ HAR-CJ, cioè il guadagno è la sostituzione. ⚠ Peeking dichiarato ex-ante: due dei tre numeri erano già noti, quindi entrambe le statistiche di decisione sono state ancorate all&#x27;unica quantità ignota.</dd><dt>Leva</dt><dd>una sola specificazione nuova, HAR con le sole componenti continue</dd><dt>Soglia</dt><dd>due DM appaiati, α=0.01 con Bonferroni familywise</dd><dt>Conseguenza</dt><dd>L&#x27;interpretazione di C2 è <b>falsificata</b>: è la bipower variation a lavorare come stimatore robusto, i salti sono rumore da togliere. HAR-C diventa la baseline di riferimento — stessa accuratezza, 450× meglio condizionata. La banda pubblicata non cambia. Coerente con la dicotomia momenti pari/dispari.</dd></dl>
+  <div class="nums"><span>Test A DM(C,RV) <b>significativo su entrambi gli split</b></span><span>Test B DM(CJ,C) <b>non significativo su entrambi</b></span><span>quota da sostituzione φ <b>≈ 1.00 (il 100%)</b></span><div class="prov">scritti a mano, veri al 2026-07-31</div></div>
+</div>
+<div class="exp no">
+  <h3>C1 — l&#x27;estimando ottimizzato non è quello giudicato: la correzione lo risolve?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-07-28 → chiuso 2026-07-30 · split val
+  · <span class="verdict no">FAIL</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>QLIKE è minimizzata dalla media condizionale, il modello ottimizza una mediana. La correzione di smearing, applicata simmetricamente a entrambi i lati, migliora la specificazione?</dd><dt>Prior dichiarato</dt><dd>Direzione attesa dichiarata prima: la baseline dovrebbe guadagnare più del modello, quindi il vantaggio misurato dovrebbe <b>ridursi</b>.</dd><dt>Leva</dt><dd>correzione di Duan (1983) sui soli residui di train</dd><dt>Soglia</dt><dd>la correzione deve migliorare QLIKE su <b>entrambi</b> i lati</dd><dt>Conseguenza</dt><dd>Non adottata; il giudice resta invariato e la banda pubblicata non si tocca. La nota resta <b>testata e non adottata</b>, non «risolta» — distinzione che vale la pena tenere: l&#x27;esito non dimostra che il vantaggio sia immune dal disallineamento, dimostra che <i>questa</i> correzione non lo risolve.</dd></dl>
+  <div class="nums"><span>esito <b>① fallita, un lato peggiora</b></span><span>direzione attesa <b>FALSIFICATA</b></span><div class="prov">scritti a mano, veri al 2026-07-30</div></div>
+</div>
+<div class="exp no">
+  <h3>A10 — concentrare l&#x27;attention migliora la previsione di varianza?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-07-28 → chiuso 2026-07-30 · split val
+  · <span class="verdict no">FAIL</span> · dettaglio in TEORIA.md §12.4</p>
+  <dl><dt>Domanda</dt><dd>Con 104 variate come token e solo ~1.7k finestre indipendenti, l&#x27;attention può disperdersi su correlazioni spurie. Penalizzarne l&#x27;entropia aiuta?</dd><dt>Prior dichiarato</dt><dd>Basso: nessun lever di training era mai passato su questa linea.</dd><dt>Leva</dt><dd>penalità entropica sulle mappe di attention, λ fissato da una regola e non da uno sweep</dd><dt>Soglia</dt><dd>−3% in QLIKE, + un <b>manipulation check</b>: se la penalità non abbassa l&#x27;entropia, il run ha misurato l&#x27;implementazione e non l&#x27;ipotesi</dd><dt>Conseguenza</dt><dd>La scheda più istruttiva del corpus: il manipulation check è <b>passato</b>, quindi la penalità ha fatto esattamente ciò che doveva e il QLIKE non si è mosso → <b>l&#x27;ipotesi è falsificata, non l&#x27;implementazione</b>. Con essa si chiude per decisione pre-dichiarata l&#x27;intera classe «lever di training sulla linea vol»: il prossimo guadagno va cercato in dati nuovi o nella monetizzazione.</dd></dl>
+  <div class="nums"><span>QLIKE <b>+0.18% (marginalmente peggiore)</b></span><span>manipulation check <b>superato, entropia −24.4%</b></span><div class="prov">scritti a mano, veri al 2026-07-30</div></div>
+</div>
+<div class="exp no">
+  <h3>B4-bis — l&#x27;implied volatility come feature di input aiuta?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-07-17 → chiuso 2026-07-23 · split val
+  · <span class="verdict no">FAIL</span> · dettaglio in TEORIA.md §12.4</p>
+  <dl><dt>Domanda</dt><dd>Aggiungere l&#x27;indice di volatilità implicita come feature migliora la previsione di varianza realizzata?</dd><dt>Prior dichiarato</dt><dd>Moderato: è informazione forward-looking che il modello non ha.</dd><dt>Leva</dt><dd>3 colonne aggiunte allo stream macro, asof causale</dd><dt>Soglia</dt><dd>−3% in QLIKE contro baseline riaddestrata</dd><dt>Conseguenza</dt><dd>Firma diagnostica che si ripeterà con A10: il segnale sposta la <b>media</b> della log-varianza senza migliorare la <b>calibrazione</b>, che è ciò che QLIKE penalizza. Più mismatch di tenor. Non ri-testare senza cambiare tenor o metrica.</dd></dl>
+  <div class="nums"><span>QLIKE <b>−1.02% contro una soglia di −3%</b></span><span>MSE in log <b>−6%, ma QLIKE no</b></span><div class="prov">scritti a mano, veri al 2026-07-23</div></div>
+</div>
+<div class="exp no">
+  <h3>A8-bis — l&#x27;augmentation mixup aiuta su un target di varianza?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-07-19 → chiuso 2026-07-20 · split val
+  · <span class="verdict no">FAIL</span> · dettaglio in TEORIA.md §12.4</p>
+  <dl><dt>Domanda</dt><dd>Con ~1.7k finestre effettivamente indipendenti, un&#x27;augmentation che interpola fra campioni compensa la scarsità?</dd><dt>Prior dichiarato</dt><dd>Moderato, ma con un caveat: una misura descrittiva precedente dava −4.94%, sospetta perché ottenuta contro il modello in carica.</dd><dt>Leva</dt><dd><code>mixup_alpha</code> 0 → 0.2</dd><dt>Soglia</dt><dd>−3% in QLIKE contro baseline <b>riaddestrata sullo stesso scaler</b></dd><dt>Conseguenza</dt><dd>Il −4.94% era <b>artefatto di distribution shift</b>: un confronto attraverso due scaler diversi. Ne nasce una regola permanente del progetto — <b>mai giudicare un lever contro un modello addestrato su un altro scaler</b>, sempre contro una baseline riaddestrata.</dd></dl>
+  <div class="nums"><span>QLIKE <b>−0.79% contro una soglia di −3%</b></span><span>misura descrittiva precedente <b>−4.94%, artefatto</b></span><div class="prov">scritti a mano, veri al 2026-07-20</div></div>
+</div>
+<div class="exp mid">
+  <h3>B1 stadio 1 — l&#x27;order-book porta informazione sulla varianza a breve?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-07-31 → chiuso 2026-07-31 · split forward
+  · <span class="verdict mid">NESSUNA CONCLUSIONE</span> · dettaglio in TEORIA.md §12.3-bis</p>
+  <dl><dt>Domanda</dt><dd>Tre feature di microstruttura, scelte da diagnostiche <b>target-free</b>, aggiungono potere predittivo sulla varianza a 3 ore oltre i lag della varianza stessa?</dd><dt>Prior dichiarato</dt><dd>Scenario base atteso: nessun effetto rilevabile — il campione è minuscolo e serve un effetto grosso per essere visto.</dd><dt>Leva</dt><dd>tre feature L2 non firmate, aggiunte a una baseline HAR-C</dd><dt>Soglia</dt><dd>significatività + materialità + n minimo, <b>e un controllo positivo</b>: la baseline deve battere la persistenza, altrimenti il confronto è ininterpretabile</dd><dt>Conseguenza</dt><dd><b>Il controllo positivo ha fallito</b> e ha fatto il suo lavoro: la baseline non batte la persistenza a questo orizzonte, quindi il confronto principale non è interpretabile. Senza quella condizione l&#x27;esito riportabile sarebbe stato «l&#x27;order-book non porta informazione» — un <b>falso negativo pubblicabile</b>. Il difetto è nel disegno, non nell&#x27;implementazione. Nessuna variante è stata girata a numeri visti.</dd><dt>Sui dati</dt><dd>L&#x27;order-book è raccolto in avanti: l&#x27;API non ne conserva lo storico.</dd></dl>
+  <div class="nums"><span>QLIKE baseline <b>0.4639</b></span><span>QLIKE candidato <b>0.4861</b></span><span>QLIKE persistenza <b>0.4019</b></span><span>previsioni valutate <b>289</b></span><span>campione effettivo <b>96.3333</b></span><div class="prov">letti dal report dei giudici a questa build</div></div>
+</div>
+<div class="exp no">
+  <h3>Semivarianza firmata — l&#x27;asimmetria della volatilità è predicibile?</h3>
+  <p class="meta">Linea volatilità 1h · pre-reg 2026-06-11 → chiuso 2026-06-11 · split test
+  · <span class="verdict no">FAIL</span> · dettaglio in TEORIA.md §12.3</p>
+  <dl><dt>Domanda</dt><dd>Il rapporto fra semivarianza positiva e negativa è predicibile come lo è la varianza totale?</dd><dt>Prior dichiarato</dt><dd>Moderato: la varianza si predice bene, sembrava naturale che una sua decomposizione lo fosse.</dd><dt>Leva</dt><dd><code>target_type: log_rs_ratio</code></dd><dt>Soglia</dt><dd>MSE ≤ 0.95 della baseline</dd><dt>Conseguenza</dt><dd>Risultato più forte del semplice FAIL: la baseline econometrica fa <b>peggio di una costante</b>, quindi l&#x27;asimmetria è impredicibile <i>per tutti</i>, non solo per il modello. È l&#x27;osservazione da cui nasce la sintesi trasversale del progetto — i momenti <b>pari</b> generalizzano, i <b>dispari</b> no.</dd></dl>
+  <div class="nums"><span>esito <b>sopra soglia</b></span><span>accuratezza di segno <b>≈ 0.46, cioè sotto il caso</b></span><span>baseline econometrica <b>peggio della costante</b></span><div class="prov">scritti a mano, veri al 2026-06-11</div></div>
+</div>
+<div class="exp no">
+  <h3>Pivot 1m→1h — il muro dei costi era il vincolo?</h3>
+  <p class="meta">Linea direzionale (controllo negativo) · pre-reg 2026-06-10 → chiuso 2026-06-10 · split test
+  · <span class="verdict no">FAIL</span> · dettaglio in TEORIA.md §12.3</p>
+  <dl><dt>Domanda</dt><dd>A un minuto l&#x27;effetto previsto era ~1.5 bps contro ~26 bps di costo. Salendo a un&#x27;ora il rendimento atteso cresce di un ordine di grandezza: emerge la skill?</dd><dt>Prior dichiarato</dt><dd>Favorevole: se il vincolo erano i costi, rimuoverli doveva bastare.</dd><dt>Leva</dt><dd>risoluzione della barra, 1m → 1h</dd><dt>Soglia</dt><dd>gate pre-registrato a due livelli di costo</dd><dt>Conseguenza</dt><dd>Il muro dei costi <b>cade davvero</b>, e la skill direzionale <b>non emerge lo stesso</b>: il vincolo non erano i costi. Chiude il filone «stesso metodo, altro timeframe». La linea direzionale sopravvive come controllo negativo — serve a dimostrare che l&#x27;apparato di misura funziona anche quando il segnale non c&#x27;è.</dd></dl>
+  <div class="nums"><span>gate <b>fallito 4/4 a entrambi i livelli di costo</b></span><span>muro dei costi <b>effettivamente sfondato</b></span><div class="prov">scritti a mano, veri al 2026-06-10</div></div>
+</div>
+<div class="exp no">
+  <h3>Gate v1 — la regola di ingresso monetizza il premio di rischio?</h3>
+  <p class="meta">Braccio short-vol · pre-reg 2026-06-12 → chiuso 2026-07-30 · split forward
+  · <span class="verdict no">FAIL</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>Confrontando varianza prevista e varianza implicita, una regola a soglia produce PnL positiva in forward test?</dd><dt>Prior dichiarato</dt><dd>Favorevole: il premio di rischio di varianza è strutturalmente positivo e confermato dal backtest storico.</dd><dt>Leva</dt><dd>regola a soglia su <code>log(varianza prevista / varianza implicita)</code></dd><dt>Soglia</dt><dd>3 criteri pre-registrati, n ≥ 30</dd><dt>Conseguenza</dt><dd>FAIL 0/3, e i due campioni concordano. Ma la baseline che vende sempre volatilità è <b>positiva</b>: il premio di rischio c&#x27;è, la regola non lo monetizza. Distinzione permanente del progetto — <i>skill predittiva misurata</i> ≠ <i>monetizzazione</i>. È la domanda che il gate E1 riapre a monte.</dd><dt>Sui dati</dt><dd>Forward test su testnet: i trade non sono ricostruibili a posteriori dall&#x27;API.</dd></dl>
+  <div class="nums"><span>posizioni eseguite <b>30</b></span><span>criterio 1 — PnL media &gt; 0 <b>no</b></span><span>criterio 2 — batte le baseline <b>no</b></span><span>criterio 3 — hit rate &gt; 0.5 <b>no</b></span><div class="prov">letti dal report dei giudici a questa build</div></div>
+</div>
+
 <h2>Gate aperti — pre-registrati, non ancora giudicati</h2>
-<p>Questi esperimenti hanno una soglia scritta e committata <b>prima</b> di girare, e un
-numero minimo di osservazioni sotto il quale il giudice si rifiuta di produrre un verdetto.
-Finché il campione non è pieno, <b>nessuna quantità decisionale viene mostrata qui</b>: un
-numero visto in anticipo non si può non-vedere, e brucerebbe la pre-registrazione. L'assenza
-in quest'ultima colonna è il punto, non una mancanza.</p>
-<table class="gates">
-<tr><th>Gate</th><th>Soglia pre-registrata</th><th>Campione richiesto</th><th>Numeri</th></tr>
-<tr><td><b>E1 — l&#x27;edge NN-vs-IV batte la previsione del mercato?</b><br><span class="pill">short-vol</span></td><td>accordo di segno &gt; 0.5 (p&lt;0.05) E Spearman &gt; 0 (IC bootstrap esclude lo zero)</td><td>n ≥ 40 expiry liquidate dopo il 2026-08-01</td><td><i>non disponibile per progetto</i></td></tr>
-<tr><td><b>Hedged vs unhedged — il delta-hedge migliora il braccio short-vol?</b><br><span class="pill">short-vol</span></td><td>3 condizioni pre-registrate, hardcoded nel giudice</td><td>n ≥ 20 posizioni hedge-attive</td><td><i>non disponibile per progetto</i></td></tr>
-<tr><td><b>MFIV v2 — il comparatore model-free ordina meglio dell&#x27;ATM?</b><br><span class="pill">short-vol</span></td><td>Δρ di Spearman appaiato, MFIV vs ATM sui PnL per-expiry</td><td>n ≥ 40 expiry qualificate</td><td><i>non disponibile per progetto</i></td></tr>
-</table>
+<p>Questi esperimenti hanno soglia e campione minimo scritti e committati <b>prima</b> di
+girare. Finché il campione non è pieno non compare nessuna quantità decisionale: un numero
+visto in anticipo non si può non-vedere.</p>
+
+<div class="exp open">
+  <h3>E1 — l&#x27;edge batte la previsione del mercato?</h3>
+  <p class="meta">Braccio short-vol · pre-reg 2026-07-31 · split forward
+  · <span class="verdict open">APERTO</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>La linea vol ha dimostrato di battere una baseline <b>econometrica</b>. Batte anche la previsione <b>del mercato</b>, cioè la varianza implicita nei prezzi delle opzioni?</dd><dt>Prior dichiarato</dt><dd>Sfavorevole. La regola derivata da questo segnale ha comprato volatilità in 26 casi su 31, mentre il premio di rischio dice il contrario: o il segnale è mal calibrato in livello, o è anti-predittivo. La varianza implicita incorpora un premio, quindi un buon previsore della varianza non è automaticamente un buon previsore del suo <b>segno</b> rispetto all&#x27;implicita.</dd><dt>Leva</dt><dd>nessuna: si giudica un segnale già registrato, non si cambia nulla nel modello</dd><dt>Soglia</dt><dd>accordo di segno &gt; 0.5 (p &lt; 0.05) <b>e</b> correlazione di rango &gt; 0 con intervallo di confidenza che esclude lo zero, <b>e</b> un controllo positivo contro la persistenza</dd><dt>Campione richiesto</dt><dd>n ≥ 40 scadenze liquidate dopo il 2026-08-01</dd><dt>Nota</dt><dd>Uno stadio esplorativo è stato eseguito sulla finestra già registrata, e i suoi numeri <b>non sono riportabili</b> come evidenza: servono a dimensionare la potenza, non a decidere. Il verdetto vive solo nello stadio confermativo.</dd></dl>
+  <p class="none">Nessun numero: il gate è aperto. Mostrarne uno prima che il campione sia pieno brucerebbe la pre-registrazione — l'assenza qui è il punto, non una mancanza.</p>
+</div>
+<div class="exp open">
+  <h3>Il delta-hedge migliora il braccio short-vol?</h3>
+  <p class="meta">Braccio short-vol · pre-reg 2026-07-12 · split forward
+  · <span class="verdict open">APERTO</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>Neutralizzare l&#x27;esposizione direzionale purifica il premio di varianza, o il costo di ribilanciamento se lo mangia?</dd><dt>Prior dichiarato</dt><dd>Incerto: è precisamente un compromesso fra riduzione di varianza e costo di realizzazione.</dd><dt>Leva</dt><dd>banda di ribilanciamento fissa, congelata dalla pre-registrazione</dd><dt>Soglia</dt><dd>3 condizioni pre-registrate, scritte nel giudice prima dell&#x27;attivazione</dd><dt>Campione richiesto</dt><dd>n ≥ 20 posizioni con hedge attivo — l&#x27;unità è la posizione, non l&#x27;evento di ribilanciamento</dd></dl>
+  <p class="none">Nessun numero: il gate è aperto. Mostrarne uno prima che il campione sia pieno brucerebbe la pre-registrazione — l'assenza qui è il punto, non una mancanza.</p>
+</div>
+<div class="exp open">
+  <h3>Il comparatore model-free ordina meglio dell&#x27;ATM?</h3>
+  <p class="meta">Braccio short-vol · pre-reg 2026-07-20 · split forward
+  · <span class="verdict open">APERTO</span> · dettaglio in TEORIA.md §12.2</p>
+  <dl><dt>Domanda</dt><dd>La volatilità implicita at-the-money sottostima il tasso di var-swap per convessità dello smile. Un comparatore model-free ordina meglio le occasioni?</dd><dt>Prior dichiarato</dt><dd>Favorevole in teoria — il cuneo di convessità è misurato e positivo — ma è un&#x27;ipotesi sull&#x27;<b>ordinamento</b>, non sul livello.</dd><dt>Leva</dt><dd>sostituzione del comparatore, il modello non cambia</dd><dt>Soglia</dt><dd>differenza di correlazione di rango appaiata, sulle stesse scadenze</dd><dt>Campione richiesto</dt><dd>n ≥ 40 scadenze qualificate</dd></dl>
+  <p class="none">Nessun numero: il gate è aperto. Mostrarne uno prima che il campione sia pieno brucerebbe la pre-registrazione — l'assenza qui è il punto, non una mancanza.</p>
+</div>
 
 <footer>
-<p>Le metriche in questa pagina sono <b>derivate dai report dei giudici</b> a ogni build,
-non trascritte: il timbro in alto dice da quale stato del repository provengono.
-La fonte tecnica autorevole resta <code>TEORIA.md</code> nel repository, che questa
-pagina richiama e non sostituisce.</p>
+<p>Le schede vengono da <code>docs/experiments.yaml</code>; i numeri marcati «letti dal
+report» sono derivati a ogni build e non trascritti, quindi non possono divergere dalla
+fonte. Il timbro in alto dice da quale stato del repository provengono. La fonte tecnica
+autorevole resta <code>TEORIA.md</code>, che questa pagina richiama e non sostituisce:
+dove le due divergessero, ha ragione TEORIA.</p>
 </footer>
 </div>
 </body>
