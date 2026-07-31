@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QUANTSYS — motore predittivo su BTC/USDT</title>
+<meta name="description" content="Come funziona un motore predittivo su BTC/USDT, e la storia completa di cosa e' stato provato e com'e' andata.">
+<style>
+:root{--bg:#fbfaf7;--fg:#1b1a17;--mut:#6b6862;--line:#e2ded5;--accent:#8a5a2b;
+--card:#fff;--warn-bg:#fdf6e8;--warn-line:#d9b56a;--ok:#2f6f4f;--no:#8c3b3b}
+@media (prefers-color-scheme:dark){:root{--bg:#14130f;--fg:#eae7df;--mut:#9a958a;
+--line:#2e2b25;--accent:#d0975a;--card:#1c1a16;--warn-bg:#241f14;--warn-line:#6b5322;
+--ok:#6fbf95;--no:#e08b8b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.65 Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
+-webkit-font-smoothing:antialiased}
+.wrap{max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+header{border-bottom:1px solid var(--line);padding-bottom:1.5rem;margin-bottom:2rem}
+h1{font-size:1.9rem;line-height:1.2;margin:0 0 .4rem;letter-spacing:-.01em}
+h2{font-size:1.3rem;margin:2.5rem 0 .75rem;letter-spacing:-.005em}
+.sub{color:var(--mut);margin:0;font-size:1.02rem}
+.stamp{color:var(--mut);font-size:.82rem;margin-top:1rem;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-line);
+border-radius:.5rem;padding:.9rem 1.1rem;margin:1.5rem 0;font-size:.95rem}
+.warn b{color:var(--accent)}
+.grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));margin:1.5rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.5rem;padding:1rem 1.1rem}
+.card h3{margin:0 0 .35rem;font-size:.78rem;text-transform:uppercase;
+letter-spacing:.09em;color:var(--mut);font-weight:600}
+.big{font-size:1.55rem;font-weight:600;letter-spacing:-.01em}
+.big.ok{color:var(--ok)}.big.no{color:var(--no)}
+.card p{margin:.35rem 0 0;font-size:.9rem;color:var(--mut);line-height:1.5}
+.gates{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.92rem}
+.gates th,.gates td{text-align:left;padding:.55rem .6rem;border-bottom:1px solid var(--line);
+vertical-align:top}
+.gates th{font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--mut)}
+.pill{display:inline-block;font-size:.72rem;padding:.12rem .5rem;border-radius:1rem;
+border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+footer{margin-top:4rem;padding-top:1.25rem;border-top:1px solid var(--line);
+color:var(--mut);font-size:.85rem}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
+background:var(--card);border:1px solid var(--line);border-radius:.25rem;padding:.05em .3em}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>QUANTSYS</h1>
+  <p class="sub">Un motore predittivo su BTC/USDT — e la storia completa,
+  positiva e negativa, di cosa è stato provato.</p>
+  <p class="stamp">build 2026-07-31 18:30 UTC · commit 1971b50
+  · branch main</p>
+</header>
+
+<h2>In una schermata</h2>
+<div class="warn">
+<b>Stato onesto, in alto e non in nota.</b> Il braccio operativo di questo progetto è
+<b>paper trading su testnet</b>: nessuna esecuzione con capitale reale, nessuno slippage
+reale, nessun impatto di mercato. Ciò che è misurato è <i>accuratezza previsiva</i>; la
+monetizzazione è una domanda separata, e finora senza risposta positiva.
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Linea volatilità · 1h</h3>
+    <div class="big ok">PASS</div>
+    <p>Previsione della varianza realizzata a 30 ore. Batte la baseline econometrica
+    del <b>30%</b> in QLIKE sullo split di test
+    (n = 6,392), con val→test coerenti.</p>
+  </div>
+  <div class="card">
+    <h3>Linea direzionale</h3>
+    <div class="big no">nessun alpha OOS</div>
+    <p>Nessuna skill direzionale fuori campione a nessun timeframe testato.
+    Il codice resta vivo come <b>controllo negativo</b>: serve a dimostrare
+    che l'apparato di misura funziona anche quando il segnale non c'è.</p>
+  </div>
+  <div class="card">
+    <h3>Confronto, sullo split di test</h3>
+    <div class="big">0.257</div>
+    <p>QLIKE del modello, contro <b>0.368</b> della baseline
+    econometrica e <b>0.807</b> della persistenza ingenua.
+    Più basso è meglio.</p>
+  </div>
+</div>
+
+<p>La tesi di questo progetto non è il risultato positivo: è il <b>metodo</b>. Un singolo
+PASS su un target di varianza, circondato da un corpus esteso di fallimenti
+<i>pre-registrati prima di girare</i>, dice molto di più di un PASS isolato — perché
+la soglia esisteva prima del numero, e i risultati negativi sono scritti con la stessa
+cura di quello positivo.</p>
+
+<h2>Gate aperti — pre-registrati, non ancora giudicati</h2>
+<p>Questi esperimenti hanno una soglia scritta e committata <b>prima</b> di girare, e un
+numero minimo di osservazioni sotto il quale il giudice si rifiuta di produrre un verdetto.
+Finché il campione non è pieno, <b>nessuna quantità decisionale viene mostrata qui</b>: un
+numero visto in anticipo non si può non-vedere, e brucerebbe la pre-registrazione. L'assenza
+in quest'ultima colonna è il punto, non una mancanza.</p>
+<table class="gates">
+<tr><th>Gate</th><th>Soglia pre-registrata</th><th>Campione richiesto</th><th>Numeri</th></tr>
+<tr><td><b>E1 — l&#x27;edge NN-vs-IV batte la previsione del mercato?</b><br><span class="pill">short-vol</span></td><td>accordo di segno &gt; 0.5 (p&lt;0.05) E Spearman &gt; 0 (IC bootstrap esclude lo zero)</td><td>n ≥ 40 expiry liquidate dopo il 2026-08-01</td><td><i>non disponibile per progetto</i></td></tr>
+<tr><td><b>Hedged vs unhedged — il delta-hedge migliora il braccio short-vol?</b><br><span class="pill">short-vol</span></td><td>3 condizioni pre-registrate, hardcoded nel giudice</td><td>n ≥ 20 posizioni hedge-attive</td><td><i>non disponibile per progetto</i></td></tr>
+<tr><td><b>MFIV v2 — il comparatore model-free ordina meglio dell&#x27;ATM?</b><br><span class="pill">short-vol</span></td><td>Δρ di Spearman appaiato, MFIV vs ATM sui PnL per-expiry</td><td>n ≥ 40 expiry qualificate</td><td><i>non disponibile per progetto</i></td></tr>
+</table>
+
+<footer>
+<p>Le metriche in questa pagina sono <b>derivate dai report dei giudici</b> a ogni build,
+non trascritte: il timbro in alto dice da quale stato del repository provengono.
+La fonte tecnica autorevole resta <code>TEORIA.md</code> nel repository, che questa
+pagina richiama e non sostituisce.</p>
+</footer>
+</div>
+</body>
+</html>
