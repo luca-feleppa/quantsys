@@ -17,7 +17,9 @@
 
 **Sequenza ① → ② COMPLETATA in questa sessione.** ① Condizione ③ ex-ante su A13a eseguita (§ sotto): il lever sopravvive ma `n_eff = n_trig`, quindi consuma calendario a 0.33-0.40× il tasso di posizioni. ② Il conteggio ha **ri-ordinato la coda** e, in fase di disegno, un secondo numero ex-ante l'ha ri-ordinata di nuovo: **la regola va LONG 26 volte su 31**, quindi un test "batte always-short" sarebbe stato quasi predeterminato al FAIL e poco informativo. → **pre-registrato E1** (§ in cima), che chiede la domanda a monte, direction-agnostic e su **ogni** expiry: *l'edge NN-vs-IV batte la previsione del mercato?* A13 **parcheggiato con condizioni di riapertura esplicite** e datate (§ dedicato).
 
-**Azione esatta da cui ripartire:** **implementare il giudice di E1** (`scripts/vol/edge_information_judge.py`) ed eseguire lo **stadio 1 esplorativo** sulle 50 expiry registrate — nessuna soglia, nessun verdetto, serve a verificare la macchina di misura e a stimare la potenza dello stadio 2. Prerequisito: `python scripts/01_update_data.py` (le candele orarie si fermano al 2026-07-19, il giudice ha bisogno della finestra fino a oggi). Lo **stadio 2 confermativo** è a `n≥40` expiry forward → **fine settembre / inizio ottobre 2026**. In parallelo, non bloccato: **implementare INERTE la persistenza del `MacroNormalizer`** (precedente del 29/07: codice spento, attivazione a campioni chiusi; ora il vintage di riferimento è nominabile perché è su disco).
+**Giudice E1 implementato e STADIO 1 ESEGUITO** (§ dedicato): esplorativo, nessun verdetto. Il guard `--stage 2` → `NO_RUN` è stato verificato **prima** di produrre qualunque numero. Il prerequisito `01_update_data.py` è stato **evitato**: ricostruisce feature e `lstm_dataset.npz`, cioè artefatti di training estranei a E1 — le chiusure orarie mancanti si derivano dalle barre 1m già su disco, **verificate identiche** alla sorgente di produzione su 1166 ore su 1167 (l'unica divergenza è l'ultima riga del file 1h, una barra ancora in formazione al download, che il giudice scarta).
+
+**Azione esatta da cui ripartire:** nulla è in scadenza. Lo **stadio 2 di E1** è ad attesa di campione → **~10 settembre 2026** (`n≥40` expiry liquidate dopo il 01/08, osservabilità misurata **100%** nel regime stabile dal 20/07). Il lavoro non bloccato disponibile è **implementare INERTE la persistenza del `MacroNormalizer`** (precedente del 29/07: codice spento, attivazione a campioni chiusi; ora il vintage di riferimento è nominabile perché i vintage sono su disco).
 
 Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24**/40 (~metà agosto), finestre L2 a h=30 **n_eff 8.7** (+0.8/giorno col VPS al 100%).
 
@@ -66,6 +68,36 @@ Tutto il resto è in attesa di campione: hedged **10**/20 (~08-09/08), MFIV **24
 
 **Script/giudice:** `scripts/vol/edge_information_judge.py` (nuovo, da scrivere) su `results/vol_paper/forecasts.parquet` + `data/raw_candles.parquet` (da rinfrescare) + `quantsys/model/vol_metrics.py` (`qlike`, `diebold_mariano` — riuso, non riscrittura). **Nessuna GPU, nessun NN da rilanciare** (le previsioni sono già registrate), secondi di CPU. Nessun impatto sul path production.
 **Calendario:** stadio 1 eseguibile **subito**; stadio 2 a `n≥40` expiry forward → **~fine settembre / inizio ottobre 2026** (1 expiry/giorno).
+
+---
+
+## 🔬 E1 STADIO 1 — ESEGUITO. **ESPLORATIVO: NESSUN VERDETTO.** · 2026-07-31
+
+> ⚠ **Questi numeri non sono evidenza confermativa e non possono cambiare nessuna soglia dello stadio 2**, che restano congelate dal commit `de47191`. Lo stadio 1 esiste per due ragioni dichiarate nella pre-reg: verificare che la macchina di misura funzioni end-to-end prima di aspettare 40 giorni, e generare ipotesi. Ha fatto entrambe. Giudice: `scripts/vol/edge_information_judge.py --stage 1`, report `results/vol_paper/edge_information_stage1.json`.
+
+**Verifica del guard PRIMA di produrre qualunque numero:** `--stage 2` eseguito per primo → `NO_RUN — n=0 < 40`, nessun numero calcolato, nessun report scritto. Il fail-fast anti-peeking funziona.
+
+**Risultati (n = 16 expiry osservabili, 2026-06-20 → 2026-07-31).**
+
+| | valore | |
+|---|---|---|
+| ① accordo di segno | **0.1250** (2/16) | t = −4.954 · p = 1.0000 (test a una coda a destra) |
+| ② Spearman ρ(x, y) | **−0.5265** | IC95 bootstrap a blocchi [−0.8313, **+0.0045**] |
+| ④ controllo positivo | QLIKE NN **0.37096** vs naive **0.91379** (−59%) | DM = −1.370, **p = 0.1908** → **non significativo a n=16** |
+
+**Decomposizione del disaccordo di segno (descrittiva).** `x > 0` in **10/16** casi (il NN dice: la RV supererà l'implicita); `y > 0` in **4/16** (la RV l'ha davvero superata). Mediane: `x = +0.1515`, `y = −0.4949` → **scarto di livello di +0.6465 in log-varianza, cioè 1.91× in varianza**.
+
+**Due ipotesi generate, da NON testare su questi dati.**
+1. **Bias di livello.** `IV² = E[RV] + VRP`: il premio di rischio rende l'implicita strutturalmente più alta della RV attesa, quindi `rv_pred − var_iv` è distorto verso l'alto **anche con un `rv_pred` non distorto per la RV**. Questo spiega meccanicamente il LONG all'84% e il FAIL del gate v1 senza invocare alcun difetto del modello. Il numero 1.91× è la misura di quel cuneo su questa finestra.
+2. **Inversione di rango — affermazione distinta e più forte.** `ρ = −0.53` dice che l'ordinamento è invertito *anche dopo* aver tolto il livello: edge alto → RV realizzata *più bassa* rispetto all'implicita. Il bias di livello da solo non produrrebbe questo.
+
+⚠ **Limite noto del disegno, deciso PRIMA di questi numeri e non modificabile ora.** Lo stadio 2 è **a una coda** (`SA > 0.5`, `ρ > 0`). Se la relazione vera è negativa, lo stadio 2 darà **FAIL** — correttamente, perché l'ipotesi pre-registrata sarebbe falsificata — ma **non** certificherà il contenuto informativo del segnale invertito. Il vincolo ⑧ vieta esplicitamente di "invertire il segno della regola" senza una NUOVA pre-registrazione, e quel divieto vale a maggior ragione ora che è lo stadio 1 a suggerirlo: una regola invertita scelta su questi dati sarebbe fittata sul campione.
+
+⚠ **Il controllo positivo NON sarebbe passato a n=16** (p = 0.19), pur con la QLIKE del NN a −59% dalla naive in stima puntuale. È un problema di **potenza**, non di direzione, ed è la ragione per cui lo stadio 2 ha `n ≥ 40`. Se anche a n=40 il controllo non passasse, l'esito pre-dichiarato è **NESSUNA CONCLUSIONE**, non FAIL.
+
+**📅 Scoperta operativa — la stima di calendario dello stadio 2 va CORRETTA in meglio.** Solo 16 expiry su 52 di calendario sono risultate osservabili, il che suggeriva ~52 giorni per `n=40`. Indagando: **tutti i 65 tick mancanti dell'epoca VPS cadono fra il 14 e il 19 luglio**, in 8 episodi contigui (10h, 14h, 15h, 17h…) — la settimana della migrazione di `04b` al VPS. **Dal 2026-07-20 in poi: zero buchi, e 11 expiry su 11 osservabili (100%).** Avevo ipotizzato che i buchi fossero il restart notturno delle 00:30 dentro la finestra di decisione (23:00-05:00): **ipotesi verificata e NON confermata** — i buchi sono episodi lunghi di migrazione, non un effetto sistematico ricorrente. → **stadio 2 a `n≥40` = ~40 giorni dal cutoff del 01/08 → ~10 settembre 2026**, non fine settembre/ottobre come stimato nella pre-reg.
+
+**Cosa NON è stato fatto.** Nessuna soglia toccata, nessuna variante girata, nessun verdetto emesso, nessuna regola invertita. Test: `tests/test_edge_information_judge.py` **6/6**, di cui una **sentinella sulle costanti pre-registrate** (orizzonte, finestra del tick, lag HAC, blocco bootstrap, alpha, n minimo, cutoff): se qualcuno le cambia, i test cadono.
 
 ---
 

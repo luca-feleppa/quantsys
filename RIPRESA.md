@@ -40,8 +40,8 @@
 
 ## Da fare (ordine = roadmap corrente) · To do (order = current roadmap)
 
-1. 🇮🇹 **E1 — implementare il giudice ed eseguire lo STADIO 1 (esplorativo, nessun verdetto).** `scripts/vol/edge_information_judge.py`, da scrivere. Prerequisito: `01_update_data.py` (candele orarie ferme al 19/07). Stadio 2 confermativo a n>=40 expiry forward -> **fine settembre / inizio ottobre 2026**. Pre-reg vincolante in cima a `STATUS.md`.
-   **EN** E1 — write the judge and run STAGE 1 (exploratory, no verdict). Prereq: refresh hourly candles. Stage 2 at n>=40 forward expiries -> **late September / early October 2026**.
+1. 🇮🇹 **E1 stadio 2 — SOLO ATTESA CAMPIONE.** Giudice implementato e stadio 1 (esplorativo, nessun verdetto) eseguito il 31/07. Stadio 2 confermativo a `n>=40` expiry liquidate dopo il 2026-08-01 -> **~10 settembre 2026** (osservabilita' misurata 100% nel regime stabile dal 20/07; i buchi erano tutti la settimana di migrazione al VPS). Run **MANUALE**, `--stage 2`, con guard fail-fast `n<40 -> NO_RUN`. ⚠ Lo stadio 1 ha generato due ipotesi (bias di livello da VRP, 1.91x in varianza; inversione di rango rho=-0.53): **non testabili su quei dati** e non attivabili senza una NUOVA pre-registrazione.
+   **EN** E1 stage 2 — SAMPLE WAIT ONLY. Judge implemented, stage 1 (exploratory, no verdict) run on 31/07. Stage 2 at n>=40 expiries settling after 2026-08-01 -> **~10 September 2026**. MANUAL run with fail-fast guard.
 
 2. 🇮🇹 **`MacroNormalizer` persistito — implementare INERTE** (precedente 29/07: codice spento, attivazione a campioni chiusi ~meta' agosto). Ora il vintage di riferimento e' **nominabile** perche' i vintage sono su disco. Vincolo noto: `vol_paper_replay.py` costruisce anch'esso un `VolForecaster` -> serve il vecchio path dietro flag, o una rottura accettata e datata.
    **EN** Persisted `MacroNormalizer` — implement INERT (29/07 precedent). The reference vintage is now nameable. Known constraint: the replay builds a `VolForecaster` too.
