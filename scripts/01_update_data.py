@@ -3,12 +3,29 @@ Script 01_update — Aggiornamento incrementale del dataset.
 Scarica solo le candele mancanti dall'ultimo aggiornamento ad oggi,
 poi ricalcola features e lstm_dataset su tutto lo storico.
 
+⚠ Il run completo NON è un'operazione neutra: rifitta il RobustScaler sullo split
+   train allungato, riscrive features.parquet + lstm_dataset.npz e salva un nuovo
+   PipelineState sotto models/{QUANTSYS_ARCH|lstm}/. Su una linea con modelli
+   CONGELATI (la vol production ha target_scale persistito nel suo state) questo
+   rompe il contratto train↔inference. Se serve solo la storia OHLCV aggiornata
+   — p.es. per un giudice offline che calcola la RV realizzata dalle barre —
+   usare `--candles-only`, che si ferma dopo il parquet raw.
+
+⚠ The full run is NOT a neutral operation: it refits the RobustScaler on the
+   extended train split, rewrites features.parquet + lstm_dataset.npz and saves a
+   new PipelineState under models/{QUANTSYS_ARCH|lstm}/. On a line with FROZEN
+   models (the production vol one has target_scale persisted in its state) this
+   breaks the train↔inference contract. When only the refreshed OHLCV history is
+   needed — e.g. an offline judge computing realized RV from bars — use
+   `--candles-only`, which stops right after the raw parquet.
+
 Prerequisito: eseguire prima scripts/01_download_data.py (primo avvio).
 
 Run configuration PyCharm:
   Script: scripts/01_update_data.py
   Working dir: <root del progetto>
 """
+import argparse
 import logging
 import sys
 import time
@@ -28,6 +45,30 @@ log = logging.getLogger("quantsys.script.01_update")
 # IT: aggiornamento incrementale: scarica solo il delta e ricostruisce il dataset.
 # EN: incremental update: fetch only the delta and rebuild the dataset.
 def main():
+    # IT: boilerplate UTF-8 — il banner contiene box-drawing e frecce, che su una
+    #     console Windows cp1252 farebbero crashare la stampa finale.
+    # EN: UTF-8 boilerplate — the banner contains box-drawing and arrows, which
+    #     would crash the final print on a cp1252 Windows console.
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    ap = argparse.ArgumentParser(description="Aggiornamento incrementale del dataset")
+    # IT: --candles-only: estende SOLO data/raw_candles.parquet e si ferma. Nessun
+    #     re-fit dello scaler, nessun npz, nessun PipelineState riscritto — è il
+    #     path sicuro quando i modelli a valle sono congelati. Stesso pattern già
+    #     usato in produzione dal bootstrap gap-aware di VolForecaster.
+    # EN: --candles-only: extends ONLY data/raw_candles.parquet and stops. No
+    #     scaler refit, no npz, no PipelineState rewritten — the safe path when
+    #     downstream models are frozen. Same pattern already used in production by
+    #     VolForecaster's gap-aware bootstrap.
+    ap.add_argument("--candles-only", action="store_true",
+                    help="aggiorna solo raw_candles.parquet, non tocca scaler/npz/state "
+                         "/ refresh raw_candles.parquet only, leaves scaler/npz/state alone")
+    args = ap.parse_args()
+
     cfg  = load_config("config/default.yaml")
     dcfg = cfg["data"]
     fcfg = cfg["features"]
@@ -75,18 +116,26 @@ def main():
         f"[{df_raw['open_time'].iloc[0].date()} → {df_raw['open_time'].iloc[-1].date()}]"
     )
 
-    # IT: 1b. funding rate (fetch_funding_rate gestisce il delta internamente)
-    # EN: 1b. funding rate (fetch_funding_rate handles delta internally)
-    try:
-        funding_df = fetch_funding_rate(
-            symbol     = dcfg["symbol"],
-            start_time = dcfg.get("start_time", "2021-01-01"),
-            output_dir = dcfg["output_dir"],
-        )
-        log.info(f"Funding rate: {len(funding_df)} osservazioni disponibili")
-    except Exception as _e:
-        log.warning(f"Aggiornamento funding rate fallito ({_e}) — continuo senza.")
-        funding_df = None
+    # IT: 1b. funding rate (fetch_funding_rate gestisce il delta internamente).
+    #     Saltato in --candles-only: il funding entra solo nel feature engineering,
+    #     che in quella modalità non viene eseguito.
+    # EN: 1b. funding rate (fetch_funding_rate handles delta internally). Skipped
+    #     in --candles-only: funding feeds feature engineering only, which that
+    #     mode does not run.
+    funding_df = None
+    if args.candles_only:
+        log.info("--candles-only: funding rate non aggiornato / funding rate not refreshed")
+    else:
+        try:
+            funding_df = fetch_funding_rate(
+                symbol     = dcfg["symbol"],
+                start_time = dcfg.get("start_time", "2021-01-01"),
+                output_dir = dcfg["output_dir"],
+            )
+            log.info(f"Funding rate: {len(funding_df)} osservazioni disponibili")
+        except Exception as _e:
+            log.warning(f"Aggiornamento funding rate fallito ({_e}) — continuo senza.")
+            funding_df = None
 
     # IT: nessuna nuova candela -> esce subito senza ricalcolare features
     # EN: no new candles -> exit early without recomputing features
@@ -107,6 +156,29 @@ def main():
                 "quote_vol","trades","taker_buy_vol","taker_buy_quote_vol"]
     atomic_save_parquet(df_raw[raw_cols], raw_path, index=False)
     log.info(f"Raw candles aggiornato → {raw_path}  ({n_after:,} candele, {raw_path.stat().st_size//1024//1024} MB)")
+
+    # IT: uscita anticipata di --candles-only: da qui in poi si ricalcolano feature,
+    #     si RIFITTA lo scaler e si riscrive il PipelineState. Fermarsi PRIMA della
+    #     Fase 2 è l'intero punto del flag: la storia OHLCV è aggiornata, tutto il
+    #     resto resta bit-invariato.
+    # EN: --candles-only early exit: from here on features are recomputed, the
+    #     scaler is REFIT and the PipelineState rewritten. Stopping BEFORE phase 2
+    #     is the whole point of the flag: OHLCV history is refreshed, everything
+    #     else stays bit-invariant.
+    if args.candles_only:
+        print(f"""
+═══════════════════════════════════════════
+  01_update · SOLO CANDELE
+═══════════════════════════════════════════
+  Simbolo       : {dcfg['symbol']} {dcfg['interval']}
+  Candele prima : {n_before:,}
+  Candele dopo  : {n_after:,}
+  Nuove candele : +{n_new:,}
+  Arco temporale: {df_raw['open_time'].iloc[0].date()} → {df_raw['open_time'].iloc[-1].date()}
+
+  Non toccati   : features.parquet · lstm_dataset.npz · scaler · PipelineState
+""")
+        return
 
     # IT: 2. holdout - taglia i dati dopo holdout_start (test set intoccato)
     # EN: 2. holdout - drop data after holdout_start (test set untouched)

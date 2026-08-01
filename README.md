@@ -384,7 +384,7 @@ quantsys_project/
 │   └── utils/                    config loader, device setup, logging, PipelineState, atomic_save, stats
 ├── scripts/                      spine numerato (fase) + sottocartelle per linea — mappa: scripts/README.md
 │   ├── 00_check_setup.py         verifica CUDA, dipendenze, connessione Binance
-│   ├── 01_download_data.py       Binance → 104 feature → dataset npz  ·  01_update_data.py (delta incrementale)
+│   ├── 01_download_data.py       Binance → 104 feature → dataset npz  ·  01_update_data.py (delta; --candles-only = solo OHLCV)
 │   ├── 01b_download_macro.py     FRED + yFinance → RegimeMarkovBTC (full / --regime-incremental)
 │   ├── 01c/01d/01e_*.py          collector forward 24/7: IV Deribit · order-book L2 Binance · trade opzioni
 │   ├── 02_train.py               training con --arch / --distill / ensemble  ·  02b walk-forward  ·  02c optuna  ·  02d CAFN

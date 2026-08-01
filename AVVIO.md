@@ -189,7 +189,8 @@ nvidia-smi -pl 215    # ripristina · restore
 | Script | Ruolo · Role |
 |---|---|
 | `scripts/01_download_data.py` | download completo candele Binance + funding, rebuild dataset npz · full Binance candles + funding download, npz dataset rebuild |
-| `scripts/01_update_data.py` | aggiornamento incrementale delle candele a oggi · incremental candle update to today |
+| `scripts/01_update_data.py` | aggiornamento incrementale delle candele a oggi, poi **rebuild** di feature + npz con **re-fit dello scaler** e riscrittura del `PipelineState` · incremental candle update to today, then feature + npz **rebuild** with **scaler refit** and `PipelineState` rewrite |
+| `scripts/01_update_data.py --candles-only` | estende **solo** `data/raw_candles.parquet` e si ferma: nessuno scaler, nessun npz, nessuno state. Da usare quando i modelli a valle sono **congelati** e serve solo la storia OHLCV fresca · extends **only** `data/raw_candles.parquet` and stops: no scaler, no npz, no state. Use it when downstream models are **frozen** |
 | `scripts/01b_download_macro.py` | macro FRED/yFinance + walk-forward regime `RegimeMarkovBTC` (clock orario; **~3h su 7 anni**) · FRED/yFinance macro + regime walk-forward (hourly clock; ~3h over 7 years) |
 
 🇮🇹 **Modalità di `01b_download_macro.py`** (mutuamente esclusive; senza flag = pipeline completa):
