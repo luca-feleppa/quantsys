@@ -69,6 +69,14 @@ def main():
                     help="ricalibrazione split-conformal (fit prefisso, giudizio suffisso; "
                          "report separato) / split-conformal recalibration (prefix fit, "
                          "suffix judgment; separate report)")
+    # IT: guard scaler modello<->dataset (2026-08-01) — via di fuga ESPLICITA,
+    #     flag e mai env: un run cross-vintage produce un numero non confrontabile.
+    # EN: model<->dataset scaler guard (2026-08-01) — EXPLICIT escape, flag never
+    #     env: a cross-vintage run produces a non-comparable number.
+    ap.add_argument("--allow-scaler-mismatch", action="store_true",
+                    help="procedi anche se lo scaler del modello != scaler del dataset: "
+                         "il numero NON e' confrontabile / proceed even if the model "
+                         "scaler != dataset scaler: the number is NOT comparable")
     args = ap.parse_args()
     model_dir = models_root() / args.arch
     log.info(f"dir modelli effettiva / effective model dir: {model_dir} (arch={args.arch})")
@@ -129,6 +137,19 @@ def main():
     idx = ps.scale_cols.index("target_ret")
     c, s = float(ps.scaler.center_[idx]), float(ps.scaler.scale_[idx])
     assert c < -3, "center ≈ 0 → PipelineState non log-RV (stale?)"
+
+    # IT: GUARD SCALER MODELLO<->DATASET — l'assert sopra cattura solo uno stato
+    #     grossolanamente sbagliato (center ~ 0), NON uno plausibile ma di un altro
+    #     vintage del dataset. Quel caso e' gia' successo e ha prodotto un numero
+    #     credibile e sbagliato: vedi TEORIA.md 12.2, provenienza del numeratore.
+    # EN: MODEL<->DATASET SCALER GUARD — the assert above only catches a grossly
+    #     wrong state (center ~ 0), NOT a plausible one from another dataset
+    #     vintage. That case already happened and produced a credible wrong number.
+    from quantsys.utils import assert_model_dataset_scaler, dataset_npz_path
+    assert_model_dataset_scaler(ps, model_dir=model_dir, arch=args.arch,
+                                npz=dataset_npz_path(),
+                                allow_mismatch=args.allow_scaler_mismatch, logger=log)
+
 
     # IT: tutti i membri DEVONO essere quantile (il giudice estrae la testa quantile).
     # EN: every member MUST be quantile-type (this judge extracts the quantile head).

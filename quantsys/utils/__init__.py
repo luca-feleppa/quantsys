@@ -666,3 +666,60 @@ def check_model_dataset_scaler(model_state: "PipelineState",
     out["canonical"] = scaler_fingerprint(PipelineState.load(str(canonical_path)))
     out["matches"] = bool(out["model"] == out["canonical"])
     return out
+
+
+def assert_model_dataset_scaler(model_state: "PipelineState", *, model_dir: Any,
+                                arch: str = "", npz: Any = "",
+                                allow_mismatch: bool = False,
+                                logger: Any = None) -> dict:
+    # IT: check + log + raise in un solo punto, e ritorna il blocco di provenienza
+    #     da scrivere nel report. Esiste come funzione unica perche' i call-site
+    #     sono quattro giudici con lo stesso identico wiring: duplicare il blocco
+    #     significherebbe che il quinto lo dimentica, ed e' proprio "il controllo
+    #     che manca in un posto solo" ad aver prodotto il numero sbagliato.
+    #     ⚠ NON va chiamata sul path LIVE. `VolForecaster` e `FeatureAssembler`
+    #     calcolano le feature al volo iniettando scaler e colonne dal
+    #     PipelineState DEL MODELLO: sono self-consistent by construction e non
+    #     leggono l'npz, quindi non hanno questa esposizione. Aggiungere qui un
+    #     fail-fast fermerebbe il forward test al bootstrap successivo per un
+    #     disallineamento che sul live non esiste.
+    # EN: check + log + raise in one place, returning the provenance block to be
+    #     written into the report. It exists as a single function because the call
+    #     sites are four judges with identical wiring: duplicating the block would
+    #     mean the fifth one forgets it, and "the check missing in exactly one
+    #     place" is what produced the wrong number.
+    #     ⚠ Do NOT call it on the LIVE path. `VolForecaster` and `FeatureAssembler`
+    #     compute features on the fly, injecting scaler and columns from the
+    #     MODEL's PipelineState: they are self-consistent by construction and never
+    #     read the npz, so they have no such exposure. A fail-fast here would stop
+    #     the forward test at the next bootstrap over a mismatch that does not
+    #     exist live.
+    log = logger or logging.getLogger("quantsys.utils")
+    prov = check_model_dataset_scaler(model_state)
+    prov.update({"arch": arch, "model_dir": str(model_dir), "npz": str(npz),
+                 "allow_scaler_mismatch": bool(allow_mismatch)})
+    if prov["matches"] is None:
+        log.warning(f"scaler canonico assente ({prov['canonical_path']}): identita' "
+                    f"modello<->dataset NON verificabile / canonical scaler absent: "
+                    f"model<->dataset identity NOT verifiable")
+        return prov
+    if prov["matches"]:
+        log.info(f"scaler modello<->dataset: IDENTICO (target_scale="
+                 f"{prov['model']['target_scale']}) / model<->dataset scaler: IDENTICAL")
+        return prov
+    msg = (f"SCALER MISMATCH modello<->dataset — il modello in {model_dir} e' stato "
+           f"addestrato sotto uno scaler diverso da quello con cui e' stato costruito {npz}.\n"
+           f"  modello  : target_scale={prov['model']['target_scale']} "
+           f"center_md5={(prov['model']['center_md5'] or '?')[:12]}\n"
+           f"  canonico : target_scale={prov['canonical']['target_scale']} "
+           f"center_md5={(prov['canonical']['center_md5'] or '?')[:12]}\n"
+           f"  Il numero che ne uscirebbe NON e' confrontabile con gli altri report: la "
+           f"differenza include un artefatto di scaler, non solo skill.\n"
+           f"  Riaddestra il modello sull'npz corrente, oppure dichiara l'incomparabilita' "
+           f"con --allow-scaler-mismatch.")
+    if not allow_mismatch:
+        raise RuntimeError(msg)
+    log.warning(msg)
+    log.warning("--allow-scaler-mismatch attivo: report marcato NON confrontabile / "
+                "active: report flagged NOT comparable")
+    return prov

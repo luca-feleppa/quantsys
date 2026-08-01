@@ -289,36 +289,11 @@ def main():
     #     two models across different scalers is forbidden; doing it silently is how
     #     it happened. Fail-fast, not a warning: a warning inside a 600-line log has
     #     stopped nobody so far.
-    from quantsys.utils import check_model_dataset_scaler
-    prov = check_model_dataset_scaler(ps)
-    prov["arch"] = args.arch
-    prov["model_dir"] = str(model_dir)
-    prov["npz"] = str(dataset_npz_path())
-    prov["allow_scaler_mismatch"] = bool(args.allow_scaler_mismatch)
-    if prov["matches"] is None:
-        log.warning(f"scaler canonico assente ({prov['canonical_path']}): identità "
-                    f"modello↔dataset NON verificabile / canonical scaler absent: "
-                    f"model↔dataset identity NOT verifiable")
-    elif not prov["matches"]:
-        msg = (f"SCALER MISMATCH modello↔dataset — il modello in {model_dir} è stato "
-               f"addestrato sotto uno scaler diverso da quello con cui è stato costruito "
-               f"{dataset_npz_path()}.\n"
-               f"  modello  : target_scale={prov['model']['target_scale']} "
-               f"center_md5={prov['model']['center_md5'][:12]}\n"
-               f"  canonico : target_scale={prov['canonical']['target_scale']} "
-               f"center_md5={prov['canonical']['center_md5'][:12]}\n"
-               f"  Il numero che ne uscirebbe NON è confrontabile con gli altri report: "
-               f"la differenza include un artefatto di scaler, non solo skill.\n"
-               f"  Riaddestra il modello sull'npz corrente, oppure dichiara "
-               f"l'incomparabilità con --allow-scaler-mismatch.")
-        if not args.allow_scaler_mismatch:
-            raise RuntimeError(msg)
-        log.warning(msg)
-        log.warning("--allow-scaler-mismatch attivo: il report sarà marcato NON confrontabile "
-                    "/ active: the report will be flagged NOT comparable")
-    else:
-        log.info(f"scaler modello↔dataset: IDENTICO (target_scale="
-                 f"{prov['model']['target_scale']}) / model↔dataset scaler: IDENTICAL")
+    from quantsys.utils import assert_model_dataset_scaler
+    prov = assert_model_dataset_scaler(ps, model_dir=model_dir, arch=args.arch,
+                                       npz=dataset_npz_path(),
+                                       allow_mismatch=args.allow_scaler_mismatch,
+                                       logger=log)
 
     X = torch.tensor(d[f"X_{split}"], dtype=torch.float32)
     Xm = torch.tensor(d[f"X_macro_{split}"], dtype=torch.float32) if f"X_macro_{split}" in d.files else None

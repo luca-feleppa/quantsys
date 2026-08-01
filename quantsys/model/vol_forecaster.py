@@ -112,6 +112,26 @@ class VolForecaster:
         log.info(f"dir modelli effettiva / effective model dir: {self.model_dir} (arch={arch})")
 
         ps = PipelineState.load(str(self.model_dir / "pipeline_state.pkl"))
+        # IT: ⚠ QUI NON VA IL GUARD SULLO SCALER (`assert_model_dataset_scaler`), e la
+        #     ragione va scritta perché la tentazione di aggiungerlo è forte dopo aver
+        #     letto TEORIA §12.2. Quel guard confronta lo scaler del modello con quello
+        #     CANONICO dell'npz, e serve dove un modello viene valutato su un dataset
+        #     costruito da qualcun altro (i giudici). Il path live non è in quel caso:
+        #     le feature sono calcolate al volo da un FeatureBuilder in cui scaler e
+        #     colonne sono INIETTATI da QUESTO stesso `ps`, e l'npz non viene mai letto
+        #     → self-consistent per costruzione. Aggiungerci un fail-fast fermerebbe il
+        #     forward test al bootstrap successivo per un disallineamento che sul live
+        #     non esiste — e fermerebbe campioni pre-registrati aperti.
+        # EN: ⚠ THE SCALER GUARD (`assert_model_dataset_scaler`) DOES NOT BELONG HERE,
+        #     and the reason must be written down because the temptation to add it is
+        #     strong after reading TEORIA §12.2. That guard compares the model scaler
+        #     against the npz's CANONICAL one, and applies where a model is evaluated
+        #     on a dataset built by someone else (the judges). The live path is not
+        #     that case: features are computed on the fly by a FeatureBuilder whose
+        #     scaler and columns are INJECTED from THIS very `ps`, and the npz is never
+        #     read → self-consistent by construction. A fail-fast here would stop the
+        #     forward test at the next bootstrap over a mismatch that does not exist
+        #     live — and would stop open pre-registered samples.
         # IT: guard contratto config↔state (pattern repo: fail-fast su mix incoerenti).
         # EN: config↔state contract guard (repo pattern: fail-fast on incoherent mixes).
         if str(cfg["data"]["interval"]) != str(ps.interval):

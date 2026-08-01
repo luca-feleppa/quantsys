@@ -92,6 +92,30 @@ La riga centrale **è** la banda pubblicata −23% ÷ −32%. I report `*_c3.jso
 
 ---
 
+## 🧭 DOVE VA IL GUARD, E DOVE NON VA — perimetro deciso e verificato · 2026-08-01 (sessione 3)
+
+**La domanda giusta non è «quanti call-site», è «dove esiste l'esposizione».** Il guard confronta lo scaler del modello con quello **canonico dell'npz**: ha senso solo dove un modello viene valutato su un dataset **costruito da qualcun altro**. Verificato leggendo il codice, non assunto:
+
+| Path | Esposto? | Perché |
+|---|---|---|
+| `dev_vols_qlike` · `dev_vols_quantile_judge` · `dev_vols_member_weights` | **SÌ** | caricano `models/{arch}/pipeline_state.pkl` e valutano su `dataset_npz_path()` |
+| **Live** (`04b`/`VolForecaster`, `04_live_signals`/`FeatureAssembler`) | **NO** | le feature sono calcolate al volo da un `FeatureBuilder` in cui scaler e colonne sono **iniettati dallo stesso `ps` del modello**; l'npz non viene mai letto → self-consistent per costruzione |
+| **Replay parity** (`99_replay_live_vs_training`) | **NO** | entrambi i lati derivano dallo **stesso** `ps`; l'npz serve solo per i **nomi** delle colonne (`get_canonical_feature_names`) → il claim di parity bit-perfect di §11 non è intaccato |
+
+⚠ **Il rischio più concreto non era omettere il guard: era metterlo nel live.** `models/itransformer` **è** in mismatch col canonico, quindi un fail-fast in `04b` avrebbe fermato il forward test al bootstrap delle 00:30 — su campioni pre-registrati **aperti** (hedged, MFIV, E1) — per un disallineamento che sul live **non esiste**. La ragione è ora scritta **nel codice**, in `vol_forecaster.py`, accanto al punto in cui qualcuno sarebbe tentato di aggiungerlo.
+
+**Rifattorizzato invece che duplicato.** Il blocco check+log+raise è diventato `assert_model_dataset_scaler` in `quantsys/utils`, usato da tre giudici: duplicarlo su tre file avrebbe garantito che il quarto se lo dimentichi, ed è **«il controllo che manca in un posto solo»** ad aver prodotto il numero sbagliato. Guard visto fallire anche su `dev_vols_quantile_judge`. Il giudice principale ri-verificato dopo il refactor: **0.27470 invariato**.
+
+**`dev_vols_rs_judge` escluso, di proposito:** non ha argparse (niente via di fuga) e gira su un npz derivato con target diverso (`log_rs_ratio`), dove il confronto col canonico non ha significato. Aggiungerci il guard sarebbe stato più probabile che sbagliato che utile.
+
+**Sito — toggle IT/EN (passo 4) FATTO.** `--lang {it,en,all}`, default **`all`**: le due lingue si generano **insieme**, così non possono divergere di build — se l'inglese fosse un comando separato resterebbe indietro di qualche commit e mostrerebbe numeri vecchi, cioè il difetto di claim stale che il generatore esiste per rendere impossibile, reintrodotto dalla porta di servizio. `docs/index.html` (IT) + `docs/index.en.html` (EN), con rimando reciproco. **Inerzia dell'italiano verificata con un diff sull'output reale:** le uniche differenze sono l'hash del commit e il link di lingua, la prosa è byte-identica.
+
+⚠ **Il test che giustifica il toggle come rischio:** il guard one-shot era verificato su **un** render; una seconda lingua è un **secondo percorso**, e «nessuna cifra in una scheda aperta» deve valere anche lì. Ora è verificato su entrambe. Trappola trovata scrivendolo: passare l'etichetta italiana da `esc()` trasformava l'apostrofo in `&#x27;`, che **contiene cifre** e faceva cadere quel guard — un controllo di disciplina scientifica ucciso da un dettaglio tipografico. Test del sito **37** (da 32). Suite **438 passed / 1 skipped**.
+
+**⛔ Decisione presa e NON eseguita: nessun riaddestramento.** Restituire riproducibilità alla cifra alla banda richiederebbe di addestrare una coppia canonica sull'npz corrente, il che (a) **sostituirebbe** il restore del PASS VOL-S, unico artefatto del solo risultato positivo del progetto, (b) produrrebbe **numeri nuovi** e quindi una ri-pubblicazione del claim, (c) andrebbe fatto con la stessa disciplina di un gate — quale coppia diventa canonica, su quale npz, come si riscrive la banda — che è una pre-registrazione, non una correzione. La qualificazione onesta è già pubblicata: **il limite è documentato, il che è diverso dall'essere risolto, e la scelta di non risolverlo ora è deliberata.**
+
+---
+
 ## 2026-07-31, fine giornata (sessione 2)
 
 **Fatto oggi in questa sessione (tutto committato e pushato: `28fb7ac`, `85b2909`, `de47191`, `e582ad9`, `29db84e`).**
