@@ -90,6 +90,18 @@ def main():
                              "itransformer_a10_sparsity"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
+    # IT: 2026-08-01 — via di fuga ESPLICITA al guard sullo scaler (vedi sotto).
+    #     Deve essere un flag e non una env: un run cross-vintage produce un numero
+    #     NON confrontabile con gli altri report, quindi la sua natura deve restare
+    #     scritta nell'invocazione e finire nel report.
+    # EN: 2026-08-01 — EXPLICIT escape hatch for the scaler guard (see below). It
+    #     must be a flag, not an env var: a cross-vintage run produces a number NOT
+    #     comparable with the other reports, so its nature must stay written in the
+    #     invocation and end up in the report.
+    ap.add_argument("--allow-scaler-mismatch", action="store_true",
+                    help="procedi anche se lo scaler del modello ≠ scaler del dataset: "
+                         "il numero NON è confrontabile con gli altri report / proceed even "
+                         "if the model scaler ≠ dataset scaler: the number is NOT comparable")
     args = ap.parse_args()
 
     # IT: root env-aware (QUANTSYS_MODELS_ROOT) — giudica la sandbox isolata se attiva.
@@ -257,6 +269,56 @@ def main():
     c, s = float(ps.scaler.center_[idx]), float(ps.scaler.scale_[idx])
     log.info(f"target_ret scaler: center={c:.3f} scale={s:.3f} (deve essere ~log-RV, non ~0)")
     assert c < -3, "center ≈ 0 → il PipelineState non è del dataset log-RV (stale?)"
+
+    # IT: GUARD SCALER MODELLO↔DATASET (2026-08-01). L'assert sopra cattura solo lo
+    #     stato grossolanamente sbagliato (center ≈ 0); NON cattura uno stato
+    #     plausibile ma di un ALTRO vintage del dataset, che è il caso che si è
+    #     verificato davvero: `models/itransformer` è il restore del PASS di giugno
+    #     e la sua QLIKE sull'npz corrente (0.27470 val) è ~5% peggiore di quella di
+    #     una coppia riaddestrata sullo stesso npz (0.26143) — differenza che è
+    #     artefatto di scaler, non skill. Confrontare due modelli attraverso scaler
+    #     diversi è vietato dal manifesto; farlo in silenzio è come è successo.
+    #     Fail-fast, non warning: un warning in un log da 600 righe non ha fermato
+    #     nessuno finora.
+    # EN: MODEL↔DATASET SCALER GUARD (2026-08-01). The assert above only catches a
+    #     grossly wrong state (center ≈ 0); it does NOT catch a plausible state from
+    #     ANOTHER dataset vintage, which is what actually happened:
+    #     `models/itransformer` is the June PASS restore and its QLIKE on the current
+    #     npz (0.27470 val) is ~5% worse than a pair retrained on that same npz
+    #     (0.26143) — a difference that is a scaler artifact, not skill. Comparing
+    #     two models across different scalers is forbidden; doing it silently is how
+    #     it happened. Fail-fast, not a warning: a warning inside a 600-line log has
+    #     stopped nobody so far.
+    from quantsys.utils import check_model_dataset_scaler
+    prov = check_model_dataset_scaler(ps)
+    prov["arch"] = args.arch
+    prov["model_dir"] = str(model_dir)
+    prov["npz"] = str(dataset_npz_path())
+    prov["allow_scaler_mismatch"] = bool(args.allow_scaler_mismatch)
+    if prov["matches"] is None:
+        log.warning(f"scaler canonico assente ({prov['canonical_path']}): identità "
+                    f"modello↔dataset NON verificabile / canonical scaler absent: "
+                    f"model↔dataset identity NOT verifiable")
+    elif not prov["matches"]:
+        msg = (f"SCALER MISMATCH modello↔dataset — il modello in {model_dir} è stato "
+               f"addestrato sotto uno scaler diverso da quello con cui è stato costruito "
+               f"{dataset_npz_path()}.\n"
+               f"  modello  : target_scale={prov['model']['target_scale']} "
+               f"center_md5={prov['model']['center_md5'][:12]}\n"
+               f"  canonico : target_scale={prov['canonical']['target_scale']} "
+               f"center_md5={prov['canonical']['center_md5'][:12]}\n"
+               f"  Il numero che ne uscirebbe NON è confrontabile con gli altri report: "
+               f"la differenza include un artefatto di scaler, non solo skill.\n"
+               f"  Riaddestra il modello sull'npz corrente, oppure dichiara "
+               f"l'incomparabilità con --allow-scaler-mismatch.")
+        if not args.allow_scaler_mismatch:
+            raise RuntimeError(msg)
+        log.warning(msg)
+        log.warning("--allow-scaler-mismatch attivo: il report sarà marcato NON confrontabile "
+                    "/ active: the report will be flagged NOT comparable")
+    else:
+        log.info(f"scaler modello↔dataset: IDENTICO (target_scale="
+                 f"{prov['model']['target_scale']}) / model↔dataset scaler: IDENTICAL")
 
     X = torch.tensor(d[f"X_{split}"], dtype=torch.float32)
     Xm = torch.tensor(d[f"X_macro_{split}"], dtype=torch.float32) if f"X_macro_{split}" in d.files else None
@@ -566,9 +628,23 @@ def main():
     _sandbox = f"_{_root.name}" if _root.name != "models" else ""
     out_path = out_dir / f"qlike_report_{interval}_{split}{_sandbox}.json"
     with open(out_path, "w", encoding="utf-8") as f:
+        # IT: `provenance` (2026-08-01) — il report DEVE dire quale modello ha
+        #     prodotto `metrics.nn`. Senza, un numero è orfano del modello che lo
+        #     ha generato: è esattamente così che i report C3 (NN da
+        #     `models/itransformer`) sono stati letti come se contenessero il
+        #     numeratore della banda pubblicata (NN da una coppia riaddestrata,
+        #     sandbox poi eliminata). Il campione era identico cifra per cifra su
+        #     tutte le baseline, quindi nulla segnalava la differenza.
+        # EN: `provenance` (2026-08-01) — the report MUST say which model produced
+        #     `metrics.nn`. Without it a number is orphaned from the model that
+        #     generated it: that is exactly how the C3 reports (NN from
+        #     `models/itransformer`) were read as if they held the published band's
+        #     numerator (NN from a retrained pair, sandbox later deleted). The
+        #     sample was identical digit-for-digit across every baseline, so nothing
+        #     flagged the difference.
         json.dump({"metrics": res, "gate": gate, "per_regime": per_regime,
                    "har_beta": list(map(float, beta)), "smearing": smear_block,
-                   "har_cj": har_cj_block}, f, indent=2)
+                   "har_cj": har_cj_block, "provenance": prov}, f, indent=2)
 
     print(f"\n══════ VOL-S QLIKE [{interval}·{split}] ══════")
     for name in ("nn", "har", "naive"):
@@ -609,6 +685,23 @@ def main():
     #     two is the mistake this panel exists to make impossible.
     _hc = har_cj_block["har_c"]
     print("  ── baseline econometriche / econometric baselines ──")
+    # IT: in mismatch di scaler i RAPPORTI NN qui sotto non sono confrontabili con
+    #     la banda pubblicata, mentre le QLIKE delle baseline lo restano (le HAR
+    #     sono fittate e valutate dentro l'npz, quindi indipendenti dal modello).
+    #     Senza questa riga l'etichetta «denominatore del CLAIM» starebbe accanto a
+    #     un rapporto che NON è quello del claim: il pannello, nato per rendere
+    #     impossibile una confusione, ne introdurrebbe un'altra.
+    # EN: under a scaler mismatch the NN RATIOS below are not comparable with the
+    #     published band, while the baseline QLIKEs are (HARs are fitted and
+    #     evaluated inside the npz, hence model-independent). Without this line the
+    #     «published CLAIM denominator» label would sit next to a ratio that is NOT
+    #     the claim's: the panel, built to make one confusion impossible, would
+    #     introduce another.
+    if prov["matches"] is False:
+        print("     ⚠ SCALER MISMATCH: i rapporti NN qui sotto NON sono confrontabili con la "
+              "banda pubblicata / NN ratios below are NOT comparable with the published band")
+        print("       (le QLIKE delle baseline restano valide: sono model-independent / "
+              "baseline QLIKEs remain valid: they are model-independent)")
     print(f"     HAR-RV  QLIKE={har_cj_block['qlike_har_rv']:.5f}   ratio NN={har_cj_block['ratio_rv']:.4f}"
           f"   ← denominatore del GATE pre-registrato (2026-06-10)")
     print(f"     HAR-C   QLIKE={_hc['qlike_har_c']:.5f}   ratio NN={_hc['ratio_nn_over_har_c']:.4f}"

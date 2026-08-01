@@ -594,3 +594,75 @@ class PipelineState:
             f"{dataset_str})"
         )
 
+
+
+# ─────────────────── identità dello scaler modello↔dataset ───────────────────
+# IT: IL SAFETY NET CHE MANCAVA (2026-08-01). Il manifesto valida train↔inference
+#     su `forecast_horizon` e su `interval`, ma NON sullo scaler — ed è lo scaler
+#     la cosa che cambia più spesso, perché si rifitta a ogni rebuild del dataset.
+#     Conseguenza concreta e già accaduta: `dev_vols_qlike.py` carica center/scale
+#     dal `pipeline_state` del MODELLO e valuta sull'npz corrente, costruito con un
+#     RobustScaler diverso. Gli input arrivano normalizzati con uno scaler, la rete
+#     è stata addestrata con un altro, e μ viene denormalizzato con un terzo
+#     riferimento. Nulla fallisce: esce un numero plausibile e leggermente peggiore,
+#     che è il modo peggiore in cui un errore può presentarsi.
+#     È la stessa classe del −4.94% di A8, artefatto di distribution shift
+#     old-scaler che a parità di scaler valeva −0.79%.
+# EN: THE SAFETY NET THAT WAS MISSING (2026-08-01). The manifesto validates
+#     train↔inference on `forecast_horizon` and `interval` but NOT on the scaler —
+#     and the scaler is what changes most often, since it is refit at every dataset
+#     rebuild. Concrete, already-happened consequence: `dev_vols_qlike.py` loads
+#     center/scale from the MODEL's `pipeline_state` and evaluates on the current
+#     npz, built with a different RobustScaler. Inputs come normalized under one
+#     scaler, the net was trained under another, μ is denormalized against a third
+#     reference. Nothing fails: out comes a plausible, slightly worse number, which
+#     is the worst way an error can present itself.
+def scaler_fingerprint(state: "PipelineState") -> dict:
+    # IT: impronta compatta e confrontabile dello scaler. Gli hash stanno su
+    #     center_/scale_ INTERI: confrontare il solo `target_scale` non basta,
+    #     perché due dataset possono condividere la scala del target e differire
+    #     sulle feature di input — che è metà del disallineamento.
+    # EN: compact, comparable scaler fingerprint. Hashes cover the WHOLE
+    #     center_/scale_: comparing `target_scale` alone is not enough, since two
+    #     datasets can share the target scale and differ on the input features —
+    #     which is half of the mismatch.
+    import hashlib
+    import numpy as _np
+    fp: dict = {"target_scale": None, "n_scale_cols": len(getattr(state, "scale_cols", []) or []),
+                "center_md5": None, "scale_md5": None}
+    try:
+        fp["target_scale"] = float(state.target_scale)
+    except Exception:
+        pass
+    sc = getattr(state, "scaler", None)
+    for attr, key in (("center_", "center_md5"), ("scale_", "scale_md5")):
+        v = getattr(sc, attr, None) if sc is not None else None
+        if v is not None:
+            fp[key] = hashlib.md5(_np.ascontiguousarray(v, dtype=_np.float64).tobytes()).hexdigest()
+    return fp
+
+
+def check_model_dataset_scaler(model_state: "PipelineState",
+                               canonical_path: Optional[Path] = None) -> dict:
+    # IT: confronta lo scaler del modello con quello CANONICO, cioè quello scritto
+    #     quando il dataset è stato costruito (`{models_root}/pipeline_state.pkl`,
+    #     arch-independent). Ritorna un dizionario di provenienza — non solleva:
+    #     la decisione se fermarsi spetta al chiamante, perché un run cross-vintage
+    #     deliberato è legittimo purché sia DICHIARATO.
+    #     `matches=None` significa "non verificabile" (canonico assente, p.es. clone
+    #     pulito) e non deve mai essere confuso con "verificato uguale".
+    # EN: compares the model's scaler against the CANONICAL one, i.e. the one
+    #     written when the dataset was built (`{models_root}/pipeline_state.pkl`,
+    #     arch-independent). Returns a provenance dict — it does not raise: whether
+    #     to stop is the caller's decision, since a deliberate cross-vintage run is
+    #     legitimate as long as it is DECLARED.
+    #     `matches=None` means "not verifiable" (canonical absent, e.g. a clean
+    #     clone) and must never be conflated with "verified equal".
+    canonical_path = Path(canonical_path) if canonical_path else models_root() / "pipeline_state.pkl"
+    out = {"model": scaler_fingerprint(model_state), "canonical": None,
+           "canonical_path": str(canonical_path), "matches": None}
+    if not canonical_path.exists():
+        return out
+    out["canonical"] = scaler_fingerprint(PipelineState.load(str(canonical_path)))
+    out["matches"] = bool(out["model"] == out["canonical"])
+    return out

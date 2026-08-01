@@ -23,18 +23,11 @@
 3. **Campo `scope` nel registro degli esperimenti** — vedi § dedicato sotto: senza, la pagina si contraddiceva.
 4. **Difetto di etichetta nell'intestazione del sito, corretto.** I riquadri in cima citavano `qlike_report_1h_test.json` chiamando il denominatore «la baseline econometrica». Quel denominatore è **HAR-RV**, cioè la baseline del **gate** pre-registrato — non HAR-C, che dal 31/07 è la baseline del **claim**. È esattamente l'invariante che il pannello a tre baseline esiste per rendere impossibile da confondere. Etichette riscritte in «la baseline del criterio pre-registrato», con rimando alla scheda.
 
-**⚠ PROBLEMA APERTO NUOVO — i rapporti NN/HAR-C pubblicati in `TEORIA.md` §12.2 non coincidono con i report C3 su disco.**
-
-| | `TEORIA.md` §12.2 (C3) | `results/vols/qlike_report_1h_*_c3.json` |
-|---|---|---|
-| NN/HAR-C **val** | 0.7758 (−22.4%) | **0.8152 (−18.5%)** |
-| NN/HAR-C **test** | 0.6835 (−31.7%) | **0.7071 (−29.3%)** |
-
-I **denominatori** riproducono cifra per cifra (HAR-RV 0.35698/0.36998, HAR-CJ 0.33788/0.34572, HAR-C 0.33698/0.34584 — coerenti con TEORIA); a divergere è il **numeratore NN**: i report contengono 0.27470/0.24453, mentre la banda pubblicata implica ≈0.26143/0.23640, che sono i numeri del **run DM riaddestrato del 2026-07-26** (val 0.26206 · test 0.23631, §12.2). L'ipotesi più probabile è che i report C3 del 31/07 siano stati prodotti su un **vintage di npz diverso** da quello che ha generato la banda (`lstm_dataset.npz` è stato riscritto il 30/07 alle 20:55). **Non risolto e non toccato:** decidere quale vintage NN è canonico è una decisione sul claim pubblicato, non un fix. Nessun numero è stato riscritto né in `TEORIA.md` né nel sito — la pagina cita solo il report frozen del 10/06, che è internamente coerente. **La banda −23% ÷ −32% resta quella pubblicata finché la discrepanza non è chiusa.**
+**⚠ DISCREPANZA NN/HAR-C — CHIUSA in seconda sessione. Vedi il § dedicato in fondo: l'ipotesi «due vintage di npz» scritta qui è FALSIFICATA.** Lasciata a testo per non riscrivere un log a posteriori: la causa vera sono **due root di modelli diversi**, non due dataset.
 
 **⚠ Addendum operativo alla pre-reg E1 (non tocca nessuna costante pre-registrata).** Il ⑤ dice «da rinfrescare con `01_update_data.py`». **Leggere: `01_update_data.py --candles-only`.** Nessuna metrica, soglia, definizione di `x`/`y`, unità, `n` minimo o finestra del tick di decisione è stata modificata — il testo della pre-reg è lasciato **intatto** di proposito: una pre-registrazione non si riscrive, ci si appende una nota datata. Il campione di E1 stadio 2 **si apre oggi** (expiry liquidate dopo il commit del 31/07).
 
-**Azione esatta da cui ripartire.** Nulla in scadenza: la coda è vuota lato modello e lato test. Alla prossima sessione `.\avvio_sessione.ps1` e lettura dei contatori. **Due voci di lavoro disponibili fuori gate:** (a) chiudere la discrepanza NN/HAR-C qui sopra — richiede di decidere il vintage canonico e, se serve, un ri-run del giudice sullo stesso npz dei tre denominatori; (b) sito, toggle IT/EN (`LANG` è ancora hardcoded a `"it"`, previsto come passo 4). I run one-shot dei giudici pre-registrati restano **MANUALI**.
+**Azione esatta da cui ripartire.** Nulla in scadenza: la coda è vuota lato modello e lato test. Alla prossima sessione `.\avvio_sessione.ps1` e lettura dei contatori. **Una sola voce di lavoro aperta fuori gate:** sito, toggle IT/EN (`LANG` è ancora hardcoded a `"it"`, previsto come passo 4). ⚠ **Decisione in sospeso, non urgente ma da prendere consapevolmente:** riaddestrare una coppia canonica sull'npz corrente per restituire riproducibilità alla cifra alla banda pubblicata — è una decisione **sul claim**, costa GPU e produrrebbe numeri nuovi (vedi § in fondo). I run one-shot dei giudici pre-registrati restano **MANUALI**.
 
 ---
 
@@ -62,6 +55,40 @@ I **denominatori** riproducono cifra per cifra (HAR-RV 0.35698/0.36998, HAR-CJ 0
 **Test:** `tests/test_site_registry.py` **32** (da 23). Fra questi, uno che lega l'intestazione ai dati: *esiste esattamente un PASS di scope `segnale`* — se domani un secondo gate di segnale passasse, il test cade e obbliga a riscrivere l'intestazione invece di lasciarla stale.
 
 **Cosa NON è stato fatto.** Nessun toggle IT/EN (`LANG` resta hardcoded a `"it"`). Nessun numero del claim riscritto. Nessuna scheda aggiunta o rimossa dal registro.
+
+---
+
+## 🔍 DISCREPANZA NN/HAR-C — CHIUSA. Non erano due dataset: erano due modelli, e il guard che li avrebbe distinti non esisteva · 2026-08-01 (sessione 2)
+
+**Ipotesi del mattino: FALSIFICATA.** Avevo scritto «due vintage di npz». Il controllo che la smonta costa dieci secondi e andava fatto prima: **`n`, HAR-RV, HAR-C, HAR-CJ e la naive coincidono cifra per cifra** su tutti i report recenti (val n=6485, test n=6486). Le baseline sono fittate e valutate *dentro* l'npz, quindi sono **model-independent**: se coincidono, il dataset è lo stesso. A variare è **solo** il modello.
+
+**Causa vera — mappa numero → root di modelli** (stesso campione, tutte e tre le righe):
+
+| root | val | test | NN/HAR-C val | NN/HAR-C test |
+|---|---|---|---|---|
+| `models/itransformer` (restore del PASS di giugno) | 0.27470 | 0.24453 | 0.8152 | 0.7071 |
+| `models_c2_sandbox` (coppia riaddestrata) | **0.26143** | **0.23637** | **0.7758** | **0.6835** |
+| `models_dm_sandbox` (seconda coppia riaddestrata) | 0.26206 | 0.23631 | 0.7738 | 0.6837 |
+
+La riga centrale **è** la banda pubblicata −23% ÷ −32%. I report `*_c3.json` contengono la prima riga. Nessuno dei due è sbagliato: sono due modelli diversi, e **nessun campo nel report diceva quale**.
+
+**Il difetto strutturale che c'era sotto — e che vale più della discrepanza stessa.** `dev_vols_qlike.py` carica center/scale dal `pipeline_state` **del modello** e valuta sull'npz corrente. Per `models/itransformer` i due non combaciano: `target_scale` **1.4375922** contro **1.4268685** del canonico, e md5 di `center_`/`scale_` distinti. Quindi la rete riceve input normalizzati con uno scaler, è stata addestrata con un altro, e μ viene denormalizzato con un terzo riferimento. **Nulla falliva:** usciva una QLIKE plausibile e ~5% peggiore, cioè un artefatto di scaler leggibile come skill — la stessa classe dell'A8 −4.94% che a parità di scaler valeva −0.79%. L'unico controllo esistente (`assert c < -3`) cattura uno stato *grossolanamente* sbagliato, non uno **plausibile ma di un altro vintage**.
+
+**Era il buco della terna.** Il manifesto valida train↔inference su `forecast_horizon` **e** su `interval`; lo **scaler** no — ed è l'unico dei tre che si rifitta a *ogni* rebuild del dataset. Aggiunto `check_model_dataset_scaler` (`quantsys/utils`): impronta di `center_`/`scale_` **interi** più `target_scale`. ⚠ Il solo `target_scale` non basterebbe: due dataset possono condividere la scala del target e differire sulle feature di **input**, che è metà del disallineamento.
+
+**Correzioni applicate.**
+1. **Fail-fast nel giudice**, con via di fuga esplicita `--allow-scaler-mismatch` (flag, mai env: un run cross-vintage produce un numero non confrontabile, quindi la sua natura deve restare scritta nell'invocazione). **Guard visto fallire** proprio sul modello di produzione — è il run che ha prodotto i numeri che mi avevano confuso.
+2. **Blocco `provenance` in ogni report** (model dir, arch, npz, impronta dei due scaler, flag di mismatch): un numero non può più restare orfano del modello che l'ha prodotto. È l'assenza di questo campo ad aver reso possibile l'errore.
+3. **Pannello a stdout**: in mismatch stampa che i *rapporti NN* non sono confrontabili con la banda, mentre le QLIKE delle baseline restano valide perché model-independent. Senza, l'etichetta «denominatore del CLAIM» sarebbe finita accanto a un rapporto che non è quello del claim — il pannello, nato per rendere impossibile una confusione, ne avrebbe introdotta un'altra.
+4. **`TEORIA.md` §12.2**: paragrafo bilingue sulla provenienza del numeratore e sul limite di riproducibilità. **Nessun numero della banda è stato riscritto.**
+
+**Ri-run di verifica (val, `--allow-scaler-mismatch`): numeri riprodotti bit-per-bit** — NN 0.27470, HAR-RV 0.35698, HAR-C 0.33698, HAR-CJ 0.33788, identici al report precedente. Il report ora porta la provenienza. **`test` non è stato ri-eseguito**: non serviva a nulla e la disciplina one-shot non si consuma per comodità.
+
+**⚠ Limite che resta, dichiarato e non risolto.** La sandbox che ha prodotto il numeratore della banda è stata **eliminata** al ripristino dello stato production (passo 5 del protocollo), quindi **la banda non è riproducibile alla cifra**. Ripetere il protocollo dà un numero vicino ma diverso: le due coppie riaddestrate differiscono di **~0.2 punti** sul rapporto (0.7758 vs 0.7738 su val), che è la precisione onesta con cui vanno letti gli estremi. Conseguenza da tenere ferma: **la banda è un'affermazione sul protocollo di addestramento applicato al dataset corrente, non sul file di checkpoint in `models/`.** Restituirle riproducibilità richiede di addestrare una coppia canonica e **ri-pubblicare** — decisione sul claim, non correzione, **non presa qui**.
+
+**Problema separato trovato e chiuso.** `scripts/README.md`, **tracciato e pubblico**, descriveva ancora il generatore del sito e puntava a quattro file non nel repo: il commit `bb7bce3` aveva tolto la riga dello spine numerato ma non quella delle sottocartelle. Riga rimossa; `git grep` su `build_site|experiments.yaml|test_site_registry|docs/index.html` nei tracciati è ora vuoto fuori da questo file.
+
+**Test:** `tests/test_scaler_identity_guard.py` **6/6**, di cui uno **sui file veri**: verifica che il guard veda il disallineamento storico. Se un giorno il modello venisse riaddestrato sull'npz corrente quel test cade — di proposito, per obbligare ad aggiornare anche la qualificazione in `TEORIA.md`.
 
 ---
 
