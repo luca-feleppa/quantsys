@@ -5,7 +5,67 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-07-31, fine giornata (sessione 2)
+## ▶️ RIPARTI DA QUI — 2026-08-01
+
+**Nessun gate in scadenza.** Routine di sessione eseguita: quattro collector VPS freschi (IV 0.1h · L2 0.0h · trades 0.1h · `04b` 1.9h), regime B7 fresco. **Il breakpoint macro delle 00:30 UTC è avvenuto senza incidenti:** il pull conferma il canonico VPS già al vintage `20260730`, nessuna promozione — la disciplina dei vintage ha retto al primo bootstrap sotto regime tracciato.
+
+| Contatore | 31/07 | 01/08 | Soglia | ETA |
+|---|---|---|---|---|
+| hedged vs unhedged | 10 | **11** | 20 | ~08-09/08 |
+| MFIV comparatore v2 | 24 | **25** | 40 | ~metà agosto |
+| E1 stadio 2 (expiry post-01/08) | — | **0** | 40 | ~10/09 |
+| L2 h=30 (`n_eff`) | 8.7 | **9.6** | 100 | ~22/11 |
+
+**Fatto oggi.**
+
+1. **`01_update_data.py --candles-only` — il prerequisito di E1 non era un'operazione neutra.** La pre-reg di E1 ⑤ prescrive di rinfrescare `data/raw_candles.parquet` con `01_update_data.py`, definendola "operazione di routine, CPU-only". **Non lo è:** il run completo rifitta il RobustScaler sullo split train allungato, riscrive `features.parquet` + `lstm_dataset.npz` e salva un nuovo `PipelineState` sotto `models/{QUANTSYS_ARCH|lstm}/`. Con `QUANTSYS_ARCH=itransformer` avrebbe **sovrascritto lo state del PASS VOL-S** (`models/itransformer/pipeline_state.pkl`, 2026-06-10, `target_scale=1.4376`) — e lo avrebbe fatto **in silenzio**, perché lo script esce con successo stampando un banner rassicurante. Aggiunto `--candles-only`: estende solo il parquet raw e si ferma prima della Fase 2. Non è un pattern nuovo — è quello che `VolForecaster` usa già in produzione dal fix gap-aware del 18/07 (*"la persistenza tocca SOLO raw_candles.parquet: il dataset npz congelato NON viene rigenerato"*). **Eseguito:** 66.099 → **66.410 barre**, fino al 2026-08-01 13:00 UTC, 311 nuove, **zero buchi nel segmento appeso**, zero duplicati; mtime di `features.parquet` (19/07), `lstm_dataset.npz` (30/07), `models/pipeline_state.pkl` (19/07) e `models/itransformer/pipeline_state.pkl` (10/06) **invariati**. Inerzia provata nei due sensi da `tests/test_update_candles_only.py`.
+2. **Sito di progetto — Sezione 3 «Come si decide se una cosa ha funzionato».** Il metodo in otto punti (soglia prima del numero · tre esiti non due · controllo positivo · contare prima di misurare · il dato mancante non è mai "nessun effetto" · val-first e test one-shot · leva inerte di default · il risultato negativo si scrive), più la distribuzione degli esiti **derivata dal registro**.
+3. **Campo `scope` nel registro degli esperimenti** — vedi § dedicato sotto: senza, la pagina si contraddiceva.
+4. **Difetto di etichetta nell'intestazione del sito, corretto.** I riquadri in cima citavano `qlike_report_1h_test.json` chiamando il denominatore «la baseline econometrica». Quel denominatore è **HAR-RV**, cioè la baseline del **gate** pre-registrato — non HAR-C, che dal 31/07 è la baseline del **claim**. È esattamente l'invariante che il pannello a tre baseline esiste per rendere impossibile da confondere. Etichette riscritte in «la baseline del criterio pre-registrato», con rimando alla scheda.
+
+**⚠ PROBLEMA APERTO NUOVO — i rapporti NN/HAR-C pubblicati in `TEORIA.md` §12.2 non coincidono con i report C3 su disco.**
+
+| | `TEORIA.md` §12.2 (C3) | `results/vols/qlike_report_1h_*_c3.json` |
+|---|---|---|
+| NN/HAR-C **val** | 0.7758 (−22.4%) | **0.8152 (−18.5%)** |
+| NN/HAR-C **test** | 0.6835 (−31.7%) | **0.7071 (−29.3%)** |
+
+I **denominatori** riproducono cifra per cifra (HAR-RV 0.35698/0.36998, HAR-CJ 0.33788/0.34572, HAR-C 0.33698/0.34584 — coerenti con TEORIA); a divergere è il **numeratore NN**: i report contengono 0.27470/0.24453, mentre la banda pubblicata implica ≈0.26143/0.23640, che sono i numeri del **run DM riaddestrato del 2026-07-26** (val 0.26206 · test 0.23631, §12.2). L'ipotesi più probabile è che i report C3 del 31/07 siano stati prodotti su un **vintage di npz diverso** da quello che ha generato la banda (`lstm_dataset.npz` è stato riscritto il 30/07 alle 20:55). **Non risolto e non toccato:** decidere quale vintage NN è canonico è una decisione sul claim pubblicato, non un fix. Nessun numero è stato riscritto né in `TEORIA.md` né nel sito — la pagina cita solo il report frozen del 10/06, che è internamente coerente. **La banda −23% ÷ −32% resta quella pubblicata finché la discrepanza non è chiusa.**
+
+**⚠ Addendum operativo alla pre-reg E1 (non tocca nessuna costante pre-registrata).** Il ⑤ dice «da rinfrescare con `01_update_data.py`». **Leggere: `01_update_data.py --candles-only`.** Nessuna metrica, soglia, definizione di `x`/`y`, unità, `n` minimo o finestra del tick di decisione è stata modificata — il testo della pre-reg è lasciato **intatto** di proposito: una pre-registrazione non si riscrive, ci si appende una nota datata. Il campione di E1 stadio 2 **si apre oggi** (expiry liquidate dopo il commit del 31/07).
+
+**Azione esatta da cui ripartire.** Nulla in scadenza: la coda è vuota lato modello e lato test. Alla prossima sessione `.\avvio_sessione.ps1` e lettura dei contatori. **Due voci di lavoro disponibili fuori gate:** (a) chiudere la discrepanza NN/HAR-C qui sopra — richiede di decidere il vintage canonico e, se serve, un ri-run del giudice sullo stesso npz dei tre denominatori; (b) sito, toggle IT/EN (`LANG` è ancora hardcoded a `"it"`, previsto come passo 4). I run one-shot dei giudici pre-registrati restano **MANUALI**.
+
+---
+
+## 🌐 SITO DI PROGETTO — recuperato in continuità (lavoro del 31/07 sera, mai entrato in `STATUS.md`) · 2026-08-01
+
+**Perché è qui.** I tre commit del sito — `40f9e8d` (scheletro, blocco 1.0, guard one-shot), `33e96a0` (registro degli esperimenti, Sezione 2), `bb7bce3` (untrack del materiale in lavorazione) — sono **posteriori** al riepilogo di fine giornata `1971b50`, quindi non risultavano da nessuna parte in questo file. Buco di continuità chiuso.
+
+**Stato.** Generatore `scripts/site/build_site.py` → `docs/index.html`, registro `docs/experiments.yaml` (14 schede), test `tests/test_site_registry.py`. **Untracked** in `.git/info/exclude` — non in `.gitignore`, e la ragione è la stessa per cui ci stanno già gli altri file locali: `.gitignore` è tracciato, quindi elencarci i path direbbe cosa si sta costruendo invece di nasconderlo. **Anche `docs/paper/` è stato sganciato** (era tracciato da giugno). ⚠ Entrambi erano già stati pushati: l'untrack li toglie dall'albero corrente, **non dalla storia**. Se `.git/info/exclude` sparisce, i path tornano visibili a `git status` e sono a un `git add -A` di distanza dalla pubblicazione.
+
+**Tre proprietà che il generatore fa rispettare (non raccomanda).**
+1. **Guard one-shot** — una scheda di un gate `aperto` che dichiari un numero *o anche solo un verdetto* alza `OneShotViolation` e **ferma la build**. Verificato sui dati reali, non su fixture.
+2. **Niente terza copia dei fatti** — dove un numero esiste in un report su disco, il registro dichiara file e chiave e il valore è **riletto a ogni build**. La divergenza non è "rilevata", è impossibile. `numbers.literal` solo dove nessun report esiste, e allora `as_of` è obbligatorio.
+3. **Niente fonte parallela** — ogni scheda punta a una sezione **esistente** di `TEORIA.md`, verificata a ogni build. Su divergenza registro↔TEORIA, **TEORIA ha ragione**.
+
+---
+
+## 🏷️ CAMPO `scope` NEL REGISTRO — la pagina si contraddiceva, e il difetto era strutturale · 2026-08-01
+
+**Il difetto.** La Sezione 3 mostra la distribuzione degli esiti derivata dal registro. Derivandola si ottiene **3 PASS** — due schermate sotto un'intestazione che rivendica *«un singolo PASS su un target di varianza»*. Entrambe le affermazioni sono vere e la pagina si contraddiceva lo stesso, perché sommava PASS che rispondono a **domande diverse**: `vol-s` risponde a *esiste un segnale*, `c2-har-cj` e `c3-attribuzione` a *qual è il confronto corretto*. È precisamente il difetto trovato dall'audit del 28/07 (un claim che regge solo grazie a una qualifica più in basso).
+
+**La correzione.** Nuovo campo obbligatorio `scope`, vocabolario **chiuso** su quattro valori — `segnale` (esiste un segnale?) · `leva` (questa modifica migliora il modello?) · `metodo` (qual è il confronto corretto?) · `realizzazione` (la regola monetizza il segnale?). Assegnazione corrente: 5 segnale · 3 leva · 4 metodo · 2 realizzazione. La frase che riconcilia intestazione e conteggi è **derivata**, non scritta: *«Un solo PASS riguarda la domanda "esiste un segnale": gli altri 2 riguardano il metro con cui si misura»*.
+
+**Due dettagli che sembrano cosmetici e non lo sono.** (a) Le etichette dei riquadri sono **senza verbo** e il testo si **accorda al numero** (0/1/molti): un conteggio derivato può valere 1, e *«1 esperimenti chiusi che hanno...»* è il genere di sgrammaticatura che compare solo il giorno in cui il dato cambia, cioè quando nessuno sta guardando. (b) Un esito a **zero non genera un riquadro «0»**: una casella vuota su una pagina di risultati si legge come un dato, non come un'assenza.
+
+**Test:** `tests/test_site_registry.py` **32** (da 23). Fra questi, uno che lega l'intestazione ai dati: *esiste esattamente un PASS di scope `segnale`* — se domani un secondo gate di segnale passasse, il test cade e obbliga a riscrivere l'intestazione invece di lasciarla stale.
+
+**Cosa NON è stato fatto.** Nessun toggle IT/EN (`LANG` resta hardcoded a `"it"`). Nessun numero del claim riscritto. Nessuna scheda aggiunta o rimossa dal registro.
+
+---
+
+## 2026-07-31, fine giornata (sessione 2)
 
 **Fatto oggi in questa sessione (tutto committato e pushato: `28fb7ac`, `85b2909`, `de47191`, `e582ad9`, `29db84e`).**
 
