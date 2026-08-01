@@ -27,7 +27,9 @@
 
 **⚠ Addendum operativo alla pre-reg E1 (non tocca nessuna costante pre-registrata).** Il ⑤ dice «da rinfrescare con `01_update_data.py`». **Leggere: `01_update_data.py --candles-only`.** Nessuna metrica, soglia, definizione di `x`/`y`, unità, `n` minimo o finestra del tick di decisione è stata modificata — il testo della pre-reg è lasciato **intatto** di proposito: una pre-registrazione non si riscrive, ci si appende una nota datata. Il campione di E1 stadio 2 **si apre oggi** (expiry liquidate dopo il commit del 31/07).
 
-**Azione esatta da cui ripartire.** Nulla in scadenza: la coda è vuota lato modello e lato test. Alla prossima sessione `.\avvio_sessione.ps1` e lettura dei contatori. **Una sola voce di lavoro aperta fuori gate:** sito, toggle IT/EN (`LANG` è ancora hardcoded a `"it"`, previsto come passo 4). ⚠ **Decisione in sospeso, non urgente ma da prendere consapevolmente:** riaddestrare una coppia canonica sull'npz corrente per restituire riproducibilità alla cifra alla banda pubblicata — è una decisione **sul claim**, costa GPU e produrrebbe numeri nuovi (vedi § in fondo). I run one-shot dei giudici pre-registrati restano **MANUALI**.
+**Azione esatta da cui ripartire.** Nulla in scadenza: la coda è vuota lato modello e lato test, e **la coda fuori gate è vuota anche lei** — il toggle IT/EN del sito, che era l'ultima voce aperta, è stato fatto in sessione 3. Alla prossima sessione: `.\avvio_sessione.ps1` e lettura dei contatori, poi **il prossimo evento reale è l'08-09/08** (giudice hedged a n≥20). I run one-shot dei giudici pre-registrati restano **MANUALI**.
+
+⚠ **Una sola decisione in sospeso, non urgente e da prendere consapevolmente:** riaddestrare una coppia canonica sull'npz corrente per restituire riproducibilità alla cifra alla banda pubblicata. **Non è una correzione ed è già stata rimandata una volta di proposito** (§ in fondo): sostituirebbe il restore del PASS VOL-S e riscriverebbe un claim pubblicato, quindi il passo giusto è una **pre-registrazione**, non un training. Finché non si fa, la qualificazione in `TEORIA.md` §12.2 è la forma onesta del limite.
 
 ---
 
