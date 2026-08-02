@@ -707,9 +707,23 @@ def main():
     #     stays for live inference on non-pre-clipped data.
     _clip_lo_cpu = torch.from_numpy(_clip_lo)
     _clip_hi_cpu = torch.from_numpy(_clip_hi)
-    X_tr = X_tr.clamp(_clip_lo_cpu, _clip_hi_cpu)
-    X_vl = X_vl.clamp(_clip_lo_cpu, _clip_hi_cpu)
-    X_te = X_te.clamp(_clip_lo_cpu, _clip_hi_cpu)
+    # IT: clamp_ IN-PLACE, non clamp(): l'out-of-place alloca un tensore nuovo e
+    #     riassegna il nome, quindi durante l'operazione vecchio e nuovo coesistono
+    #     — un picco pari alla DIMENSIONE PIENA del tensore (X_train da solo e' 2.59 GB
+    #     su 15.9 GB di RAM, con il npz gia' mappato). I tensori sono proprietari
+    #     della loro memoria (to_t fa .astype(), che copia sempre) e a questo punto
+    #     non esiste piu' nessuna vista su di essi (_X_flat e' stato gia' del-etato),
+    #     quindi l'in-place e' sicuro; il risultato e' bit-identico, elemento per elemento.
+    # EN: IN-PLACE clamp_, not clamp(): the out-of-place form allocates a fresh
+    #     tensor and rebinds the name, so old and new coexist during the op — a peak
+    #     equal to the FULL SIZE of the tensor (X_train alone is 2.59 GB out of 15.9 GB
+    #     of RAM, with the npz already mapped). The tensors own their memory (to_t
+    #     calls .astype(), which always copies) and no view onto them survives at this
+    #     point (_X_flat was already deleted), so in-place is safe; the result is
+    #     bit-identical, element by element.
+    X_tr.clamp_(_clip_lo_cpu, _clip_hi_cpu)
+    X_vl.clamp_(_clip_lo_cpu, _clip_hi_cpu)
+    X_te.clamp_(_clip_lo_cpu, _clip_hi_cpu)
     del _clip_lo_cpu, _clip_hi_cpu
     if n_feat > 57:
         log.info(f"  ret_kurt_20: [{_clip_lo[57]:.2f}, {_clip_hi[57]:.2f}]  "
