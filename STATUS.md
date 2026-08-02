@@ -5,7 +5,143 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-01
+## ▶️ RIPARTI DA QUI — 2026-08-02
+
+**Nessun gate in scadenza.** Sessione **interamente fuori dal perimetro scientifico**: audit diagnostico di performance (read-only) + i due fix a rischio numerico zero che ne sono usciti. Nessun modello riaddestrato, nessun giudice eseguito, nessuna soglia pre-registrata sfiorata.
+
+**Routine di sessione eseguita a fine giornata — esito OK (exit 0).** Quattro collector VPS freschi (IV 0.1h · L2 0.0h · trades 0.1h · `04b` 1.2h), vintage macro **`20260730` invariato, nessuna promozione**, regime B7 fresco.
+
+| Contatore | 01/08 | **02/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 11 | **12** | 20 | ~08-09/08 |
+| MFIV comparatore v2 | 25 | **26** | 40 | `--count-only`, nessun run one-shot |
+| L2 h=30 (`n_eff`) | 9.6 | **10.4** | 100 | ⚠ vedi buco sotto |
+| leg opzioni | 30 | **33** | (30) | gate **CHIUSO il 30/07, FAIL 0/3** — è accumulo oltre un gate consumato, non un'azione dovuta |
+
+⚠ **Fatto nuovo: buco del recorder L2 il 2026-08-02 alle 16:00 UTC (1h persa).** Il run contiguo corrente è tornato a **0h** (max storico 462h); copertura 51.9% su 1132 ore. Costo stimato **~150 finestre ≈ 5 `n_eff` ≈ 6 giorni di accumulo**, perché una finestra richiede `T+h` barre contigue: un'ora di buco non costa un'ora. È esattamente il motivo per cui il check di continuità L2 esiste (un file fresco con un buco *dentro* passava l'heartbeat in silenzio). Nessuna azione correttiva presa: il buco è già avvenuto e il recorder è ripartito da solo.
+
+⚠ **Trappola di invocazione, non un guasto.** Le prime due esecuzioni della routine sono uscite con **exit 1** e "pull FALLITO" su `hedge_state.json`. Causa: `scp` scrive su stderr quando il file non esiste (**assenza legittima** = nessun hedge aperto, e il codice la gestisce con un semplice messaggio), ma sotto `$ErrorActionPreference="Stop"` PS 5.1 trasforma lo stderr di un exe nativo in errore **terminante** *se lo stderr viene rediretto* — ed entrambe le invocazioni lo redirigevano. Eseguendo con redirezione a livello di **OS** (`powershell.exe -File ... > out 2> err`) l'esito è **exit 0** e il messaggio corretto. È il gotcha già documentato in `AVVIO.md §1.2`: vale anche per chi lancia la routine da un wrapper, non solo per `Tee-Object`.
+
+**Fatto oggi.**
+
+1. **Audit di performance → `docs/PERF_AUDIT.md`** (nuovo, con probe temporanee in `scripts/archive/perf_probe/`, untracked). Il risultato centrale: **il training non è compute-bound**. A batch 64 la GPU sta al **5-15% di SM** e il tempo per step è dominato dal **lancio** dei kernel — da batch 32 a 128 l'aritmetica quadruplica e il wall-clock cresce del **16%**; la curva diventa lineare solo oltre batch 512 (SM 96-98%). Il modello è piccolo (676k parametri, `T_eff=24`) e i kernel sono minuscoli per una 2070S. **Conseguenza metodologica:** i lever che riducono l'*aritmetica* non toccano il collo di bottiglia — è la ragione per cui `channels_last`, Numba, Polars ed estensioni native sono stati scartati con una ragione tecnica invece che con un'opinione.
+2. **Due fallimenti silenziosi rimossi** (§ dedicato sotto). Entrambi **bit-invarianti sul path di successo**; entrambi trovati per caso durante l'audit, non cercati.
+3. **README riallineato**: dichiarava 355 test, erano 438 → ora **450** (`~45 s`). È un claim che un lettore esterno verifica in trenta secondi.
+
+**⚠ Cambiamento di stato dati non pianificato (benigno, ma va scritto).** Lo smoke test di fine sessione ha eseguito `01_update_data.py --candles-only`, che ha **appeso 25 candele** a `data/raw_candles.parquet`: **66.410 → 66.435**, fino al 2026-08-02. Era inteso come verifica che il fix ① non avesse rotto un path di produzione che legge e scrive parquet — e infatti la verifica è riuscita — ma ha prodotto un append reale, non una simulazione. **Perimetro toccato: solo il parquet raw.** `features.parquet`, `lstm_dataset.npz`, lo scaler e i due `PipelineState` sono **invariati** (è la garanzia di `--candles-only`, provata da `tests/test_update_candles_only.py`). Nessun campione forward è perturbato: i vintage macro non sono stati toccati e la promozione richiede `-PromoteMacro`. Se un giudice one-shot dovesse girare su una finestra che assume 66.410 barre, saperlo evita mezz'ora di confusione.
+
+**⚠ Difetto preesistente trovato durante lo smoke test, NON corretto.** `scripts/00_check_setup.py` **non ha il boilerplate di reconfigure UTF-8** (zero occorrenze) e crasha con `UnicodeEncodeError` su console Windows cp1252 alla prima riga di banner. È la **6ª occorrenza** del bug che la checklist "nuovo script" esiste per prevenire — ed è particolarmente sfortunata perché `python scripts/00_check_setup.py` è **l'ultimo comando della sequenza di setup nel README**: è letteralmente la prima cosa che esegue chi clona. Verificato preesistente (fallisce identico con `quantsys/__init__.py` originale, quindi indipendente dai fix di oggi). Fix: due righe di boilerplate. Non applicato per non allargare il perimetro senza dirlo.
+
+**Azione esatta da cui ripartire.** Nulla in scadenza. Alla prossima sessione: `.\avvio_sessione.ps1` e lettura dei contatori. **Il prossimo evento reale è l'08-09/08** (giudice hedged a n≥20, oggi 12). I run one-shot dei giudici pre-registrati restano **MANUALI**.
+
+**Coda delle performance: CHIUSA per ora.** Leva A **no-go** (testata, §10 di `PERF_AUDIT.md`), Leva B **parcheggiata** con condizione di riapertura datata (§ sotto). Restano **non implementate di proposito** due cose misurate e documentate, da riprendere solo se qualcuno le vuole: `astype(copy=False)` in `02_train.py` (−2.42 GiB di picco, bit-identico, test già in suite: `tests/test_npz_load_aliasing.py`) e l'esercizio del guard regime su un run reale. Nessuna delle due è urgente.
+
+---
+
+## ⚙️ DUE FALLIMENTI SILENZIOSI RIMOSSI · 2026-08-02
+
+**① Ordine di inizializzazione DLL — `pyarrow` prima di torch+sklearn.** Caricare pyarrow **dopo** che torch **e** scikit-learn sono già nel processo produce un'**access violation** (exit 139, nessun traceback Python) al primo `pd.read_parquet`. Serve la compresenza dei due: torch da solo o sklearn da solo non basta — è il conflitto fra i runtime OpenMP che ciascuno porta. **Gli script numerati sopravvivevano solo perché importano `pandas` alla riga 30 e `torch` alla 31**: un invariante **di fatto, mai dichiarato né testato**. Poiché `quantsys.utils` importa torch a livello di modulo, uno script nuovo scritto nell'ordine naturale — prima gli import del progetto come prescrive la checklist, poi pandas — crasha. **Ci sono incappato scrivendo una probe dell'audit**, il che è la dimostrazione che il caso è realistico e non teorico. Fix: `import pyarrow` ancorato in `quantsys/__init__.py`, best-effort (l'assenza di pyarrow non deve bloccare l'import: il VPS minimale). Test `tests/test_import_order.py` (4), che girano in **subprocesso** verificando il codice d'uscita — un crash di processo non è catturabile con `pytest.raises`.
+
+**② Degradazione silenziosa del walk-forward regime.** In `RegimeMarkovSwitching.fit_predict_walkforward`, ogni fit Markov-Switching fallito finiva in un `log.warning` per timestep e il loop proseguiva. Con `current_params=None`, `probs_all[t]` non veniva **mai** scritto: la funzione restituiva la **prior uniforme `1/n_regimes` travestita da probabilità di regime**, senza che nulla fallisse. Peggio: il ramo `_fit_single → None` (tutti i restart falliti, nessuna eccezione) non produceva **nemmeno un log**. Un full rebuild lanciato con statsmodels rotto avrebbe scritto un `regime_probs.parquet` privo di contenuto informativo, e la degradazione sarebbe stata visibile solo leggendo i warning. Fix: `RuntimeError` su **zero fit riusciti** — deliberatamente **non disattivabile**, perché un walk-forward senza un solo fit non produce informazione in nessun caso — più abort configurabile su `max_fit_failure_ratio` (default 0.5, lasco perché su serie corte qualche fallimento è fisiologico) e diagnostica persistita in `last_fit_diagnostics`. Guard **rispecchiato in `continue_walkforward`** come impone il commento ⚠ MIRROR, dove però la degradazione è diversa e più insidiosa: `current_params` non è mai `None`, quindi un refit fallito non dà la prior ma **parametri stantii**, indistinguibili a valle da quelli buoni. Test `tests/test_regime_fit_guard.py` (8). **Bit-parity B7 verificata invariata** (`tests/test_regime_incremental.py` verde).
+
+⚠ **Perché contano più di qualunque ottimizzazione:** nessuno dei due costava un secondo. Entrambi trasformano un fallimento muto in uno esplicito, che è la stessa logica dei guard già in `TEORIA.md` §12.5 (σ, `forecast_horizon`, `interval`, scaler) — ora estesa ai due punti che ne erano scoperti.
+
+---
+
+## 🔬 LEVA A — TESTATA, ESITO NO-GO (decisa 2026-08-02)
+
+**Non si implementa.** Numeri completi in `docs/PERF_AUDIT.md` §10. In breve: il test di correttezza
+ha prima falsificato la premessa (**`X_train` non è contiguo**: `create_windows` scarta le finestre
+con NaN → **4 blocchi**, 3 discontinuità; la ricostruzione ovvia `X[j,0,:]` è sbagliata **in
+silenzio**, e il test l'ha intercettata). Gestendo i blocchi la ricostruzione è bit-identica, il che
+dimostra che **la vista espansa non contiene informazione in più**: stessa popolazione, bordi
+sotto-pesati (952 barre, 1.82%). Bootstrap sulle barre: z mediano **0.008**, solo **9/208** bound
+oltre 1 SD → per il 95.7% i due stimatori sono **statisticamente indistinguibili**. Impatto a valle
+0.145% delle celle, |Δ| mediana 0.0008 IQR. Concettualmente il più corretto è quello sulle barre
+distinte (il peso per molteplicità è un artefatto di windowing), ma il premio è **1.9%** del tempo di
+training e l'implementazione corretta dipende da una struttura a blocchi che cambia a ogni rebuild —
+la stessa classe di bug silenzioso appena rimossa. ⚠ Ipotesi collaterale **falsificata**: `X_train`
+non ha NaN, ma `np.percentile` al posto di `nanpercentile` è **più lento** (0.92×).
+
+⚠ **Risultato che resta valido a prescindere:** i clip bounds sono stimati da **~52k osservazioni
+effettive, non 6.2M**; SD bootstrap 0.008 (p0.1) e **0.036 (p99.9)** con IQR mediana 1.004. I 6.2M
+danno **precisione fittizia**.
+
+---
+
+## 🔬 LEVA B — MISURATA, PARCHEGGIATA (decisa 2026-08-02)
+
+**Non si implementa ora.** Non è un KILL: la misura è solida e la leva resta disponibile. È un
+**rinvio deliberato**, con la condizione di riapertura scritta qui sotto.
+
+**Perché rinviare.** Il guadagno è reale (1.79× con una riga di config) ma è tempo di **training**,
+e oggi il training non è sul percorso critico di nulla: i gate aperti sono tutti **forward** e
+avanzano al ritmo del campione che il VPS accumula, non della GPU di casa. Contro questo, la leva
+cambia la realizzazione RNG → pesi diversi → richiede un gate pre-registrato e una coppia
+riaddestrata. Aprirlo ora consumerebbe attenzione su un collo di bottiglia che non stringe, mentre
+`models/itransformer` **già non combacia** con l'npz corrente (decisione a sé, più vecchia e più
+importante — vedi § in fondo).
+
+**Condizione di riapertura (datata, così non si riapre per noia):** quando si dovrà comunque
+**riaddestrare una coppia canonica** — cioè quando si affronterà la pre-registrazione già in sospeso
+per restituire riproducibilità alla banda pubblicata. In quell'occasione il costo marginale del
+cambio è **zero** (si sta già riaddestrando e si sta già scrivendo un gate), e i due bracci possono
+essere confrontati nello stesso esperimento. Fuori da quell'occasione, non aprirla.
+
+---
+
+## 🔬 LEVA B — I NUMERI (per la riapertura) · 2026-08-02
+
+**Il risultato principale non è `torch.compile`: è che `gradient_accumulation_steps: 2` costa ~1.8×
+senza comprare nulla.** A batch efficace costante (128), misurato per **passo di ottimizzatore**:
+
+| Configurazione | ms/passo ott. | vs produzione |
+|---|---|---|
+| `bs=64, ga=2` eager — **produzione attuale** | 39.38 | — |
+| `bs=128, ga=1` eager | **22.00** | **1.79×** |
+| `bs=64, ga=2` + compile cudagraphs | 20.63 | 1.91× |
+| `bs=128, ga=1` + compile cudagraphs | 21.70 | 1.81× |
+
+La grad-accumulation esiste per far stare un batch efficace grande in poca VRAM. Qui **non c'è
+pressione di memoria**: picco fwd+bwd **0.24 GB a bs=64, 0.45 GB a bs=128, su una scheda da 8 GB**.
+In regime launch-bound, spezzare in due mezzi batch paga **il doppio dei lanci per la stessa
+matematica**. Equivalenza del gradiente verificata con dropout/drop_path spenti: **1.1e-07 relativo
+mediano** (epsilon float32). `DropPath` è **per-sample** (verificato nel codice), quindi la semantica
+di regolarizzazione non cambia; cambia solo la realizzazione RNG.
+
+**Su `torch.compile(backend="cudagraphs")`, le due domande lasciate aperte dall'audit sono chiuse:**
+riproducibilità **sì** (compiled con sé stesso: 62/62 tensori bit-identici, loss identica; eager
+idem come controllo positivo); batch parziale (42 campioni) **gestito**, con ricattura una tantum.
+Bit-identità con eager: **sì a `ga=1` (62/62), no a `ga=2` (4/62)** — la divergenza è
+**riassociazione floating-point nell'accumulo dei gradienti**, non RNG né kernel diversi. VRAM
+invariata. Speedup confermato col `run_train` **vero** (non un proxy): 1.91×.
+
+⚠ **Trappola metodologica incontrata e superata:** una prima misura dava eager e compiled
+bit-identici su un loop scritto a mano — era il loop a non essere rappresentativo (ga=1 implicito).
+Una seconda dava loss diverse — era un artefatto del test (le due run si passavano lo stato del RNG).
+Solo ri-seedando e usando `run_train` reale i numeri sono diventati stabili.
+
+**Raccomandazione:** il cambio di config (`batch_size: 128`, `gradient_accumulation_steps: 1`)
+cattura il **94%** del guadagno disponibile con una riga, zero macchinari nuovi, zero tempo di
+compilazione. Combinarlo con `torch.compile` **non aggiunge nulla** (1.81× < 1.91×): a bs=128 il
+carico è meno launch-bound e cudagraphs ha meno da togliere. Entrambe restano leve **sui numeri**
+(cambia la realizzazione RNG → pesi diversi) e vogliono un gate pre-registrato.
+
+---
+
+## 🔧 DUE LEVE DI PERFORMANCE — MISURATE, NON APPLICATE · 2026-08-02
+
+Sono l'unica decisione nuova aperta. **Entrambe cambiano i numeri**, quindi nessuna delle due è una pulizia da fare "tanto è solo performance": vanno pre-registrate e giudicate contro una **baseline riaddestrata sullo stesso dataset/scaler**, mai contro l'incumbent.
+
+**Leva A — clip bounds sulle barre distinte.** `np.nanpercentile(X_train.reshape(-1,104), [0.1, 99.9])` costa **31-36 s** a ogni invocazione di `02_train` (misurato da timestamp di log e da probe: due epoche intere, dato che un'epoca è 18 s). Ordina **647M celle** che, con `window_stride: 1`, sono solo **52.001 barre distinte ripetute ~120 volte**. Il percentile sulle barre distinte costa **0.16 s → 200×**. ⚠ Ma **34 colonne su 104 cambiano** (rel_max 4%), perché le barre di bordo compaiono meno di 120 volte e il percentile a 0.1/99.9 è sensibile alla coda. I clip bounds entrano nel `PipelineState`, quindi è una leva sui **dati**. Verificato per inciso: `X_train` non ha NaN (0 su 647M) ma sostituire `nanpercentile` con `percentile` **non aiuta** — è 0.92×, più lento. La ridondanza 120× è l'unica strada.
+
+**Leva B — `torch.compile(backend="cudagraphs")` sul solo loop di training.** **1.56×** misurato sullo step (15.30 → 9.79 ms), ~2.8 s di compilazione una tantum. Dynamo traccia **1 grafo, 0 graph break, 88 op**; **nessuna `spectral_norm` sul path di produzione** (è dentro un ramo `loss_type=="t_student"`, e la produzione è `quantile` — verificato con `is_parametrized`: nessun modulo parametrizzato). Inductor **non è utilizzabile**: Triton non è installabile da PyPI su Windows. Fine-a-fine porterebbe il training 5-seed da ~27 a ~20 min. ⚠ **Da verificare prima di aprirla**: riproducibilità del RNG sotto cattura del grafo (dropout 0.3 e drop_path 0.2 sono attivi) e ricomputazione di AOTAutograd nel backward. Applicarla all'**inferenza** romperebbe invece la parity live↔training in senso proprio: non farlo.
+
+**Terza pista, non misurata:** con la GPU al 5-15% e 5 seed indipendenti, addestrarne più d'uno in parallelo nello stesso processo sovrapporrebbe i lanci — potenzialmente più dell'1.56× e **senza toccare un solo iperparametro**. Il vincolo non è la VRAM (676k parametri) ma i 15.9 GB di RAM con l'npz da 3.3 GB.
+
+---
+
+## ▶️ 2026-08-01
 
 **Nessun gate in scadenza.** Routine di sessione eseguita: quattro collector VPS freschi (IV 0.1h · L2 0.0h · trades 0.1h · `04b` 1.9h), regime B7 fresco. **Il breakpoint macro delle 00:30 UTC è avvenuto senza incidenti:** il pull conferma il canonico VPS già al vintage `20260730`, nessuna promozione — la disciplina dei vintage ha retto al primo bootstrap sotto regime tracciato.
 

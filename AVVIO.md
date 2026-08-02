@@ -77,6 +77,9 @@ python scripts/00_check_setup.py
 - **Quoting verso gli exe nativi:** PS 5.1 strippa le doppie virgolette negli argomenti passati a un eseguibile nativo → nei blocchi `python -c` usa **solo apici singoli**.
 - **UTF-8 boilerplate:** ogni nuovo script in `scripts/` deve reconfigurare UTF-8 su stdout/stderr in `main()` (il bug cp1252 è ricorso 5 volte: qualunque unicode nel banner crasha su console Windows).
 - **`set` vs `$env:`:** i blocchi `set QUANTSYS_ARCH=...` di questa guida sono sintassi **cmd.exe**; in PowerShell usa `$env:QUANTSYS_ARCH="..."`.
+- **Ordine di import — pyarrow prima di torch+sklearn (risolto 2026-08-02).** Caricare pyarrow **dopo** che torch **e** scikit-learn sono già nel processo produce un'**access violation** (exit 139, nessun traceback Python) al primo `pd.read_parquet`: è il conflitto fra i runtime OpenMP che i due portano. Serve la compresenza — torch da solo o sklearn da solo non basta. `quantsys/__init__.py` ancora `import pyarrow` alla radice del package, quindi qualunque `import quantsys.*` inizializza Arrow per primo e il problema non si presenta più (test: `tests/test_import_order.py`). ⚠ Se scrivi codice che importa torch **prima** di qualunque cosa di `quantsys`, l'ancora non ti copre: in quel caso importa `pandas` (o `pyarrow`) in cima, come fanno tutti gli script numerati.
+
+⚠ **Diagnosi rapida:** un processo Python che muore con **exit 139 / access violation senza traceback** subito dopo un `read_parquet` è quasi sempre questo, non un OOM.
 
 **EN**
 - **stderr:** do **NOT** use `2>&1 | Tee-Object` — PS 5.1 wraps stderr as an ErrorRecord (fake red output; Python logging goes to stderr). The script already writes `logs/quantsys_*.log`; for a dedicated file use `*> file.log`.
@@ -86,6 +89,9 @@ python scripts/00_check_setup.py
 - **Quoting toward native exes:** PS 5.1 strips double quotes in arguments passed to a native executable → inside `python -c` blocks use **single quotes only**.
 - **UTF-8 boilerplate:** every new `scripts/` file must reconfigure UTF-8 on stdout/stderr in `main()` (the cp1252 bug recurred 5 times: any unicode in the banner crashes the Windows console).
 - **`set` vs `$env:`:** the `set QUANTSYS_ARCH=...` blocks in this guide are **cmd.exe** syntax; in PowerShell use `$env:QUANTSYS_ARCH="..."`.
+- **Import order — pyarrow before torch+sklearn (fixed 2026-08-02).** Loading pyarrow **after** both torch **and** scikit-learn are already in the process yields an **access violation** (exit 139, no Python traceback) at the first `pd.read_parquet`: it is the clash between the OpenMP runtimes the two ship. Both are required — torch alone or sklearn alone is fine. `quantsys/__init__.py` anchors `import pyarrow` at the package root, so any `import quantsys.*` initializes Arrow first and the problem no longer occurs (test: `tests/test_import_order.py`). ⚠ If you write code importing torch **before** anything from `quantsys`, the anchor does not cover you: there, import `pandas` (or `pyarrow`) at the top, as every numbered script does.
+
+⚠ **Quick diagnosis:** a Python process dying with **exit 139 / access violation and no traceback** right after a `read_parquet` is almost always this, not an OOM.
 
 ### 1.3 Hardware
 

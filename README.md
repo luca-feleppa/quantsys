@@ -14,10 +14,10 @@
 
 | Cosa | Dove |
 |---|---|
-| **Il risultato.** Il forecast NN della realized variance batte **HAR-CJ** (decomposizione continua/salti — la baseline forte, non quella comoda) del **32% in QLIKE su test** e del 23% su val (0.236 vs 0.346; naive 0.793 — Diebold-Mariano HAC **p ≤ 4.3·10⁻⁴**, vedi `TEORIA.md` §12.2). Contro HAR-RV semplice la banda sarebbe −27%÷−36%: la differenza è la misura di **quanto del vantaggio veniva da una baseline debole**, quantificata con un gate pre-registrato invece che assunta | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
+| **Il risultato.** Il forecast NN della realized variance batte **HAR-C** (`C = min(RV, BV)`, componente continua jump-robust — la baseline forte, non quella comoda; riferimento dal 2026-07-31, gate C3, che ha sostituito HAR-CJ a parità di accuratezza) del **32% in QLIKE su test** e del 23% su val (0.236 vs 0.346; naive 0.793 — significatività Diebold-Mariano HAC **p ≤ 4.3·10⁻⁴**, misurata contro HAR-CJ, vedi `TEORIA.md` §12.2). Contro HAR-RV semplice la banda sarebbe −27%÷−36%: la differenza è la misura di **quanto del vantaggio veniva da una baseline debole**, quantificata con un gate pre-registrato invece che assunta | `scripts/vol/dev_vols_qlike.py` — il giudice che produce il numero, split val-first |
 | **Come si decide se un'idea vive o muore.** Ogni esperimento è **pre-registrato**: metriche, soglie e n minimo scritti e committati *prima* di girare | `TEORIA.md` §12.1 (protocollo in 5 passi) · `STATUS.md` (pre-registrazioni in testa) |
 | **Cosa è stato provato e NON funziona**, con i numeri: direzionale a 1m e 1h, semivarianza firmata, IVS relative-value, 4 lever di training, gating per regime | `TEORIA.md` §12.3-12.4 (corpus KILL, con i numeri) |
-| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **355 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale |
+| **Cosa può verificare un lettore esterno** senza scaricare dati | `pytest tests/` → **450 passed, 1 skipped**: parity live↔training bit-perfect, invarianti z-score/interval, bit-parity del regime incrementale, ordine di init pyarrow, guard anti-degradazione del regime |
 
 🇮🇹 Il progetto è organizzato attorno a un'asimmetria dichiarata: **i momenti pari (varianza, RV) generalizzano fuori campione su questo asset, i momenti dispari (segno, asimmetria) no** — per la rete *e* per le baseline econometriche. Le tre linee di codice (vol-forecasting, monetizzazione short-vol, direzionale) esistono per documentare quella asimmetria, non per nasconderla.
 
@@ -25,10 +25,10 @@
 
 | What | Where |
 |---|---|
-| **The result.** The NN realized-variance forecast beats **HAR-CJ** (continuous/jump decomposition — the strong baseline, not the convenient one) by **32% in test QLIKE** and 23% on val (0.236 vs 0.346; naive 0.793 — Diebold-Mariano HAC **p ≤ 4.3·10⁻⁴**), val→test coherent. Against plain HAR-RV the band would be −27% to −36%: the gap measures **how much of the edge came from a weak baseline**, quantified by a pre-registered gate rather than assumed | `scripts/vol/dev_vols_qlike.py` — the judge that produces the number, val-first split |
+| **The result.** The NN realized-variance forecast beats **HAR-C** (`C = min(RV, BV)`, the jump-robust continuous component — the strong baseline, not the convenient one; reference since 2026-07-31, gate C3, which replaced HAR-CJ at equal accuracy) by **32% in test QLIKE** and 23% on val (0.236 vs 0.346; naive 0.793 — Diebold-Mariano HAC significance **p ≤ 4.3·10⁻⁴**, measured against HAR-CJ), val→test coherent. Against plain HAR-RV the band would be −27% to −36%: the gap measures **how much of the edge came from a weak baseline**, quantified by a pre-registered gate rather than assumed | `scripts/vol/dev_vols_qlike.py` — the judge that produces the number, val-first split |
 | **How an idea lives or dies.** Every experiment is **pre-registered**: metrics, thresholds and minimum n written and committed *before* running | `TEORIA.md` §12.1 (5-step protocol) · `STATUS.md` (pre-registrations on top) |
 | **What was tried and does NOT work**, with numbers: directional at 1m and 1h, signed semivariance, IVS relative-value, 4 training levers, regime gating | `TEORIA.md` §12.3-12.4 (KILL corpus, with numbers) |
-| **What an outside reader can verify** without downloading data | `pytest tests/` → **355 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity |
+| **What an outside reader can verify** without downloading data | `pytest tests/` → **450 passed, 1 skipped**: bit-perfect live↔training parity, z-score/interval invariants, incremental-regime bit-parity, pyarrow init order, regime anti-degradation guard |
 
 **EN** The project is organized around a stated asymmetry: **even moments (variance, RV) generalize out-of-sample on this asset, odd moments (sign, skew) do not** — for the network *and* for the econometric baselines. The three code lines (vol forecasting, short-vol monetization, directional) exist to document that asymmetry, not to hide it.
 
@@ -36,13 +36,13 @@
 
 🇮🇹 `data/`, `models/` e `results/` sono **gitignored**: pesi e parquet sono grandi e i dati di mercato non sono ridistribuibili. Cosa significa in pratica per chi clona:
 
-- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (355 test, ~30s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
+- **Verificabile subito, senza dati:** `pip install -e .` → `pytest tests/` (450 test, ~45s, CPU). Include i golden test sulla lista delle 104 feature e la parity live↔training.
 - **Rigenerabile:** dataset (`scripts/01_download_data.py`, Binance pubblico + una chiave FRED gratuita per la macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min per 5 seed iTransformer su RTX 2070 Super) → giudice QLIKE (`scripts/vol/dev_vols_qlike.py`).
 - **NON rigenerabile** (raccolta forward, per costruzione): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — snapshot IV/book/trade e forward test su testnet. I numeri del braccio short-vol non sono riproducibili da un clone: sono un log d'esperimento, e sono presentati come tali.
 
 **EN** `data/`, `models/` and `results/` are **gitignored**: weights and parquets are large and market data is not redistributable. What that means when you clone:
 
-- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (355 tests, ~30s, CPU), including golden tests on the 104-feature list and live↔training parity.
+- **Verifiable immediately, no data needed:** `pip install -e .` → `pytest tests/` (450 tests, ~45s, CPU), including golden tests on the 104-feature list and live↔training parity.
 - **Regenerable:** dataset (`scripts/01_download_data.py`, public Binance + a free FRED key for macro) → training (`scripts/02_train.py --n-ensemble 5`, ~27 min for 5 iTransformer seeds on an RTX 2070 Super) → QLIKE judge (`scripts/vol/dev_vols_qlike.py`).
 - **NOT regenerable** (forward collection, by construction): `data/iv/`, `data/orderbook/`, `data/deribit_trades/`, `results/vol_paper/` — IV/book/trade snapshots and the testnet forward test. The short-vol arm's numbers cannot be reproduced from a clone: they are an experiment log, and are presented as such.
 
@@ -95,7 +95,7 @@
 - **104 feature ingegnerizzate** post-filtro C-funding, lista canonica sotto golden test (§3.2).
 - **4 architetture** intercambiabili — iTransformer, N-HiTS, TCN+Mamba, LSTM legacy — dietro un forward contract unico, con ensemble eterogeneo e **distillation multi-teacher** target-aware (§4.1-4.2).
 - **Rilevamento regimi BTC** `RegimeMarkovBTC`, Markov-Switching causale con refresh incrementale (§3.3).
-- **Giudici della linea vol** QLIKE vs baseline HAR-RV per-fold, split val-first (§5.1).
+- **Giudici della linea vol** QLIKE vs pannello a tre baseline HAR (RV = denominatore del gate, **C** = denominatore del claim, CJ = diagnostica) + HAR-RV per-fold nel walk-forward, split val-first (§5.1).
 - **Validazione anti-leakage**: walk-forward purged k-fold con embargo, backtest con stress test, bootstrap CI, analisi per regime (§5.2).
 - **Monte Carlo** 2000 scenari GJR-GARCH(1,1), parametri stimati su rendimenti orari (§4.4).
 - **Trading layer** Kelly frazionario + SL ATR + trailing + circuit breaker DD 15% MtM (§6.1).
@@ -107,7 +107,7 @@
 - **104 engineered features** post C-funding filter, canonical list under a golden test (§3.2).
 - **4 interchangeable architectures** — iTransformer, N-HiTS, TCN+Mamba, legacy LSTM — behind a single forward contract, with heterogeneous ensembling and target-aware **multi-teacher distillation** (§4.1-4.2).
 - **BTC regime detection** `RegimeMarkovBTC`, causal Markov-Switching with incremental refresh (§3.3).
-- **Vol-line judges** QLIKE vs per-fold HAR-RV baseline, val-first split (§5.1).
+- **Vol-line judges** QLIKE vs a three-baseline HAR panel (RV = gate denominator, **C** = claim denominator, CJ = diagnostic) + per-fold HAR-RV in the walk-forward, val-first split (§5.1).
 - **Anti-leakage validation**: purged k-fold walk-forward with embargo, backtest with stress tests, bootstrap CI, regime-conditioned analysis (§5.2).
 - **Monte Carlo** 2000 GJR-GARCH(1,1) scenarios, params estimated on hourly returns (§4.4).
 - **Trading layer** fractional Kelly + ATR SL + trailing + 15% MtM drawdown circuit breaker (§6.1).
@@ -227,9 +227,9 @@ python scripts/00_check_setup.py
 
 ### 5.1 Giudici linea VOL · VOL-line judges
 
-🇮🇹 Metrica primaria: **QLIKE** (loss di volatilità robusta) + ratio NN/baseline; baseline di riferimento **HAR-CJ** dal 2026-07-30 (gate C2), con HAR-RV riportata accanto come contesto. I modelli vol **non vengono mai tradati nel backtest**: il giudizio è puramente predittivo. Giudici in `scripts/vol/`: `dev_vols_qlike.py` (QLIKE log-RV, giudice principale), `dev_vols_rs_judge.py` (asimmetria semivarianza), `wf_har_baseline.py` (HAR per-fold), `step0_xarch_corr.py` (kill-check correlazione cross-arch), `mfiv_comparator_judge.py` (comparatore MFIV@30h vs IV ATM sul forward test). Split **val-first** via `QUANTSYS_VOLS_SPLIT=val|test`; la logica condivisa (QLIKE, inversione log-RV, HAR) vive in `quantsys/model/vol_metrics.py`. **Risultato chiave:** NN-log_rv 0.257 QLIKE vs HAR-RV 0.368 vs naive 0.807 su test 1h (−30%).
+🇮🇹 Metrica primaria: **QLIKE** (loss di volatilità robusta) + ratio NN/baseline; baseline di riferimento **HAR-C** dal 2026-07-31 (gate C3, che sostituisce la HAR-CJ adottata da C2 il 2026-07-30: stessa accuratezza, condizionamento 450× migliore), con HAR-RV e HAR-CJ riportate accanto come contesto. ⚠ Il **gate** pre-registrato del 2026-06-10 continua a usare **HAR-RV** come denominatore: il claim usa HAR-C, il gate no — il giudice stampa il ruolo accanto a ogni numero. I modelli vol **non vengono mai tradati nel backtest**: il giudizio è puramente predittivo. Giudici in `scripts/vol/`: `dev_vols_qlike.py` (QLIKE log-RV, giudice principale), `dev_vols_rs_judge.py` (asimmetria semivarianza), `wf_har_baseline.py` (HAR per-fold), `step0_xarch_corr.py` (kill-check correlazione cross-arch), `mfiv_comparator_judge.py` (comparatore MFIV@30h vs IV ATM sul forward test). Split **val-first** via `QUANTSYS_VOLS_SPLIT=val|test`; la logica condivisa (QLIKE, inversione log-RV, HAR) vive in `quantsys/model/vol_metrics.py`. **Risultato chiave:** il PASS **come fu registrato** (2026-06-10) è NN-log_rv 0.257 QLIKE vs HAR-RV 0.368 vs naive 0.807 su test 1h (−30%); il **claim corrente**, contro HAR-C e su coppia modello/scaler riaddestrata sull'npz corrente, è 0.236 vs 0.346 (−32%).
 
-**EN** Primary metric: **QLIKE** (robust volatility loss) + NN/baseline ratio; reference baseline **HAR-CJ** since 2026-07-30 (gate C2), with HAR-RV reported alongside as context. Vol models are **never traded in the backtest**: judging is purely predictive. Judges in `scripts/vol/`: `dev_vols_qlike.py` (log-RV QLIKE, main judge), `dev_vols_rs_judge.py` (semivariance asymmetry), `wf_har_baseline.py` (per-fold HAR), `step0_xarch_corr.py` (cross-arch correlation kill-check), `mfiv_comparator_judge.py` (MFIV@30h vs ATM IV comparator on the forward test). **Val-first** split via `QUANTSYS_VOLS_SPLIT=val|test`; shared logic (QLIKE, log-RV inversion, HAR) lives in `quantsys/model/vol_metrics.py`. **Key result:** NN-log_rv 0.257 QLIKE vs HAR-RV 0.368 vs naive 0.807 on the 1h test split (−30%).
+**EN** Primary metric: **QLIKE** (robust volatility loss) + NN/baseline ratio; reference baseline **HAR-C** since 2026-07-31 (gate C3, replacing the HAR-CJ adopted by C2 on 2026-07-30: same accuracy, 450× better conditioning), with HAR-RV and HAR-CJ reported alongside as context. ⚠ The pre-registered 2026-06-10 **gate** keeps **HAR-RV** as its denominator: the claim uses HAR-C, the gate does not — the judge prints each number's role. Vol models are **never traded in the backtest**: judging is purely predictive. Judges in `scripts/vol/`: `dev_vols_qlike.py` (log-RV QLIKE, main judge), `dev_vols_rs_judge.py` (semivariance asymmetry), `wf_har_baseline.py` (per-fold HAR), `step0_xarch_corr.py` (cross-arch correlation kill-check), `mfiv_comparator_judge.py` (MFIV@30h vs ATM IV comparator on the forward test). **Val-first** split via `QUANTSYS_VOLS_SPLIT=val|test`; shared logic (QLIKE, log-RV inversion, HAR) lives in `quantsys/model/vol_metrics.py`. **Key result:** the PASS **as registered** (2026-06-10) is NN-log_rv 0.257 QLIKE vs HAR-RV 0.368 vs naive 0.807 on the 1h test split (−30%); the **current claim**, against HAR-C and on a model/scaler pair retrained on the current npz, is 0.236 vs 0.346 (−32%).
 
 ### 5.2 Walk-forward & backtest · Walk-forward & backtest
 
@@ -374,7 +374,8 @@ quantsys_project/
 │   │   ├── ensemble.py           EnsembleModel (omogeneo / eterogeneo, AMP off in inferenza)
 │   │   ├── distillation.py       Knowledge Distillation multi-teacher (scoring target-aware)
 │   │   ├── forecast.py           Monte Carlo GJR-GARCH(1,1) + neural-guided
-│   │   ├── vol_metrics.py        QLIKE / inversione log-RV / baseline HAR-RV (linea vol, condivisi)
+│   │   ├── vol_metrics.py        QLIKE / inversione log-RV / baseline HAR-RV, HAR-C, HAR-CJ
+│   │   │                         + Diebold-Mariano HAC e smearing di Duan (linea vol, condivisi)
 │   │   ├── vol_forecaster.py     VolForecaster (nucleo forecast del vol-paper, promosso da 04b) + macro_snapshot (strumento vs stato: refit legacy o normalizer pinnato)
 │   │   ├── regime_gate.py        build_regime_gate (gate causale: asof backward + staleness bound)
 │   │   ├── cafn.py               CausalAttentionFlowNetwork (coordinatore causale, probe inerte)
