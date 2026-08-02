@@ -13,6 +13,19 @@ import sys
 import time
 from pathlib import Path
 
+# IT: questo script non ha main() — il codice gira a livello di modulo, quindi il
+#     reconfigure va qui, prima di qualunque print. Console Windows default cp1252:
+#     i glyph ✓/△/✗ e i box-drawing delle sezioni crashano il print (bug ricorrente).
+# EN: this script has no main() — code runs at module level, so the reconfigure goes
+#     here, before any print. Windows console defaults to cp1252: the ✓/△/✗ glyphs and
+#     the section box-drawing chars crash the print (recurring bug).
+import sys as _sys
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # IT: usa basicConfig perche' setup_logging potrebbe non essere disponibile
 # EN: use basicConfig since setup_logging may not yet be importable
 logging.basicConfig(

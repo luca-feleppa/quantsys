@@ -38,6 +38,16 @@ def _default_arch() -> str:
 # IT: analizza live_signals.jsonl (stats+equity) e aggiorna dashboard_results.json
 # EN: analyze live_signals.jsonl (stats+equity) and update dashboard_results.json
 def main():
+    # IT: console Windows default cp1252 — qualsiasi unicode nei banner/report crasha
+    #     il print con UnicodeEncodeError. Reconfigure UTF-8 come 01/02/04.
+    # EN: Windows console defaults to cp1252 — any unicode in banners/reports crashes
+    #     the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
+    import sys as _sys
+    for _stream in (_sys.stdout, _sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     # IT: env QUANTSYS_ARCH ha precedenza per propagazione da pipeline
     # EN: QUANTSYS_ARCH env wins to propagate from pipeline parent
     import os as _os

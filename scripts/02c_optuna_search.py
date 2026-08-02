@@ -214,6 +214,16 @@ def objective(trial, base_cfg, device,
 # EN: main — load data, create persistent Optuna study, write best_params.json
 
 def main():
+    # IT: console Windows default cp1252 — qualsiasi unicode nei banner/report crasha
+    #     il print con UnicodeEncodeError. Reconfigure UTF-8 come 01/02/04.
+    # EN: Windows console defaults to cp1252 — any unicode in banners/reports crashes
+    #     the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
+    import sys as _sys
+    for _stream in (_sys.stdout, _sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser = argparse.ArgumentParser(
         description="Ricerca bayesiana iperparametri QuantLSTM con Optuna"
     )
