@@ -380,17 +380,36 @@ class RegimeMarkovSwitching:
     """
 
     # IT: Configura n. regimi/PCA/restart; scaler, PCA e cache parametri sono popolati al fit.
+    #     `max_fit_failure_ratio`: soglia di abort del walk-forward (vedi il guard in
+    #     fit_predict_walkforward). 1.0 = nessun abort per rapporto, resta comunque
+    #     l'abort su ZERO fit riusciti — quello non è disattivabile perché un
+    #     walk-forward senza un solo fit non produce informazione, produce la prior.
     # EN: Sets regime/PCA/restart counts; scaler, PCA and param cache are populated at fit time.
+    #     `max_fit_failure_ratio`: walk-forward abort threshold (see the guard in
+    #     fit_predict_walkforward). 1.0 = no ratio-based abort, but the abort on ZERO
+    #     successful fits still stands — it is not disableable, because a walk-forward
+    #     without a single fit yields no information, it yields the prior.
     def __init__(self, n_regimes: int = 3, n_iter: int = 300,
                  random_state: int = 42, n_pca: int = 3,
-                 n_restarts: int = 5):
+                 n_restarts: int = 5, max_fit_failure_ratio: float = 0.5):
         if n_regimes < 2:
             raise ValueError(f"n_regimes deve essere >= 2, ricevuto {n_regimes}")
+        if not 0.0 <= max_fit_failure_ratio <= 1.0:
+            raise ValueError(
+                f"max_fit_failure_ratio deve essere in [0,1], "
+                f"ricevuto {max_fit_failure_ratio}"
+            )
         self.n_regimes    = n_regimes
         self.n_iter       = n_iter
         self.random_state = random_state
         self.n_pca        = n_pca
         self.n_restarts   = n_restarts
+        self.max_fit_failure_ratio = max_fit_failure_ratio
+        # IT: diagnostica dell'ultimo walk-forward (popolata dal guard) — leggibile
+        #     dai chiamanti per loggare la qualità del rebuild senza ri-parsare i log.
+        # EN: last walk-forward diagnostics (filled by the guard) — readable by
+        #     callers to log rebuild quality without re-parsing the logs.
+        self.last_fit_diagnostics: dict | None = None
         self.model        = None
         self.pca          = None
         self.scaler       = RobustScaler()
@@ -605,9 +624,33 @@ class RegimeMarkovSwitching:
         # EN: n_eff = loop end (B7: _stop_at truncates for the golden test; None = n).
         n_eff = n if _stop_at is None else min(int(_stop_at), n)
 
+        # IT: Contatori del guard anti-degradazione-silenziosa. Prima, OGNI fallimento
+        #     di fit finiva in un log.warning per timestep e il loop proseguiva: con
+        #     current_params=None, probs_all[t] non veniva mai scritto e il walk-forward
+        #     restituiva la PRIOR UNIFORME al posto delle probabilità filtrate, senza
+        #     che nulla fallisse. `n_filtered` misura la copertura reale (timestep con
+        #     probabilità effettivamente calcolate), che è la grandezza da controllare:
+        #     i fit falliti sono la causa, la copertura è l'effetto.
+        #     I contatori NON toccano il path numerico: a fit riusciti l'output è
+        #     bit-identico (golden test di bit-parity B7 invariato).
+        # EN: Counters for the anti-silent-degradation guard. Previously EVERY fit
+        #     failure produced one log.warning per timestep and the loop carried on:
+        #     with current_params=None, probs_all[t] was never written and the
+        #     walk-forward returned the UNIFORM PRIOR instead of filtered
+        #     probabilities, without anything failing. `n_filtered` measures actual
+        #     coverage (timesteps with genuinely computed probabilities), which is the
+        #     quantity to check: failed fits are the cause, coverage is the effect.
+        #     The counters do NOT touch the numeric path: with successful fits the
+        #     output is bit-identical (B7 bit-parity golden test unchanged).
+        n_fit_attempts = 0
+        n_fit_ok       = 0
+        n_filtered     = 0
+        n_steps        = max(0, n_eff - burn_in_days)
+
         for t in range(burn_in_days, n_eff):
             if current_params is None or (t - last_retrain) >= retrain_days:
                 if t >= 50:
+                    n_fit_attempts += 1
                     try:
                         # PCA expanding window: fit solo su dati[:t]
                         pca_t = PCA(n_components=n_comp,
@@ -636,6 +679,7 @@ class RegimeMarkovSwitching:
 
                         result = self._fit_single(pc1_train)
                         if result is not None:
+                            n_fit_ok += 1
                             current_params = self._extract_params(result)
                             fmp = result.filtered_marginal_probabilities
                             if isinstance(fmp, pd.DataFrame):
@@ -648,6 +692,15 @@ class RegimeMarkovSwitching:
                                 f"llf={result.llf:.1f}, "
                                 f"PCA var={pca_t.explained_variance_ratio_[0]:.1%}"
                             )
+                        else:
+                            # IT: _fit_single ritorna None quando TUTTI gli n_restarts
+                            #     falliscono: prima era un ramo muto (nessun log).
+                            # EN: _fit_single returns None when ALL n_restarts fail:
+                            #     this used to be a silent branch (no logging at all).
+                            log.warning(
+                                f"  MarkovSwitching: nessun restart converge a t={t} "
+                                f"(su {self.n_restarts} tentativi)"
+                            )
                     except Exception as e:
                         log.warning(
                             f"  MarkovSwitching fit fallito a t={t}: {e}"
@@ -659,6 +712,65 @@ class RegimeMarkovSwitching:
                     pc1_t, current_params, last_filtered
                 )
                 probs_all[t] = last_filtered
+                n_filtered += 1
+
+        # ── Guard anti-degradazione silenziosa ────────────────────────────────
+        # IT: Due condizioni di abort, deliberatamente diverse per severità.
+        #     ① ZERO fit riusciti → il risultato è la prior uniforme travestita da
+        #        probabilità di regime: sempre fatale, non disattivabile. È il caso
+        #        che si presenta con statsmodels mancante o rotto.
+        #     ② Troppi fit falliti (> max_fit_failure_ratio) → il walk-forward gira
+        #        su parametri stantii per lunghi tratti: degradazione parziale,
+        #        soglia configurabile perché su serie corte qualche fallimento è
+        #        fisiologico.
+        #     La diagnostica è sempre persistita, anche quando non si aborta: un
+        #     rebuild degradato deve lasciare traccia leggibile a valle.
+        # EN: Two abort conditions, deliberately differing in severity.
+        #     ① ZERO successful fits → the result is the uniform prior dressed up as
+        #        regime probabilities: always fatal, not disableable. This is the case
+        #        that shows up with statsmodels missing or broken.
+        #     ② Too many failed fits (> max_fit_failure_ratio) → the walk-forward runs
+        #        on stale parameters for long stretches: partial degradation,
+        #        configurable threshold because on short series some failures are
+        #        physiological.
+        #     Diagnostics are always persisted, even when not aborting: a degraded
+        #     rebuild must leave a trace readable downstream.
+        fail_ratio = (
+            0.0 if n_fit_attempts == 0
+            else (n_fit_attempts - n_fit_ok) / n_fit_attempts
+        )
+        coverage = 0.0 if n_steps == 0 else n_filtered / n_steps
+        self.last_fit_diagnostics = {
+            "fit_attempts": n_fit_attempts,
+            "fit_ok":       n_fit_ok,
+            "fail_ratio":   fail_ratio,
+            "coverage":     coverage,
+            "n_steps":      n_steps,
+        }
+        log.info(
+            f"Walk-forward completato: fit {n_fit_ok}/{n_fit_attempts} riusciti, "
+            f"copertura probabilità filtrate {coverage:.1%} ({n_filtered}/{n_steps})"
+        )
+        if n_fit_attempts > 0 and n_fit_ok == 0:
+            raise RuntimeError(
+                f"RegimeMarkovSwitching: NESSUN fit riuscito su {n_fit_attempts} "
+                f"tentativi — le probabilità restituite sarebbero la prior uniforme "
+                f"(1/{self.n_regimes}), non regimi stimati. Cause tipiche: statsmodels "
+                f"assente o incompatibile, serie degenere, n_regimes troppo alto per "
+                f"i dati. Controllare i warning 'MarkovSwitching fit fallito' sopra. / "
+                f"NO successful fit out of {n_fit_attempts} attempts — the returned "
+                f"probabilities would be the uniform prior, not estimated regimes."
+            )
+        if n_fit_attempts > 0 and fail_ratio > self.max_fit_failure_ratio:
+            raise RuntimeError(
+                f"RegimeMarkovSwitching: {n_fit_attempts - n_fit_ok}/{n_fit_attempts} "
+                f"fit falliti (rapporto {fail_ratio:.1%} > soglia "
+                f"{self.max_fit_failure_ratio:.1%}) — il walk-forward avrebbe girato "
+                f"su parametri stantii per larga parte della storia. Alzare "
+                f"max_fit_failure_ratio solo con una ragione esplicita. / "
+                f"{n_fit_attempts - n_fit_ok}/{n_fit_attempts} fits failed (ratio "
+                f"{fail_ratio:.1%} > threshold {self.max_fit_failure_ratio:.1%})."
+            )
 
         # IT: B7 — stash dello stato di catena a fine loop (PRIMA del fit finale, che
         #     sovrascrive self.pca/self.model col fit full-sample): è tutto ciò che serve
@@ -830,11 +942,24 @@ class RegimeMarkovSwitching:
             f"prossimo a t={last_retrain + retrain_days}"
         )
 
+        # IT: MIRROR dei contatori del run pieno. Qui la degradazione è più mite ma
+        #     più insidiosa: current_params non è mai None, quindi un retrain fallito
+        #     NON produce la prior uniforme — produce probabilità filtrate con
+        #     parametri STANTII, indistinguibili da quelle buone a valle. Contarli è
+        #     l'unico modo per accorgersene.
+        # EN: MIRROR of the full-run counters. Degradation here is milder but more
+        #     insidious: current_params is never None, so a failed retrain does NOT
+        #     produce the uniform prior — it produces filtered probabilities from
+        #     STALE parameters, indistinguishable downstream from good ones. Counting
+        #     them is the only way to notice.
+        n_fit_attempts = 0
+
         for t in range(n_old, n):
             # ── MIRROR del blocco retrain del run pieno (differenza: current_params
             #    non è mai None, verificato sopra) ─ MIRROR of the full-run retrain block
             if (t - last_retrain) >= retrain_days:
                 if t >= 50:
+                    n_fit_attempts += 1
                     try:
                         pca_t = PCA(n_components=current_pca.n_components_,
                                     random_state=self.random_state)
@@ -862,6 +987,12 @@ class RegimeMarkovSwitching:
                                 f"llf={result.llf:.1f}, "
                                 f"PCA var={pca_t.explained_variance_ratio_[0]:.1%}"
                             )
+                        else:
+                            log.warning(
+                                f"  MarkovSwitching: nessun restart converge a t={t} "
+                                f"(su {self.n_restarts} tentativi) — l'append "
+                                f"prosegue su parametri STANTII"
+                            )
                     except Exception as e:
                         log.warning(
                             f"  MarkovSwitching fit fallito a t={t}: {e}"
@@ -871,6 +1002,62 @@ class RegimeMarkovSwitching:
                 pc1_cache[t], current_params, last_filtered
             )
             probs_new[t - n_old] = last_filtered
+
+        # IT: MIRROR del guard del run pieno. Zero retrain TENTATI è legittimo (l'append
+        #     può non attraversare un confine di refit): non è un errore. Zero riusciti
+        #     su ≥1 tentato invece significa che l'append ha superato un confine di
+        #     refit continuando su parametri congelati dal checkpoint — silenziosamente.
+        # EN: MIRROR of the full-run guard. Zero ATTEMPTED retrains is legitimate (the
+        #     append may not cross a refit boundary): not an error. Zero successful out
+        #     of ≥1 attempted means the append crossed a refit boundary and carried on
+        #     with parameters frozen from the checkpoint — silently.
+        self.last_fit_diagnostics = {
+            "fit_attempts": n_fit_attempts,
+            "fit_ok":       n_retrains,
+            "fail_ratio":   (0.0 if n_fit_attempts == 0
+                             else (n_fit_attempts - n_retrains) / n_fit_attempts),
+            "incremental":  True,
+        }
+        if n_fit_attempts > 0 and n_retrains == 0:
+            raise RuntimeError(
+                f"continue_walkforward: {n_fit_attempts} retrain dovuti, NESSUNO "
+                f"riuscito — l'append avrebbe prodotto probabilità filtrate con i "
+                f"parametri congelati nel checkpoint, indistinguibili da quelle "
+                f"valide. Controllare i warning sopra (statsmodels assente o serie "
+                f"degenere) e rifare un full rebuild se necessario. / "
+                f"{n_fit_attempts} retrains due, NONE succeeded — the append would "
+                f"have produced filtered probabilities from checkpoint-frozen "
+                f"parameters, indistinguishable from valid ones."
+            )
+        # IT: secondo ramo del mirror — il run pieno aborta anche su rapporto di
+        #     fallimento eccessivo, non solo su zero successi. Senza questo,
+        #     un append con backlog lungo (mesi di pausa → più confini di retrain
+        #     attraversati) che fallisse 3 refit su 4 passerebbe silenziosamente,
+        #     mentre il run pieno equivalente avrebbe abortito: è la stessa
+        #     degradazione, con una soglia diversa a seconda del metodo chiamato.
+        #     Con n_fit_attempts==1 questo ramo coincide col precedente (nessun
+        #     cambio di comportamento nel caso comune: cadenza incrementale
+        #     settimanale contro retrain a 90 giorni ⇒ 0 o 1 tentativo).
+        # EN: second mirror branch — the full run also aborts on an excessive
+        #     failure ratio, not only on zero successes. Without this, an append
+        #     with a long backlog (months of pause → several retrain boundaries
+        #     crossed) failing 3 refits out of 4 would pass silently, while the
+        #     equivalent full run would have aborted: same degradation, different
+        #     threshold depending on which method was called. With
+        #     n_fit_attempts==1 this branch coincides with the previous one (no
+        #     behaviour change in the common case: weekly incremental cadence
+        #     against a 90-day retrain ⇒ 0 or 1 attempt).
+        _fail_ratio = self.last_fit_diagnostics["fail_ratio"]
+        if n_fit_attempts > 0 and _fail_ratio > self.max_fit_failure_ratio:
+            raise RuntimeError(
+                f"continue_walkforward: {n_fit_attempts - n_retrains}/"
+                f"{n_fit_attempts} refit falliti (rapporto {_fail_ratio:.1%} > "
+                f"soglia {self.max_fit_failure_ratio:.1%}) — l'append avrebbe "
+                f"girato su parametri stantii per larga parte dello span nuovo. / "
+                f"{n_fit_attempts - n_retrains}/{n_fit_attempts} refits failed "
+                f"(ratio {_fail_ratio:.1%} > threshold "
+                f"{self.max_fit_failure_ratio:.1%})."
+            )
 
         # IT: aggiorna lo stato in place per il re-save del checkpoint (append riuscito).
         # EN: update the state in place for the checkpoint re-save (append succeeded).
