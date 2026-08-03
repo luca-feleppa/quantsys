@@ -5,7 +5,49 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-02
+## ▶️ RIPARTI DA QUI — 2026-08-03
+
+**Nessun gate in scadenza.** Sessione di monitoraggio + **ritrattazione di un fatto scritto ieri**: il "buco del recorder L2 del 02/08" non è mai esistito. Nessun modello toccato, nessun giudice eseguito, nessuna soglia sfiorata.
+
+**Routine eseguita — esito OK (exit 0)**, lanciata con redirezione a livello di OS come impone il gotcha PS 5.1. Vintage macro **`20260730` invariato, nessuna promozione**; regime B7 fresco.
+
+| Contatore | 02/08 | **03/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 12 | **14** | 20 | +2 in un giorno → ~08-09/08 |
+| MFIV comparatore v2 | 26 | **27** | 40 | `--count-only`, nessun run one-shot |
+| L2 h=30 (`n_eff`) | 10.4 | **11.3** | — | vedi ritrattazione sotto |
+| leg opzioni | 33 | **34** | (30) | gate **CHIUSO il 30/07, FAIL 0/3** |
+
+### ⛔ RITRATTAZIONE — il buco L2 del 2026-08-02 non è mai esistito
+
+**Fatti verificati sui dati, non dedotti:** l'ora `2026-08-02 16:00 UTC` ha oggi **720/720 snapshot**; il run contiguo è **490h = 462 (max di ieri) + 28h trascorse**, cioè non si è mai spezzato; `n_eff` 10.4 → 11.3 è accumulo ordinario. **La stima "~150 finestre ≈ 5 `n_eff` ≈ 6 giorni persi" della voce 02/08 è FALSA e va letta come ritirata.** Nessun dato è stato perso e nessuna azione correttiva era dovuta.
+
+**Causa — il monitor misurava il MIRROR LOCALE credendo di misurare il recorder.** `analyze()` costruiva lo span fino a `ts[-1].floor("h")`: l'**ultima ora dello span è per costruzione quella che contiene l'ultimo tick**, quindi è in corso e parziale. Con `MIN_SNAP_PER_HOUR = 360` su una cadenza reale di 720/h, l'esito dipendeva dal **minuto** in cui girava la routine — prima del minuto ~30 "run corrente 0h" e un buco di 1h, dopo tutto verde. Oggi la stessa ora in corso aveva 507/720 e sarebbe passata: è la firma di un artefatto di misura, non di un fatto sui dati. Secondo canale, non escluso: il pull scarica i giornalieri con `scp` **senza atomicità remota** (a differenza dell'archivio macro, che usa `.tmp` + `mv` remoto), quindi le ultime ore possono arrivare in ritardo di un pull.
+
+**Fix in `scripts/vol/l2_continuity_check.py`** — l'ora in corso è **esclusa** dallo span (il conteggio scende di 1h ed è conservativo: 489h invece di 490h); i buchi che cadono nelle ultime `--provisional-hours` (default 6) sono stampati come **PROVVISORI** ed **esclusi dalla stima di costo**, con la regola scritta nel codice: *un buco è un fatto solo dopo essere sopravvissuto a un secondo pull*. I buchi consolidati restano un allarme pieno, con la stessa aritmetica per-blocco di prima. Logica estratta in `analyze()` per essere testabile su serie sintetiche: `tests/test_l2_continuity_check.py` (**4**), di cui uno gira su cinque valori di riempimento dell'ora in corso (1, 60, 359, 361, 720) e pretende `cur` invariato — la dipendenza dal minuto è ora impossibile da reintrodurre in silenzio.
+
+⚠ **La lezione generalizza oltre l'L2:** ogni check che gira **subito dopo un pull** legge una coda non consolidata. Freschezza e continuità sono due proprietà diverse, e nessuna delle due è una proprietà del *recorder* finché la si misura sul mirror.
+
+### ✅ Stato VPS — verificato, tutti i flussi sani
+
+Non l'heartbeat (che guarda solo l'ultimo tick) ma la **copertura oraria sulle 48 ore consolidate**, per flusso:
+
+| Flusso | Ultimo tick | Ore vuote / 48h | Cadenza mediana |
+|---|---|---|---|
+| L2 order-book | 0.2h fa | **0** | 720 snap/h |
+| IV chain (Deribit) | 0.2h fa | **0** | 10 392 righe/h |
+| trades Deribit | 0.3h fa | **0** | 162/h |
+| `atm_30h` | 0.2h fa | **0** | 12/h |
+| `dvol` | 0.9h fa | **0** | 1/h |
+| `04b` forecasts | ultimo candle 18:00 (tick 19:01) | **0 tick orari mancanti** | 1/h |
+
+`04b` ha una posizione **aperta e coerente**: short straddle entrato il 03/08 08:01:34 UTC, strike 62500, expiry `BTC-4AUG26`, `edge −0.294`, delta-hedge attivo (`h_usd 53 780`, ribilanciato alle 15:01). Copertura L2 storica 53.1% su 1158 ore consolidate — il numero basso è **l'epoca "casa"** (16/06→18/07, già a corpus KILL); dal passaggio al VPS il run è ininterrotto.
+
+**Azione esatta da cui ripartire.** Nulla in scadenza. **Il prossimo evento reale è l'08-09/08**: giudice `hedged_vs_unhedged_judge.py` alla soglia n≥20 (oggi 14, +2/giorno). Il run one-shot resta **MANUALE**. Il comparatore MFIV v2 (27/40) è a ~2 settimane. Le decisioni aperte non datate restano due: il fix di due righe a `scripts/00_check_setup.py` (§ 02/08) e la pre-registrazione della **coppia canonica** che restituirebbe riproducibilità alla banda pubblicata — che è anche l'unica occasione in cui riaprire la Leva B a costo marginale zero.
+
+---
+
+## ▶️ 2026-08-02
 
 **Nessun gate in scadenza.** Sessione **interamente fuori dal perimetro scientifico**: audit diagnostico di performance (read-only) + i due fix a rischio numerico zero che ne sono usciti. Nessun modello riaddestrato, nessun giudice eseguito, nessuna soglia pre-registrata sfiorata.
 
@@ -17,6 +59,8 @@
 | MFIV comparatore v2 | 25 | **26** | 40 | `--count-only`, nessun run one-shot |
 | L2 h=30 (`n_eff`) | 9.6 | **10.4** | 100 | ⚠ vedi buco sotto |
 | leg opzioni | 30 | **33** | (30) | gate **CHIUSO il 30/07, FAIL 0/3** — è accumulo oltre un gate consumato, non un'azione dovuta |
+
+⛔ **RITRATTATO IL 2026-08-03 — questo paragrafo è FALSO, lasciato per tracciabilità.** Non c'era nessun buco: l'ora era in corso al momento del pull e il monitor la leggeva come persa. Vedi la voce 03/08 in testa.
 
 ⚠ **Fatto nuovo: buco del recorder L2 il 2026-08-02 alle 16:00 UTC (1h persa).** Il run contiguo corrente è tornato a **0h** (max storico 462h); copertura 51.9% su 1132 ore. Costo stimato **~150 finestre ≈ 5 `n_eff` ≈ 6 giorni di accumulo**, perché una finestra richiede `T+h` barre contigue: un'ora di buco non costa un'ora. È esattamente il motivo per cui il check di continuità L2 esiste (un file fresco con un buco *dentro* passava l'heartbeat in silenzio). Nessuna azione correttiva presa: il buco è già avvenuto e il recorder è ripartito da solo.
 

@@ -183,6 +183,12 @@ if (-not $SkipMonitor) {
     #     (6.2 days of accrual). A fresh file with a gap INSIDE passed the heartbeat check
     #     silently, and the "home" epoch already produced 32 days of collection with ZERO
     #     usable windows. Timestamps only: no feature values, no one-shot risk.
+    # IT: NOTA 2026-08-03 - il check gira SUBITO DOPO il pull, quindi legge una coda non
+    #     consolidata: l'ora in corso e' esclusa e i buchi nelle ultime ore sono marcati
+    #     PROVVISORI. Un buco e' un fatto solo se sopravvive al pull successivo.
+    # EN: NOTE 2026-08-03 - the check runs RIGHT AFTER the pull, so it reads an
+    #     unconsolidated tail: the in-progress hour is excluded and gaps in the last hours
+    #     are flagged PROVISIONAL. A gap is a fact only if it survives the next pull.
     Write-Output "[sessione] monitoraggio vol: continuita' recorder L2 / L2 recorder continuity..."
     & $Py (Join-Path $ProjRoot "scripts\vol\l2_continuity_check.py") --days $Days
     if ($LASTEXITCODE -ne 0) { Write-Warning "l2_continuity_check FALLITO/FAILED (exit $LASTEXITCODE)" }
