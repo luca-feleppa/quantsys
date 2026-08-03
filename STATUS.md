@@ -49,13 +49,24 @@ Non l'heartbeat (che guarda solo l'ultimo tick) ma la **copertura oraria sulle 4
 2. **Pre-registrazione R1 scritta** (§ sotto): coppia canonica (modello ↔ npz) per restituire riproducibilità alla banda pubblicata, con il braccio diagnostico Leva B. **Nessun run lanciato**, nessun numero decisionale visto. Attende conferma esplicita.
 3. **Errore numerico trovato scrivendo R1 e corretto — denominatori incrociati nella tabella dell'01/08.** Ricalcolando i rapporti dai report su disco per fissare l'attesa ex-ante di R1, la riga `models_dm_sandbox` non tornava: riportava **0.7738 / 0.6837**, che sono i rapporti di `models_c2_sandbox` contro **HAR-CJ**, non quelli di `dm_sandbox` contro **HAR-C**. Valori corretti: **0.7777 (val) · 0.6833 (test)**. **La conclusione dell'01/08 è invariata** — lo spread fra repliche resta ~0.2 punti (0.7758 vs 0.7777 invece di 0.7758 vs 0.7738) — e **nessun claim pubblico è intaccato**: `TEORIA.md` §12.2 usa 0.7758/0.6835 (c2 contro HAR-C, corretti) nel paragrafo di provenienza e 0.7737/0.6837 (c2 contro HAR-CJ, corretti) nel paragrafo C2, ciascuno col proprio denominatore. L'errore viveva **solo** in quella tabella di continuità. ⚠ È la stessa classe di confusione che ha reso necessario stampare il **ruolo** accanto a ogni baseline nel giudice: un rapporto senza il suo denominatore accanto è un numero orfano, e qui l'orfano era finito nella riga sbagliata.
 
-**Azione esatta da cui ripartire.** Nulla in scadenza. **Il prossimo evento reale è l'08-09/08**: giudice `hedged_vs_unhedged_judge.py` alla soglia n≥20 (oggi 14, +2/giorno). Il run one-shot resta **MANUALE**. Il comparatore MFIV v2 (27/40) è a ~2 settimane. **La decisione aperta è una sola: eseguire o no R1** — è la sola voce in coda che non dipende da un contatore, costa ~1.5h di GPU e non tocca né il live né il VPS.
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE — 2026-08-04, nell'ordine.** Decisione presa a fine sessione: **R1 si esegue domani**, subito dopo la routine.
+
+1. **`.\avvio_sessione.ps1`** — con redirezione a livello di **OS** (`powershell.exe -File ... > out 2> err`), non da wrapper che rediriga lo stderr dentro PowerShell. Leggere i quattro contatori e annotarli.
+2. **Verifica pre-volo di R1, prima di accendere la GPU** (~1 minuto, tutta a costo zero): `git diff --exit-code config/default.yaml` pulito · `data/lstm_dataset.npz` presente e con mtime **2026-07-30** · nessun `models_r1_sandbox/` residuo.
+3. **Braccio canonico** — config di produzione **intatta**:
+   `$env:QUANTSYS_ARCH="itransformer"; $env:QUANTSYS_MODELS_ROOT="models_r1_sandbox"; python scripts/02_train.py --n-ensemble 5`
+4. **Giudice su val:** `$env:QUANTSYS_VOLS_SPLIT="val"; python scripts/vol/dev_vols_qlike.py` — **senza** `--allow-scaler-mismatch`. Poi valutare **⓪ prima di guardare il NN**, quindi ①②③ nell'ordine scritto nella pre-registrazione.
+5. **Test one-shot** solo a val verde: `$env:QUANTSYS_VOLS_SPLIT="test"`, **un** run, nessuna variante.
+6. **Braccio B per ULTIMO**, perché è l'unico che tocca `config/default.yaml` (`batch_size: 128`, `gradient_accumulation_steps: 1`, sandbox separata, **solo val**). Al termine `git checkout config/default.yaml` e `git diff --exit-code` di nuovo pulito. ⚠ L'ordine non è estetico: se il ripristino della config venisse dimenticato, con B in coda non può contaminare né la coppia canonica né il test, che sono già chiusi.
+7. **Ripristino:** azzerare `QUANTSYS_MODELS_ROOT`/`QUANTSYS_VOLS_SPLIT`; **NON** eliminare la sandbox (a PASS diventa `models/canonical_1h_vols/`), **NON** promuovere in `models/itransformer`, **NON** toccare il VPS.
+
+**Il resto del calendario è invariato.** Prossimo evento reale **08-09/08**: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 14, +2/giorno), run **MANUALE**. Comparatore MFIV v2 (27/40) a ~2 settimane. R1 non interferisce con nessuno dei due: gira in sandbox, non tocca il live e non consuma nessun campione forward.
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — R1: COPPIA CANONICA (modello ↔ npz) PER RESTITUIRE RIPRODUCIBILITÀ ALLA BANDA PUBBLICATA · 2026-08-03 · **APERTO, MAI ESEGUITO**
+## 🎯 PRE-REGISTRAZIONE GATE — R1: COPPIA CANONICA (modello ↔ npz) PER RESTITUIRE RIPRODUCIBILITÀ ALLA BANDA PUBBLICATA · 2026-08-03 · **APERTO — ESECUZIONE SCHEDULATA 2026-08-04**
 
-> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun training lanciato, nessun numero decisionale visto.
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun training lanciato, nessun numero decisionale visto. **Esecuzione confermata per il 2026-08-04**, subito dopo la routine di sessione: runbook in 7 passi nella voce «RIPARTI DA QUI» in testa. Il gate è **committato prima** del primo run che produce numeri, che è la condizione per cui esiste.
 
 **Problema che chiude.** La banda pubblicata **−23% ÷ −32%** (NN vs HAR-C) ha come numeratore una coppia modello/scaler **riaddestrata** in una sandbox che è stata **eliminata** al ripristino dello stato production. Il checkpoint su disco (`models/itransformer`, restore del PASS di giugno) **non** è quel numeratore e non lo può diventare: il suo `PipelineState` porta `target_scale = 1.4375922` contro il canonico `1.4268685`, e il guard `check_model_dataset_scaler` lo **rifiuta**. Oggi la banda è quindi un'affermazione sul **protocollo di addestramento**, non su un artefatto verificabile. R1 produce l'artefatto.
 
