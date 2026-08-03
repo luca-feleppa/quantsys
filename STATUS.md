@@ -43,7 +43,79 @@ Non l'heartbeat (che guarda solo l'ultimo tick) ma la **copertura oraria sulle 4
 
 `04b` ha una posizione **aperta e coerente**: short straddle entrato il 03/08 08:01:34 UTC, strike 62500, expiry `BTC-4AUG26`, `edge −0.294`, delta-hedge attivo (`h_usd 53 780`, ribilanciato alle 15:01). Copertura L2 storica 53.1% su 1158 ore consolidate — il numero basso è **l'epoca "casa"** (16/06→18/07, già a corpus KILL); dal passaggio al VPS il run è ininterrotto.
 
-**Azione esatta da cui ripartire.** Nulla in scadenza. **Il prossimo evento reale è l'08-09/08**: giudice `hedged_vs_unhedged_judge.py` alla soglia n≥20 (oggi 14, +2/giorno). Il run one-shot resta **MANUALE**. Il comparatore MFIV v2 (27/40) è a ~2 settimane. Le decisioni aperte non datate restano due: il fix di due righe a `scripts/00_check_setup.py` (§ 02/08) e la pre-registrazione della **coppia canonica** che restituirebbe riproducibilità alla banda pubblicata — che è anche l'unica occasione in cui riaprire la Leva B a costo marginale zero.
+**Fatto nella seconda metà della sessione.**
+
+1. **`scripts/00_check_setup.py`** — l'item "boilerplate UTF-8 mancante" era **già risolto** da `ad6634f` del 02/08: nota stale, ritrattata sopra. Verificato eseguendo (exit 0). **Trovato e corretto un difetto logico diverso, nello stesso script:** il § STATO PIPELINE stampava un **✗ rosso** per ogni artefatto assente mentre il verdetto finale diceva "Setup verificato — pronti per la pipeline". Le due affermazioni non potevano essere entrambe vere, e a mentire era l'icona: quegli artefatti sono **prodotti** dalla pipeline, quindi su un clone fresco sono assenti **per definizione** e infatti non concorrono ad `all_ok` (il ritorno di `check()` è ignorato di proposito). Ora sono warning (△), con il motivo scritto accanto al loop. ⚠ È lo script che chi clona esegue per primo: mostrargli sette righe rosse e poi dirgli che è tutto a posto è il modo più economico per insegnargli a ignorare i rossi.
+2. **Pre-registrazione R1 scritta** (§ sotto): coppia canonica (modello ↔ npz) per restituire riproducibilità alla banda pubblicata, con il braccio diagnostico Leva B. **Nessun run lanciato**, nessun numero decisionale visto. Attende conferma esplicita.
+3. **Errore numerico trovato scrivendo R1 e corretto — denominatori incrociati nella tabella dell'01/08.** Ricalcolando i rapporti dai report su disco per fissare l'attesa ex-ante di R1, la riga `models_dm_sandbox` non tornava: riportava **0.7738 / 0.6837**, che sono i rapporti di `models_c2_sandbox` contro **HAR-CJ**, non quelli di `dm_sandbox` contro **HAR-C**. Valori corretti: **0.7777 (val) · 0.6833 (test)**. **La conclusione dell'01/08 è invariata** — lo spread fra repliche resta ~0.2 punti (0.7758 vs 0.7777 invece di 0.7758 vs 0.7738) — e **nessun claim pubblico è intaccato**: `TEORIA.md` §12.2 usa 0.7758/0.6835 (c2 contro HAR-C, corretti) nel paragrafo di provenienza e 0.7737/0.6837 (c2 contro HAR-CJ, corretti) nel paragrafo C2, ciascuno col proprio denominatore. L'errore viveva **solo** in quella tabella di continuità. ⚠ È la stessa classe di confusione che ha reso necessario stampare il **ruolo** accanto a ogni baseline nel giudice: un rapporto senza il suo denominatore accanto è un numero orfano, e qui l'orfano era finito nella riga sbagliata.
+
+**Azione esatta da cui ripartire.** Nulla in scadenza. **Il prossimo evento reale è l'08-09/08**: giudice `hedged_vs_unhedged_judge.py` alla soglia n≥20 (oggi 14, +2/giorno). Il run one-shot resta **MANUALE**. Il comparatore MFIV v2 (27/40) è a ~2 settimane. **La decisione aperta è una sola: eseguire o no R1** — è la sola voce in coda che non dipende da un contatore, costa ~1.5h di GPU e non tocca né il live né il VPS.
+
+---
+
+## 🎯 PRE-REGISTRAZIONE GATE — R1: COPPIA CANONICA (modello ↔ npz) PER RESTITUIRE RIPRODUCIBILITÀ ALLA BANDA PUBBLICATA · 2026-08-03 · **APERTO, MAI ESEGUITO**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun training lanciato, nessun numero decisionale visto.
+
+**Problema che chiude.** La banda pubblicata **−23% ÷ −32%** (NN vs HAR-C) ha come numeratore una coppia modello/scaler **riaddestrata** in una sandbox che è stata **eliminata** al ripristino dello stato production. Il checkpoint su disco (`models/itransformer`, restore del PASS di giugno) **non** è quel numeratore e non lo può diventare: il suo `PipelineState` porta `target_scale = 1.4375922` contro il canonico `1.4268685`, e il guard `check_model_dataset_scaler` lo **rifiuta**. Oggi la banda è quindi un'affermazione sul **protocollo di addestramento**, non su un artefatto verificabile. R1 produce l'artefatto.
+
+**Ipotesi / prior onesto (pre-dichiarato).** Non è un esperimento su un'ipotesi scientifica nuova: è una **replica** del protocollo già misurato due volte. Attesa: rapporto NN/HAR-C su val nell'intorno di **0.777 ± 0.005**, cioè la banda esce **invariata alla cifra pubblicata**. L'esito informativo sarebbe il contrario — una dispersione di ri-addestramento molto più larga di quella osservata su n=2 renderebbe la banda meno precisa di come è pubblicata, ed è un fatto da scrivere, non da nascondere. ⚠ Con n=2 repliche (**0.7758** e **0.7777**, ricalcolate oggi dai report: vedi la correzione della tabella dell'01/08) la dispersione **non è stimata**, è vincolata da due punti. R1 ne aggiunge una terza.
+
+**Script/giudice:** `scripts/02_train.py` (training, protocollo di produzione invariato) + `scripts/vol/dev_vols_qlike.py` (giudice, invariato).
+**Split:** `val` (`QUANTSYS_VOLS_SPLIT=val`); `test` **solo** a condizioni val verdi, **one-shot**, un unico run, nessuna variante.
+**Sandbox:** `QUANTSYS_MODELS_ROOT=models_r1_sandbox` (nome scelto perché già coperto da `models_*_sandbox/` in `.gitignore`: nessun checkpoint può finire nel repo pubblico per distrazione), `QUANTSYS_ARCH=itransformer`. `models/itransformer` e `models/backup_1h_vols` **READ-ONLY** per tutta la durata. I report del giudice sono suffissati con la root (`qlike_report_1h_{val,test}_models_r1_sandbox.json`), quindi **non sovrascrivono** quelli di produzione.
+**Nessuna leva sperimentale sul braccio canonico:** config di produzione **invariata** (`batch_size 64`, `gradient_accumulation_steps 2`, 5 membri, seed `42+i` per `i∈{0..4}` — deterministici, letti dal codice, non scelti qui).
+
+**Vincoli sui dati — l'npz è CONGELATO.** `data/lstm_dataset.npz` (3.26 GB, 2026-07-30) è lo stesso che ha prodotto tutti i report recenti. Durante R1 **non si lancia `01_download_data.py`, `01b`, né `dev_vols_macro_append.py`**: un rifit dello scaler invaliderebbe simultaneamente il confronto e l'artefatto. `QUANTSYS_DATASET_NPZ` **non impostata** (default canonico). ⚠ Il 02/08 sono state appese 25 candele a `data/raw_candles.parquet` (66.410 → 66.435): **irrilevante finché l'npz non viene rigenerato**, decisivo se lo si rigenera.
+
+**Condizione di conteggio — verificata EX-ANTE, come impone il protocollo.** `n_val = 6485`, `n_test = 6486`, **fissi e model-independent**: non c'è nessun campione da attendere e nessun rischio di "nessuna conclusione" per n insufficiente. Il costo GPU è quindi speso su un esperimento che **produce** un esito.
+
+### Condizioni di PASS (tutte, AND)
+
+**⓪ Controllo di vintage (model-independent, si valuta PRIMA di guardare il NN).** Il report val deve riprodurre **cifra per cifra** le baseline già registrate sullo stesso npz:
+
+| Baseline (val) | Valore atteso |
+|---|---|
+| HAR-RV | 0.35698200803887636 |
+| HAR-C | 0.33697940716798486 |
+| HAR-CJ | 0.33788144361497324 |
+| naive | 0.7128755760530082 |
+| `n_obs` | 6485 |
+
+Le baseline sono fittate e valutate **dentro** l'npz, quindi model-independent: se non coincidono, l'npz non è quello e R1 **non è una ri-pubblicazione ma un dataset nuovo** → STOP, nessuna promozione, nessun test. È il controllo che l'08-01 ha distinto "due dataset" da "due modelli", e costa dieci secondi.
+
+**① Identità dello scaler.** `dev_vols_qlike.py` gira **senza** `--allow-scaler-mismatch` e **non fallisce**. È l'obiettivo stesso di R1, ed è binario: il `provenance` del report deve riportare `matches: true`. ⚠ Per costruzione **non può** fallire (il `PipelineState` scritto dal training viene dallo scaler di quell'npz): se fallisse non sarebbe un esito sperimentale ma un **difetto del path di training** → STOP e indagine, non una riga di risultato.
+
+**② Il gate storico del vol-S resta superato (val).** Denominatore **HAR-RV**, come nel gate pre-registrato del 2026-06-10 — non HAR-C, che è il denominatore del *claim*: `QLIKE_NN ≤ 0.95 · 0.35698200803887636 = 0.33913` **e** `QLIKE_NN < 0.7128755760530082` (naive). Se cade, la coppia canonica **falsificherebbe il PASS** invece di riprodurlo: non si promuove nulla e si apre un'indagine sul path di training.
+
+**③ Materialità sulla cifra pubblicata.** Rapporto `QLIKE_NN / 0.33697940716798486` (HAR-C) su val **≤ 0.80**. Non è un bound statistico — con n=2 non esiste — è una **soglia di materialità**: 0.80 = −20%, e la banda pubblicata parte da −23%; oltre 0.80 la cifra inferiore si sposterebbe di ≥3 punti, cioè non sarebbe una ri-pubblicazione ma un **claim diverso**, che come tale richiede la sua pre-registrazione e non questa.
+
+**④ Test one-shot, con le sue soglie scritte QUI e non dopo.** Solo a ⓪①②③ verdi: **un** run su `test`, nessuna variante, nessun re-run. Le tre condizioni si ripetono con i denominatori del test split — ⓪ HAR-RV `0.36998480578695586`, HAR-C `0.3458427303567653`, HAR-CJ `0.34572086276193376`, naive `0.7931544984285546`, `n_obs = 6486`; ② `QLIKE_NN ≤ 0.95 · 0.36998480578695586 = 0.35149` **e** `< naive`; ③ rapporto `QLIKE_NN / 0.3458427303567653 ≤ **0.71**`. La soglia 0.71 è costruita come quella su val (repliche a 0.6834 + lo stesso margine di ~0.023): oltre 0.71 la cifra **superiore** della banda si sposterebbe di ≥3 punti da −32% a ≤−29%, cioè un claim diverso. Le due repliche note danno test 0.23637 e 0.23631 → rapporti 0.6835 e 0.6833.
+
+### Braccio B (Leva B) — DIAGNOSTICO, SOLO VAL
+
+Questa è l'occasione di riapertura **datata** scritta il 02/08: si sta già riaddestrando e si sta già scrivendo un gate, quindi il costo marginale è ~35 min di GPU. Config `batch_size: 128`, `gradient_accumulation_steps: 1`, **stessi seed, stesso npz, sandbox separata**.
+
+- **Il braccio B non può diventare la coppia canonica.** Il canonico è definito **ex-ante** come il braccio a config di produzione, **qualunque** numero esca. Scegliere a posteriori il migliore dei due sarebbe selezione sull'esito, ed è la ragione per cui il ruolo è fissato qui e non dopo.
+- **Il braccio B non tocca `test`.** Mai. È diagnostico su `val`.
+- **Condizione di adozione della config** (per i training **futuri**, non per questa coppia): `|ratio_B − ratio_canonico| ≤ 0.005` su val **e** speedup wall-clock **≥ 1.5×**. La soglia 0.005 è metà del passo di arrotondamento della banda (1 punto percentuale ≈ 0.01 di rapporto): sotto quella soglia il cambio è invisibile al claim. Se `|Δ| > 0.005` la config di produzione **resta** com'è e il numero si scrive comunque: sarebbe la misura che la realizzazione RNG sposta il rapporto **più** della dispersione osservata fra repliche, cioè un'informazione sulla precisione della banda più importante del guadagno di velocità.
+
+### Conseguenze pre-dichiarate
+
+**PASS (⓪①②③④ verdi):**
+1. La sandbox **non si elimina**: diventa l'artefatto permanente e dichiarato `models/canonical_1h_vols/` (autosufficiente come `models/backup_1h_vols/`), col report `provenance` che ne lega modello, npz e impronte di scaler. È la contromisura diretta all'errore che ha reso la banda irriproducibile: l'eliminazione della sandbox al passo 5 del protocollo.
+2. La banda pubblicata è **riscritta con i numeri della coppia canonica, quali che siano**, arrotondata al punto percentuale come oggi; `TEORIA.md` §12.2 perde la qualificazione "non riproducibile alla cifra" e guadagna il puntatore all'artefatto. Il §12.2 va aggiornato **anche se i numeri coincidono**: cambia lo statuto del claim, non solo il valore.
+3. `tests/test_scaler_identity_guard.py` va aggiornato — il test sui file veri inchioda il **disallineamento storico** e cade di proposito quando esiste una coppia allineata. Era scritto per obbligare a questo aggiornamento.
+
+**⚠ Ciò che il PASS NON autorizza: la promozione a `models/itransformer` e sul VPS.** Sostituire il modello di produzione cambia l'input di `04b`, cioè **dentro campioni forward pre-registrati aperti** (hedged n=14/20 · MFIV 27/40 · E1 stadio 2 a ~10/09): è la stessa violazione del refresh macro dentro un campione, con un impatto molto maggiore. La promozione è una **decisione separata e datata**, subordinata alla chiusura dei campioni aperti, e va scritta in `STATUS.md` con la data del bootstrap `04b` da cui entra in vigore. Fino ad allora la coppia canonica vive accanto al production, non al suo posto.
+
+**FAIL:**
+- **⓪ FAIL** → l'npz non è quello atteso: STOP prima del training, nessuna GPU spesa, si indaga quale rebuild è avvenuto.
+- **② FAIL** → esito **grave e riportabile**: il protocollo non riproduce più il PASS. Nessuna ri-pubblicazione, banda invariata con la qualificazione attuale, indagine sul path di training.
+- **③ FAIL** → la dispersione di ri-addestramento è più larga di quanto la banda dichiari: si scrive il numero, la banda **resta com'è** con la qualificazione di irriproducibilità **rafforzata** (non rimossa), e la ri-pubblicazione diventa un claim nuovo da pre-registrare a parte.
+- In ogni caso l'esito si scrive: qui, in `TEORIA.md` §12 e in `CHANGELOG.md`.
+
+**Costo stimato:** ~1h GPU (5 seed a config di produzione) + ~35 min (braccio B) + giudici. Nessuna contesa CUDA: `04b` gira sul VPS, a casa non c'è nulla di live.
 
 ---
 
@@ -73,6 +145,8 @@ Non l'heartbeat (che guarda solo l'ultimo tick) ma la **copertura oraria sulle 4
 3. **README riallineato**: dichiarava 355 test, erano 438 → ora **450** (`~45 s`). È un claim che un lettore esterno verifica in trenta secondi.
 
 **⚠ Cambiamento di stato dati non pianificato (benigno, ma va scritto).** Lo smoke test di fine sessione ha eseguito `01_update_data.py --candles-only`, che ha **appeso 25 candele** a `data/raw_candles.parquet`: **66.410 → 66.435**, fino al 2026-08-02. Era inteso come verifica che il fix ① non avesse rotto un path di produzione che legge e scrive parquet — e infatti la verifica è riuscita — ma ha prodotto un append reale, non una simulazione. **Perimetro toccato: solo il parquet raw.** `features.parquet`, `lstm_dataset.npz`, lo scaler e i due `PipelineState` sono **invariati** (è la garanzia di `--candles-only`, provata da `tests/test_update_candles_only.py`). Nessun campione forward è perturbato: i vintage macro non sono stati toccati e la promozione richiede `-PromoteMacro`. Se un giudice one-shot dovesse girare su una finestra che assume 66.410 barre, saperlo evita mezz'ora di confusione.
+
+⛔ **SUPERATO — verificato il 2026-08-03: il fix ERA GIÀ ENTRATO** con `ad6634f` ("boilerplate UTF-8 mancante su 5 script"), lo stesso giorno, poche ore dopo che questo paragrafo era stato scritto; il paragrafo non fu riallineato. `python scripts/00_check_setup.py` gira ed esce 0. Resta come lezione: **una nota "non corretto" invecchia peggio di una nota "corretto"**, perché nessuno la ri-verifica.
 
 **⚠ Difetto preesistente trovato durante lo smoke test, NON corretto.** `scripts/00_check_setup.py` **non ha il boilerplate di reconfigure UTF-8** (zero occorrenze) e crasha con `UnicodeEncodeError` su console Windows cp1252 alla prima riga di banner. È la **6ª occorrenza** del bug che la checklist "nuovo script" esiste per prevenire — ed è particolarmente sfortunata perché `python scripts/00_check_setup.py` è **l'ultimo comando della sequenza di setup nel README**: è letteralmente la prima cosa che esegue chi clona. Verificato preesistente (fallisce identico con `quantsys/__init__.py` originale, quindi indipendente dai fix di oggi). Fix: due righe di boilerplate. Non applicato per non allargare il perimetro senza dirlo.
 
@@ -254,7 +328,7 @@ Sono l'unica decisione nuova aperta. **Entrambe cambiano i numeri**, quindi ness
 |---|---|---|---|---|
 | `models/itransformer` (restore del PASS di giugno) | 0.27470 | 0.24453 | 0.8152 | 0.7071 |
 | `models_c2_sandbox` (coppia riaddestrata) | **0.26143** | **0.23637** | **0.7758** | **0.6835** |
-| `models_dm_sandbox` (seconda coppia riaddestrata) | 0.26206 | 0.23631 | 0.7738 | 0.6837 |
+| `models_dm_sandbox` (seconda coppia riaddestrata) | 0.26206 | 0.23631 | 0.7777 | 0.6833 |
 
 La riga centrale **è** la banda pubblicata −23% ÷ −32%. I report `*_c3.json` contengono la prima riga. Nessuno dei due è sbagliato: sono due modelli diversi, e **nessun campo nel report diceva quale**.
 
@@ -270,7 +344,7 @@ La riga centrale **è** la banda pubblicata −23% ÷ −32%. I report `*_c3.jso
 
 **Ri-run di verifica (val, `--allow-scaler-mismatch`): numeri riprodotti bit-per-bit** — NN 0.27470, HAR-RV 0.35698, HAR-C 0.33698, HAR-CJ 0.33788, identici al report precedente. Il report ora porta la provenienza. **`test` non è stato ri-eseguito**: non serviva a nulla e la disciplina one-shot non si consuma per comodità.
 
-**⚠ Limite che resta, dichiarato e non risolto.** La sandbox che ha prodotto il numeratore della banda è stata **eliminata** al ripristino dello stato production (passo 5 del protocollo), quindi **la banda non è riproducibile alla cifra**. Ripetere il protocollo dà un numero vicino ma diverso: le due coppie riaddestrate differiscono di **~0.2 punti** sul rapporto (0.7758 vs 0.7738 su val), che è la precisione onesta con cui vanno letti gli estremi. Conseguenza da tenere ferma: **la banda è un'affermazione sul protocollo di addestramento applicato al dataset corrente, non sul file di checkpoint in `models/`.** Restituirle riproducibilità richiede di addestrare una coppia canonica e **ri-pubblicare** — decisione sul claim, non correzione, **non presa qui**.
+**⚠ Limite che resta, dichiarato e non risolto.** La sandbox che ha prodotto il numeratore della banda è stata **eliminata** al ripristino dello stato production (passo 5 del protocollo), quindi **la banda non è riproducibile alla cifra**. Ripetere il protocollo dà un numero vicino ma diverso: le due coppie riaddestrate differiscono di **~0.2 punti** sul rapporto (0.7758 vs 0.7777 su val — ⚠ **numeri corretti il 2026-08-03**: la versione originale di questa riga e della tabella sopra riportava per `dm_sandbox` 0.7738/0.6837, che sono i rapporti di `c2_sandbox` contro **HAR-CJ**, non i suoi contro HAR-C; ricalcolati dai report su disco. La conclusione — spread ~0.2 punti — è invariata), che è la precisione onesta con cui vanno letti gli estremi. Conseguenza da tenere ferma: **la banda è un'affermazione sul protocollo di addestramento applicato al dataset corrente, non sul file di checkpoint in `models/`.** Restituirle riproducibilità richiede di addestrare una coppia canonica e **ri-pubblicare** — decisione sul claim, non correzione, **non presa qui**.
 
 **Problema separato trovato e chiuso.** `scripts/README.md`, **tracciato e pubblico**, descriveva ancora il generatore del sito e puntava a quattro file non nel repo: il commit `bb7bce3` aveva tolto la riga dello spine numerato ma non quella delle sottocartelle. Riga rimossa; `git grep` su `build_site|experiments.yaml|test_site_registry|docs/index.html` nei tracciati è ora vuoto fuori da questo file.
 

@@ -88,6 +88,18 @@ def test_tail_gap_is_provisional_and_not_costed():
     assert len(r2["firm"]) == 1 and r2["prov"] == []
 
 
+def test_single_in_progress_hour_yields_no_consolidated_span():
+    # IT: caso degenere reale (primo avvio del recorder): l'unica ora presente e' quella
+    #     in corso, quindi non esiste NIENTE di consolidato. Deve dirlo, non dividere per
+    #     zero ne' inventare un run.
+    # EN: real degenerate case (recorder's first start): the only hour present is the one
+    #     in progress, so nothing is consolidated. It must say so, not divide by zero nor
+    #     invent a run.
+    r = C.analyze(_ts(1, last_hour_snaps=200), days=7)
+    assert r["empty"] is True
+    assert r["in_progress"] == pd.Timestamp("2026-06-01 00:00", tz="UTC")
+
+
 def test_windows_and_n_eff_count_only_contiguous_runs():
     # IT: controllo dell'aritmetica pre-esistente su un caso a mano: un run di R ore
     #     produce max(R-(T+h)+1, 0) finestre, e n_eff le riscala per h.

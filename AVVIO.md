@@ -63,9 +63,9 @@ pip install -e .
 python scripts/00_check_setup.py
 ```
 
-🇮🇹 `00_check_setup.py` controlla dipendenze, CUDA, Binance, FRED — risolvi gli errori prima di proseguire. `00_test_binance_testnet.py` è uno smoke opzionale della connettività al testnet Binance.
+🇮🇹 `00_check_setup.py` controlla dipendenze, CUDA, Binance, FRED — risolvi gli errori prima di proseguire. Il suo § **STATO PIPELINE** è diverso: elenca artefatti **prodotti** dagli script successivi (dataset, checkpoint, report), quindi su un clone fresco sono assenti **per definizione** e compaiono come warning `△`, non come errori — non concorrono al verdetto finale e non c'è nulla da "risolvere" prima di lanciare la pipeline. `00_test_binance_testnet.py` è uno smoke opzionale della connettività al testnet Binance.
 
-**EN** `00_check_setup.py` checks dependencies, CUDA, Binance, FRED — fix errors before proceeding. `00_test_binance_testnet.py` is an optional Binance-testnet connectivity smoke.
+**EN** `00_check_setup.py` checks dependencies, CUDA, Binance, FRED — fix errors before proceeding. Its **PIPELINE STATE** section is different: it lists artifacts **produced** by the later scripts (dataset, checkpoints, reports), so on a fresh clone they are missing **by definition** and show up as `△` warnings, not errors — they do not feed the final verdict and there is nothing to "fix" before running the pipeline.  `00_test_binance_testnet.py` is an optional Binance-testnet connectivity smoke.
 
 ### 1.2 Note operative su Windows / PowerShell · Windows / PowerShell operational notes
 

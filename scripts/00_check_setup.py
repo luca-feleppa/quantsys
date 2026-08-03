@@ -248,13 +248,23 @@ steps = [
     (f"models/{_arch}/history.json",                   "02_train.py",           False),
     (f"results/{_arch}/dashboard_results.json",        "03_backtest.py",        False),
 ]
+# IT: questi artefatti sono PRODOTTI dalla pipeline: su un clone fresco non esiste
+#     nessuno di essi, ed e' lo stato corretto. Non concorrono infatti ad `all_ok`
+#     (il ritorno di check() e' deliberatamente ignorato qui) — ma finche' l'assenza
+#     stampava un ✗ rosso, l'icona diceva "errore" e il verdetto finale diceva
+#     "setup verificato": una delle due mentiva, e a mentire era l'icona. Warning.
+# EN: these artifacts are PRODUCED by the pipeline: on a fresh clone none of them
+#     exists, and that is the correct state. Indeed they do not feed `all_ok`
+#     (check()'s return value is deliberately ignored here) — but as long as absence
+#     printed a red ✗, the icon said "error" while the final verdict said "setup
+#     verified": one of the two was lying, and it was the icon. Warning instead.
 for path, script, optional in steps:
     exists = Path(path).exists()
     sz     = f"  ({Path(path).stat().st_size//1024} KB)" if exists else ""
     label  = f"[opzionale] {path}" if optional else path
     check(label, exists,
           f"✓{sz}" if exists else f"→ esegui scripts/{script}",
-          warn_only=optional and not exists)
+          warn_only=not exists)
 
 # IT: riepilogo finale con device, AMP, batch size e stima training
 # EN: final summary with device, AMP, batch size and training estimate
