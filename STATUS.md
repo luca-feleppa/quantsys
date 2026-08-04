@@ -69,7 +69,28 @@ Il rapporto val contro HAR-C è **0.7757926 → −22.42%**, che arrotondato al 
 
 **Suite completa: 469 passed, 1 skipped** (47 s), config di produzione pulita.
 
-**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto in scadenza. Le due sandbox `models_r1_sandbox/` e `models_r1b_sandbox/` sono **ancora su disco** (~40 MB): la prima è ridondante — il suo contenuto è stato copiato in `models/canonical_1h_vols/` e ri-giudicato da lì con esito identico — la seconda è il braccio diagnostico, già misurato. Eliminarle è il passo 5 del protocollo e **non è stato fatto**: decisione lasciata esplicita, non dimenticata. Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 15, +1/giorno), **~08-09/08, run MANUALE**. Comparatore MFIV v2 a 28/40, ~2 settimane.
+### 🔎 I due cluster deterministici: causa IDENTIFICATA — è il vintage macro dell'npz
+
+Indagine a costo zero (log + git, nessuna GPU), fatta dopo il braccio B. **Non era la config di training: era il dataset.**
+
+| data | evento | cluster |
+|---|---|---|
+| 19/07 16:54:57 | macro append → npz **V1** | |
+| 19/07 22:58 · 23/07 22:39 · 26/07 19:03 | `base_ext`, `base_ext`, `dm_sandbox` | **B** = 0.2620578012 |
+| 30/07 20:55:02 | macro append → npz **V2** | |
+| 30/07 20:56 · 21:31 · 23:09 · 04/08 19:19 | `smear`, `a10_base`, `c2`, `r1` | **A** = 0.2614261407 |
+
+Il primo run del cluster A parte **87 secondi** dopo la riscrittura dell'npz. **Meccanismo verificato nel codice:** `01b_download_macro.py` ricarica gli split e sostituisce **solo** `X_macro_{split}` (+ `macro_feature_names`, `n_macro_features`), lasciando `X_*`, `y_*`, `t_*` intatti — e la macro è **input del modello** (90 colonne, embedding attivo) ma **non entra in nessuna baseline HAR**, che leggono solo RV/target. Da qui la firma osservata: NN si sposta, le baseline restano identiche cifra per cifra. ⚠ E non è un append: il `MacroNormalizer` è **rifittato whole-df** e riapplicato a tutte le righe, quindi allungare la serie sposta mediana e IQR e cambia i valori macro **anche delle righe storiche**.
+
+**Le alternative sono escluse, non ignorate:** seed (Δ=0, misurato stamattina) · batch (811 batch/epoca in **tutte** le run, quindi batch 64 ovunque) · codice (i due soli commit che toccano il path di training fra il 26 e il 30/07 sono uno di **solo logging** e uno **inerte a flag spento** — ricade sullo stesso `scaled_dot_product_attention` e aggiunge solo attributi Python, nessun `nn.Parameter`, quindi nessun consumo di RNG in più).
+
+⚠ **Falsa pista utile da ricordare:** gli SHA dei run del cluster B **non esistono più** nel repo (sono pre-rewrite del 27/07), e il confine dei cluster ci cade accanto. Sembrava una spiegazione e non poteva esserlo — un rewrite di storia non cambia il contenuto dei file. La coincidenza temporale con la causa vera è casuale.
+
+**🕳️ Buco che ne discende (dichiarato, non chiuso):** il guard di identità copre il RobustScaler dei prezzi e `target_scale`, **non** la normalizzazione macro — che non vive nel `PipelineState` canonico (`0 macro features`, la `MacroNormalizer` finisce in `models/lstm/pipeline_state.pkl` per il routing di `01b`). Due modelli possono quindi passare `matches: true` ed essere addestrati su **macro diverse**: uno scarto misurato di **0.0019** sul rapporto pubblicato, che oggi **nulla segnala**. Estendere l'impronta al vintage macro è la contromisura naturale — non fatta oggi, e da fare con una pre-registrazione se tocca il numeratore pubblicato.
+
+**Bilancio della giornata sulla precisione della banda:** il seed non muove nulla (0), il refresh macro muove **0.0019**, la config di training muove **0.0068**. Tutte e tre le fonti sono **deterministiche e dichiarabili** — nessuna è rumore stocastico, e la banda va letta come funzione di (npz, config), non come una stima con un errore standard.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto in scadenza. `models_r1b_sandbox/` **eliminata** (19 MB, braccio diagnostico già misurato); `models_r1_sandbox/` resta su disco ed è ridondante — il suo contenuto è in `models/canonical_1h_vols/`, ri-giudicato da lì con esito identico — quindi è eliminabile in qualsiasi momento. Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 15, +1/giorno), **~08-09/08, run MANUALE**. Comparatore MFIV v2 a 28/40, ~2 settimane.
 
 ---
 
