@@ -218,6 +218,27 @@ def models_root() -> Path:
     return Path(os.environ.get("QUANTSYS_MODELS_ROOT", "models"))
 
 
+# IT: path del PipelineState CANONICO (scritto da `01_download_data` alla costruzione
+#     del dataset, arch-independent). NON è `models_root()/pipeline_state.pkl`: sotto
+#     `QUANTSYS_MODELS_ROOT` quella risolve dentro la sandbox, dove il canonico non
+#     esiste — e il guard di identità degradava a "non verificabile" proprio nella
+#     modalità in cui si giudicano i candidati, cioè il suo unico caso d'uso
+#     (trovato il 2026-08-04 durante R1). Precedenza: canonico locale alla sandbox se
+#     esiste (esperimento che ha costruito il PROPRIO dataset dentro la sandbox, con
+#     `QUANTSYS_DATASET_NPZ`), altrimenti il canonico della root di default.
+# EN: path of the CANONICAL PipelineState (written by `01_download_data` at dataset
+#     build time, arch-independent). It is NOT `models_root()/pipeline_state.pkl`:
+#     under `QUANTSYS_MODELS_ROOT` that resolves inside the sandbox, where no
+#     canonical exists — so the identity guard degraded to "not verifiable" in
+#     exactly the mode where candidates are judged, i.e. its only use case (found on
+#     2026-08-04 during R1). Precedence: sandbox-local canonical if present (an
+#     experiment that built its OWN dataset inside the sandbox, via
+#     `QUANTSYS_DATASET_NPZ`), otherwise the default-root canonical.
+def canonical_state_path() -> Path:
+    local = models_root() / "pipeline_state.pkl"
+    return local if local.exists() else Path("models") / "pipeline_state.pkl"
+
+
 # IT: path del dataset npz — override via env QUANTSYS_DATASET_NPZ per ESPERIMENTI ISOLATI
 #     (probe DVOL-come-feature, pre-reg 2026-07-17). Default "data/lstm_dataset.npz" =
 #     comportamento byte-identico. Consumer: 02_train.py + scripts/vol/dev_vols_qlike.py
@@ -645,20 +666,20 @@ def scaler_fingerprint(state: "PipelineState") -> dict:
 def check_model_dataset_scaler(model_state: "PipelineState",
                                canonical_path: Optional[Path] = None) -> dict:
     # IT: confronta lo scaler del modello con quello CANONICO, cioè quello scritto
-    #     quando il dataset è stato costruito (`{models_root}/pipeline_state.pkl`,
-    #     arch-independent). Ritorna un dizionario di provenienza — non solleva:
+    #     quando il dataset è stato costruito (`canonical_state_path()`,
+    #     arch- e sandbox-independent). Ritorna un dizionario di provenienza — non solleva:
     #     la decisione se fermarsi spetta al chiamante, perché un run cross-vintage
     #     deliberato è legittimo purché sia DICHIARATO.
     #     `matches=None` significa "non verificabile" (canonico assente, p.es. clone
     #     pulito) e non deve mai essere confuso con "verificato uguale".
     # EN: compares the model's scaler against the CANONICAL one, i.e. the one
-    #     written when the dataset was built (`{models_root}/pipeline_state.pkl`,
-    #     arch-independent). Returns a provenance dict — it does not raise: whether
+    #     written when the dataset was built (`canonical_state_path()`, arch- and
+    #     sandbox-independent). Returns a provenance dict — it does not raise: whether
     #     to stop is the caller's decision, since a deliberate cross-vintage run is
     #     legitimate as long as it is DECLARED.
     #     `matches=None` means "not verifiable" (canonical absent, e.g. a clean
     #     clone) and must never be conflated with "verified equal".
-    canonical_path = Path(canonical_path) if canonical_path else models_root() / "pipeline_state.pkl"
+    canonical_path = Path(canonical_path) if canonical_path else canonical_state_path()
     out = {"model": scaler_fingerprint(model_state), "canonical": None,
            "canonical_path": str(canonical_path), "matches": None}
     if not canonical_path.exists():

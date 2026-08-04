@@ -31,8 +31,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from quantsys.utils import (PipelineState, check_model_dataset_scaler,  # noqa: E402
-                            scaler_fingerprint)
+from quantsys.utils import (PipelineState, canonical_state_path,  # noqa: E402
+                            check_model_dataset_scaler, scaler_fingerprint)
 
 
 class _Scaler:
@@ -108,6 +108,51 @@ def test_missing_canonical_is_None_and_never_True(tmp_path):
     assert out["canonical"] is None
 
 
+# ─────────── risoluzione del canonico sotto sandbox (R1, 2026-08-04) ───────────
+def test_canonical_is_resolved_OUTSIDE_the_sandbox(tmp_path, monkeypatch):
+    # IT: il difetto che chiude. Con `QUANTSYS_MODELS_ROOT` attiva il canonico veniva
+    #     cercato DENTRO la sandbox, dove non esiste mai: il guard restituiva
+    #     `matches=None` e il giudice stampava un warning — cioè non controllava
+    #     nulla proprio nella modalità in cui si giudicano i candidati. Un guard che
+    #     tace esattamente dove serve è peggio di un guard assente, perché il report
+    #     porta comunque un blocco `provenance` dall'aria rassicurante.
+    # EN: the defect this closes. With `QUANTSYS_MODELS_ROOT` set, the canonical was
+    #     looked up INSIDE the sandbox, where it never exists: the guard returned
+    #     `matches=None` and the judge logged a warning — i.e. it checked nothing in
+    #     exactly the mode where candidates are judged. A guard that goes quiet where
+    #     it is needed is worse than no guard, since the report still carries a
+    #     reassuring-looking `provenance` block.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "models").mkdir()
+    _save(tmp_path / "models", "pipeline_state.pkl", _state([1.0, -7.0], [2.0, 1.4]))
+    (tmp_path / "models_x_sandbox").mkdir()
+    monkeypatch.setenv("QUANTSYS_MODELS_ROOT", "models_x_sandbox")
+
+    assert canonical_state_path() == Path("models") / "pipeline_state.pkl"
+    out = check_model_dataset_scaler(_state([1.0, -7.0], [2.0, 1.4]))
+    assert out["matches"] is True, "in sandbox il guard deve confrontare, non tacere"
+
+
+def test_a_sandbox_local_canonical_wins_when_it_exists(tmp_path, monkeypatch):
+    # IT: la precedenza non è cosmetica: un esperimento che costruisce il PROPRIO
+    #     dataset dentro la sandbox (`QUANTSYS_DATASET_NPZ`) ha il proprio canonico,
+    #     e confrontarlo con quello della root di default darebbe un mismatch falso.
+    # EN: the precedence is not cosmetic: an experiment building its OWN dataset
+    #     inside the sandbox (`QUANTSYS_DATASET_NPZ`) has its own canonical, and
+    #     comparing it against the default-root one would yield a false mismatch.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "models").mkdir()
+    _save(tmp_path / "models", "pipeline_state.pkl", _state([1.0, -7.0], [2.0, 1.4]))
+    (tmp_path / "models_y_sandbox").mkdir()
+    _save(tmp_path / "models_y_sandbox", "pipeline_state.pkl",
+          _state([1.0, -7.0], [2.0, 9.9]))
+    monkeypatch.setenv("QUANTSYS_MODELS_ROOT", "models_y_sandbox")
+
+    assert canonical_state_path() == Path("models_y_sandbox") / "pipeline_state.pkl"
+    assert check_model_dataset_scaler(_state([1.0, -7.0], [2.0, 9.9]))["matches"] is True
+    assert check_model_dataset_scaler(_state([1.0, -7.0], [2.0, 1.4]))["matches"] is False
+
+
 # ─────────────── lo stato reale su disco: il caso che è successo ───────────────
 @pytest.mark.skipif(not (ROOT / "models" / "itransformer" / "pipeline_state.pkl").exists()
                     or not (ROOT / "models" / "pipeline_state.pkl").exists(),
@@ -126,3 +171,29 @@ def test_the_real_production_pair_is_detected_as_mismatched():
     assert out["matches"] is False, \
         ("il modello di produzione ora combacia con l'npz canonico: il disallineamento "
          "storico è stato risolto — aggiorna questo test e la qualificazione in TEORIA.md §12.2")
+
+
+@pytest.mark.skipif(not (ROOT / "models" / "canonical_1h_vols" / "pipeline_state.pkl").exists()
+                    or not (ROOT / "models" / "pipeline_state.pkl").exists(),
+                    reason="artefatto canonico non versionato: assente su un clone pulito")
+def test_the_canonical_artifact_is_and_stays_aligned_with_the_npz():
+    # IT: sentinella sull'artefatto di R1 (2026-08-04). La coppia canonica esiste per
+    #     dare un numeratore VERIFICABILE alla banda pubblicata: se il suo scaler
+    #     smette di combaciare col canonico, l'artefatto non è più confrontabile con
+    #     l'npz corrente e la banda torna a essere un'affermazione sul protocollo.
+    #     ⚠ La rottura attesa non è "il modello è cambiato" — i checkpoint sono
+    #     congelati — ma "l'npz è stato ricostruito": in quel caso la risposta è una
+    #     NUOVA coppia canonica, non `--allow-scaler-mismatch`.
+    # EN: sentinel on R1's artifact (2026-08-04). The canonical pair exists to give
+    #     the published band a VERIFIABLE numerator: if its scaler stops matching the
+    #     canonical one, the artifact is no longer comparable against the current npz
+    #     and the band reverts to being a statement about the protocol.
+    #     ⚠ The expected breakage is not "the model changed" — checkpoints are frozen
+    #     — but "the npz was rebuilt": the answer then is a NEW canonical pair, not
+    #     `--allow-scaler-mismatch`.
+    st = PipelineState.load(str(ROOT / "models" / "canonical_1h_vols" / "pipeline_state.pkl"))
+    out = check_model_dataset_scaler(st, ROOT / "models" / "pipeline_state.pkl")
+    assert out["matches"] is True, \
+        ("l'artefatto canonico non combacia più con l'npz: probabile rebuild del "
+         "dataset — serve una nuova coppia canonica (pre-registrata), non una via di fuga")
+    assert out["model"]["target_scale"] == 1.4268685271051726

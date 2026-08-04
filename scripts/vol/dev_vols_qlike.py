@@ -52,6 +52,23 @@ log = logging.getLogger("quantsys.script.vols_qlike")
 H = 30
 
 
+# IT: nome del report — unica fonte di verità, estratta per essere testabile senza
+#     girare il giudice. Due suffissi indipendenti, entrambi anti-clobber: la ROOT
+#     (`QUANTSYS_MODELS_ROOT`, candidato vs incumbent) e l'ARCH (dir-modello dentro
+#     `models/`, p.es. l'artefatto canonico di R1). Il path production — arch e root
+#     di default — resta il nome NUDO, quindi i report storici non si rinominano.
+# EN: report name — single source of truth, extracted to be testable without running
+#     the judge. Two independent, both anti-clobber suffixes: the ROOT
+#     (`QUANTSYS_MODELS_ROOT`, candidate vs incumbent) and the ARCH (model dir inside
+#     `models/`, e.g. R1's canonical artifact). The production path — default arch and
+#     default root — keeps the BARE name, so historical reports are never renamed.
+def report_filename(interval: str, split: str, arch: str = "itransformer",
+                    root_name: str = "models") -> str:
+    arch_sfx = f"_{arch}" if arch != "itransformer" else ""
+    root_sfx = f"_{root_name}" if root_name != "models" else ""
+    return f"qlike_report_{interval}_{split}{arch_sfx}{root_sfx}.json"
+
+
 def main():
     # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
@@ -84,10 +101,22 @@ def main():
     # EN: 2026-07-29: same EX-ANTE fix for itransformer_a10_sparsity (A10 pre-reg of
     #     28/07, models_a10_sparsity sandbox) — added before the first checkpoint
     #     exists, so the judge cannot block the run after the GPU is already spent.
+    #     2026-08-04: + canonical_1h_vols — NON è un'architettura ma la dir della
+    #     coppia canonica di R1 (`models/canonical_1h_vols`, artefatto permanente).
+    #     Il flag significa da tempo "nome della dir del modello", non "architettura":
+    #     le tre choice sopra sono anch'esse dir di sandbox. Serve perché l'artefatto
+    #     deve poter essere RI-GIUDICATO, altrimenti è un checkpoint dichiarato
+    #     riproducibile e non verificabile — cioè il difetto che R1 chiude.
+    # EN: 2026-08-04: + canonical_1h_vols — not an architecture but the directory of
+    #     R1's canonical pair (`models/canonical_1h_vols`, permanent artifact). The
+    #     flag has long meant "model directory name", not "architecture": the three
+    #     choices above are sandbox dirs too. It is needed so the artifact can be
+    #     RE-JUDGED; otherwise it is a checkpoint declared reproducible yet not
+    #     verifiable — the very defect R1 closes.
     ap.add_argument("--arch", default="itransformer",
                     choices=["itransformer", "nhits", "tcnmamba", "lstm",
                              "itransformer_regime_moe", "itransformer_a8_mixup",
-                             "itransformer_a10_sparsity"],
+                             "itransformer_a10_sparsity", "canonical_1h_vols"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
     # IT: 2026-08-01 — via di fuga ESPLICITA al guard sullo scaler (vedi sotto).
@@ -599,9 +628,17 @@ def main():
     #     2026-07-19: + sandbox suffix when QUANTSYS_MODELS_ROOT is set — candidate and
     #     incumbent runs no longer clobber each other (seen on B2/B3: the candidate
     #     report only survived in the logs). Production path (no env) UNCHANGED.
-    _root = models_root()
-    _sandbox = f"_{_root.name}" if _root.name != "models" else ""
-    out_path = out_dir / f"qlike_report_{interval}_{split}{_sandbox}.json"
+    # IT: 2026-08-04 — il suffisso ARCH è nato qui: giudicare un artefatto che vive
+    #     come cartella-arch dentro `models/` (la coppia canonica di R1) scriveva sul
+    #     nome NUDO, cioè sopra il report storico di produzione che §12.2 cita come
+    #     numero del checkpoint di giugno. La root sandbox proteggeva solo il caso
+    #     `QUANTSYS_MODELS_ROOT`. Regola in `report_filename`, test dedicati.
+    # EN: 2026-08-04 — the ARCH suffix originates here: judging an artifact living as
+    #     an arch-directory inside `models/` (R1's canonical pair) wrote to the BARE
+    #     name, i.e. over the historical production report §12.2 cites as the June
+    #     checkpoint's number. The sandbox root only covered `QUANTSYS_MODELS_ROOT`.
+    #     Rule lives in `report_filename`, with dedicated tests.
+    out_path = out_dir / report_filename(interval, split, args.arch, models_root().name)
     with open(out_path, "w", encoding="utf-8") as f:
         # IT: `provenance` (2026-08-01) — il report DEVE dire quale modello ha
         #     prodotto `metrics.nn`. Senza, un numero è orfano del modello che lo
