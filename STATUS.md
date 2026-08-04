@@ -5,7 +5,75 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-03
+## ▶️ RIPARTI DA QUI — 2026-08-04
+
+**Gate R1 ESEGUITO e CHIUSO: PASS ⓪①②③④.** La banda pubblicata ha di nuovo un numeratore verificabile. Nessuna promozione: `models/itransformer` e il VPS **intoccati**, campioni forward aperti non consumati.
+
+**Routine eseguita — exit 0**, redirezione a livello di OS. Vintage macro **`20260730` invariato**; regime B7 fresco (0 barre nuove).
+
+| Contatore | 03/08 | **04/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 14 | **15** | 20 | +1 → ~08-09/08, giudice **manuale** |
+| MFIV comparatore v2 | 27 | **28** | 40 | `--count-only`, nessun run one-shot |
+| L2 h=30 (`n_eff`) | 11.3 | **12.1** | (216) | run contiguo 511h, **nessun buco in 7g** |
+| leg opzioni | 34 | **35** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+
+### ✅ R1 — coppia canonica: PASS su tutte le condizioni pre-registrate
+
+Braccio canonico: 5 membri iTransformer, config di produzione **invariata**, 28.5 min, sandbox `models_r1_sandbox`. `best_val_nll` per seed: 0.17938 · 0.15213 · 0.16209 · 0.15415 · 0.16582 (spread ≈16%, nessun membro degenere).
+
+| | criterio | val | test |
+|---|---|---|---|
+| ⓪ | baseline cifra per cifra | HAR-RV 0.3569820080 · naive 0.7128755761 · HAR-CJ 0.3378814436 · n=6485 ✅ | HAR-RV 0.3699848058 · naive 0.7931544984 · HAR-CJ 0.3457208628 · n=6486 ✅ |
+| ① | `provenance.matches` senza via di fuga | `true` ✅ | `true` ✅ |
+| ② | gate storico (denom. **HAR-RV**) | 0.2614261407 ≤ 0.3391329076 ✅ | 0.2363669743 ≤ 0.3514855655 ✅ |
+| ③④ | materialità (denom. **HAR-C**) | **0.7757926** ≤ 0.80 ✅ | **0.6834522** ≤ 0.71 ✅ |
+
+DM nn-vs-har: val −3.975 (p=7.1e-05), test −4.782 (p=1.8e-06). Per regime su test: r0 0.24588 · r1 0.21423 · r2 0.23710 — nessun regime porta il risultato da solo.
+
+**La banda pubblicata non cambia di una cifra:** il numeratore della coppia canonica coincide **esattamente** con quello già in `TEORIA.md` §12.2 (val 0.26143, test 0.23637). Cambia lo **statuto** del claim, non il valore.
+
+**Artefatto permanente: `models/canonical_1h_vols/`** (19 MB, gitignored da `models/*`) — 5 checkpoint + `pipeline_state.pkl` + `config.json`/`calibration.json`/`history.json` + i due report del giudice + `regime_probs_1h.parquet` + `PROVENANCE.md` (legame modello↔npz, impronte di scaler, numeri, e cosa l'artefatto **non** è). Ri-giudicabile: `python scripts/vol/dev_vols_qlike.py --arch canonical_1h_vols` — verificato, riproduce 0.2614261407 con `matches=true`.
+
+### 🔬 Tre difetti trovati eseguendo R1 — nessuno era l'esperimento
+
+1. **Il guard sullo scaler era CIECO in sandbox.** `check_model_dataset_scaler` risolveva il canonico come `models_root()/pipeline_state.pkl`, e `models_root()` è env-aware: sotto `QUANTSYS_MODELS_ROOT` puntava **dentro** la sandbox, dove il canonico non esiste mai → `matches=None` e un warning, cioè **nessun controllo proprio nella modalità in cui si giudicano i candidati**, che è il suo unico caso d'uso. Fix: `canonical_state_path()` in `quantsys/utils` — canonico locale alla sandbox se esiste (esperimento con `QUANTSYS_DATASET_NPZ` proprio), altrimenti quello della root di default. Il giudice è stato **ri-eseguito su val** dopo il fix: `nn_qlike` bit-identico (0.2614261407350182), cambia solo il blocco `provenance` → il fix tocca la provenienza, non la metrica. Test: 2 nuovi, uno dei quali gira **con la env attiva** e pretende `matches is True`.
+2. **Il nome del report non conteneva l'arch → clobber silenzioso.** Giudicare `models/canonical_1h_vols` con la root di default avrebbe scritto sul nome NUDO `qlike_report_1h_val.json`, cioè **sopra il report storico di produzione** che §12.2 cita come QLIKE del checkpoint di giugno (0.27470). Il giudice sarebbe uscito 0 stampando un PASS corretto: l'unica traccia sarebbe stata un file sovrascritto con numeri plausibili. Regola estratta in `report_filename()` + `tests/test_qlike_report_naming.py` (4 test); il path production mantiene il nome nudo, quindi nessun report storico si rinomina. Non-clobber **verificato con md5** prima/dopo.
+3. **`--arch` non ammetteva l'artefatto**, che quindi sarebbe stato un checkpoint dichiarato riproducibile e **non verificabile** — il difetto che R1 esiste per chiudere. Aggiunto alla choices con il razionale: quel flag significa da tempo "nome della dir del modello", non "architettura".
+
+### ⛔ RITRATTAZIONE — «~0.2 punti di incertezza di seed-draw» è FALSO
+
+`TEORIA.md` §12.2 attribuiva lo scarto fra le due repliche note (val 0.26206 vs 0.26143) a incertezza di sorteggio RNG. **Misurato oggi: a seed, config e npz fissi il protocollo è deterministico.** R1 riproduce `c2_sandbox` alla **decima cifra su entrambi gli split** (val 0.2614261407350182, test 0.2363669742679634, delta 0.000e+00). La dispersione di ri-addestramento è **zero**; i report su disco formano due cluster deterministici — {`c2`, `a10_base`, `smear`, `r1`} e {`dm_sandbox`, `base_ext`} — e la differenza fra i due **non è rumore di seed** ma una differenza di config o di versione del codice, **non identificata**. Scritta come tale in §12.2, IT ed EN: una causa non misurata non si dichiara.
+
+⚠ **La lezione generalizza:** era una spiegazione plausibile scritta senza l'esperimento che la testava, esattamente come il "buco L2" del 02/08. Due ritrattazioni in tre giorni, stessa forma — **un'inferenza dedotta invece che misurata**.
+
+### 📌 Nota sulla cifra inferiore della banda (non toccata)
+
+Il rapporto val contro HAR-C è **0.7757926 → −22.42%**, che arrotondato al punto è **−22%**, mentre la banda pubblicata dichiara **−23%**. L'estremo inferiore viene da C2 (−22.6% contro HAR-CJ) ed è stato mantenuto al passaggio a HAR-C. La direzione dello scarto è **conservativa** (la banda dichiara meno vantaggio di quello misurato), quindi non è un'inflazione del claim e non è stata modificata qui: cambiarla è una decisione sul claim, da prendere esplicitamente.
+
+### 🔬 Braccio B (Leva B) — ESEGUITO su val: speedup OK, **adozione RESPINTA**, e il numero che conta è un altro
+
+`models_r1b_sandbox`, `batch_size: 128`, `gradient_accumulation_steps: 1`, stessi seed, stesso npz, **solo val**. Config di produzione **ripristinata subito dopo il training** (`git checkout config/default.yaml`, `git diff --exit-code` pulito, `batch_size: 64`/`ga: 2` verificati a video).
+
+| | canonico | B | condizione |
+|---|---|---|---|
+| wall-clock | 28.5 min | **17.7 min** | speedup **1.610×** ≥ 1.5 ✅ |
+| QLIKE val | 0.2614261407 | 0.2591395776 | — |
+| ratio NN/HAR-C | 0.7757926 | **0.7690141** | **\|Δ\| = 0.0067785** > 0.005 ❌ |
+
+**Adozione RESPINTA: la config di produzione resta `batch_size: 64`, `ga: 2`.** ⚠ B è *migliore* su val (QLIKE più bassa) e questo **non conta**: il ruolo dei due bracci era fissato ex-ante e sceglierlo a risultati visti sarebbe selezione sull'esito — è esattamente ciò che la pre-registrazione vietava.
+
+**Il risultato informativo è il Δ, non lo speedup.** Un knob **puramente computazionale** — dimensione del batch e accumulo del gradiente, che non cambiano né i dati, né l'architettura, né i seed — sposta il rapporto pubblicato di **0.0068**, cioè **3.5× lo scarto fra i due cluster deterministici** (0.7758 vs 0.7777 = 0.0019) che fino a ieri era attribuito al seed-draw. Messo accanto alla misura di determinismo di stamattina si ottiene una coppia di fatti complementari: **il seed non muove il rapporto (Δ=0), la config sì (Δ=0.0068)**. Non è una prova di quale config differisse fra `c2_sandbox` e `dm_sandbox` — quella resta non identificata — ma è un **meccanismo dimostrato** capace di produrre quello scarto con ampio margine, mentre il meccanismo che era stato scritto è stato falsificato.
+
+⚠ **Conseguenza sulla precisione della banda:** gli estremi vanno letti con un'incertezza di **~±0.7 punti percentuali rispetto alla scelta di configurazione di training**, non ±0.2. La banda resta invariata alla cifra pubblicata — 0.7690 e 0.7758 arrotondano entrambi a −23%/−22% nella stessa zona — ma la *fonte* dell'incertezza è cambiata: non è rumore stocastico, è **sensibilità a una scelta deterministica**, e come tale si elimina dichiarando la config invece che mediando su repliche.
+
+**Suite completa: 469 passed, 1 skipped** (47 s), config di produzione pulita.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto in scadenza. Le due sandbox `models_r1_sandbox/` e `models_r1b_sandbox/` sono **ancora su disco** (~40 MB): la prima è ridondante — il suo contenuto è stato copiato in `models/canonical_1h_vols/` e ri-giudicato da lì con esito identico — la seconda è il braccio diagnostico, già misurato. Eliminarle è il passo 5 del protocollo e **non è stato fatto**: decisione lasciata esplicita, non dimenticata. Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 15, +1/giorno), **~08-09/08, run MANUALE**. Comparatore MFIV v2 a 28/40, ~2 settimane.
+
+---
+
+## ▶️ 2026-08-03
 
 **Nessun gate in scadenza.** Sessione di monitoraggio + **ritrattazione di un fatto scritto ieri**: il "buco del recorder L2 del 02/08" non è mai esistito. Nessun modello toccato, nessun giudice eseguito, nessuna soglia sfiorata.
 
@@ -64,7 +132,7 @@ Non l'heartbeat (che guarda solo l'ultimo tick) ma la **copertura oraria sulle 4
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — R1: COPPIA CANONICA (modello ↔ npz) PER RESTITUIRE RIPRODUCIBILITÀ ALLA BANDA PUBBLICATA · 2026-08-03 · **APERTO — ESECUZIONE SCHEDULATA 2026-08-04**
+## 🎯 PRE-REGISTRAZIONE GATE — R1: COPPIA CANONICA (modello ↔ npz) PER RESTITUIRE RIPRODUCIBILITÀ ALLA BANDA PUBBLICATA · 2026-08-03 · **CHIUSO 2026-08-04 — PASS ⓪①②③④** (esito in testa; il testo sotto è la pre-registrazione **come fu scritta**, non modificata a posteriori)
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessun training lanciato, nessun numero decisionale visto. **Esecuzione confermata per il 2026-08-04**, subito dopo la routine di sessione: runbook in 7 passi nella voce «RIPARTI DA QUI» in testa. Il gate è **committato prima** del primo run che produce numeri, che è la condizione per cui esiste.
 
