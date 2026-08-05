@@ -674,7 +674,27 @@ def main():
     if _npz != Path("data/lstm_dataset.npz"):
         log.warning(f"Dataset OVERRIDE via QUANTSYS_DATASET_NPZ: {_npz}")
     data  = np.load(str(_npz), allow_pickle=True)
-    to_t  = lambda k: torch.from_numpy(data[k].astype(np.float32))
+    # IT: `copy=False` — su un membro npz GIÀ float32 `astype` restituisce lo stesso
+    #     ndarray invece di allocarne una copia, e `torch.from_numpy` ne condivide il
+    #     buffer: il picco di memoria del caricamento scende di ~2.42 GiB sul dataset
+    #     di produzione, bit-identico. ⚠ È sicuro SOLO perché `NpzFile.__getitem__`
+    #     materializza un array fresco e non condiviso a ogni accesso — altrimenti il
+    #     `clamp_` IN-PLACE poche righe sotto muterebbe stato condiviso e una rilettura
+    #     della stessa chiave darebbe dati già clippati, in silenzio. Quell'ipotesi non
+    #     è assunta: è inchiodata da `tests/test_npz_load_aliasing.py`, che cade se una
+    #     versione futura di numpy inizia a cachare o a mappare i membri, e che verifica
+    #     anche che nessuna chiave `to_t` venga riletta altrove nel file.
+    # EN: `copy=False` — on an ALREADY-float32 npz member `astype` returns the same
+    #     ndarray instead of allocating a copy, and `torch.from_numpy` shares its
+    #     buffer: load-time peak memory drops by ~2.42 GiB on the production dataset,
+    #     bit-identically. ⚠ This is safe ONLY because `NpzFile.__getitem__`
+    #     materialises a fresh, unshared array on every access — otherwise the IN-PLACE
+    #     `clamp_` a few lines below would mutate shared state and a re-read of the same
+    #     key would silently return already-clipped data. That assumption is not
+    #     assumed: it is pinned by `tests/test_npz_load_aliasing.py`, which fails if a
+    #     future numpy starts caching or memory-mapping members, and which also checks
+    #     that no `to_t` key is re-read elsewhere in this file.
+    to_t  = lambda k: torch.from_numpy(data[k].astype(np.float32, copy=False))
 
     X_tr, y_tr = to_t("X_train"), to_t("y_train")
     X_vl, y_vl = to_t("X_val"),   to_t("y_val")

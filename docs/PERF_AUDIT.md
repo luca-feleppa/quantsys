@@ -557,9 +557,15 @@ Le elenco per completezza, con la ragione per cui **non** vale la pena toccarle:
 - `create_windows` valuta `np.isnan(wins).any(axis=(1,2))` sulla **vista espansa** (3.3 GB, ogni
   barra riletta 120 volte) quando la maschera NaN è calcolabile sulla matrice `(66k, 104)` prima
   dell'espansione. Costa una frazione dei 4.31 s — ma vedi §6.4, il punto vero è la materializzazione.
-- `02_train.py` fa `X_tr.clamp(...)` creando una **copia completa** dei tensori train/val/test
-  (~3.3 GB transitori su 15.9 GB di RAM). `clamp_` in-place eviterebbe il picco. Non è tempo, è
-  memoria — e non ho osservato swap.
+- ~~`02_train.py` fa `X_tr.clamp(...)` creando una **copia completa** dei tensori train/val/test
+  (~3.3 GB transitori su 15.9 GB di RAM). `clamp_` in-place eviterebbe il picco.~~ **APPLICATO il
+  2026-08-02** (`f36b406`, −2.59 GB di picco). **Completato il 2026-08-05:** l'altra metà dello stesso
+  picco era `astype(np.float32)` in `to_t()`, che copiava ogni membro npz già float32 — ora
+  `astype(np.float32, copy=False)`, **−2.42 GiB**, bit-identico. ⚠ Le due modifiche sono sicure solo
+  **insieme e in quest'ordine di ragionamento**: `copy=False` restituisce lo stesso ndarray del membro
+  npz, quindi è il `clamp_` in-place a scriverci sopra — l'invariante che rende l'insieme corretto è
+  che `NpzFile.__getitem__` materializzi un array fresco a ogni accesso, ed è inchiodato da
+  `tests/test_npz_load_aliasing.py` (7 test) invece di essere assunto.
 - `_vp_single` accumula in **dict Python** indicizzati da intero (`poc_dist_sampled[i] = ...`) per poi
   riconvertirli in array con `np.array(sorted(dict.keys()))`. Un array pre-allocato + maschera
   eviterebbe dict e sort. Vale una frazione di 1.32 s.

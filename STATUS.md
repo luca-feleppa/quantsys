@@ -57,6 +57,41 @@ Pre-registrato e eseguito lo stesso giorno, su conferma esplicita. `02_train.py`
 
 **Limiti dichiarati, non chiusi.** (i) Il controllo positivo è **sintetico**: V1 non esiste più e ricostruirlo richiederebbe `01b`, cioè riscrivere l'npz congelato — dimostrato che il guard separa due blocchi macro diversi, **non** che avrebbe intercettato quell'evento. (ii) I tre modelli pre-M1 (`itransformer`, `backup_1h_vols`, `canonical_1h_vols`) restano `matches: null` per sempre: è un fatto sulla loro provenienza, non un difetto da mascherare. **Da qui in avanti** ogni modello nuovo nasce con l'impronta.
 
+### 🧹 Coda del 02/08 svuotata — i due item lasciati non implementati
+
+**① `astype(copy=False)` in `02_train.py` — APPLICATO.** `to_t()` copiava ogni membro npz già float32; ora restituisce lo stesso ndarray e `torch.from_numpy` ne condivide il buffer: **−2.42 GiB di picco**, bit-identico. È la seconda metà dello stesso picco di cui il `clamp_` in-place (`f36b406`, 02/08) era la prima — e le due modifiche sono corrette **solo insieme**: `copy=False` fa sì che il `clamp_` scriva direttamente sul membro npz, quindi tutto poggia sull'invariante che `NpzFile.__getitem__` materializzi un array fresco a ogni accesso. Quell'invariante **non è assunta**: la inchiodano i 7 test di `tests/test_npz_load_aliasing.py`, scritti il 02/08 proprio per rendere applicabile questa riga, che cadono se una numpy futura inizia a cachare o a mappare i membri, e che verificano anche che nessuna chiave `to_t` sia riletta altrove nel file (una rilettura post-clamp restituirebbe dati già clippati, in silenzio). Suite verde, `PERF_AUDIT.md` §7.4 riallineato da "non implementato" ad "applicato".
+
+**② Guard di fit del regime — ESERCITATO su dati reali, `fail_ratio` = 0.000.** L'item era l'unico dei due con un rischio vero, e non era quello che sembrava: il guard del 02/08 aborta il walk-forward se la frazione di fit Markov-Switching falliti supera `max_fit_failure_ratio` (default 0.5), ma **quel tasso non era mai stato misurato su dati veri** — solo su serie sintetiche. Una soglia di abort mai vista in campo è essa stessa un rischio di **disponibilità**: se i fit reali fallissero abitualmente sopra il 50%, il guard introdotto per proteggere un rebuild lo renderebbe impossibile, e lo si scoprirebbe solo al prossimo full rebuild da 3 ore.
+
+Misurato con una probe **read-only** (nessuna scrittura di `regime_probs.parquet` né di `regime_hmm.pkl`): walk-forward sul path di produzione, **2 anni di candele reali** (17.520 ore, 2024-08-02 → 2026-08-02), cadenza di produzione letta da config (burn-in 30gg, retrain 90gg).
+
+| | valore |
+|---|---|
+| fit tentati / riusciti | **8 / 8** |
+| `fail_ratio` | **0.000** |
+| soglia di abort | 0.5 → **margine 0.5** |
+| copertura probabilità filtrate | **100.0%** (16.800/16.800) |
+| PCA var. spiegata | 63.3% (PC1), stabile 74%→64% sui refit |
+| wall-clock | 15.3 min (coerente con le ~3h **[D]** dichiarate per i 7 anni, mai cronometrate) |
+
+`last_fit_diagnostics` letto a fine run: `{'fit_attempts': 8, 'fit_ok': 8, 'fail_ratio': 0.0, 'coverage': 1.0, 'n_steps': 16800}`.
+
+`last_fit_diagnostics` risulta **popolato su un run reale**, non solo nei test sintetici — che era l'altra metà dell'item. ⚠ **Limite dichiarato:** la probe copre 2 anni, non i 7 del full rebuild, e i fit più difficili sono per costruzione quelli su finestra corta — che qui sono inclusi (il primo refit è a t=720h) e sono passati. Resta non misurato il comportamento sui refit di finestra molto lunga, dove però il problema atteso è il **tempo**, non la convergenza.
+
+### ⛔ Refresh macro — NON eseguito, e non è una dimenticanza
+
+Era il primo dei tre item richiesti; l'ho fermato sulla condizione «se non ci sono problemi», perché un problema c'è ed è quello che il manifesto vieta per iscritto: **non rinfrescare la macro dentro un campione forward pre-registrato.** Oggi ce ne sono **due aperti che dipendono dall'input del modello**, non uno:
+
+| campione | stato | dipende dalla macro? |
+|---|---|---|
+| hedged vs unhedged | 16/20, ~09/08 | **sì** — le decisioni di `04b` dipendono dal forecast, che ha la macro in input |
+| **E1 stadio 2** | **0/40**, ~10/09 | **sì** — il predittore `x_i = log(rv_pred/var_iv)` è **letto** da `forecasts.parquet`, cioè prodotto da `04b` |
+| MFIV comparatore v2 | 29/40, ~16/08 | no — deriva dal chain IV, è model-independent |
+
+Il caso grave è **E1 stadio 2**: è a **0/40** e accumula per le prossime ~5 settimane. Promuovere un vintage macro oggi spaccherebbe quel campione **a metà** fra due normalizzazioni diverse — e non di poco, perché il `MacroNormalizer` è rifittato **whole-df**, quindi un refresh cambia i valori macro **anche delle righe storiche**. Sarebbe la prima osservazione di uno stadio confermativo raccolta sotto un input che non è quello sotto cui si raccoglieranno le altre 39. ⚠ Ed è **irreversibile nel senso che conta**: il vintage si può ri-puntare indietro, le osservazioni forward già raccolte no.
+
+**Finestra pulita: dopo ~10/09**, alla chiusura di E1 stadio 2 — oppure prima, ma solo come decisione esplicita di **chiudere o sacrificare** un campione, che è una scelta scientifica e non un'operazione di manutenzione. Il vintage `20260730` intanto invecchia di 6 giorni: è un costo reale, ed è il costo giusto da pagare.
+
 **▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto, nessuno in scadenza. Stato production **intatto**: `config/default.yaml` pulito, nessuna sandbox creata, `models/itransformer` e VPS non toccati, npz congelato (nessun `01`/`01b`/`macro_append` lanciato). Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 16, +1/giorno), **~09/08, run MANUALE**. Comparatore MFIV v2 a 29/40, ~11 giorni al ritmo corrente. ⚠ **Nota per il prossimo training, qualunque esso sia:** sarà il primo a nascere con l'impronta macro `measured` — se il giudice stampasse `MACRO VINTAGE MISMATCH` significa che l'npz è stato rigenerato fra train e giudizio, e la risposta è riaddestrare, non la via di fuga.
 
 ---
