@@ -1626,6 +1626,32 @@ def main():
                     f"Rilancia scripts/01_download_data.py per rigenerarlo."
                 )
         state.set_model_config(cfg_out)
+        # IT: M1 — registra l'impronta del VINTAGE MACRO dell'npz appena consumato.
+        #     È l'unico momento in cui la coppia modello↔macro è nota per costruzione:
+        #     dopo, `01b` può riscrivere `X_macro_*` senza toccare né i pesi né lo
+        #     scaler dei prezzi, e nulla lo segnalerebbe. Fonte "measured" perché
+        #     calcolata sull'array effettivamente letto, non dedotta da una data.
+        # EN: M1 — record the fingerprint of the MACRO VINTAGE of the npz just used.
+        #     This is the only moment when the model↔macro pairing is known by
+        #     construction: afterwards `01b` may rewrite `X_macro_*` without touching
+        #     the weights or the price scaler, and nothing would flag it. Source is
+        #     "measured" since it is computed on the array actually read, not inferred
+        #     from a date.
+        try:
+            from quantsys.utils import macro_fingerprint
+            _mfp = macro_fingerprint(data)
+            state.macro_vintage_fp = _mfp
+            state.macro_vintage_fp_source = "measured" if _mfp is not None else None
+            if _mfp is not None:
+                log.info(f"impronta vintage macro registrata: "
+                         f"n_macro={_mfp.get('n_macro_features')} "
+                         f"train_md5={_mfp['splits']['X_macro_train']['md5'][:12]}")
+        except Exception as _e:
+            # IT: non bloccante — un'impronta mancante degrada a "non verificabile",
+            #     mai a "verificato". Rompere il training per un md5 sarebbe sproporzionato.
+            # EN: non-blocking — a missing fingerprint degrades to "not verifiable",
+            #     never to "verified". Breaking training over an md5 would be disproportionate.
+            log.warning(f"impronta vintage macro non calcolata (non critico): {_e}")
         state.save(str(_ps_path))
 
     # IT: copia best_model + PipelineState nella exp dir (senza scaler il ckpt è inutile)

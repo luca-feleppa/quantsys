@@ -7,7 +7,7 @@
 
 ## ▶️ RIPARTI DA QUI — 2026-08-05
 
-**Giornata senza gate, come previsto.** Nessun contatore in soglia, nessun giudice eseguito, nessun modello toccato, **zero GPU**. Fatte due cose: la routine, e la ri-espressione della banda pubblicata alla precisione dell'artefatto canonico. Scritta inoltre la pre-registrazione **M1** (§ sotto), **non eseguita**.
+**Giornata senza gate in scadenza, chiusa con un gate in più.** Nessun contatore in soglia, nessun modello riaddestrato, **zero GPU**. Tre cose: la routine, la ri-espressione della banda pubblicata alla precisione dell'artefatto canonico, e la pre-registrazione **M1** — scritta, confermata ed **eseguita in giornata: PASS ⓪①②③④**. I due giudici lanciati sono riproduzioni su modello e npz congelati, non statistiche di decisione.
 
 **Routine eseguita — exit 0**, redirezione a livello di OS. Vintage macro **`20260730` invariato**; regime B7 fresco (0 barre nuove); 4 collector VPS freschi (IV 0.1h · L2 0.0h · trades 0.2h · `04b` 1.9h).
 
@@ -37,11 +37,31 @@ La correzione dell'estremo superiore **non era stata chiesta e non era stata seg
 
 Propagato in: `TEORIA.md` §12.2 (titolo IT+EN, paragrafo DM, paragrafo di provenienza, **nuovo paragrafo «Precisione della banda» IT+EN**), `README.md` §5.1 (IT+EN), commento di intestazione di `tests/test_har_c_baseline.py`, § STATO NOTO del manifesto. **NON toccati i record datati** — le voci C2 (30/07) e C3 (31/07) di `TEORIA.md`, `CHANGELOG.md` e `RIPRESA.md` dicono quale banda fu decisa *allora* ed erano vere quando furono scritte: un diario non si riscrive. Il titolo di §12.2 dichiara la ri-espressione e la data, ed è la prima riga che si legge.
 
-**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate in scadenza. **M1 è pre-registrato e NON eseguito** — attende conferma esplicita, e non ha fretta: costa zero GPU e non è bloccante per nulla. Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 16, +1/giorno), **~09/08, run MANUALE**. Comparatore MFIV v2 a 29/40, ~11 giorni al ritmo corrente.
+### ✅ M1 — impronta di vintage macro: ESEGUITO e CHIUSO, PASS ⓪①②③④ (zero GPU)
+
+Pre-registrato e eseguito lo stesso giorno, su conferma esplicita. `02_train.py` registra ora nel `PipelineState` l'impronta del blocco macro dell'npz **effettivamente consumato** (md5 per split di `X_macro_*` + ordine e conteggio colonne + dtype, fonte `measured`); i **tre** giudici vol la ri-calcolano sull'npz corrente e fail-fastano, con `--allow-macro-mismatch` tenuta **separata** da quella dello scaler perché i due assi sono indipendenti.
+
+| | criterio | esito |
+|---|---|---|
+| ⓪ | inerzia del numeratore pubblicato, **entrambi** gli split | **118 chiavi comuni, 0 differenze numeriche** vs i report archiviati di R1 ✅ |
+| ① | controllo positivo (cella singola · riordino colonne · dtype · end-to-end) | il guard scatta in tutti i casi ✅ |
+| ② | nessun `null` confuso con "verificato" | i 3 model dir pre-M1 → `matches: null` ✅ |
+| ③ | path live irraggiungibile dal fail-fast | grep **+** test parametrico su 4 file ✅ |
+| ④ | suite | **490 passed / 1 skipped**, nessun golden ri-allineato ✅ |
+
+⓪ nel dettaglio: le sole due differenze su 118 chiavi sono `provenance.arch` e `provenance.model_dir` — R1 giudicò la sandbox, oggi si giudica la dir dell'artefatto. 18 chiavi nuove, **tutte** sotto `provenance.macro`; zero chiavi perse. `nn` val `0.26142614073501824` e test `0.23636697426796344`, identici all'archivio.
+
+⚠ **La costante che avevo pre-registrato per ⓪ era sbagliata di 1 ULP.** Avevo scritto `0.2614261407350182` (16 cifre), trascritta dalla **prosa** di STATUS.md; il valore vero è `0.26142614073501824`. Non ho interpretato il delta di 5.6e−17: ho confrontato contro i **report archiviati in `models/canonical_1h_vols/`**, che sono il record macchina pre-patch, e lì il delta è **esattamente 0**. Lezione operativa: una costante di gate va copiata dal **JSON**, non dal testo che la racconta — la prosa arrotonda e nessuno se ne accorge finché non la si usa come soglia di identità.
+
+**⚠ Una conseguenza pre-dichiarata NON è stata eseguita, di proposito: il backfill dell'impronta sull'artefatto canonico.** La pre-registrazione lo prevedeva come punto 3 del PASS, marcato `declared`. Eseguendolo è emerso che **non porta evidenza**: un'impronta ricalcolata oggi dall'npz corrente combacia **per costruzione** — è confrontata con la cosa stessa da cui è stata derivata. L'unico effetto sarebbe convertire un onesto `null` in un rassicurante `IDENTICO (fonte: declared)`, cioè **la condizione ② violata passando dalla porta principale**. Ho quindi fatto **meno** di quanto la pre-registrazione autorizzasse, mai di più, e l'ho scritto: la provenienza macro dell'artefatto resta la riga datata di `PROVENANCE.md`, che è una dichiarazione e si legge come tale. ⚠ Non è goalpost-moving — le soglie erano tutte verdi prima di questa decisione, che riguarda un **premio** del PASS e non un criterio.
+
+**Limiti dichiarati, non chiusi.** (i) Il controllo positivo è **sintetico**: V1 non esiste più e ricostruirlo richiederebbe `01b`, cioè riscrivere l'npz congelato — dimostrato che il guard separa due blocchi macro diversi, **non** che avrebbe intercettato quell'evento. (ii) I tre modelli pre-M1 (`itransformer`, `backup_1h_vols`, `canonical_1h_vols`) restano `matches: null` per sempre: è un fatto sulla loro provenienza, non un difetto da mascherare. **Da qui in avanti** ogni modello nuovo nasce con l'impronta.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto, nessuno in scadenza. Stato production **intatto**: `config/default.yaml` pulito, nessuna sandbox creata, `models/itransformer` e VPS non toccati, npz congelato (nessun `01`/`01b`/`macro_append` lanciato). Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 16, +1/giorno), **~09/08, run MANUALE**. Comparatore MFIV v2 a 29/40, ~11 giorni al ritmo corrente. ⚠ **Nota per il prossimo training, qualunque esso sia:** sarà il primo a nascere con l'impronta macro `measured` — se il giudice stampasse `MACRO VINTAGE MISMATCH` significa che l'npz è stato rigenerato fra train e giudizio, e la risposta è riaddestrare, non la via di fuga.
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — M1: ESTENDERE L'IMPRONTA DI IDENTITÀ TRAIN↔INFERENCE AL VINTAGE MACRO DELL'NPZ · 2026-08-05 · **APERTO, MAI ESEGUITO**
+## 🎯 PRE-REGISTRAZIONE GATE — M1: ESTENDERE L'IMPRONTA DI IDENTITÀ TRAIN↔INFERENCE AL VINTAGE MACRO DELL'NPZ · 2026-08-05 · **CHIUSO 2026-08-05 — PASS ⓪①②③④** (esito in testa; il testo sotto è la pre-registrazione **come fu scritta**, non modificata a posteriori)
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessuna patch applicata, nessun giudice rilanciato, nessun numero visto. Attende conferma esplicita.
 

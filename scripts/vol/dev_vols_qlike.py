@@ -131,6 +131,14 @@ def main():
                     help="procedi anche se lo scaler del modello ≠ scaler del dataset: "
                          "il numero NON è confrontabile con gli altri report / proceed even "
                          "if the model scaler ≠ dataset scaler: the number is NOT comparable")
+    # IT: M1 — via di fuga SEPARATA da quella dello scaler, di proposito: sono due assi
+    #     di vintage indipendenti e accettarne uno non deve accettare l'altro in silenzio.
+    # EN: M1 — escape hatch kept SEPARATE from the scaler one on purpose: they are two
+    #     independent vintage axes, and accepting one must not silently accept the other.
+    ap.add_argument("--allow-macro-mismatch", action="store_true",
+                    help="procedi anche se il vintage macro del modello ≠ quello dell'npz: "
+                         "il numero NON è confrontabile / proceed even if the model's macro "
+                         "vintage ≠ the npz's: the number is NOT comparable")
     args = ap.parse_args()
 
     # IT: root env-aware (QUANTSYS_MODELS_ROOT) — giudica la sandbox isolata se attiva.
@@ -322,6 +330,8 @@ def main():
     prov = assert_model_dataset_scaler(ps, model_dir=model_dir, arch=args.arch,
                                        npz=dataset_npz_path(),
                                        allow_mismatch=args.allow_scaler_mismatch,
+                                       npz_arrays=d,
+                                       allow_macro_mismatch=args.allow_macro_mismatch,
                                        logger=log)
 
     X = torch.tensor(d[f"X_{split}"], dtype=torch.float32)

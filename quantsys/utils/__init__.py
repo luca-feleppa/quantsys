@@ -300,6 +300,20 @@ class PipelineState:
         self.dataset_end:         Optional[str]  = None
         self.n_train_samples:     Optional[int]  = None
         self.interval:            Optional[str]  = None
+        # IT: impronta del VINTAGE MACRO dell'npz su cui il modello è stato addestrato
+        #     (M1, 2026-08-05). `None` sui modelli anteriori a M1 → "non verificabile",
+        #     che non è "verificato uguale". `_source` distingue "measured" (calcolata
+        #     dall'npz durante il training) da "declared" (backfill documentale, non
+        #     dimostrabile): un backfill spacciato per misura sarebbe un'inferenza
+        #     scritta come se fosse un dato.
+        # EN: fingerprint of the MACRO VINTAGE of the npz the model was trained on
+        #     (M1, 2026-08-05). `None` on pre-M1 models → "not verifiable", which is
+        #     not "verified equal". `_source` separates "measured" (computed from the
+        #     npz during training) from "declared" (documentary backfill, not
+        #     provable): a backfill passed off as a measurement would be an inference
+        #     written as if it were data.
+        self.macro_vintage_fp:        Optional[dict] = None
+        self.macro_vintage_fp_source: Optional[str]  = None
 
     # IT: Copia scaler + config dual-stream dal FeatureBuilder.
     # EN: Copies scalers + dual-stream config from the FeatureBuilder.
@@ -689,9 +703,112 @@ def check_model_dataset_scaler(model_state: "PipelineState",
     return out
 
 
+# ──────────── identità del VINTAGE MACRO modello↔dataset (M1, 2026-08-05) ────────────
+# IT: IL SECONDO ASSE DI VINTAGE, scoperto il 2026-08-04. Il guard sopra copre il
+#     RobustScaler dei PREZZI e `target_scale`; la normalizzazione MACRO non è
+#     coperta e non può esserlo con lo stesso meccanismo, perché non vive nel
+#     `PipelineState` canonico (`01_download_data` lo scrive PRIMA che `01b` esista;
+#     il `MacroNormalizer` finisce in `models/lstm/pipeline_state.pkl` per il
+#     routing di `01b`). Il confronto è quindi modello ↔ NPZ, non modello ↔ canonico.
+#     Meccanismo: `01b_download_macro.py` ricarica gli split e sostituisce SOLO
+#     `X_macro_{split}`, lasciando intatti `X_*`, `y_*`, `t_*`, e rifitta il
+#     `MacroNormalizer` WHOLE-DF — quindi allungare la serie sposta mediana e IQR e
+#     cambia i valori macro anche delle righe storiche. La macro è INPUT del modello
+#     (90 colonne, embedding attivo) ma non entra in nessuna baseline HAR, che
+#     leggono solo RV/target: da qui la firma osservata, il NN che si sposta e le
+#     baseline identiche cifra per cifra. Scarto misurato sul rapporto pubblicato:
+#     0.0019 — invisibile a `matches: true`, che guarda solo i prezzi.
+# EN: THE SECOND VINTAGE AXIS, found on 2026-08-04. The guard above covers the PRICE
+#     RobustScaler and `target_scale`; MACRO normalization is not covered and cannot
+#     be, by the same mechanism, since it does not live in the canonical
+#     `PipelineState` (`01_download_data` writes it BEFORE `01b` runs; the
+#     `MacroNormalizer` ends up in `models/lstm/pipeline_state.pkl` for `01b`
+#     routing). The comparison is therefore model ↔ NPZ, not model ↔ canonical.
+#     Mechanism: `01b_download_macro.py` reloads the splits and replaces ONLY
+#     `X_macro_{split}`, leaving `X_*`, `y_*`, `t_*` untouched, and refits the
+#     `MacroNormalizer` WHOLE-DF — so extending the series shifts median and IQR and
+#     changes macro values for historical rows too. Macro is a model INPUT (90
+#     columns, embedding active) but enters no HAR baseline, which read RV/target
+#     only: hence the observed signature, the NN moving while baselines stay
+#     identical digit for digit. Measured gap on the published ratio: 0.0019 —
+#     invisible to `matches: true`, which only looks at prices.
+def macro_fingerprint(npz: Any) -> Optional[dict]:
+    # IT: impronta del blocco macro DENTRO l'npz. Si impronta l'ARRAY che il modello
+    #     ha consumato, non i parametri del `MacroNormalizer`: quelli nel canonico non
+    #     ci sono affatto, e confrontarli col normalizer del modello stesso sarebbe
+    #     circolare. ⚠ La pre-registrazione M1 fissava il solo `X_macro_train`; qui
+    #     sono impronti TUTTI gli split presenti — strettamente più forte, costo
+    #     identico (X_macro è 2D `(n, 90)` float32, non 3D come `X`), e chiude il caso
+    #     di bordo in cui un rifit lasci train invariato a precisione float32 e muova
+    #     val/test. Il dtype entra nell'impronta: due array uguali a valori ma di
+    #     dtype diverso NON sono lo stesso input per la rete.
+    # EN: fingerprint of the macro block INSIDE the npz. It fingerprints the ARRAY the
+    #     model consumed, not the `MacroNormalizer` parameters: those are absent from
+    #     the canonical state, and comparing them against the model's own normalizer
+    #     would be circular. ⚠ M1's pre-registration fixed `X_macro_train` alone; here
+    #     ALL present splits are fingerprinted — strictly stronger, identical cost
+    #     (X_macro is 2D `(n, 90)` float32, not 3D like `X`), and it closes the corner
+    #     case where a refit leaves train unchanged at float32 precision but moves
+    #     val/test. dtype is part of the fingerprint: two arrays equal in value but of
+    #     different dtype are NOT the same input to the network.
+    import hashlib
+    import numpy as _np
+    if isinstance(npz, (str, Path)):
+        npz = _np.load(str(npz), allow_pickle=True)
+    keys = list(getattr(npz, "files", None) or list(npz.keys()))
+    splits = [k for k in ("X_macro_train", "X_macro_val", "X_macro_test") if k in keys]
+    # IT: nessun blocco macro → None = "non c'è", che NON è "combacia".
+    # EN: no macro block → None = "absent", which is NOT "matches".
+    if not splits:
+        return None
+    fp: dict = {"n_macro_features": None, "names_md5": None, "splits": {}}
+    if "n_macro_features" in keys:
+        try:
+            fp["n_macro_features"] = int(_np.asarray(npz["n_macro_features"]).ravel()[0])
+        except Exception:
+            pass
+    # IT: l'ORDINE delle colonne macro fa parte del vintage: stesse colonne in ordine
+    #     diverso sono un input diverso per un embedding posizionale.
+    # EN: macro column ORDER is part of the vintage: the same columns in a different
+    #     order are a different input to a positional embedding.
+    if "macro_feature_names" in keys:
+        names = [str(x) for x in _np.asarray(npz["macro_feature_names"]).ravel().tolist()]
+        fp["names_md5"] = hashlib.md5("\x00".join(names).encode("utf-8")).hexdigest()
+    for k in splits:
+        a = _np.ascontiguousarray(npz[k])
+        fp["splits"][k] = {"md5": hashlib.md5(a.tobytes()).hexdigest(),
+                           "shape": list(a.shape), "dtype": str(a.dtype)}
+    return fp
+
+
+def check_model_dataset_macro(model_state: "PipelineState", npz_arrays: Any) -> dict:
+    # IT: confronta l'impronta macro REGISTRATA NEL MODELLO al training con quella
+    #     dell'npz corrente. Come il guard sui prezzi non solleva: ritorna provenienza.
+    #     ⚠ `matches=None` = "non verificabile" e NON deve mai diventare True. I
+    #     modelli addestrati prima di M1 non hanno l'impronta: sono `None` per sempre,
+    #     ed è un fatto sulla loro provenienza, non un difetto da mascherare.
+    # EN: compares the macro fingerprint RECORDED IN THE MODEL at training time with
+    #     the current npz's. Like the price guard it does not raise: it returns
+    #     provenance. ⚠ `matches=None` = "not verifiable" and must never become True.
+    #     Models trained before M1 carry no fingerprint: they stay `None` forever, and
+    #     that is a fact about their provenance, not a defect to paper over.
+    out = {"model": getattr(model_state, "macro_vintage_fp", None),
+           "model_fp_source": getattr(model_state, "macro_vintage_fp_source", None) or None,
+           "dataset": None, "matches": None}
+    if npz_arrays is None:
+        return out
+    out["dataset"] = macro_fingerprint(npz_arrays)
+    if out["model"] is None or out["dataset"] is None:
+        return out
+    out["matches"] = bool(out["model"] == out["dataset"])
+    return out
+
+
 def assert_model_dataset_scaler(model_state: "PipelineState", *, model_dir: Any,
                                 arch: str = "", npz: Any = "",
                                 allow_mismatch: bool = False,
+                                npz_arrays: Any = None,
+                                allow_macro_mismatch: bool = False,
                                 logger: Any = None) -> dict:
     # IT: check + log + raise in un solo punto, e ritorna il blocco di provenienza
     #     da scrivere nel report. Esiste come funzione unica perche' i call-site
@@ -723,11 +840,15 @@ def assert_model_dataset_scaler(model_state: "PipelineState", *, model_dir: Any,
         log.warning(f"scaler canonico assente ({prov['canonical_path']}): identita' "
                     f"modello<->dataset NON verificabile / canonical scaler absent: "
                     f"model<->dataset identity NOT verifiable")
-        return prov
+        return _assert_macro_vintage(model_state, prov, npz_arrays=npz_arrays,
+                                     model_dir=model_dir, npz=npz,
+                                     allow_mismatch=allow_macro_mismatch, log=log)
     if prov["matches"]:
         log.info(f"scaler modello<->dataset: IDENTICO (target_scale="
                  f"{prov['model']['target_scale']}) / model<->dataset scaler: IDENTICAL")
-        return prov
+        return _assert_macro_vintage(model_state, prov, npz_arrays=npz_arrays,
+                                     model_dir=model_dir, npz=npz,
+                                     allow_mismatch=allow_macro_mismatch, log=log)
     msg = (f"SCALER MISMATCH modello<->dataset — il modello in {model_dir} e' stato "
            f"addestrato sotto uno scaler diverso da quello con cui e' stato costruito {npz}.\n"
            f"  modello  : target_scale={prov['model']['target_scale']} "
@@ -742,5 +863,57 @@ def assert_model_dataset_scaler(model_state: "PipelineState", *, model_dir: Any,
         raise RuntimeError(msg)
     log.warning(msg)
     log.warning("--allow-scaler-mismatch attivo: report marcato NON confrontabile / "
+                "active: report flagged NOT comparable")
+    return _assert_macro_vintage(model_state, prov, npz_arrays=npz_arrays,
+                                 model_dir=model_dir, npz=npz,
+                                 allow_mismatch=allow_macro_mismatch, log=log)
+
+
+def _assert_macro_vintage(model_state: "PipelineState", prov: dict, *, npz_arrays: Any,
+                          model_dir: Any, npz: Any, allow_mismatch: bool, log: Any) -> dict:
+    # IT: secondo stadio del guard (M1). Gira SEMPRE, anche quando lo scaler è
+    #     "non verificabile" o è stato dichiarato incomparabile: i due assi di
+    #     vintage sono indipendenti e uno spento non deve spegnere l'altro.
+    #     Arricchisce `prov` con il blocco `macro` e fail-fasta sul mismatch.
+    #     ⚠ Se `npz_arrays` è None il controllo NON è stato richiesto dal chiamante:
+    #     resta `None` e viene detto nel report — mai silenzio, mai True.
+    # EN: the guard's second stage (M1). It ALWAYS runs, even when the scaler is
+    #     "not verifiable" or has been declared incomparable: the two vintage axes
+    #     are independent and switching one off must not switch off the other.
+    #     It enriches `prov` with the `macro` block and fails fast on a mismatch.
+    #     ⚠ If `npz_arrays` is None the check was not requested by the caller: it
+    #     stays `None` and the report says so — never silence, never True.
+    m = check_model_dataset_macro(model_state, npz_arrays)
+    m["allow_macro_mismatch"] = bool(allow_mismatch)
+    prov["macro"] = m
+    if m["matches"] is None:
+        if npz_arrays is not None:
+            why = ("il modello non porta l'impronta macro (addestrato prima di M1)"
+                   if m["model"] is None else "l'npz non contiene un blocco macro")
+            log.warning(f"vintage macro NON verificabile: {why} / macro vintage NOT "
+                        f"verifiable — provenance recorded as null, not as a match")
+        return prov
+    if m["matches"]:
+        log.info(f"vintage macro modello<->dataset: IDENTICO "
+                 f"(n_macro={m['dataset'].get('n_macro_features')}, "
+                 f"fonte impronta={m['model_fp_source'] or '?'}) / macro vintage: IDENTICAL")
+        return prov
+    _md = (m["model"] or {}).get("splits", {}).get("X_macro_train", {}).get("md5") or "?"
+    _dd = (m["dataset"] or {}).get("splits", {}).get("X_macro_train", {}).get("md5") or "?"
+    msg = (f"MACRO VINTAGE MISMATCH modello<->dataset — il modello in {model_dir} e' stato "
+           f"addestrato su un blocco macro diverso da quello dentro {npz}.\n"
+           f"  modello  : X_macro_train md5={_md[:12]} (fonte impronta: "
+           f"{m['model_fp_source'] or '?'})\n"
+           f"  dataset  : X_macro_train md5={_dd[:12]}\n"
+           f"  La macro e' INPUT del modello ma non entra in nessuna baseline HAR: il NN si\n"
+           f"  sposta e le baseline restano identiche cifra per cifra, quindi il confronto\n"
+           f"  sembra sano ed e' cross-vintage. Scarto misurato su un caso reale: 0.0019 sul\n"
+           f"  rapporto pubblicato.\n"
+           f"  Riaddestra sull'npz corrente, oppure dichiara l'incomparabilita' con "
+           f"--allow-macro-mismatch.")
+    if not allow_mismatch:
+        raise RuntimeError(msg)
+    log.warning(msg)
+    log.warning("--allow-macro-mismatch attivo: report marcato NON confrontabile / "
                 "active: report flagged NOT comparable")
     return prov

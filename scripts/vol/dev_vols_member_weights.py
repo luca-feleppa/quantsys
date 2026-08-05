@@ -57,6 +57,10 @@ def main():
                     help="procedi anche se lo scaler del modello != scaler del dataset: "
                          "il numero NON e' confrontabile / proceed even if the model "
                          "scaler != dataset scaler: the number is NOT comparable")
+    # IT/EN: M1 — secondo asse di vintage (macro), via di fuga separata.
+    ap.add_argument("--allow-macro-mismatch", action="store_true",
+                    help="procedi anche se il vintage macro del modello != quello dell'npz "
+                         "/ proceed even if the model macro vintage != the npz's")
     args = ap.parse_args()
     model_dir = models_root() / args.arch
     log.info(f"dir modelli effettiva / effective model dir: {model_dir} (arch={args.arch})")
@@ -105,7 +109,9 @@ def main():
     from quantsys.utils import assert_model_dataset_scaler, dataset_npz_path
     assert_model_dataset_scaler(ps, model_dir=model_dir, arch=args.arch,
                                 npz=dataset_npz_path(),
-                                allow_mismatch=args.allow_scaler_mismatch, logger=log)
+                                allow_mismatch=args.allow_scaler_mismatch,
+                                npz_arrays=d,
+                                allow_macro_mismatch=args.allow_macro_mismatch, logger=log)
 
 
     X = torch.tensor(d[f"X_{split}"], dtype=torch.float32)
