@@ -8,7 +8,7 @@
 #     fuori campione; (b) l'IDENTITÀ del campione fra le tre baseline, che il
 #     confronto appaiato richiede; (c) il NON-LEAKAGE strutturale dei coefficienti;
 #     (d) l'INERZIA — HAR-C non deve spostare di un bit né HAR-RV né HAR-CJ, contro
-#     cui il claim pubblicato (banda −23% ÷ −32%) è oggi registrato.
+#     cui il claim pubblicato (banda −22.42% ÷ −31.65%) è oggi registrato.
 # EN: Tests for the HAR-C BASELINE (C3, STATUS 2026-07-31 pre-reg) — continuous
 #     components only, no jump terms. It separates two explanations of the HAR-CJ
 #     over HAR-RV gain measured by C2: regressor SUBSTITUTION (C = min(RV,BV) is
@@ -18,7 +18,7 @@
 #     sample; (b) sample IDENTITY across the three baselines, required by the
 #     paired comparison; (c) structural NON-LEAKAGE of the coefficients;
 #     (d) INERTIA — HAR-C must not shift HAR-RV or HAR-CJ by one bit, since the
-#     published claim (−23% ÷ −32% band) is currently registered against them.
+#     published claim (−22.42% ÷ −31.65% band) is currently registered against them.
 import numpy as np
 import pandas as pd
 

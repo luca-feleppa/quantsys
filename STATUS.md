@@ -5,7 +5,90 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-04
+## ▶️ RIPARTI DA QUI — 2026-08-05
+
+**Giornata senza gate, come previsto.** Nessun contatore in soglia, nessun giudice eseguito, nessun modello toccato, **zero GPU**. Fatte due cose: la routine, e la ri-espressione della banda pubblicata alla precisione dell'artefatto canonico. Scritta inoltre la pre-registrazione **M1** (§ sotto), **non eseguita**.
+
+**Routine eseguita — exit 0**, redirezione a livello di OS. Vintage macro **`20260730` invariato**; regime B7 fresco (0 barre nuove); 4 collector VPS freschi (IV 0.1h · L2 0.0h · trades 0.2h · `04b` 1.9h).
+
+| Contatore | 04/08 | **05/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 15 | **16** | 20 | +1 → ~09/08, giudice **manuale** |
+| MFIV comparatore v2 | 28 | **29** | 40 | `--count-only`, nessun run one-shot |
+| L2 h=30 (`n_eff`) | 12.1 | **12.9** | (216) | run contiguo **535h**, nessun buco in 7g |
+| leg opzioni | 35 | **36** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+
+Entrambi i contatori attivi sono **esattamente** sull'attesa scritta ieri (16 e 29). Wedge MFIV−ATM stabile: mediana +3.04 vol pt su 6849 tick accoppiati.
+
+### 📐 Banda pubblicata ri-espressa: **−22.42% ÷ −31.65%** (stessi numeri, nessuna ri-misura)
+
+Decisione presa esplicitamente, che ieri era stata lasciata aperta di proposito. La banda è ora scritta con i rapporti NN/HAR-C della coppia canonica per esteso — val `0.7757926`, test `0.6834522`, entrambi in `models/canonical_1h_vols/`. **Nessun run, nessuna GPU, nessun numero nuovo.**
+
+⚠ **I due estremi si muovono per ragioni diverse, e distinguerle è il punto.**
+
+| estremo | prima | ora | perché |
+|---|---|---|---|
+| inferiore | −23% | **−22.42%** | era **stale**: −23% è l'arrotondamento del −22.6% che C2 misurò contro **HAR-CJ**, mantenuto quando C3 sostituì il denominatore con HAR-C e mai riallineato. Contro HAR-C il valore è **sempre stato** −22.42%. Lo scarto era **conservativo** → non era un'inflazione del claim, ed è la ragione per cui non era urgente |
+| superiore | −32% | **−31.65%** | non era stale, era **arrotondato al punto** — ed era l'unico dei due arrotondato nella direzione che **favorisce** il claim |
+
+La correzione dell'estremo superiore **non era stata chiesta e non era stata segnalata da nessuno**: è emersa allineando le precisioni. Lasciare "−22.42% ÷ −32%" avrebbe prodotto una banda **precisa dove conviene e arrotondata dove conviene**, che è esattamente il dettaglio che un lettore competente nota per primo e che costa più credibilità di quanto valga il mezzo punto. Il claim esce quindi **leggermente più conservativo** di ieri.
+
+⚠ **I due decimali NON sono un intervallo di confidenza** — è l'errore di lettura che questa scrittura rende possibile, quindi va detto dove il numero appare. Identificano **quale** coppia (modello, npz, config) produce il numero. L'incertezza vera, misurata il 04/08: **~±0.7 punti** rispetto alla config di training (braccio B), **0.0019** rispetto al vintage macro, **esattamente 0** rispetto al seed. Nessuna delle tre è stocastica → si elimina **dichiarando la coppia**, non allargando la banda.
+
+Propagato in: `TEORIA.md` §12.2 (titolo IT+EN, paragrafo DM, paragrafo di provenienza, **nuovo paragrafo «Precisione della banda» IT+EN**), `README.md` §5.1 (IT+EN), commento di intestazione di `tests/test_har_c_baseline.py`, § STATO NOTO del manifesto. **NON toccati i record datati** — le voci C2 (30/07) e C3 (31/07) di `TEORIA.md`, `CHANGELOG.md` e `RIPRESA.md` dicono quale banda fu decisa *allora* ed erano vere quando furono scritte: un diario non si riscrive. Il titolo di §12.2 dichiara la ri-espressione e la data, ed è la prima riga che si legge.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate in scadenza. **M1 è pre-registrato e NON eseguito** — attende conferma esplicita, e non ha fretta: costa zero GPU e non è bloccante per nulla. Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 16, +1/giorno), **~09/08, run MANUALE**. Comparatore MFIV v2 a 29/40, ~11 giorni al ritmo corrente.
+
+---
+
+## 🎯 PRE-REGISTRAZIONE GATE — M1: ESTENDERE L'IMPRONTA DI IDENTITÀ TRAIN↔INFERENCE AL VINTAGE MACRO DELL'NPZ · 2026-08-05 · **APERTO, MAI ESEGUITO**
+
+> Scritto PRIMA di girare (protocollo sperimentale, passo 1). Nessuna patch applicata, nessun giudice rilanciato, nessun numero visto. Attende conferma esplicita.
+
+**Problema che chiude.** Il guard `check_model_dataset_scaler` confronta il `PipelineState` del modello col canonico dell'npz su `target_scale`, `n_scale_cols` e gli md5 di `center_`/`scale_` — cioè il **RobustScaler dei prezzi**. La normalizzazione **macro** non è coperta: non vive nel `PipelineState` canonico (`0 macro features`; il `MacroNormalizer` finisce in `models/lstm/pipeline_state.pkl` per il routing di `01b`). Ma `01b_download_macro.py` ricarica gli split e **sostituisce `X_macro_{split}`** nell'npz lasciando intatti `X_*`, `y_*`, `t_*`, e rifitta il `MacroNormalizer` **whole-df** — quindi allungare la serie cambia i valori macro **anche delle righe storiche**. La macro è **input del modello** (90 colonne, embedding attivo) ma **non entra in nessuna baseline HAR**, che leggono solo RV/target. Da qui la firma già osservata: il NN si sposta, le baseline restano identiche cifra per cifra. **Oggi due modelli possono entrambi stampare `matches: true` ed essere stati addestrati su macro diverse**, con uno scarto **misurato** di `0.0019` sul rapporto pubblicato. È il buco dichiarato il 04/08 e mai chiuso — l'unica cosa che oggi lo segnala è una riga di `PROVENANCE.md` scritta a mano.
+
+**Ipotesi / prior onesto (pre-dichiarato).** Non è un'ipotesi scientifica: è un gate **infrastrutturale**, della stessa famiglia di R1. Attesa: l'estensione è **numericamente inerte** (nessuna cifra di QLIKE si muove) e il controllo positivo scatta. L'esito informativo sarebbe il contrario — scoprire che `X_macro_*` **non** è l'oggetto giusto da impronta, per esempio perché qualcosa sul path di produzione lo riscrive di routine, il che renderebbe i falsi positivi la norma e trasformerebbe il guard in rumore che si impara a ignorare. È il modo tipico in cui un safety net muore, e va escluso prima di adottarlo, non dopo.
+
+**Oggetto dell'impronta — deciso EX-ANTE.** md5 di `X_macro_train` letto dall'npz **al momento del training**, più l'ordine di `macro_feature_names` e `n_macro_features`, persistiti nel `PipelineState` del modello; il giudice ri-calcola l'impronta sull'npz corrente e confronta. Razionale: l'oggetto che **effettivamente** differisce fra due vintage è l'array che il modello ha consumato, non i parametri del `MacroNormalizer` — che nel canonico non ci sono affatto e il cui confronto sarebbe circolare. Costo trascurabile: `X_macro` è 2D `(n, 90)` float32, non 3D come `X`.
+
+**Vincoli sui dati — l'npz resta CONGELATO.** Durante M1 **non si lancia `01_download_data.py`, né `01b`, né `dev_vols_macro_append.py`**: ognuno riscriverebbe il blocco macro, invalidando simultaneamente il confronto e l'artefatto canonico. `QUANTSYS_DATASET_NPZ` non impostata. `models/canonical_1h_vols`, `models/itransformer`, `models/backup_1h_vols` **READ-ONLY**. **Zero GPU: nessun modello viene riaddestrato.**
+
+**⚠ Limite dichiarato EX-ANTE — il controllo positivo è SINTETICO, e questo indebolisce il gate.** Il vintage macro V1 (19/07) **non esiste più su disco**: ricostruirlo richiede di rilanciare `01b`, che riscrive l'npz congelato ed è escluso da questa pre-registrazione. Quindi ciò che ① dimostra è «il guard distingue due `X_macro` diversi», **non** «il guard avrebbe intercettato quell'evento storico». La differenza è reale e non va spacciata: è il motivo per cui M1 non chiude retroattivamente nulla sui report esistenti.
+
+### Condizioni di PASS (tutte, AND)
+
+**⓪ Inerzia numerica sul numeratore pubblicato.** Ri-giudicare `models/canonical_1h_vols` col codice patchato deve riprodurre **bit-identico** su **entrambi** gli split: `nn_qlike` val `0.2614261407350182`, test `0.2363669742679634`, più le quattro baseline cifra per cifra (val HAR-RV `0.35698200803887636` · HAR-C `0.33697940716798486` · HAR-CJ `0.33788144361497324` · naive `0.7128755760530082`, `n=6485`; test HAR-RV `0.36998480578695586` · HAR-C `0.3458427303567653` · HAR-CJ `0.34572086276193376` · naive `0.7931544984285546`, `n=6486`). ⚠ **Perché qui il test split si tocca senza violare la disciplina one-shot:** il modello è congelato, l'npz è congelato ed **entrambi i numeri sono già pubblicati** — è una **riproduzione**, non una statistica di decisione, e non c'è nessuna variante fra cui scegliere. La regola one-shot esiste contro la selezione sull'esito, che qui è strutturalmente impossibile. Se una cifra si muove: la patch ha toccato il path numerico → **STOP**, niente adozione, si indaga.
+
+**① Controllo positivo — il guard deve FALLIRE quando deve.** Due livelli: (a) unitario — due `X_macro` sintetici che differiscono in **una sola cella** devono produrre impronte diverse; (b) end-to-end — un npz sintetico minimale più uno stato che porta l'impronta di un array **diverso** deve far **fail-fast** il giudice senza `--allow-macro-mismatch`, e passare (con report marcato non confrontabile) con il flag. ⚠ **Senza ① il gate è vuoto:** un guard che ritorni sempre `matches: true` supererebbe ⓪ in modo perfetto. È la condizione che B1 stadio 1 ha insegnato a scrivere, ed è l'unica che distingue «funziona» da «non fallisce mai».
+
+**② Nessun "verificato" che non sia stato verificato.** I tre model dir esistenti non hanno impronta macro: dopo la patch devono riportare `macro_matches: null` = **non verificabile**, **mai** `true` — lo stesso invariante già scritto per il price scaler (`None` non è "verificato uguale"). ⚠ E un eventuale **backfill** sull'artefatto canonico va marcato con la sua **fonte** (`dichiarato`, non `misurato`): non esiste prova crittografica che sia stato addestrato sulla macro dell'npz corrente, e **l'identità del price scaler non lo prova**, perché `01b` riscrive la macro *dopo* che `01` ha scritto lo scaler — che è precisamente il buco. Un backfill spacciato per misura sarebbe lo stesso errore di forma delle due ritrattazioni del 03/08 e del 04/08: un'inferenza dedotta scritta come se fosse stata misurata.
+
+**③ Il path LIVE non è raggiungibile dal nuovo fail-fast.** Verificato per grep **e** con un test: nessun call-site raggiungibile da `04b_vol_paper.py`, `quantsys/model/vol_forecaster.py`, `vol_paper_replay.py`. ⚠ **È la condizione a conseguenza più alta dell'intero gate**, non un dettaglio di igiene: un fail-fast sul path live fermerebbe il forward test al bootstrap successivo (00:30 UTC) **dentro tre campioni pre-registrati aperti** (hedged 16/20, MFIV 29/40, E1 stadio 2). Il razionale è già scritto in `assert_model_dataset_scaler`: il path live calcola le feature al volo iniettando scaler e colonne dal `PipelineState` **del modello**, non legge l'npz, quindi non ha questa esposizione — e un guard che lo fermasse lo farebbe per un disallineamento che sul live **non esiste**.
+
+**④ Suite verde.** `469 passed / 1 skipped` più i test nuovi. ⚠ Nessun golden può essere ri-allineato per far passare il gate: l'unica modifica ammessa a un golden è l'aggiunta del campo nuovo dell'impronta.
+
+**Vincolo anti-goalpost.** Le soglie qui sono **binarie** (identità bit a bit, fallisce/non fallisce), quindi non c'è nulla da allentare a risultati visti. Esplicitamente **vietato**: rilassare ⓪ a «differenze sotto 1e-9». Il precedente del price scaler ha riprodotto alla **decima cifra** dopo un fix analogo; un path numerico che si sposta è un **difetto**, non una tolleranza.
+
+### Conseguenze pre-dichiarate
+
+**PASS (⓪①②③④ verdi):**
+1. Il guard entra **sempre acceso** nei giudici, **non** come flag — lezione di C3: un flag sempre acceso non è una leva, è una via di fallimento in più. La via di fuga resta il solo `--allow-macro-mismatch`, che **marca il report non confrontabile** (stessa semantica di `--allow-scaler-mismatch`).
+2. `TEORIA.md` §12.2 perde la frase «e oggi nulla lo segnala»; il buco passa da **dichiarato** a **chiuso**, con il limite del controllo positivo sintetico scritto accanto.
+3. L'artefatto canonico riceve il backfill **dichiarato** e `PROVENANCE.md` lo registra come tale.
+
+**FAIL:**
+- **⓪ FAIL** → la patch tocca il path numerico: si revoca per intero, il buco resta dichiarato com'è oggi. Non si adotta «la parte che non muove i numeri».
+- **① FAIL** → il guard non fa ciò per cui esiste: **nessuna adozione parziale**. Un guard che non fallisce mai è peggio dell'assenza di guard, perché produce fiducia.
+- **③ FAIL** → nessuna adozione in nessuna forma finché il call-site non è **dimostrato** fuori dal path live. Nessuna eccezione: qui il costo di un errore è un campione forward bruciato, non un numero da riscrivere.
+- In ogni caso l'esito si scrive: qui, in `TEORIA.md` §12 e in `CHANGELOG.md`.
+
+**Costo stimato:** **zero GPU**, ~1-2h di lavoro. Il rischio di questo gate è di **correttezza**, non di budget — ed è la ragione per cui è pre-registrato malgrado non consumi nulla: tocca l'impronta che decide se un numeratore è confrontabile, quindi tocca indirettamente il numeratore pubblicato.
+
+**⚠ Ciò che M1 NON fa:** non estende l'impronta al path live, non promuove nulla in `models/itransformer`, non tocca il VPS, non rigenera l'npz, non riapre nessun claim. E non rende retroattivamente confrontabili i report esistenti — quelli restano senza impronta macro, che è un fatto sulla loro provenienza e non un difetto da mascherare.
+
+---
+
+## ▶️ 2026-08-04
 
 **Gate R1 ESEGUITO e CHIUSO: PASS ⓪①②③④.** La banda pubblicata ha di nuovo un numeratore verificabile. Nessuna promozione: `models/itransformer` e il VPS **intoccati**, campioni forward aperti non consumati.
 
