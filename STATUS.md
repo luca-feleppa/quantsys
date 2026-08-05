@@ -7,7 +7,7 @@
 
 ## ▶️ RIPARTI DA QUI — 2026-08-05
 
-**Giornata senza gate in scadenza, chiusa con un gate in più.** Nessun contatore in soglia, nessun modello riaddestrato, **zero GPU**. Tre cose: la routine, la ri-espressione della banda pubblicata alla precisione dell'artefatto canonico, e la pre-registrazione **M1** — scritta, confermata ed **eseguita in giornata: PASS ⓪①②③④**. I due giudici lanciati sono riproduzioni su modello e npz congelati, non statistiche di decisione.
+**Giornata senza gate in scadenza, chiusa con un gate in più.** Nessun contatore in soglia, nessun modello riaddestrato, **zero GPU**. Quattro cose: la routine, la ri-espressione della banda pubblicata alla precisione dell'artefatto canonico, la pre-registrazione **M1** — scritta, confermata ed **eseguita in giornata: PASS ⓪①②③④** — e, a chiusura, un audit del contesto sempre caricato con quattro ridondanze rimosse (nessun file tracciato modificato). I due giudici lanciati sono riproduzioni su modello e npz congelati, non statistiche di decisione.
 
 **Routine eseguita — exit 0**, redirezione a livello di OS. Vintage macro **`20260730` invariato**; regime B7 fresco (0 barre nuove); 4 collector VPS freschi (IV 0.1h · L2 0.0h · trades 0.2h · `04b` 1.9h).
 
@@ -93,6 +93,23 @@ Il caso grave è **E1 stadio 2**: è a **0/40** e accumula per le prossime ~5 se
 **Finestra pulita: dopo ~10/09**, alla chiusura di E1 stadio 2 — oppure prima, ma solo come decisione esplicita di **chiudere o sacrificare** un campione, che è una scelta scientifica e non un'operazione di manutenzione. Il vintage `20260730` intanto invecchia di 6 giorni: è un costo reale, ed è il costo giusto da pagare.
 
 **✅ DECISIONE PRESA (2026-08-05): si aspetta dopo il ~10/09.** Nessun sacrificio di campione, nessuna promozione anticipata. Fino ad allora `pull_vps_data.ps1` gira **senza** `-PromoteMacro` — che è già il default, quindi non serve nessuna azione ricorrente: il pull continuerà ad archiviare i vintage datati e a lasciare il canonico dov'è, e la routine lo dichiara a ogni sessione (`canonico VPS gia' al vintage 20260730 - nessuna promozione`). ⚠ **Il rischio residuo non è dimenticarsi di promuovere, è promuovere per distrazione:** basta un `-PromoteMacro` di troppo, e il 31/07 la promozione avvenne **de facto per automazione**, non per decisione. Alla riapertura, ri-verificare che E1 stadio 2 sia **chiuso** (n≥40 consumato), non solo scaduto di calendario.
+
+### 🧹 Contesto sempre caricato — audit e trim (nessun file tracciato modificato)
+
+Audit del materiale che entra in contesto a ogni sessione: **~13.4k token stimati**, dominati da tre sorgenti tutte volute — manifesto operativo ~7.4k, indice della memoria di lungo periodo ~3.1k, iniezione automatica delle prime 70 righe di questo file ~2.6k. Nient'altro pesa: nessun plugin attivo, nessun server esterno configurato lato progetto, i tre hook di repo sotto i 120 ms mediani su ~2.200 esecuzioni (quello di SessionStart 781 ms, nessun timeout in 30 giorni), installazione singola e già all'ultima versione.
+
+Rimosse dal manifesto **quattro ridondanze** — contenuto che vive già altrove o è ricostruibile dal repo: **−474 caratteri, ~−118 token/sessione**.
+
+| voce rimossa | dove viveva già |
+|---|---|
+| forward contract delle arch | riferimento path-scoped `quantsys/**` (fuori dal repo), verbatim |
+| mappa classe→modulo delle arch | idem — **spostata** lì, non eliminata |
+| comandi di setup + flag di `run_all.py` | `README.md`, `AVVIO.md`, `run_all.py --help` |
+| punti (b)-(e) della checklist nuovo script | riferimento path-scoped `scripts/**` (fuori dal repo) |
+
+⚠ **Il punto (a) della checklist NON è stato spostato, pur essendo duplicato identico.** È il boilerplate UTF-8, e serve mentre si **crea** un file nuovo sotto `scripts/` — cioè quando non è garantito che una regola path-scoped, che si carica aprendo file *esistenti*, sia già in contesto. Un contenuto si può spostare in caricamento pigro solo se il momento in cui serve coincide con quello in cui si carica; il bug cp1252 è già ricorso 5 volte e non vale i ~40 caratteri risparmiati.
+
+**Non è stata toccata nessuna regola scientifica, nessuna proibizione e nessun verdetto del corpus KILL** — solo mappe e comandi. Il risparmio è dichiarato per quello che è, **modesto**: il grosso del contesto residente è materiale non derivabile (invarianti, gotcha, risultati negativi) e resta dov'è per costruzione. Le modifiche stanno tutte in file **esclusi dal repo**, quindi non compaiono in `git diff` e non hanno undo di versionamento: copie pre-modifica conservate fuori dall'albero per la durata della sessione.
 
 **▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto, nessuno in scadenza. Stato production **intatto**: `config/default.yaml` pulito, nessuna sandbox creata, `models/itransformer` e VPS non toccati, npz congelato (nessun `01`/`01b`/`macro_append` lanciato). Prossimo evento reale invariato: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi 16, +1/giorno), **~09/08, run MANUALE**. Comparatore MFIV v2 a 29/40, ~11 giorni al ritmo corrente. **Refresh macro schedulato dopo il ~10/09** (decisione presa oggi, § sopra): fino ad allora nessuna promozione, e il default del pull la impedisce già da solo. ⚠ **Nota per il prossimo training, qualunque esso sia:** sarà il primo a nascere con l'impronta macro `measured` — se il giudice stampasse `MACRO VINTAGE MISMATCH` significa che l'npz è stato rigenerato fra train e giudizio, e la risposta è riaddestrare, non la via di fuga.
 
