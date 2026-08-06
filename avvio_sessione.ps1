@@ -12,7 +12,8 @@
 #     (due 04b scriverebbero position/trades in conflitto).
 #     NOTA encoding: file deliberatamente ASCII-only - PS 5.1 legge i .ps1
 #     senza BOM come cp1252 e i caratteri unicode corrompono il parsing.
-#     Uso: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor]
+#     Uso: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor] [-RefreshCandles]
+#     (-RefreshCandles NON e' un default: estende raw_candles.parquet, vedi 3bis)
 #     (da root progetto; il doppio click NON esegue i .ps1 - usa
 #     "Esegui con PowerShell" o terminale).
 # EN: SESSION STARTUP (home side) - a single command at PC power-on:
@@ -27,13 +28,15 @@
 #          + counters of the open forward gates.
 #     Encoding note: deliberately ASCII-only - PS 5.1 reads BOM-less .ps1 as
 #     cp1252 and unicode characters corrupt parsing.
-#     Usage: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor]
+#     Usage: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor] [-RefreshCandles]
+#     (-RefreshCandles is NOT a default: it extends raw_candles.parquet, see 3bis)
 #     (from project root; double-click does NOT run .ps1 - use "Run with
 #     PowerShell" or a terminal).
 param(
     [int]$Days = 7,
     [switch]$SkipPull,
-    [switch]$SkipMonitor
+    [switch]$SkipMonitor,
+    [switch]$RefreshCandles
 )
 
 $ErrorActionPreference = "Stop"
@@ -135,6 +138,52 @@ if ($barsNew -match '^-?\d+$') {
     }
 } else {
     Write-Warning "[sessione] regime B7: check fallito/failed ($barsNew) - refresh manuale: python scripts\01b_download_macro.py --regime-incremental"
+}
+
+# --- 3bis. Estensione candele su richiesta esplicita / candle extension on demand -
+# IT: -RefreshCandles estende data/raw_candles.parquet con 01_update_data.py
+#     --candles-only. NON e' un default, ed e' una decisione ogni volta: modellato
+#     su -PromoteMacro, per la stessa ragione per cui quello esiste. La meccanica
+#     e' sicura (no-op se non c'e' nulla di nuovo, dedup che tiene la riga
+#     ESISTENTE quindi la storia non si riscrive, mai la barra in formazione,
+#     scrittura atomica, file mai spedito al VPS), ma automatizzarla toglierebbe
+#     la possibilita' di CONGELARE i dati per un esperimento pre-registrato:
+#     l'invariante "candele/npz/regime_probs non si toccano fino a chiusura gate"
+#     passerebbe da "non fare nulla" a "ricordarsi -SkipMonitor", ed e' la forma
+#     esatta della promozione macro avvenuta per automazione il 2026-07-31.
+#     Quando serve: prima di annotare il contatore E1 se il blocco 4 stampa il
+#     warning di ritardo, e prima del run one-shot di E1 stadio 2 (prerequisito 5
+#     della sua pre-registrazione). Fra i gate aperti solo E1 legge le barre: il
+#     giudice hedged legge i ledger, il comparatore MFIV il chain.
+#     ATTENZIONE - effetto a distanza di una sessione, voluto: estendere le
+#     candele fa avanzare il contatore di staleness B7, quindi il refresh
+#     incrementale del regime puo' partire al PROSSIMO avvio (blocco 3, che qui
+#     sopra ha gia' girato). Le due scritture restano cosi' separate e ognuna
+#     visibile per conto suo, invece di concatenarsi in silenzio.
+# EN: -RefreshCandles extends data/raw_candles.parquet via 01_update_data.py
+#     --candles-only. NOT a default, and a decision every time: modelled on
+#     -PromoteMacro, for the same reason that one exists. The mechanics are safe
+#     (no-op when nothing is new, dedup keeps the EXISTING row so history is never
+#     rewritten, never the in-progress bar, atomic write, file never shipped to the
+#     VPS), but automating it would remove the ability to FREEZE data for a
+#     pre-registered experiment: the "candles/npz/regime_probs untouched until the
+#     gate closes" invariant would go from "do nothing" to "remember -SkipMonitor",
+#     which is exactly the shape of the macro promotion that happened by automation
+#     on 2026-07-31.
+#     When it is needed: before recording the E1 counter if block 4 prints the lag
+#     warning, and before the one-shot run of E1 stage 2 (prerequisite 5 of its
+#     pre-registration). Among the open gates only E1 reads the bars: the hedged
+#     judge reads the ledgers, the MFIV comparator the chain.
+#     WARNING - deliberate one-session delayed effect: extending the candles moves
+#     the B7 staleness counter forward, so the incremental regime refresh may start
+#     at the NEXT startup (block 3, which has already run above). The two writes
+#     stay separate and each visible on its own, instead of chaining silently.
+if ($RefreshCandles) {
+    Write-Output "[sessione] -RefreshCandles: estensione di data\raw_candles.parquet (solo candele) / candle-only extension..."
+    & $Py (Join-Path $ProjRoot "scripts\01_update_data.py") --candles-only
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "01_update_data --candles-only FALLITO/FAILED (exit $LASTEXITCODE) - la serie close resta dov'era, il contatore E1 sotto sara' SOTTOSTIMATO / the close series is unchanged, the E1 count below will be UNDERSTATED"
+    }
 }
 
 # --- 4. Monitoraggio ricorrente linea vol / recurring vol-line monitoring ----
