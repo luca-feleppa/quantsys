@@ -76,6 +76,8 @@ Aggiunto al blocco ③ un check **read-only** sulla copertura di `data/raw_candl
 
 **▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto in scadenza. Stato production **intatto**: nessuna promozione macro, npz congelato, `models/itransformer` e VPS non toccati, zero GPU. Prossimo evento reale: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi **17**, +1/giorno) → **~09/08, run MANUALE**. Poi MFIV v2 a 30/40 (~10 giorni) ed E1 stadio 2 a 6/40 (~09-10/09). **Refresh macro resta schedulato dopo il ~10/09** (decisione del 05/08, invariata). ⚠ Alla prossima sessione il blocco ③ stamperà il ritardo della serie close: se supera 6h, rilanciare la routine con **`-RefreshCandles`** (o `python scripts/01_update_data.py --candles-only`) **prima** di annotare il contatore E1, altrimenti il numero annotato è sottostimato. ⚠ **Non usare `-RefreshCandles` se in quel momento è aperto un esperimento che dichiara i dati congelati** — oggi non ce ne sono.
 
+**🗒️ Unica voce aperta lasciata in coda, con un oggetto preciso:** scrivere il **produttore del file barre 1m** (`data/raw_candles_1m_l2.parquet`, oggi 3 consumatori e 0 produttori). Non è urgente — non blocca nessun gate in scadenza — ma è l'unico modo per far ripartire il campione a target 1m, che da oggi il monitor mostra fermo al 31/07 con **6 giorni di L2 già raccolti e non giudicabili a h=3**. Il ritardo cresce di 1 giorno al giorno e i dati L2 sottostanti **non si perdono**, quindi il costo è differibile: è una decisione di priorità, non una scadenza.
+
 ---
 
 ## ▶️ 2026-08-05
