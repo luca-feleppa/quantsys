@@ -13,7 +13,7 @@
 #     NOTA encoding: file deliberatamente ASCII-only - PS 5.1 legge i .ps1
 #     senza BOM come cp1252 e i caratteri unicode corrompono il parsing.
 #     Uso: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor] [-RefreshCandles]
-#     (-RefreshCandles NON e' un default: estende raw_candles.parquet, vedi 3bis)
+#     (-RefreshCandles NON e' un default: estende raw_candles.parquet, vedi 3bis / see 3bis)
 #     (da root progetto; il doppio click NON esegue i .ps1 - usa
 #     "Esegui con PowerShell" o terminale).
 # EN: SESSION STARTUP (home side) - a single command at PC power-on:
@@ -141,6 +141,12 @@ if ($barsNew -match '^-?\d+$') {
 }
 
 # --- 3bis. Estensione candele su richiesta esplicita / candle extension on demand -
+# IT: NOTA sulla numerazione - qui i blocchi contano anche il "2. processi locali"
+#     (oggi un no-op), quindi questo passo e' 3bis; nella tabella di AVVIO.md 5.3,
+#     che elenca i soli tre blocchi attivi, lo stesso passo e' 2bis.
+# EN: numbering NOTE - blocks here also count "2. local processes" (a no-op today),
+#     so this step is 3bis; in the AVVIO.md 5.3 table, which lists the three active
+#     blocks only, the same step is 2bis.
 # IT: -RefreshCandles estende data/raw_candles.parquet con 01_update_data.py
 #     --candles-only. NON e' un default, ed e' una decisione ogni volta: modellato
 #     su -PromoteMacro, per la stessa ragione per cui quello esiste. La meccanica
