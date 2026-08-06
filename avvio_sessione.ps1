@@ -248,6 +248,69 @@ if (-not $SkipMonitor) {
     & $Py (Join-Path $ProjRoot "scripts\vol\l2_continuity_check.py") --days $Days
     if ($LASTEXITCODE -ne 0) { Write-Warning "l2_continuity_check FALLITO/FAILED (exit $LASTEXITCODE)" }
 
+    # IT: copertura del file di barre a 1 MINUTO. Non e' un doppione del check L2
+    #     qui sopra: quello misura la continuita' del RECORDER, questo misura se
+    #     esiste il TARGET con cui quelle ore verrebbero giudicate. Il giudice B1
+    #     costruisce la RV da rendimenti a 1m (~180 quadrati per osservazione invece
+    #     di 3), quindi le ore di L2 oltre la fine del file 1m sono raccolte ma prive
+    #     di target: il campione utile e' il MINIMO fra i due, e finora nessuno dei
+    #     due contatori lo diceva.
+    #     PRECISIONE - il tetto vale per le analisi a target 1m (B1 a h=3, proxy del
+    #     pin-close). Il contatore n_eff a h=30 stampato dal check L2 usa le barre
+    #     ORARIE (target di produzione: 30 barre da rendimenti orari) e NON e' toccato
+    #     da questo file: scriverlo senza qualificare l'orizzonte darebbe l'allarme
+    #     sbagliato sul gate sbagliato.
+    #     ATTENZIONE - il file ha TRE consumatori (l2_incremental_judge,
+    #     pin_close_feasibility, edge_information_judge come sorgente di coda) e
+    #     ZERO produttori: nessuno script del repo lo genera o lo estende, e' stato
+    #     acquisito a mano. Quindi qui si misura soltanto, e il messaggio dice cosa
+    #     manca invece di suggerire un comando che non esiste.
+    #     Sola lettura di timestamp e nomi file: nessun valore di feature.
+    # EN: 1-MINUTE bar file coverage. Not a duplicate of the L2 check above: that one
+    #     measures RECORDER continuity, this one measures whether the TARGET those
+    #     hours would be judged against exists at all. The B1 judge builds RV from 1m
+    #     returns (~180 squares per observation instead of 3), so L2 hours beyond the
+    #     end of the 1m file are collected but NOT judgeable: the usable sample is the
+    #     MINIMUM of the two, and until now neither counter said so.
+    #     WARNING - the file has THREE consumers (l2_incremental_judge,
+    #     pin_close_feasibility, edge_information_judge as a tail source) and ZERO
+    #     producers: no script in the repo generates or extends it, it was acquired by
+    #     hand. So this only measures, and the message states what is missing instead
+    #     of suggesting a command that does not exist.
+    #     Timestamps and file names only: no feature values.
+    $pyOneMinCoverage = @'
+from pathlib import Path
+import pandas as pd
+p = Path('data/raw_candles_1m_l2.parquet')
+if not p.exists():
+    print('[1m] data/raw_candles_1m_l2.parquet ASSENTE - il giudice B1 non ha target / MISSING')
+else:
+    d = pd.read_parquet(p, columns=['open_time'])
+    t = pd.to_datetime(d['open_time'], utc=True)
+    last, first = t.max(), t.min()
+    lag_d = (pd.Timestamp.now(tz='UTC') - last) / pd.Timedelta('1D')
+    print(f'[1m] {len(d):,} barre/bars {first:%Y-%m-%d} -> {last:%Y-%m-%d %H:%M} UTC - ritardo/lag {lag_d:.1f} giorni/days')
+    # IT: giorni di L2 gia' registrati che restano senza target 1m -> tetto sul
+    #     campione B1 indipendente dalla continuita' del recorder.
+    # EN: already-recorded L2 days left without a 1m target -> a cap on the B1 sample
+    #     independent of recorder continuity.
+    days = sorted(q.stem.split('_')[-1] for q in Path('data/orderbook').glob('l2_features_*.parquet'))
+    if days:
+        l2_last = pd.Timestamp(days[-1], tz='UTC')
+        uncov = (l2_last.normalize() - last.normalize()) / pd.Timedelta('1D')
+        if uncov > 0:
+            print(f'[1m] ATTENZIONE/WARNING: L2 registrata fino al/through {l2_last:%Y-%m-%d}, target 1m fino al/through {last:%Y-%m-%d}')
+            print(f'[1m] -> {uncov:.0f} giorni di L2 senza target a 1 minuto / days of L2 without a 1-minute target')
+            print(f'[1m]    riguarda le analisi a target 1m (B1 h=3, proxy pin-close); il contatore n_eff a h=30 usa le barre ORARIE ed e intatto')
+            print(f'[1m]    affects 1m-target analyses (B1 h=3, pin-close proxies); the h=30 n_eff counter uses HOURLY bars and is unaffected')
+            print(f'[1m] nessuno script lo produce (3 consumatori, 0 produttori): estensione MANUALE via quantsys.data.fetch_klines / no producer script: MANUAL extension')
+        else:
+            print(f'[1m] copertura/coverage OK: il target 1m arriva almeno quanto la L2 registrata / 1m target reaches at least as far as recorded L2')
+'@
+    Write-Output "[sessione] monitoraggio vol: copertura del file barre 1m / 1m bar file coverage..."
+    & $Py -c $pyOneMinCoverage
+    if ($LASTEXITCODE -ne 0) { Write-Warning "check copertura 1m FALLITO/FAILED (exit $LASTEXITCODE)" }
+
     # IT: contatori dei gate forward aperti (leg opzioni n>=30, hedged n>=20).
     #     Sola lettura dei ledger di 04b: nessun PnL aggregato, nessun verdetto.
     #     NOTA quoting: solo apici SINGOLI (PS 5.1 strippa le doppie virgolette

@@ -64,6 +64,16 @@ Audit letto nel codice, non nella doc che lo descrive. **Meccanicamente l'automa
 
 ⚠ **Sulla soglia di 6h del warning:** la serie dei close di E1 è strutturalmente indietro di ~2-3h rispetto alle barre (`fetch` scarta la barra in formazione, e `hourly_close` ne scarta un'altra per prudenza — oggi barre fino alle 14:00 UTC, serie fino alle 12:00). La soglia a 6h tollera quel margine strutturale senza gridare al lupo; sotto i 4h comincerebbe a suonare sempre.
 
+### 📉 File barre 1m sotto monitoraggio — e il primo run dice già qualcosa
+
+Aggiunto al blocco ③ un check **read-only** sulla copertura di `data/raw_candles_1m_l2.parquet`. **Non è un doppione del check L2:** quello misura la continuità del **recorder**, questo se esiste il **target** con cui quelle ore verrebbero giudicate. Il campione utile è il **minimo fra i due** e finora nessuno dei due contatori lo diceva — stessa forma del difetto di stamattina, un numero che cresce mentre qualcos'altro lo tappa.
+
+**Primo run: 87.217 barre, 2026-06-01 → 2026-07-31 13:36 UTC, ritardo 6.1 giorni → 6 giorni di L2 registrati senza target 1m.**
+
+⚠ **Qualificazione che il messaggio stampa esplicitamente, perché senza è un allarme sul gate sbagliato:** il tetto riguarda le analisi a **target 1m** (B1 a h=3, proxy del pin-close). Il contatore `n_eff = 13.5` a h=30 usa le barre **orarie** — il target di produzione è 30 barre da rendimenti orari — e **non è toccato**.
+
+⚠ **Il file ha tre consumatori e zero produttori.** Lo leggono `l2_incremental_judge.py`, `pin_close_feasibility.py` ed `edge_information_judge.py` (sorgente di coda), ma **nessuno script del repo lo genera o lo estende**: STATUS del 31/07 lo dà "già acquisito", cioè scaricato a mano senza lasciare un path riproducibile. Per questo il monitor **misura e basta**, e dichiara che l'estensione è manuale via `quantsys.data.fetch_klines` invece di stampare un comando che non esiste. **Scrivere il produttore è un lavoro a sé, non fatto oggi** — e va deciso sapendo che è l'unico modo per far ripartire quel campione.
+
 **▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto in scadenza. Stato production **intatto**: nessuna promozione macro, npz congelato, `models/itransformer` e VPS non toccati, zero GPU. Prossimo evento reale: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi **17**, +1/giorno) → **~09/08, run MANUALE**. Poi MFIV v2 a 30/40 (~10 giorni) ed E1 stadio 2 a 6/40 (~09-10/09). **Refresh macro resta schedulato dopo il ~10/09** (decisione del 05/08, invariata). ⚠ Alla prossima sessione il blocco ③ stamperà il ritardo della serie close: se supera 6h, rilanciare la routine con **`-RefreshCandles`** (o `python scripts/01_update_data.py --candles-only`) **prima** di annotare il contatore E1, altrimenti il numero annotato è sottostimato. ⚠ **Non usare `-RefreshCandles` se in quel momento è aperto un esperimento che dichiara i dati congelati** — oggi non ce ne sono.
 
 ---
