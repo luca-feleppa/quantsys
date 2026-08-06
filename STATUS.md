@@ -5,7 +5,50 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-05
+## ▶️ RIPARTI DA QUI — 2026-08-06
+
+**Giornata di sola routine, che ha trovato un campione fermo.** Nessun gate in scadenza, zero GPU, nessun modello toccato, npz congelato. Il lavoro vero è stato la verifica del contatore **E1 stadio 2**, che risultava a `0/40` da cinque giorni: **non era vero, ed erano due difetti sovrapposti, non uno.**
+
+**Routine eseguita — exit 0** al secondo tentativo. ⚠ Il primo è stato lanciato con `*>` (redirezione a livello **PowerShell**) e il gotcha PS 5.1 si è ripresentato nella forma più insidiosa: lo stderr di Python incapsulato in `ErrorRecord` ha fatto **abortire il merge**, e il messaggio di fallimento stampato aveva come testo una riga di `INFO Log file: ...`. Un pull che fallisce dichiarando come causa una riga di log informativa è indistinguibile, a occhio, da un errore vero. Redirezione a livello di OS → merge completo.
+
+| Contatore | 05/08 | **06/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 16 | **17** | 20 | +1 → ~09/08, giudice **manuale** |
+| MFIV comparatore v2 | 29 | **30** | 40 | `--count-only`, nessun run one-shot |
+| **E1 stadio 2** | *0 (mai misurato)* | **6** | 40 | vedi sotto — n≥40 all'expiry del **09-10/09** |
+| L2 h=30 (`n_eff`) | 12.9 | **13.5** | (216) | run contiguo **555h**, nessun buco in 7g |
+| leg opzioni | 36 | **37** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+
+Vintage macro **`20260730` invariato**, nessuna promozione; regime B7 fresco (0 barre nuove); 4 collector freschi (IV 0.0h · L2 0.0h · trades 0.2h · `04b` 1.3h). Wedge MFIV−ATM stabile: mediana **+3.04** vol pt su 7081 tick accoppiati.
+
+### 🔍 E1 stadio 2 non era a 0 — due difetti che si mascheravano a vicenda
+
+| | difetto | conseguenza |
+|---|---|---|
+| ① | lo `0/40` scritto qui il 05/08 **non era una misura**: era il valore di apertura del 01/08 riportato in avanti per cinque giorni. Il contatore E1 **non era nella routine** (il blocco ③ contava hedged, MFIV, L2, leg — non E1) | un numero che nessuno rileggeva, in un log che si legge come se fosse misurato |
+| ② | anche misurandolo ieri avrebbe detto **2, non 5**: `raw_candles.parquet` locale era fermo al 02/08 14:00 UTC e `raw_candles_1m_l2.parquet` al 31/07, quindi `realized_rv` restituiva `None` su ogni expiry dal 03/08 | il campione appariva fermo mentre stava accumulando regolarmente |
+
+⚠ **La combinazione è peggiore della somma:** ① garantisce che nessuno guardi, ② garantisce che chi guardasse vedrebbe un numero basso e plausibile. Il modo in cui questo sarebbe finito è che il **10/09** il giudice avrebbe stampato `NO_RUN` con n molto sotto 40 e la spiegazione sarebbe arrivata cinque settimane dopo il momento in cui costava poco.
+
+**Diagnosi, non congettura.** I **7 tick di decisione esistono tutti** per ogni expiry dal 01/08 al 07/08 (7 tick per finestra `[E−33h, E−27h]`, `rv_pred`/`var_iv` finiti e positivi): mancava solo la serie dei close. Rimedio = prerequisito ⑤ della pre-reg E1, con l'addendum del 01/08 (`01_update_data.py --candles-only`): **66.435 → 66.530 barre** (+95, fino al 06/08 14:00 UTC), `features.parquet` · `lstm_dataset.npz` · scaler · `PipelineState` **non toccati** — l'npz resta congelato.
+
+**Esito: n = 2 → 6**, finestra 01/08 → 06/08, `no_rv` da 5 a 1 (resta la sola 07/08, non ancora liquidata). Il campione accumula **esattamente 1/giorno dall'apertura**: **nessuna osservazione persa**, perché i tick vivono in `forecasts.parquet` che si merge append-only dal VPS — il ritardo era di **osservabilità**, non di raccolta, e la retroattività li ha ripresi tutti. ⚠ È la differenza che conta e che va tenuta distinta dal caso macro: qui il ritardo è **recuperabile**, lì (promuovere un vintage dentro un campione aperto) non lo sarebbe. ETA invariata: **09-10/09**.
+
+### 🛠️ Contatore E1 aggiunto al blocco ③ — e il modo ovvio di farlo era sbagliato
+
+`avvio_sessione.ps1` ora stampa il campione E1 a ogni sessione. Due decisioni di progetto, entrambe non cosmetiche:
+
+**① `--count-only`, MAI `--stage 2` nudo.** Il guard `n<40 → NO_RUN` protegge **solo sotto soglia**: a n≥40 lo stesso comando calcola le tre condizioni, stampa il verdetto e scrive il report. Automatizzarlo nudo avrebbe fatto scattare il **run confermativo per automazione invece che per decisione**, il giorno in cui la soglia cade e senza che nessuno lo scegliesse — la stessa forma di errore della promozione macro *de facto* del 31/07. Aggiunto `--count-only` al giudice (si ferma alla conta a **qualunque** n, nessuna statistica, nessun report), e un test lo verifica su un campione costruito **sopra** la soglia: sotto soglia il test non proverebbe nulla, perché lo passerebbe anche il comando nudo. Costruire il pannello **è** la conta — un'expiry è osservabile solo se la sua RV è calcolabile — ma `x`, `y` e le statistiche restano in memoria: l'operatore vede **quante** osservazioni ci sono, mai **quanto valgono**.
+
+**② Il refresh delle candele NON è automatizzato, di proposito.** Il blocco stampa **prima** fin dove arriva la serie dei close e avvisa oltre 6h di ritardo, così ② diventa visibile a colpo d'occhio; il rimedio resta un comando esplicito. Automatizzare `--candles-only` avrebbe reso il numero sempre veritiero al prezzo di trasformare il blocco ③ da *off-path e a scrittura zero* a *scrive un file di dati a ogni sessione* — ed è la classe di automatismo che il 31/07 ha già prodotto una promozione non decisa.
+
+Suite **491 passed / 1 skipped** (era 490/1). Doc allineata: `AVVIO.md` §5.3 (riga ③ + nuovo paragrafo IT+EN sul guard che protegge solo sotto soglia), `scripts/README.md`.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto in scadenza. Stato production **intatto**: nessuna promozione macro, npz congelato, `models/itransformer` e VPS non toccati, zero GPU. Prossimo evento reale: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi **17**, +1/giorno) → **~09/08, run MANUALE**. Poi MFIV v2 a 30/40 (~10 giorni) ed E1 stadio 2 a 6/40 (~09-10/09). **Refresh macro resta schedulato dopo il ~10/09** (decisione del 05/08, invariata). ⚠ Alla prossima sessione il blocco ③ stamperà il ritardo della serie close: se supera 6h, lanciare `python scripts/01_update_data.py --candles-only` **prima** di annotare il contatore E1, altrimenti il numero annotato è sottostimato.
+
+---
+
+## ▶️ 2026-08-05
 
 **Giornata senza gate in scadenza, chiusa con un gate in più.** Nessun contatore in soglia, nessun modello riaddestrato, **zero GPU**. Quattro cose: la routine, la ri-espressione della banda pubblicata alla precisione dell'artefatto canonico, la pre-registrazione **M1** — scritta, confermata ed **eseguita in giornata: PASS ⓪①②③④** — e, a chiusura, un audit del contesto sempre caricato con quattro ridondanze rimosse (nessun file tracciato modificato). I due giudici lanciati sono riproduzioni su modello e npz congelati, non statistiche di decisione.
 

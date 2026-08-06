@@ -195,6 +195,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Giudice E1 / E1 judge")
     ap.add_argument("--stage", type=int, choices=[1, 2], required=True,
                     help="1 = esplorativo (nessun verdetto) / 2 = confermativo")
+    # IT: --count-only = monitoraggio SICURO del campione, automatizzabile. Il guard
+    #     n<40 -> NO_RUN protegge solo SOTTO soglia: a n>=40 uno `--stage 2` nudo
+    #     calcola le tre condizioni, stampa il verdetto e scrive il report, cioe'
+    #     eseguirebbe il run one-shot confermativo per automazione invece che per
+    #     decisione. Con questo flag il giudice si ferma alla conta e non produce
+    #     nessun numero decisionale a NESSUN n (stessa semantica del --count-only
+    #     del comparatore MFIV).
+    # EN: --count-only = SAFE sample monitoring, automatable. The n<40 -> NO_RUN guard
+    #     only protects BELOW threshold: at n>=40 a bare `--stage 2` computes the three
+    #     conditions, prints the verdict and writes the report — i.e. it would fire the
+    #     confirmatory one-shot run by automation rather than by decision. With this
+    #     flag the judge stops at the count and produces no decisional number at ANY n
+    #     (same semantics as the MFIV comparator's --count-only).
+    ap.add_argument("--count-only", action="store_true",
+                    help="stampa solo la conta del campione, nessuna statistica e nessun report "
+                         "/ prints the sample count only, no statistics and no report")
     args = ap.parse_args()
 
     fc = pd.read_parquet(FORECASTS)
@@ -214,6 +230,19 @@ def main() -> int:
     if n:
         print(f"finestra / window                        : {panel['expiry'].min():%Y-%m-%d}"
               f" -> {panel['expiry'].max():%Y-%m-%d}")
+
+    # IT: uscita anticipata del monitoraggio. Costruire il pannello E' la conta —
+    #     un'expiry e' osservabile solo se la sua RV e' calcolabile — ma x, y e le
+    #     statistiche restano in memoria e non vengono ne' stampate ne' scritte:
+    #     l'operatore vede quante osservazioni ci sono, mai quanto valgono.
+    # EN: monitoring early exit. Building the panel IS the count — an expiry is
+    #     observable only if its RV is computable — but x, y and the statistics stay
+    #     in memory and are neither printed nor written: the operator sees how many
+    #     observations exist, never what they are worth.
+    if args.count_only:
+        print(f"\nCOUNT_ONLY — nessuna statistica calcolata, nessun report scritto "
+              f"(soglia/threshold stadio 2 n>={N_MIN_STAGE2}). / no statistics, no report written.")
+        return 0
 
     # IT: guard fail-fast anti-peeking: sotto n_min lo stadio 2 NON calcola nulla.
     # EN: fail-fast anti-peeking guard: below n_min stage 2 computes NOTHING.

@@ -102,6 +102,80 @@ def test_hac_mean_test_recovers_the_mean_and_is_one_sided(ej):
     assert lo["mean"] == 0.0 and lo["p_value"] > 0.999
 
 
+def test_count_only_computes_nothing_decisional_at_any_n(tmp_path):
+    # IT: IL test che rende sicura l'automazione. `--count-only` gira nella routine di
+    #     sessione a ogni avvio, quindi deve restare muto sui numeri ANCHE sopra la
+    #     soglia: il guard n<40 -> NO_RUN protegge solo sotto, e un `--stage 2` nudo a
+    #     n>=40 stamperebbe il verdetto confermativo per automazione. Qui si costruisce
+    #     un campione ABBONDANTEMENTE sopra la soglia (60 expiry) e si pretende che lo
+    #     stdout non contenga nessuna delle etichette decisionali e che nessun report
+    #     venga scritto. Se un domani qualcuno spostasse l'uscita anticipata sotto il
+    #     calcolo, questo test cade.
+    # EN: THE test that makes the automation safe. `--count-only` runs in the session
+    #     routine at every startup, so it must stay silent about numbers EVEN above
+    #     threshold: the n<40 -> NO_RUN guard only protects below, and a bare
+    #     `--stage 2` at n>=40 would print the confirmatory verdict by automation. Here
+    #     a sample WELL above threshold (60 expiries) is built and stdout must contain
+    #     none of the decisional labels, with no report written. If someone later moved
+    #     the early exit below the computation, this test fails.
+    import subprocess
+    import sys
+
+    n_days = 60
+    start = pd.Timestamp("2026-08-02 00:00", tz="UTC")
+    # IT: un tick orario continuo copre ogni finestra di decisione [E-33h, E-27h].
+    # EN: a continuous hourly tick covers every decision window [E-33h, E-27h].
+    idx = pd.date_range(start, periods=24 * (n_days + 3), freq="h", tz="UTC")
+    rng = np.random.default_rng(7)
+    fc = pd.DataFrame({
+        "candle_ts": idx,
+        "rv_pred": rng.uniform(1e-4, 3e-4, len(idx)),
+        "var_iv": rng.uniform(1e-4, 3e-4, len(idx)),
+    })
+    closes = pd.DataFrame({
+        "open_time": idx,
+        "close": 64000.0 * np.exp(np.cumsum(rng.normal(0, 1e-3, len(idx)))),
+    })
+
+    root = tmp_path
+    (root / "results" / "vol_paper").mkdir(parents=True)
+    (root / "data").mkdir()
+    fc.to_parquet(root / "results" / "vol_paper" / "forecasts.parquet")
+    closes.to_parquet(root / "data" / "raw_candles.parquet")
+    closes.to_parquet(root / "data" / "raw_candles_1m_l2.parquet")
+
+    # IT: il giudice risolve i path da parents[2] del PROPRIO file: si copia lo script
+    #     nell'albero temporaneo invece di scriverne uno finto.
+    # EN: the judge resolves paths from parents[2] of its OWN file: the script is copied
+    #     into the temporary tree rather than faked.
+    (root / "scripts" / "vol").mkdir(parents=True)
+    src = ROOT / "scripts" / "vol" / "edge_information_judge.py"
+    (root / "scripts" / "vol" / "edge_information_judge.py").write_bytes(src.read_bytes())
+
+    out = subprocess.run(
+        [sys.executable, str(root / "scripts" / "vol" / "edge_information_judge.py"),
+         "--stage", "2", "--count-only"],
+        capture_output=True, text=True, cwd=str(ROOT), env={**__import__("os").environ,
+                                                            "PYTHONPATH": str(ROOT)})
+    assert out.returncode == 0, out.stderr
+    n_line = [l for l in out.stdout.splitlines() if "osservabili" in l]
+    assert n_line and int(n_line[0].split(":")[-1]) >= ej_n_min(), \
+        f"campione non sopra soglia, il test non prova nulla: {out.stdout}"
+    for label in ("ACCORDO DI SEGNO", "SPEARMAN", "CONTROLLO POSITIVO", "VERDETTO", "PASS", "FAIL"):
+        assert label not in out.stdout, f"--count-only ha stampato '{label}'"
+    assert not (root / "results" / "vol_paper" / "edge_information_stage2.json").exists()
+
+
+def ej_n_min():
+    # IT: rilettura della soglia dalla sorgente, non una costante duplicata nel test.
+    # EN: threshold re-read from the source, not a constant duplicated in the test.
+    spec = importlib.util.spec_from_file_location(
+        "edge_information_judge", ROOT / "scripts" / "vol" / "edge_information_judge.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.N_MIN_STAGE2
+
+
 def test_spearman_block_bootstrap_ci_brackets_a_strong_relation(ej):
     # IT: sanita' della macchina d'inferenza: su una relazione monotona forte l'IC
     #     deve stare tutto sopra lo zero; il blocco 2 non deve romperla.

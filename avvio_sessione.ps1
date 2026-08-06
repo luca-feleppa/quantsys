@@ -241,6 +241,63 @@ print(f'[gate] hedged: n={len(hedged_pos)} posizioni hedge-attive/hedge-active p
 '@
     & $Py -c $pyGateCounters
     if ($LASTEXITCODE -ne 0) { Write-Warning "contatori gate FALLITI/FAILED (exit $LASTEXITCODE)" }
+
+    # IT: contatore del campione E1 stadio 2 (confermativo, expiry liquidate dopo il
+    #     2026-08-01). Aggiunto il 2026-08-06 dopo aver scoperto che il numero in
+    #     continuita' era fermo a 0 da cinque giorni: non era nella routine, quindi
+    #     nessuno lo rileggeva, e sotto c'era un secondo difetto che lo avrebbe fatto
+    #     leggere basso comunque (vedi il check di freschezza qui sotto).
+    #     ATTENZIONE - DUE PRECAUZIONI, entrambe necessarie:
+    #     (1) si lancia --count-only, MAI `--stage 2` nudo: il guard n<40 -> NO_RUN
+    #         protegge solo SOTTO soglia, quindi a n>=40 il comando nudo calcolerebbe
+    #         le tre condizioni e scriverebbe il verdetto PER AUTOMAZIONE - cioe'
+    #         esattamente il run one-shot che il protocollo impone manuale;
+    #     (2) il conteggio dipende dalla serie dei close (una expiry e' osservabile
+    #         solo se la sua RV e' calcolabile), quindi si stampa PRIMA fin dove
+    #         arriva quella serie: un raw_candles.parquet stale fa scendere n senza
+    #         che nulla lo dica. Il rimedio (01_update_data.py --candles-only) NON e'
+    #         automatizzato di proposito: e' una scrittura su un file di dati, e
+    #         questo blocco resta a scrittura zero.
+    # EN: E1 stage-2 sample counter (confirmatory, expiries settling after 2026-08-01).
+    #     Added 2026-08-06 after finding the continuity-log number had been stuck at 0
+    #     for five days: it was not in the routine, so nobody re-read it, and beneath
+    #     it sat a second defect that would have made it read low anyway (see the
+    #     freshness check below).
+    #     WARNING - TWO PRECAUTIONS, both required:
+    #     (1) run --count-only, NEVER a bare `--stage 2`: the n<40 -> NO_RUN guard only
+    #         protects BELOW threshold, so at n>=40 the bare command would compute the
+    #         three conditions and write the verdict BY AUTOMATION - exactly the
+    #         one-shot run the protocol requires to be manual;
+    #     (2) the count depends on the close series (an expiry is observable only if
+    #         its RV is computable), so how far that series reaches is printed FIRST: a
+    #         stale raw_candles.parquet lowers n with nothing saying so. The remedy
+    #         (01_update_data.py --candles-only) is deliberately NOT automated: it
+    #         writes to a data file, and this block stays write-free.
+    $pyCloseFreshness = @'
+import importlib.util
+from pathlib import Path
+import pandas as pd
+# IT: la serie e' letta con la funzione del giudice stesso - una copia qui sarebbe
+#     una seconda sorgente di verita' sulla stessa domanda.
+# EN: the series is read with the judge's own function - a copy here would be a
+#     second source of truth on the same question.
+spec = importlib.util.spec_from_file_location(
+    'e1_judge', Path('scripts/vol/edge_information_judge.py'))
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+c = m.hourly_close()
+last = c.index.max()
+lag = (pd.Timestamp.now(tz='UTC').floor('h') - last) / pd.Timedelta('1h')
+print(f'[e1] serie close fino a/through {last:%Y-%m-%d %H:%M} UTC - ritardo/lag {lag:.0f}h')
+if lag >= 6:
+    print(f'[e1] ATTENZIONE/WARNING: serie close STALE - il conteggio sotto e SOTTOSTIMATO / the count below is UNDERSTATED')
+    print(f'[e1] rimedio/remedy: python scripts\\01_update_data.py --candles-only  (estende SOLO raw_candles.parquet / extends raw_candles.parquet ONLY)')
+'@
+    Write-Output "[sessione] monitoraggio vol: campione E1 stadio 2 (solo conteggio) / E1 stage-2 sample (count only)..."
+    & $Py -c $pyCloseFreshness
+    if ($LASTEXITCODE -ne 0) { Write-Warning "check freschezza serie close FALLITO/FAILED (exit $LASTEXITCODE) - il conteggio E1 sotto non e' interpretabile / the E1 count below is not interpretable" }
+    & $Py (Join-Path $ProjRoot "scripts\vol\edge_information_judge.py") --stage 2 --count-only
+    if ($LASTEXITCODE -ne 0) { Write-Warning "edge_information_judge --stage 2 --count-only FALLITO/FAILED (exit $LASTEXITCODE)" }
 } else {
     Write-Output "[sessione] monitoraggio vol saltato (-SkipMonitor)"
 }
