@@ -5,7 +5,50 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-06
+## ▶️ RIPARTI DA QUI — 2026-08-07
+
+**Giornata di sola routine, chiusa da una ritrattazione.** Nessun gate in soglia, zero GPU, nessun modello toccato, npz congelato, nessun file tracciato modificato. Il warning E1 introdotto ieri ha sparato, il rimedio è stato applicato — e **non serviva**: il conteggio non era sottostimato.
+
+**Routine eseguita — exit 0**, redirezione a livello di OS. Vintage macro **`20260730` invariato**, nessuna promozione; regime B7 fresco; 4 collector freschi (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.8h).
+
+| Contatore | 06/08 | **07/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 17 | **18** | 20 | +1 → ~09/08, giudice **manuale** |
+| MFIV comparatore v2 | 30 | **31** | 40 | `--count-only`, nessun run one-shot |
+| E1 stadio 2 | 6 | **6** | 40 | **invariato — è corretto, vedi sotto** |
+| L2 h=30 (`n_eff`) | 13.5 | **14.3** | (216) | run contiguo **578h**, nessun buco in 7g |
+| leg opzioni | 37 | **38** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 6.1g | **7.0g** | — | fermo al 31/07 13:36 UTC, +1g/giorno |
+
+Wedge MFIV−ATM stabile: mediana **+3.01** vol pt su 7363 tick accoppiati.
+
+### ⚠️ Il warning «serie close STALE → conteggio SOTTOSTIMATO» è un'inferenza da proxy, non una misura
+
+Il blocco ③ ha stampato 24h di ritardo della serie close e ha dichiarato il conteggio E1 sottostimato. **Il ritardo era reale; la conseguenza no.**
+
+| | prima | dopo `--candles-only` |
+|---|---|---|
+| `raw_candles.parquet` | 66.530 barre, → 06/08 13:00 UTC | **66.552** (+22), → 07/08 11:00 UTC |
+| serie close E1 | 06/08 12:00 UTC (lag 24h) | 07/08 10:00 UTC (lag 2.9h) |
+| conteggio E1 | 6 · `no_rv` 2 | **6 · `no_rv` 2** — invariato |
+
+**Il vincolo binding è per-expiry, non il lag assoluto.** `realized_rv` pretende 31 close consecutivi da `tick` a `tick+30h`; il tick di decisione dell'expiry **07/08 08:00** è alle **06/08 05:00**, quindi serve il close delle **11:00 di oggi** ≈ `E+3h`. Il refresh non poteva spostare il numero, e **n=6 era già corretto**: l'expiry entra alla prossima sessione, cadenza 1/giorno intatta, nessuna osservazione persa.
+
+⚠ **Un'ora strutturale in più, non nota finora.** `raw_candles` **ha** la barra delle 11:00 (completa, chiusa alle 12:00; l'estensione gira alle 12:50 UTC), ma `hourly_close()` scarta l'ultima riga per costruzione e ricostruisce la coda dal file 1m — che è **fermo al 31/07**, quindi il ramo `m_h[m_h.index > h.index.max()]` è **vuoto da una settimana** e quella riga non viene più ricompensata. È una perdita secca di 1h che si somma al margine di fetch: E1 è osservabile da ~`E+4h`, non da `E+3h`. **Il giudice NON è stato toccato** — è codice di un campione confermativo aperto, e cambiare la costruzione della serie close a metà campione ne ridefinirebbe l'insieme osservabile.
+
+**Il rimedio non è stato un no-op:** +22 barre hanno portato lo staleness B7 da 95 a **117/168**, cioè ~2 giorni dall'innesco automatico di `01b --regime-incremental`. È esattamente la composizione di automatismi che ieri era stata elencata come ragione ② per non rendere `-RefreshCandles` un default — con la differenza che ieri era un argomento ipotetico e oggi è un costo pagato per una scrittura che non serviva.
+
+**Regola scritta nel contesto sempre caricato** (accanto alla condizione ③ ex-ante): un check che dichiara una *conseguenza* sta inferendo da un proxy; prima del rimedio si deriva il **vincolo binding** e si verifica ex-ante che il rimedio possa spostare il numero — a maggior ragione se scrive su un file di dati di produzione, e a maggior ragione se il rimedio è quello suggerito dal messaggio stesso o da una riga di continuità: **un'istruzione scritta ieri è una previsione, non un'osservazione di oggi**. Costo della verifica: una query read-only. Aggiunta anche la qualificazione del warning specifico (soglia fissa 6h vs vincolo per-expiry).
+
+**Non fatto, di proposito:** (a) il warning nella routine **non è stato modificato** — la soglia a 6h resta, ed è ancora informativa come segnale sul *proxy*; renderla per-expiry significherebbe replicare nel monitor la logica del giudice, cioè una seconda sorgente di verità sulla stessa domanda, che è la ragione per cui il check importa `hourly_close()` invece di riscriverlo; (b) la regola non è stata propagata nella copia pubblica del protocollo (`TEORIA.md` §12) — è una regola di metodo, non un verdetto del corpus KILL, e la propagazione è una decisione a sé.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Nessun gate aperto in scadenza. Stato production **intatto**: nessuna promozione macro, npz congelato, `models/itransformer` e VPS non toccati, zero GPU, working tree pulito. Prossimo evento reale: giudice `hedged_vs_unhedged_judge.py` a n≥20 (oggi **18**, +1/giorno) → **~09/08, run MANUALE**. Poi MFIV v2 a 31/40 (~16/08) ed E1 stadio 2 a 6/40 (~09-10/09). **Refresh macro resta schedulato dopo il ~10/09.** ⚠ Se il blocco ③ ristampa il warning sulla serie close, **non applicare `-RefreshCandles` per il solo warning**: guarda prima quale expiry manca e cosa le serve (`tick+30h`). ⚠ Lo staleness B7 è a **117/168**: al superamento la routine lancia da sola il refresh incrementale del regime — atteso e corretto, ma va **notato** se in quel momento c'è un esperimento a dati congelati.
+
+**🗒️ Unica voce aperta lasciata in coda, invariata:** il **produttore del file barre 1m** (`data/raw_candles_1m_l2.parquet`, 3 consumatori e 0 produttori, oggi 7 giorni di ritardo). Da oggi ha un consumatore in più di quanto scritto ieri: è anche ciò che ricompenserebbe l'ora scartata da `hourly_close()`. Resta differibile — i dati L2 sottostanti non si perdono — ed è una decisione di priorità, non una scadenza.
+
+---
+
+## ▶️ 2026-08-06
 
 **Giornata di sola routine, che ha trovato un campione fermo.** Nessun gate in scadenza, zero GPU, nessun modello toccato, npz congelato. Il lavoro vero è stato la verifica del contatore **E1 stadio 2**, che risultava a `0/40` da cinque giorni: **non era vero, ed erano due difetti sovrapposti, non uno.**
 
