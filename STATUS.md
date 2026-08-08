@@ -5,7 +5,51 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-07
+## ▶️ RIPARTI DA QUI — 2026-08-08
+
+**Giornata di sola routine, che ha corretto una previsione di ieri.** Nessun gate in soglia, zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. La riga di continuità di ieri diceva che l'expiry E1 mancante sarebbe entrata «alla prossima sessione, cadenza 1/giorno intatta»: **la cadenza c'era nei dati, il contatore no** — e la ragione è la stessa ora strutturale annotata ieri.
+
+**Routine eseguita — exit 0**, redirezione a livello di OS. 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.1h · `04b` 1.3h); nessuna promozione macro; regime B7 fresco.
+
+| Contatore | 07/08 | **08/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 18 | **19** | 20 | +1 → **domani**, giudice **manuale** |
+| MFIV comparatore v2 | 31 | **32** | 40 | `--count-only`, nessun run one-shot |
+| E1 stadio 2 | 6 | **8** | 40 | +2 dopo refresh candele verificato — vedi sotto |
+| L2 h=30 (`n_eff`) | 14.3 | **15.2** | (216) | run contiguo **604h**, nessun buco in 7g |
+| leg opzioni | 38 | **39** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 7.0g | **8.0g** | — | fermo al 31/07 13:36 UTC, +1g/giorno |
+
+Wedge MFIV−ATM stabile: mediana **+3.01** vol pt su 7668 tick accoppiati.
+
+### 🔍 Il contatore E1 non avanza da solo: cadenza 0/giorno, non 1/giorno
+
+Il warning sulla serie close ha sparato di nuovo. Applicata la regola scritta ieri — derivare il **vincolo binding per-expiry prima del rimedio** — con una query read-only:
+
+| expiry | stato ex-ante | tick di decisione | serve close fino a | gap vs serie |
+|---|---|---|---|---|
+| 01–06/08 | OK (6) | — | — | — |
+| **07/08 08:00** | `no_rv` | 06/08 05:00 | **07/08 11:00** | **+1h** |
+| **08/08 08:00** | `no_rv` | 07/08 05:00 | 08/08 11:00 | +25h |
+| 09/08 08:00 | `no_rv` | 08/08 05:00 | 09/08 11:00 | +49h (futuro) |
+
+**Esito opposto a quello di ieri, e la differenza è di un'ora.** Ieri il refresh portò `raw_candles` a 07/08 11:00 — esattamente il close che serviva all'expiry 07/08 — e `hourly_close()` lo scartò, perché butta l'ultima riga e il ramo 1m che la ricompensava è vuoto dal 31/07. Non fu un no-op con un costo: fu **un'ora corta**. Oggi il rimedio poteva invece spostare il numero, verificato **prima** di scrivere, e l'ha spostato di **+2**: `6 → 8`, `no_rv` da 3 a **1**, e l'unico residuo è l'expiry **09/08**, che non è ancora realizzata. Finestra `2026-08-01 → 2026-08-08`: **8 expiry su 8 giorni consecutivi, zero perse.**
+
+**La correzione vera è sulla cadenza.** Le osservazioni si accumulano a 1/giorno nei dati (chain IV e forecast sul VPS, candele ri-scaricabili da storico), ma il **contatore** è funzione di `raw_candles.parquet`, che avanza **solo** con l'atto esplicito `-RefreshCandles`. Senza refresh la sua cadenza è **0/giorno**: sarebbe rimasto a 6 a tempo indefinito, e con esso la proiezione «n≥40 al ~09-10/09», che assumeva accumulo automatico. Il ritardo resta di **osservabilità, non di perdita** — ma il contatore è ciò che innesca il run one-shot, quindi un contatore fermo significa un gate che non scatta mai. **Ricalibrare la scadenza sull'ultimo refresh, non sul calendario.**
+
+**Scelte fatte e non fatte, sul criterio «non compromettere i test aperti».**
+- `--candles-only` è bit-safe per costruzione: esce prima di feature/scaler/npz/`PipelineState` e salta anche il funding. Non ridefinisce l'insieme osservabile di E1, lo **riempie**: la regola pre-registrata (`tick+30h`, 31 close consecutivi) è invariata e non seleziona quali expiry entrano. `--count-only` non calcola statistiche e non scrive report → nessun peeking.
+- **Il giudice E1 NON è stato toccato**, di nuovo e per la stessa ragione di ieri: è codice di un campione confermativo aperto. Era stata valutata una diagnostica per-expiry sotto `--count-only` (solo stdout, nessuna duplicazione perché il giudice è già la sorgente) e **scartata**: il costo non è tecnico ma probatorio — un campione il cui codice è stato modificato a metà raccolta è più debole da difendere del beneficio di un messaggio più informativo.
+- **Il warning nella routine resta invariato** (soglia proxy a 6h). Ha fatto il suo lavoro: segnala il proxy, e la decisione la prende la verifica per-expiry a valle.
+- **Innesco B7 verificato prima di scrivere:** `regime_probs.parquet` non è letto da `04b_vol_paper.py` — i consumatori sono `02_train`, `03_backtest`, `01b`, `regime_gate`, `short_vol_regime_decomp`, nessuno sul path forward aperto (che gira comunque sul VPS). Staleness 117 → **143/168**. E poiché lo staleness avanza solo quando avanzano le candele, l'innesco **non può scattare da solo**: servono altri ~2 refresh espliciti.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Stato production intatto: nessuna promozione macro, npz congelato, `models/itransformer` e VPS non toccati, zero GPU. Prossimo evento reale: **giudice `hedged_vs_unhedged_judge.py` a n≥20 — oggi 19, atteso DOMANI ~09/08, run MANUALE.** Poi MFIV v2 a 32/40 (~16/08) ed E1 stadio 2 a 8/40. ⚠ **La scadenza E1 non si legge più sul calendario:** il contatore avanza solo con `-RefreshCandles`, quindi o si rinfrescano le candele quando serve annotarlo (verificando ogni volta il vincolo per-expiry) o si accetta che resti fermo fino al refresh successivo. ⚠ Staleness B7 a 143/168.
+
+**🗒️ Unica voce aperta lasciata in coda, invariata:** il **produttore del file barre 1m** (`data/raw_candles_1m_l2.parquet`, 3 consumatori e 0 produttori, oggi 8 giorni di ritardo). È anche ciò che ricompenserebbe l'ora scartata da `hourly_close()` — cioè la causa dell'off-by-one di ieri. Resta differibile (i dati L2 sottostanti non si perdono) ed è una decisione di priorità, non una scadenza.
+
+---
+
+## ▶️ 2026-08-07
 
 **Giornata di sola routine, chiusa da una ritrattazione.** Nessun gate in soglia, zero GPU, nessun modello toccato, npz congelato, nessun file tracciato modificato. Il warning E1 introdotto ieri ha sparato, il rimedio è stato applicato — e **non serviva**: il conteggio non era sottostimato.
 
