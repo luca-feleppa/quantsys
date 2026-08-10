@@ -5,7 +5,72 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-08
+## ▶️ RIPARTI DA QUI — 2026-08-10
+
+**Giornata di sola routine, che ha chiuso una voce di coda invece di rimandarla.** Nessun gate in soglia, zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, **nessun refresh candele** (decisione presa a vincolo verificato, sotto). Due previsioni di calendario cadute nella stessa sessione, e stavolta su **due contatori diversi**.
+
+**Routine eseguita — exit 0**, redirezione a livello di OS. 4 collector freschi (IV 0.0h · L2 0.0h · trades 0.0h · `04b` 1.7h); nessuna promozione macro; regime B7 fresco 143/168.
+
+| Contatore | 08/08 | **10/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 19 | **19** | 20 | **fermo, ed è corretto — vedi ①** |
+| MFIV comparatore v2 | 32 | **34** | 40 | `--count-only`, nessun run one-shot |
+| E1 stadio 2 | 8 | **8** | 40 | nessun refresh: cadenza 0/giorno confermata |
+| L2 h=30 (`n_eff`) | 15.2 | **16.6** | (216) | run contiguo **647h**, nessun buco in 7g |
+| leg opzioni | 39 | **40** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 8.0g | **9.8g** | — | **non è più un debito — vedi ③** |
+
+Wedge MFIV−ATM stabile: mediana **+2.98** vol pt su 8187 tick accoppiati.
+
+### ① Il gate hedged non è in ritardo: è a eventi, e il calendario non lo descrive
+
+La riga di continuità dell'08/08 diceva «atteso **DOMANI ~09/08**». È a 19 anche oggi, e il motore è **sano** — verificato su `forecasts.parquet`, `hedge_ledger.jsonl` ed `exec_diag.jsonl`:
+
+- 08/08 07:00 **LONG** → settled 09/08 08:00, hedge-attiva → è il 19°
+- 09/08 07:00 → 20:00 **FLAT per regola**, 13 ore consecutive: `edge` ha attraversato lo zero (IV 23→26 vol pt contro `rv_pred` in calo). Nessuna posizione ⇒ nessun evento hedge ⇒ nessun incremento
+- 09/08 21:00 **SHORT** aperta su expiry 11AUG 08:00, tuttora aperta (HOLD, `t_hours` 22.97 all'ultimo tick)
+
+Il 20° richiede che **questa** posizione sfondi la banda `band_eff = 0.3` prima del settlement dell'11/08 08:00: finora max |net_delta| = **0.205**, e il ledger non ha ancora l'evento `open` per lei. **Stessa classe di errore del contatore E1**, su un contatore diverso: una cadenza osservata (`+1/giorno` finché ogni giorno ha una posizione hedgiata) è stata proiettata come se fosse una legge. Qui la cadenza dipende da due condizioni congiunte — posizione aperta **e** delta oltre banda — e la prima è saltata per 13 ore.
+
+### ② E1 — vincolo per-expiry verificato *prima* di decidere, e la decisione è stata NON scrivere
+
+Applicata la regola: derivare il vincolo binding prima del rimedio. Query read-only sulla regola del giudice (tick = ultimo in `[E−33h, E−27h]`, servono 31 close consecutivi da lì):
+
+| expiry | tick di decisione | serve close fino a | vs serie (08/08 12:00) |
+|---|---|---|---|
+| 09/08 | 08/08 05:00 | 09/08 11:00 | +23h |
+| 10/08 | 09/08 05:00 | 10/08 11:00 | +47h |
+| 11/08 | 10/08 05:00 | 11/08 11:00 | futuro |
+
+Alle 09:41 UTC le candele arrivano al più a 10/08 08:00 usabile ⇒ un refresh **ora** valeva **+1** (solo 09/08), dopo le **~12:05 UTC** ne valeva **+2** (l'off-by-one di `hourly_close()` richiede la barra 11:00 *più una*). **Decisione utente: nessun refresh oggi.** Il contatore resta a **8**, staleness B7 resta **143/168**, npz e regime intatti. Le osservazioni non si perdono: le candele sono ri-scaricabili, il ritardo resta di **osservabilità**.
+
+### ③ Il file barre 1m ha zero produttori — e da oggi è una DECISIONE, non lavoro arretrato
+
+Verificato dove quel file entra davvero, perché la voce era in coda da quattro sessioni senza che nessuno avesse misurato il suo peso:
+
+- **Sul VPS: zero.** Il VPS gira 01c/01d/01e + `04b`; `raw_candles_1m_l2` compare in **3 soli .py** (`edge_information_judge`, `l2_incremental_judge`, `pin_close_feasibility`), più un test e il check di copertura inline. `04b` legge IV + macro + candele **orarie**: il braccio live ne è indipendente.
+- **In locale lo esegue un solo consumatore, e il suo contributo è misurato a zero.** `hourly_close()` usa l'1m come secondo ramo, `m_h[m_h.index > h.index.max()]`: con l'1m fermo al 31/07 e le orarie all'08/08 l'insieme è **vuoto**. Misurato: **0 righe contribuite**. Viene letto ogni sessione e non aggiunge nulla.
+- **Gli altri due sono dormienti:** `l2_incremental_judge` ha già girato (B1 stadio 1 → nessuna conclusione), `pin_close_feasibility` era uno studio one-shot.
+
+**Quanto varrebbe il produttore, per non doverlo ri-derivare:** 774 ore L2 con ≥360 snapshot/ora (la soglia del giudice), di cui **537 sotto il tetto 1m** e **237 sopra** — registrate ma prive di target. Sul rapporto osservato il 31/07 (289 punti da ~537 ore) valgono **~+128 punti**, cioè `n_eval` da 289 a **~420**: è esattamente ciò che scioglierebbe l'obiezione «un secondo gate girerebbe sugli stessi 289 punti». Stima, non misura.
+
+**🔴 REGOLA NUOVA (decisione utente 2026-08-10) — non scrivere un produttore fisso, e non chiamarlo debito.** Le kline 1m sono **storiche e ri-scaricabili indefinitamente**: a differenza del recorder L2 — forward-only, irrecuperabile se si ferma — **non si sta perdendo niente**. Il file scaricato oggi e quello scaricato fra sei mesi sono identici, quindi il "ritardo di 9,8 giorni" non matura: è un download non ancora fatto. **Quando servirà, si decide allora come scaricarlo**, sulla finestra che serve. Un produttore permanente terrebbe aggiornato un file che nessun path operativo legge. Propagata in `AVVIO.md` (IT+EN), nel messaggio a runtime del blocco ③ — che non stampa più un rimedio — e nelle regole operative di sessione.
+
+**🔴 B1 stadio 1 — DECISIONE: non riaprire ora** (utente, 10/08). Il difetto del 31/07 non erano i dati: `N_MIN=240` era già superato con 289 punti. Era il **controllo positivo** — HAR-C ristimata sulla finestra corta, 4 parametri su ≤400 osservazioni contro una naive a zero parametri. La correzione è già scritta e costa zero (benchmark = naive; HAR-C stimata sulla storia lunga 2019→oggi e solo *valutata* sulla finestra, come diagnostica). Riaprire richiede comunque una **nuova pre-registrazione**, e la domanda a h=3 risponde a «L2 predice la RV a breve», non a «L2 migliora la linea vol».
+
+### ④ Le candele orarie si estendono da sole sul VPS — cosa che il file non diceva
+
+Emerso verificando i consumatori. `VolForecaster._bootstrap` (usato da `04b`) fa bootstrap **gap-aware** con `fetch_klines_incremental` su `data/raw_candles.parquet` e **ri-persiste il file** quando cresce (`raw_candles.parquet esteso: {n} → {m} candele (gap-fill bootstrap)`). Quindi **sul VPS le candele orarie avanzano da sole a ogni bootstrap (00:30 UTC)**; la copia di casa è ferma perché `pull_vps_data.ps1` non la sincronizza (trasferisce `iv/`, `orderbook/`, `deribit_trades/`, `vol_paper/`, macro — non le candele).
+
+⚠ **Sfuma una riga, non la annulla:** «`-RefreshCandles` è un atto, non un automatismo» vale **per la copia locale**, che è quella che alimenta i contatori e i giudici a casa. Sul VPS è già automatico, e per costruzione non tocca l'npz (il commento nel codice lo dichiara: «la persistenza tocca SOLO `raw_candles.parquet`: il dataset npz congelato NON viene rigenerato»). Conseguenza pratica per il prossimo refresh: esiste **già una copia più avanti** sul VPS, quindi l'alternativa al download è un pull — resta comunque una scrittura sul file di produzione locale, cioè lo stesso atto con sorgente diversa. Non ho ispezionato il file remoto: questo è ciò che fa il codice.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** Stato production intatto: nessuna promozione macro, npz congelato, `models/itransformer` e VPS non toccati, zero GPU, zero scritture su dati. Prossimo evento reale: **giudice `hedged_vs_unhedged_judge.py` a n≥20, run MANUALE** — oggi 19, e **non è proiettabile su una data**: serve che la posizione aperta (expiry 11AUG 08:00) sfondi `band_eff=0.3` prima del settlement, altrimenti slitta alla successiva. Poi MFIV v2 a 34/40 (~16/08, quello sì a ~1/giorno) ed E1 stadio 2 a 8/40, che **avanza solo con `-RefreshCandles`** e va verificato per-expiry ogni volta. ⚠ Staleness B7 a 143/168.
+
+**🗒️ Coda: vuota.** La voce del produttore 1m è **chiusa per decisione**, non rimandata.
+
+---
+
+## ▶️ 2026-08-08
 
 **Giornata di sola routine, che ha corretto una previsione di ieri.** Nessun gate in soglia, zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. La riga di continuità di ieri diceva che l'expiry E1 mancante sarebbe entrata «alla prossima sessione, cadenza 1/giorno intatta»: **la cadenza c'era nei dati, il contatore no** — e la ragione è la stessa ora strutturale annotata ieri.
 

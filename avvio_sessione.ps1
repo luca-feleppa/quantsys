@@ -274,9 +274,12 @@ if (-not $SkipMonitor) {
     #     MINIMUM of the two, and until now neither counter said so.
     #     WARNING - the file has THREE consumers (l2_incremental_judge,
     #     pin_close_feasibility, edge_information_judge as a tail source) and ZERO
-    #     producers: no script in the repo generates or extends it, it was acquired by
-    #     hand. So this only measures, and the message states what is missing instead
-    #     of suggesting a command that does not exist.
+    #     producers, BY DECISION (2026-08-10): the 1m klines are HISTORICAL and
+    #     re-downloadable indefinitely, so the lag is not a maturing debt - it is a
+    #     download not yet done, and waiting costs nothing. A standing producer would
+    #     keep a file current that no operational path reads. So this only measures,
+    #     and does not suggest a command: when a 1m-target analysis is actually
+    #     reopened, the download is decided then, over the window it needs.
     #     Timestamps and file names only: no feature values.
     $pyOneMinCoverage = @'
 from pathlib import Path
@@ -303,7 +306,7 @@ else:
             print(f'[1m] -> {uncov:.0f} giorni di L2 senza target a 1 minuto / days of L2 without a 1-minute target')
             print(f'[1m]    riguarda le analisi a target 1m (B1 h=3, proxy pin-close); il contatore n_eff a h=30 usa le barre ORARIE ed e intatto')
             print(f'[1m]    affects 1m-target analyses (B1 h=3, pin-close proxies); the h=30 n_eff counter uses HOURLY bars and is unaffected')
-            print(f'[1m] nessuno script lo produce (3 consumatori, 0 produttori): estensione MANUALE via quantsys.data.fetch_klines / no producer script: MANUAL extension')
+            print(f'[1m] nessun path operativo lo legge; le kline 1m sono storiche e RI-SCARICABILI: non e un debito che matura / no operational path reads it; 1m klines are historical and RE-DOWNLOADABLE: not a maturing debt')
         else:
             print(f'[1m] copertura/coverage OK: il target 1m arriva almeno quanto la L2 registrata / 1m target reaches at least as far as recorded L2')
 '@
