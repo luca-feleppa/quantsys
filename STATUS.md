@@ -5,7 +5,96 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-10
+## ▶️ RIPARTI DA QUI — 2026-08-11
+
+**Il gate hedged-vs-unhedged è SCATTATO e si è CHIUSO in giornata: FAIL 2/3.** Run one-shot del giudice pre-registrato, lanciato su decisione esplicita alla prima sessione con la condizione ③ soddisfatta. Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, nessun refresh candele. **Il processo `04b` sul VPS NON è stato toccato:** la disattivazione di `--hedge` ha un vincolo di ordine che la pre-registrazione non aveva previsto (⑤).
+
+### 🔜 DOMANI 12/08 — due azioni, in quest'ordine, subito dopo `.\avvio_sessione.ps1`
+
+**Precondizione: settlement delle 08:00 UTC avvenuto.** Se apri la sessione prima, non fare nulla di questo elenco.
+
+**① Verificare il flatten** (read-only, la routine ha appena mergiato il ledger dal VPS): in `results/vol_paper/hedge_ledger.jsonl` deve comparire un evento con `reason: "settled"` per `position_key {side: 1, strike: 64000.0, expiry_ms: 1786521600000}`. **Se non c'è, FERMARSI qui** e capire perché: senza flatten la leg perp è ancora aperta e il punto ② va rimandato.
+
+**② Disattivare `--hedge`.** Sono due modifiche, e la prima è un **file tracciato**:
+- `deploy/vps/quantsys-volpaper.service` → `ExecStart` diventa `... scripts/04b_vol_paper.py --execute` (via i tre flag `--hedge --hedge-band 0.30 --hedge-conv raw`); aggiornare anche il commento IT+EN sopra `ExecStart`, che oggi cita il congelamento C3 di una pre-reg **chiusa**;
+- sul VPS: copia dell'unit in `/etc/systemd/system/`, `daemon-reload`, restart del servizio. ⚠ Il timer `quantsys-volpaper-restart` rilancia comunque il processo alle **00:30 UTC**: finché l'unit sul VPS non è sostituita, ogni restart riparte **con** l'hedge.
+
+**③ Ritirare il contatore hedged** dal blocco ③ di `avvio_sessione.ps1` (file untracked): il suo gate è chiuso e continuerebbe a stampare `n=NN posizioni hedge-attive` senza consumatore. ⚠ Nel toglierlo, **non toccare il contatore delle leg opzioni**, che condivide lo stesso blocco `$pyGateCounters` ed è ancora l'unico numero che dice se `04b` sta eseguendo.
+
+**Routine eseguita — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.0h · `04b` 2.0h); nessuna promozione macro; regime B7 fresco 143/168.
+
+| Contatore | 10/08 | **11/08** | Soglia | Nota |
+|---|---|---|---|---|
+| **hedged vs unhedged** | 19 | **20** ✅ | 20 | **soglia raggiunta, gate CHIUSO — vedi ①** |
+| MFIV comparatore v2 | 34 | **35** | 40 | `--count-only`, nessun run one-shot |
+| E1 stadio 2 | 8 | **8** | 40 | nessun refresh: cadenza 0/giorno, invariata |
+| L2 h=30 (`n_eff`) | 16.6 | **17.7** | (216) | run contiguo **680h**, nessun buco in 7g |
+| leg opzioni | 40 | **41** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 9.8g | 11.2g | — | non è un debito (decisione 10/08) |
+
+Wedge MFIV−ATM stabile: mediana **+2.98** vol pt su 8580 tick accoppiati.
+
+### ① Il contatore diceva 21, il campione pre-registrato era 20 — verificato prima di lanciare
+
+Il blocco ③ ha stampato `n=21 posizioni hedge-attive`. **La sua unità non è quella della pre-reg.** Il contatore conta `position_key` distinte con ≥1 hedge eseguito nel ledger; la condizione ③ del 12/07 dice «n ≥ 20 **settlement** con hedge attivo». La 21ª posizione (strike 64000, expiry 12AUG 08:00) è **tuttora aperta** — hedge alle 12:01 e 15:01 di oggi — quindi non è un settlement.
+
+Conteggio vero sui trade settled post-attivazione, esclusa la 19JUL26 (esclusione pre-dichiarata il 18/07): **esattamente 20**, dal 19/07 13:01 (exp 20JUL) al 09/08 22:01 (exp 11AUG, settlato stamattina alle 08:00). ⚠ È la **terza** variante dello stesso scarto di unità su questo contatore: eventi ≠ posizioni (corretto il 26/07), ora **posizioni ≠ settlement**. Oggi entrambe le letture superano la soglia e il trigger è valido, ma il contatore legge **uno in più** del campione giudicato.
+
+`--since`: qualunque valore in `(2026-07-18 11:36, 2026-07-19 13:01]` produce **lo stesso identico campione di 20** — verificato enumerando gli `entry_ts`, quindi la scelta non è un grado di libertà del ricercatore. Usato `2026-07-19T00:00:00Z`.
+
+### ② Esito — FAIL 2/3, e il drag è quasi tutto fee
+
+`python scripts/vol/hedged_vs_unhedged_judge.py --since 2026-07-19T00:00:00Z` → `results/vols/hedged_vs_unhedged.json`, verdetto **FAIL**, n=20.
+
+| | condizione pre-registrata | misurato | esito |
+|---|---|---|---|
+| ① | `var(hedged) ≤ 0.6·var(unhedged)` | **0.4472** (varianza **−55.3%**) | ✅ PASS con margine |
+| ② | `mean(h) ≥ mean(u) − 0.25·SE_u` | drag **−0.001312 BTC = −0.647·SE** (budget −0.000507) | ❌ **FAIL, 2.6× la soglia** |
+| ③ | `n ≥ 20` settlement hedge-attivi | **20** | ✅ PASS |
+
+**Decomposizione del drag** — identità `hedged − unhedged = gross − fee − funding` verificata a residuo 1.7e−18:
+
+| componente | BTC/trade | quota del drag |
+|---|---|---|
+| **fee perp** | −0.000996 | **75.9%** |
+| gross perp | −0.000305 | 23.2% |
+| **funding** | −0.000012 | **0.9%** |
+
+76 ribilanciamenti su 20 trade (mediana 3.5, max 7), **0.000262 BTC di fee per evento**.
+
+⚠ **L'ipotesi pre-dichiarata era giusta sulla variabile e sbagliata sulla componente.** Il 12/07 era scritto: «il rischio reale è che **fee di churn + funding** erodano il beneficio: **il funding non è mai stato misurato sulla serie**». Misurato: il funding vale **meno dell'1% del drag**. La grande incognita dichiarata era irrilevante, e il costo è tutto nelle fee taker (5e−4, ratificate al congelamento). Contro-fattuale a fee nulle: drag **−0.156·SE** → ② passerebbe, var ratio 0.4521 → il gate sarebbe **PASS 3/3**.
+
+⚠ **Qualificazione onesta che NON sposta il verdetto.** La ② è un **budget**, non un test di significatività: il t appaiato su `hedged − unhedged` è **−1.051**, hedged migliore in **7/20** trade. Dimostrato: l'hedge **non compra PnL**, e il suo costo di realizzazione a size 1 contratto consuma un multiplo del budget dichiarato. **Non** dimostrato: che il drag sia negativo in popolazione. La regola era scritta il 12/07, prima di qualunque dato hedge — il verdetto si applica come sta, senza rinegoziarlo a risultati visti.
+
+### ③ Conseguenze pre-dichiarate — applicate, e quelle che NON si applicano
+
+Dalla pre-reg del 12/07, alla lettera: **FAIL → `--hedge` marcato FALLITO e disattivato, la v1 unhedged resta il design paper di produzione**; l'ipotesi **B2 (hedge = purificatore del VRP) muore sul costo di realizzazione, non sulla teoria** — la ① passata a −55.3% è la prova che la teoria reggeva.
+
+⚠ **Non si sbloccano** il sizing v2 (HAR-q90 per la coda, esito A2) né A7 greeks-aware: erano conseguenze **condizionate al PASS**, e restano dove sono.
+
+È la **terza** volta che un effetto misurato non sopravvive ai costi di transazione, dopo il muro dei costi del direzionale a 1m e il KILL net-of-cost dell'IVS relative-value. Il pattern è ormai un prior del progetto e va pesato su ogni ipotesi di monetizzazione futura.
+
+### ④ Propagazione — l'esito è nella copia pubblica
+
+`TEORIA.md` §12.2 (paragrafo dedicato IT+EN, con la decomposizione, il contro-fattuale a fee nulle e la qualificazione sul t appaiato), `CHANGELOG.md`, indice KILL del contesto di sessione. Il report macchina è `results/vols/hedged_vs_unhedged.json` — **quello** è il record, non questa prosa.
+
+### ⑤ ⚠ La disattivazione ha un vincolo di ORDINE che la pre-registrazione non prevedeva
+
+`--hedge` **non è stato disattivato oggi**, ed è una decisione tecnica verificata nel codice, non un rinvio.
+
+`results/vol_paper/hedge_state.json` ha una leg perp aperta di **+19.320 USD** (`position_key` strike 64000, expiry 12AUG 08:00, ultimo fill 15:01 UTC di oggi). In `04b_vol_paper.py` sia `maybe_hedge` sia `reconcile_hedge_state` girano **solo** dentro `if hedge_cfg is not None`, cioè **solo sotto `--hedge`**: riavviare il servizio senza il flag adesso lascerebbe quel perp **nudo, non gestito e mai flattenato** sul testnet — e la 21ª posizione verrebbe contabilizzata come leg opzioni unhedged mentre porta una leg perp congelata.
+
+**Ordine corretto:** attendere il settlement del **12/08 08:00 UTC**, in cui `maybe_hedge` esegue il flatten con `reason="settled"`, **verificare l'evento nel ledger**, e solo dopo riavviare `quantsys-volpaper` senza `--hedge`.
+
+⚠ **Verificato che la disattivazione non perturba i campioni forward aperti:** con `hedge_cfg=None` il path è la v1 bit-identica (nessun file hedge letto o scritto) e la leg hedge gira comunque **per ultima**, dopo settlement/open/diagnostica — la leg opzioni è identica con o senza hedge, che è l'invariante su cui poggiava il disegno within-trade del gate. E1 stadio 2 e MFIV v2 leggono `forecasts.parquet` e il chain: **non toccati**.
+
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** ① Dopo le **08:00 UTC del 12/08**: verificare nel `hedge_ledger.jsonl` l'evento di flatten `reason="settled"` della posizione 12AUG-64000 e che `hedge_state.json` sia sparito, **poi** riavviare il servizio VPS `quantsys-volpaper` **senza `--hedge`** (v1 unhedged = design di produzione). ② Fatto questo, **ritirare il contatore hedged dal blocco ③** di `avvio_sessione.ps1`: il suo gate è chiuso e continuerebbe a stampare un numero senza consumatore. Stato production intatto: nessuna promozione macro, npz congelato, `models/itransformer` non toccato, zero GPU. Prossimi contatori: MFIV v2 a **35/40** (~16/08, ~1/giorno) ed E1 stadio 2 a **8/40**, che avanza solo con `-RefreshCandles` e va verificato per-expiry ogni volta. ⚠ Staleness B7 a 143/168.
+
+**🗒️ Coda:** i due punti dell'azione sopra, entrambi vincolati al settlement di domani. Nient'altro.
+
+---
+
+## ▶️ 2026-08-10
 
 **Giornata di sola routine, che ha chiuso una voce di coda invece di rimandarla.** Nessun gate in soglia, zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, **nessun refresh candele** (decisione presa a vincolo verificato, sotto). Due previsioni di calendario cadute nella stessa sessione, e stavolta su **due contatori diversi**.
 
