@@ -9,9 +9,13 @@
 
 **Il gate hedged-vs-unhedged è SCATTATO e si è CHIUSO in giornata: FAIL 2/3.** Run one-shot del giudice pre-registrato, lanciato su decisione esplicita alla prima sessione con la condizione ③ soddisfatta. Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, nessun refresh candele. **Il processo `04b` sul VPS NON è stato toccato:** la disattivazione di `--hedge` ha un vincolo di ordine che la pre-registrazione non aveva previsto (⑤).
 
-### 🔜 DOMANI 12/08 — due azioni, in quest'ordine, subito dopo `.\avvio_sessione.ps1`
+### 🔜 DOMANI 12/08 — quattro azioni, in quest'ordine, subito dopo `.\avvio_sessione.ps1`
 
-**Precondizione: settlement delle 08:00 UTC avvenuto.** Se apri la sessione prima, non fare nulla di questo elenco.
+**Orario: aprire la sessione dalle 15:00 ITALIANE (13:00 UTC) in poi** — così una sola passata copre tutto. Le due precondizioni sono diverse e vanno tenute distinte:
+- ①②③ (hedge) richiedono il **settlement delle 08:00 UTC = 10:00 italiane**;
+- ④ (refresh candele) rende utilizzabile il close delle 11:00 UTC solo da **13:00 UTC = 15:00 italiane**. Aprendo prima si perde un'expiry: le altre tre entrerebbero comunque, ma la 12/08 no.
+
+⚠ Prima delle 10:00 italiane non fare **nulla** di questo elenco.
 
 **① Verificare il flatten** (read-only, la routine ha appena mergiato il ledger dal VPS): in `results/vol_paper/hedge_ledger.jsonl` deve comparire un evento con `reason: "settled"` per `position_key {side: 1, strike: 64000.0, expiry_ms: 1786521600000}`. **Se non c'è, FERMARSI qui** e capire perché: senza flatten la leg perp è ancora aperta e il punto ② va rimandato.
 
@@ -20,6 +24,18 @@
 - sul VPS: copia dell'unit in `/etc/systemd/system/`, `daemon-reload`, restart del servizio. ⚠ Il timer `quantsys-volpaper-restart` rilancia comunque il processo alle **00:30 UTC**: finché l'unit sul VPS non è sostituita, ogni restart riparte **con** l'hedge.
 
 **③ Ritirare il contatore hedged** dal blocco ③ di `avvio_sessione.ps1` (file untracked): il suo gate è chiuso e continuerebbe a stampare `n=NN posizioni hedge-attive` senza consumatore. ⚠ Nel toglierlo, **non toccare il contatore delle leg opzioni**, che condivide lo stesso blocco `$pyGateCounters` ed è ancora l'unico numero che dice se `04b` sta eseguendo.
+
+**④ Refresh candele — `-RefreshCandles` (o `python scripts/01_update_data.py --candles-only`), UNA volta, dalle 15:00 italiane.**
+
+Vale **+4**: il contatore E1 passa da **8 a 12/40**. Le quattro expiry sono 09, 10, 11 e 12/08 — corrispondono esattamente al `no_rv: 4` stampato oggi dal monitor. La serie dei close è ferma al 08/08 12:00 UTC.
+
+*Derivazione dell'orario, per non ri-ricavarla:* il download si ferma a `floor(adesso) − 1h` (esclude la barra in formazione) e `hourly_close()` scarta un'altra riga (il ramo 1m che la compensava è vuoto dal 31/07) → per rendere usabile il close delle ore `T` bisogna girare alle **`T+2h`**. La regola E1 vuole i close fino a `tick+30h` = **E+3h** = 11:00 UTC per un'expiry delle 08:00 → refresh da **13:00 UTC**. Le 15:00 italiane sono il lato conservativo: una nota del 10/08 suggeriva un'ora prima, e **finire un'ora corti è già successo il 07/08**.
+
+**⚠ REGOLA PERMANENTE — vale a OGNI refresh, oggi e in futuro.** *Prima si guarda quale expiry manca e cosa le serve, poi si scrive.* Il refresh non si applica perché lo suggerisce un messaggio del monitor, né perché "è passato un giorno": **il warning del blocco ③ è un'inferenza da un proxy** (soglia fissa a 6h sul ritardo della serie close), mentre il vincolo vero è **per singola expiry** (`tick+30h`). Costo della verifica: una query read-only. È la regola che il **07/08** ha risparmiato una scrittura inutile — il conteggio non era sottostimato, `n=6` era già corretto — e il **10/08** una seconda. ⚠ Vale a maggior ragione perché il rimedio **scrive su un file di dati di produzione**, e perché un'istruzione scritta ieri (compresa questa) è una **previsione**, non un'osservazione di oggi.
+
+**Effetto collaterale certo, da mettere in conto:** ~95 barre nuove portano lo staleness B7 da 143 **oltre 168**, quindi alla sessione **successiva** la routine lancerà da sola `01b --regime-incremental` (scrive `regime_probs.parquet` + checkpoint). Atteso e corretto; oggi nessun esperimento a dati congelati è aperto, quindi non blocca nulla — ma va **notato**, non scoperto. ⚠ La frequenza dei refresh **non cambia** quante volte il regime viene riscritto: quel meccanismo conta le *barre*, non i refresh (168 barre ≈ una settimana, sia che tu rinfreschi ogni giorno sia una volta a settimana).
+
+**Quando rifarlo, dopo domani.** Intervallo minimo utile **24h** (c'è una expiry al giorno, leggibile dalle 15:00 italiane del suo stesso giorno → +1 per volta); farlo più spesso non aggiunge nulla. **Nessun obbligo di cadenza:** le kline sono storiche, non si perde niente saltando giorni, e un singolo refresh recupera **tutte** le expiry arretrate in un colpo — esattamente come domani ne recupera quattro. Diventa **obbligatorio una volta sola**: prima del run one-shot di E1 stadio 2 (prerequisito ⑤ della sua pre-registrazione), quando il contatore deve essere veritiero perché è il numero che autorizza il giudice. ⚠ Le expiry maturano **da sole** sul VPS: il refresh non le crea, le rende visibili. Da 12/40 la soglia cade intorno al **9-10 settembre** — ma **1/giorno è il ritmo atteso, non una legge**: un'expiry entra solo se in quella finestra c'è stata una decisione valida, e il 09/08 la regola è rimasta FLAT per 13 ore consecutive (precedente reale sull'altro contatore).
 
 **Routine eseguita — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.0h · `04b` 2.0h); nessuna promozione macro; regime B7 fresco 143/168.
 
@@ -88,9 +104,9 @@ Dalla pre-reg del 12/07, alla lettera: **FAIL → `--hedge` marcato FALLITO e di
 
 ⚠ **Verificato che la disattivazione non perturba i campioni forward aperti:** con `hedge_cfg=None` il path è la v1 bit-identica (nessun file hedge letto o scritto) e la leg hedge gira comunque **per ultima**, dopo settlement/open/diagnostica — la leg opzioni è identica con o senza hedge, che è l'invariante su cui poggiava il disegno within-trade del gate. E1 stadio 2 e MFIV v2 leggono `forecasts.parquet` e il chain: **non toccati**.
 
-**▶️ AZIONE ESATTA DA CUI RIPARTIRE.** ① Dopo le **08:00 UTC del 12/08**: verificare nel `hedge_ledger.jsonl` l'evento di flatten `reason="settled"` della posizione 12AUG-64000 e che `hedge_state.json` sia sparito, **poi** riavviare il servizio VPS `quantsys-volpaper` **senza `--hedge`** (v1 unhedged = design di produzione). ② Fatto questo, **ritirare il contatore hedged dal blocco ③** di `avvio_sessione.ps1`: il suo gate è chiuso e continuerebbe a stampare un numero senza consumatore. Stato production intatto: nessuna promozione macro, npz congelato, `models/itransformer` non toccato, zero GPU. Prossimi contatori: MFIV v2 a **35/40** (~16/08, ~1/giorno) ed E1 stadio 2 a **8/40**, che avanza solo con `-RefreshCandles` e va verificato per-expiry ogni volta. ⚠ Staleness B7 a 143/168.
+**▶️ AZIONE ESATTA DA CUI RIPARTIRE — il dettaglio operativo è nel blocco `🔜 DOMANI 12/08` in testa a questa sezione (quattro azioni, sessione dalle 15:00 italiane).** In sintesi: ① Dopo le **08:00 UTC del 12/08**: verificare nel `hedge_ledger.jsonl` l'evento di flatten `reason="settled"` della posizione 12AUG-64000 e che `hedge_state.json` sia sparito, **poi** riavviare il servizio VPS `quantsys-volpaper` **senza `--hedge`** (v1 unhedged = design di produzione). ② Fatto questo, **ritirare il contatore hedged dal blocco ③** di `avvio_sessione.ps1`: il suo gate è chiuso e continuerebbe a stampare un numero senza consumatore. ③ **Dalle 15:00 italiane, un solo `-RefreshCandles`** → E1 da 8 a **12/40** (verifica per-expiry PRIMA di scrivere, sempre). Stato production intatto: nessuna promozione macro, npz congelato, `models/itransformer` non toccato, zero GPU. Prossimi contatori: MFIV v2 a **35/40** (~16/08, ~1/giorno) ed E1 stadio 2, che avanza **solo** con `-RefreshCandles`. ⚠ Staleness B7 a 143/168 — dopo il refresh di domani supera la soglia e il refresh incrementale del regime parte alla sessione **seguente**.
 
-**🗒️ Coda:** i due punti dell'azione sopra, entrambi vincolati al settlement di domani. Nient'altro.
+**🗒️ Coda:** le quattro azioni di domani. Nient'altro.
 
 ---
 
