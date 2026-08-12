@@ -27,13 +27,45 @@ Wants=network-online.target
 Type=simple
 User=quantsys
 WorkingDirectory=/opt/quantsys
-# IT: C3 attivato 2026-07-18 — band/conv CONGELATI dalla pre-registrazione
-#     hedged-vs-unhedged (STATUS.md, congelamento 2026-07-18): NON cambiarli a
-#     giudizio in corso. band_mode=fixed e fee=5e-4 sono i default del CLI.
-# EN: C3 activated 2026-07-18 — band/conv FROZEN by the hedged-vs-unhedged
-#     pre-registration (STATUS.md, 2026-07-18 freeze): do NOT change them
-#     mid-judgment. band_mode=fixed and fee=5e-4 are the CLI defaults.
-ExecStart=/opt/quantsys/.venv/bin/python scripts/04b_vol_paper.py --execute --hedge --hedge-band 0.30 --hedge-conv raw
+# IT: STATO TRANSITORIO DI WIND-DOWN (2026-08-12) — il gate hedged-vs-unhedged
+#     si e' chiuso l'11/08 con FAIL 2/3 (varianza -55.3%, ma drag -0.647 SE
+#     contro un budget di -0.25 SE, per il 76% fee perp): --hedge e' FALLITO e
+#     la v1 unhedged e' il design di produzione. Il flag NON viene rimosso in un
+#     colpo per un vincolo di ORDINE: maybe_hedge e reconcile_hedge_state girano
+#     SOLO dentro --hedge, quindi riavviare senza il flag con una leg perp
+#     aperta la lascerebbe NUDA e mai flattenata sul testnet. La banda 999
+#     rende impossibile aprire o ribilanciare un hedge (il check di banda esce
+#     prima di qualunque ordine) MA lascia attivo il flatten a settlement /
+#     expiry / cambio struttura, che gira PRIMA del check di banda: la leg
+#     residua viene chiusa dal codice che ha scritto tutte le altre, cosi'
+#     hedge_ledger.jsonl resta internamente consistente.
+#     ⚠ Non e' un cambio di parametro a giudizio in corso: il congelamento
+#     band=0.30/conv=raw valeva per la durata del gate, ora chiuso, e il
+#     campione giudicato (n=20, ultimo settlement exp 11AUG) e' frozen in
+#     results/vols/hedged_vs_unhedged.json — la posizione hedgiata ancora
+#     aperta e' la 22esima e sta fuori dal campione per costruzione.
+#     ⚠ DA RIMUOVERE dopo il settlement del 13AUG 08:00 UTC, verificato il
+#     flatten nel ledger: ExecStart torna al solo --execute (v1).
+# EN: TRANSIENT WIND-DOWN STATE (2026-08-12) — the hedged-vs-unhedged gate
+#     closed on 08/11 with FAIL 2/3 (variance -55.3%, but drag -0.647 SE against
+#     a -0.25 SE budget, 76% of it perp fees): --hedge FAILED and unhedged v1 is
+#     the production design. The flag is NOT removed in one step because of an
+#     ORDER constraint: maybe_hedge and reconcile_hedge_state run ONLY under
+#     --hedge, so restarting without it while a perp leg is open would leave it
+#     NAKED and never flattened on the testnet. A 999 band makes opening or
+#     rebalancing a hedge impossible (the band check returns before any order)
+#     but keeps the settlement / expiry / structure-change flatten active, since
+#     that runs BEFORE the band check: the residual leg is closed by the same
+#     code that wrote all the others, so hedge_ledger.jsonl stays internally
+#     consistent.
+#     ⚠ This is not a mid-judgment parameter change: the band=0.30/conv=raw
+#     freeze held for the gate's duration, now closed, and the judged sample
+#     (n=20, last settlement exp 11AUG) is frozen in
+#     results/vols/hedged_vs_unhedged.json — the still-open hedged position is
+#     the 22nd and lies outside the sample by construction.
+#     ⚠ TO BE REMOVED after the 13AUG 08:00 UTC settlement, once the flatten is
+#     verified in the ledger: ExecStart goes back to --execute alone.
+ExecStart=/opt/quantsys/.venv/bin/python scripts/04b_vol_paper.py --execute --hedge --hedge-band 999 --hedge-conv raw
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=60
