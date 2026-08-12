@@ -5,11 +5,94 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-11
+## ▶️ RIPARTI DA QUI — 2026-08-12
+
+**Giornata di esecuzione del piano di ieri: ④ chiuso come previsto, ② NON eseguibile come scritto.** Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. Due scritture, entrambe pre-verificate: `raw_candles.parquet` (+97 candele, dopo la verifica per-expiry) e l'unit `04b` sul VPS (wind-down della leg hedge). Il contatore E1 passa da **8 a 12/40**, esattamente il +4 predetto.
+
+**Routine eseguita — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.0h · `04b` 1.3h); nessuna promozione macro; regime B7 fresco 143/168 **prima** del refresh.
+
+| Contatore | 11/08 | **12/08** | Soglia | Nota |
+|---|---|---|---|---|
+| hedged vs unhedged | 20 | **22** | — | **gate CHIUSO 11/08**, contatore da ritirare domani (③) |
+| MFIV comparatore v2 | 35 | **36** | 40 | `--count-only`, nessun run one-shot |
+| **E1 stadio 2** | 8 | **12** ⬆ | 40 | **+4 dal refresh candele**, verificato ex-ante |
+| L2 h=30 (`n_eff`) | 17.7 | **18.4** | (216) | run contiguo **701h**, nessun buco in 7g |
+| leg opzioni | 41 | **42** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 11.2g | 12.1g | — | non è un debito (decisione 10/08) |
+
+Wedge MFIV−ATM stabile: mediana **+2.98** vol pt su 8823 tick accoppiati.
+
+### ① Flatten verificato — la precondizione bloccante era soddisfatta
+
+`hedge_ledger.jsonl`, `2026-08-12 08:01:34`: `event: "flatten"`, `reason: "settled"`, `position_key {side: 1, strike: 64000.0, expiry_ms: 1786521600000}`, `h_usd_after: 0.0`, fill 63745.14, fee 0.00037972 BTC. La leg perp della 21ª posizione è chiusa dal codice, come previsto.
+
+### ② Il vincolo di ordine NON era un evento singolo: si ripresenta ogni giorno
+
+**Il piano di ieri assumeva che dopo il flatten lo stato hedge restasse vuoto fino al riavvio. È falso.** Alle **10:01 UTC** `04b` ha aperto la 22ª posizione (strike 63500, expiry 13AUG 08:00) e l'ha immediatamente hedgiata (−30.260 USD), ribilanciando alle 15:01 (+10.460 USD). Alla sessione delle 17:16 italiane la finestra pulita era chiusa da cinque ore.
+
+La finestra fra il flatten di settlement (08:01 UTC) e il primo tick che sfonda la banda **non è controllabile**: oggi è durata 2 ore, ma dipende da quando `|book_delta|` supera 0.30 e può essere il primo tick utile. Un piano che richiede di cronometrarla è un piano che fallisce a intermittenza — e ogni fallimento costa un altro giorno di churn su una leva già dichiarata FALLITO.
+
+**Via d'uscita trovata nel codice, non nel calendario.** In `maybe_hedge` il ramo di flatten (`pos is None or expired or position_key != pos_key`) gira **prima** del check di banda (`if abs(book_delta) < band_eff: return`). Quindi una banda arbitrariamente grande **disabilita apertura e ribilanciamento** ma **lascia intatto** il flatten a settlement / expiry / cambio struttura. Wind-down in due passi:
+
+- **oggi:** `ExecStart` → `--hedge --hedge-band 999 --hedge-conv raw`, committato e deployato (servizio riavviato **15:34:54 UTC**);
+- **domani dopo le 08:01 UTC, senza limite superiore:** verificato il flatten della 13AUG, `ExecStart` torna al solo `--execute`.
+
+**Perché nel file tracciato e non in un drop-in systemd.** Un drop-in in `/etc/systemd/system/quantsys-volpaper.service.d/` non è ricostruibile da git: lo stato realmente deployato per ~17h non esisterebbe in nessun artefatto versionato — lo stesso difetto, in forma mite, per cui è stata scartata l'ipotesi del flatten manuale. In più un drop-in dimenticato sovrascrive in silenzio qualunque unit futura. Costo della variante tracciata: **un commit di una riga**, e un passaggio in meno (niente drop-in da rimuovere). Verificato che non esistessero drop-in preesistenti e che l'unit in vigore sul VPS combaciasse con quella tracciata prima dell'edit (nessuna deriva).
+
+⚠ **Non è un cambio di parametro a giudizio in corso.** Il congelamento `band=0.30`/`conv=raw` valeva per la **durata** del gate, chiuso ieri; il campione giudicato (n=20, ultimo settlement exp 11AUG) è frozen in `results/vols/hedged_vs_unhedged.json`. La 22ª posizione sta fuori dal campione per costruzione.
+
+⚠ **Conseguenza da mettere a verbale:** ri-lanciare oggi `hedged_vs_unhedged_judge.py` con lo stesso `--since` restituirebbe **22** settlement, non 20 — la 12AUG e la 13AUG sono maturate dopo il verdetto. **Il record è il JSON archiviato**, non una ri-esecuzione: il gate è chiuso e non si ri-giudica a campione allargato.
+
+**Verifica di inerzia, empirica.** Al riavvio: guard `V2 HEDGE ATTIVO: band=999.0`, nessun warning di riconciliazione (stato locale = posizione venue). Il tick di bootstrap ha processato la candela 14:00 (`edge=+0.280 → HOLD`) e la leg hedge è girata **senza produrre eventi**: ledger fermo al `rebalance` delle 15:01, `hedge_state.json` con `updated_ts` invariato. La leg perp resta congelata a +10.460 USD fino al flatten automatico di domani — delta non più inseguito, **non** delta nudo permanente.
+
+### ③ NON fatto oggi, per costruzione
+
+Il ritiro del contatore hedged da `avvio_sessione.ps1` resta fermo: fino al passo di domani quel numero ha ancora un consumatore, cioè la verifica che nessun nuovo hedge si apra. ⚠ Il contatore ha stampato **22** (posizioni con ≥1 hedge nel ledger) contro **20** settlement giudicati: è la stessa terza variante di scarto di unità annotata ieri, ora con due unità di scarto perché sono maturati due settlement post-verdetto.
+
+### ④ Refresh candele — verifica per-expiry PRIMA della scrittura, e il +4 è esatto
+
+Applicata la regola permanente: enumerate le expiry dello stadio 2 con il loro tick di decisione e il close di cui hanno bisogno (`tick+30h`), **prima** di toccare `raw_candles.parquet`.
+
+| expiry | tick di decisione | serve close fino a | esito atteso |
+|---|---|---|---|
+| 01→08/08 | — | — | già osservabili (8) |
+| 09/08 | 08-08 05:00 | 09-08 11:00 | +1 |
+| 10/08 | 08-09 05:00 | 10-08 11:00 | +1 |
+| 11/08 | 08-10 05:00 | 11-08 11:00 | +1 |
+| 12/08 | 08-11 05:00 | 12-08 11:00 | +1 |
+| **13/08** | 08-12 05:00 | **13-08 11:00** | **no** — matura domani |
+
+⚠ Il monitor stampava `no_rv: 5` (ieri 4) e la quinta **non è un'osservazione persa**: è la 13/08, il cui tick di decisione è già in `forecasts.parquet` ma la cui finestra RV si chiude domani alle 11:00 UTC. Letta senza la verifica, quella riga avrebbe suggerito un guadagno di +5.
+
+`01_update_data.py --candles-only`: 66.578 → **66.675** candele (+97). Esito misurato: **E1 12/40**, `no_rv` da 5 a **1**.
+
+⚠ **La regola `T+2h` regge — misurata oggi, non ereditata, e la lettura ingenua del log la sbaglia di un'ora.** Il log stampa «Caricate 98 candele [… → 2026-08-12 15:00]» e sembra dire che la barra in formazione entra; ma il merge ne scrive **97**, cioè la scarta già lì. Verificato a valle sui file: `raw_candles.parquet` finisce alle **14:00 UTC** (girando alle 15:22) e `hourly_close()`, che scarta un'altra riga, dà close usabile fino a **13:00 UTC**. **Due righe perse, una per il merge e una per `hourly_close()`** → per rendere usabile il close delle ore `T` bisogna girare alle `T+2h`, esattamente come scritto il 10/08. Margine effettivo di oggi sul vincolo della 12/08 (11:00): **2h**. Non toccati: `features.parquet`, `lstm_dataset.npz`, scaler, `PipelineState`, funding.
+
+⚠ **Staleness B7 ora 240/168:** alla **prossima** sessione la routine lancerà da sola `01b --regime-incremental` (scrive `regime_probs.parquet` + checkpoint). Atteso, e nessun esperimento a dati congelati è aperto.
+
+### 🔜 DOMANI 13/08 — due azioni, dopo le 08:01 UTC (10:01 italiane), senza limite superiore
+
+Nessuna finestra da cronometrare: con la banda 999 non può aprirsi alcun hedge, quindi il passo si può fare a qualunque ora dopo il settlement.
+
+**① Verificare il flatten della 13ª** in `results/vol_paper/hedge_ledger.jsonl`: evento con `reason` in `{"settled", "expired"}` per `position_key {side: 1, strike: 63500.0, expiry_ms: 1786608000000}`, `h_usd_after: 0.0`, e `hedge_state.json` **assente**. Se manca, fermarsi e capire perché prima di procedere.
+
+**② Chiudere il wind-down:** in `deploy/vps/quantsys-volpaper.service` `ExecStart` torna a `... scripts/04b_vol_paper.py --execute` (via i tre flag hedge) e il commento IT+EN transitorio va sostituito con la ragione definitiva (v1 unhedged = design di produzione, gate FAIL 2/3 dell'11/08). Poi deploy: `install` in `/etc/systemd/system/`, `daemon-reload`, `restart`. ⚠ Il timer `quantsys-volpaper-restart` rilancia comunque alle 00:30 UTC: finché l'unit non è sostituita ogni restart riparte **con** la banda 999 — che è innocua, ma non è lo stato finale.
+
+**③ Poi** ritirare il contatore hedged dal blocco ③ di `avvio_sessione.ps1` (untracked), **senza toccare** il contatore delle leg opzioni che condivide lo stesso blocco `$pyGateCounters` ed è l'unico numero che dice se `04b` sta eseguendo.
+
+**Refresh candele:** vale **+1** (la sola 13/08), leggibile dalle **13:00 UTC**. Nessun obbligo: le kline sono storiche e un singolo refresh recupera tutto l'arretrato in un colpo. Diventa obbligatorio una volta sola, prima del run one-shot di E1 stadio 2. Da 12/40 la soglia cade intorno al **9-10 settembre**, con la solita avvertenza: **1/giorno è il ritmo atteso, non una legge** (un'expiry entra solo se in quella finestra c'è stata una decisione valida).
+
+**🗒️ Coda:** le tre azioni di domani. Nient'altro.
+
+---
+
+## ▶️ 2026-08-11
 
 **Il gate hedged-vs-unhedged è SCATTATO e si è CHIUSO in giornata: FAIL 2/3.** Run one-shot del giudice pre-registrato, lanciato su decisione esplicita alla prima sessione con la condizione ③ soddisfatta. Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, nessun refresh candele. **Il processo `04b` sul VPS NON è stato toccato:** la disattivazione di `--hedge` ha un vincolo di ordine che la pre-registrazione non aveva previsto (⑤).
 
-### 🔜 DOMANI 12/08 — quattro azioni, in quest'ordine, subito dopo `.\avvio_sessione.ps1`
+### ~~🔜 DOMANI 12/08~~ — ESEGUITO il 12/08, con una divergenza: vedi la sezione del 2026-08-12
+
+> ⚠ Blocco tenuto **letterale** perché era una **previsione**, e il suo scarto dall'esito è il contenuto informativo. ④ è andato esattamente come scritto (+4). ② no: presupponeva che dopo il flatten lo stato hedge restasse vuoto, mentre `04b` ri-apre una leg entro poche ore → disattivazione in due passi via banda di wind-down. ③ è slittato di conseguenza.
 
 **Orario: aprire la sessione dalle 15:00 ITALIANE (13:00 UTC) in poi** — così una sola passata copre tutto. Le due precondizioni sono diverse e vanno tenute distinte:
 - ①②③ (hedge) richiedono il **settlement delle 08:00 UTC = 10:00 italiane**;
