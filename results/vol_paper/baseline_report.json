@@ -1,0 +1,52 @@
+{
+  "generated_ts": "2026-07-30 18:51:27+00:00",
+  "n_forecast_rows": 500,
+  "calendar_span": [
+    "2026-06-12 12:00:00+00:00",
+    "2026-07-30 17:00:00+00:00"
+  ],
+  "min_trades_required": 30,
+  "evaluable": false,
+  "gates": {
+    "g1_real_mean_pnl_gt_0": false,
+    "g2_nn_beats_both_baselines": false,
+    "g3_real_hit_rate_gt_0.5": false
+  },
+  "real_trades": {
+    "n_trades": 31,
+    "n_executed": 30,
+    "n_simulated": 1,
+    "total_pnl_btc": -0.08833490993102719,
+    "mean_pnl_btc": -0.0028495132235815224,
+    "hit_rate": 0.3870967741935484
+  },
+  "reconstructed": {
+    "nn": {
+      "rule": "nn",
+      "n_trades": 28,
+      "total_pnl_btc": -0.03480459076021764,
+      "mean_pnl_btc": -0.0012430210985792014,
+      "hit_rate": 0.42857142857142855,
+      "open_at_end": true,
+      "skipped_no_delivery": 0
+    },
+    "long": {
+      "rule": "long",
+      "n_trades": 30,
+      "total_pnl_btc": -0.07572005029616569,
+      "mean_pnl_btc": -0.0025240016765388563,
+      "hit_rate": 0.36666666666666664,
+      "open_at_end": true,
+      "skipped_no_delivery": 0
+    },
+    "short": {
+      "rule": "short",
+      "n_trades": 30,
+      "total_pnl_btc": 0.03972005029616569,
+      "mean_pnl_btc": 0.0013240016765388564,
+      "hit_rate": 0.5666666666666667,
+      "open_at_end": true,
+      "skipped_no_delivery": 0
+    }
+  }
+}

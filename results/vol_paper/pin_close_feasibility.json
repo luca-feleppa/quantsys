@@ -1,0 +1,658 @@
+{
+  "n_positions": 31,
+  "n_excluded_non_executed": 1,
+  "window": [
+    "2026-06-13 15:18:21+00:00",
+    "2026-07-30 10:01:33+00:00"
+  ],
+  "grid_hours": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    6.0
+  ],
+  "grid_band": [
+    0.001,
+    0.002,
+    0.003,
+    0.005,
+    0.0075,
+    0.01
+  ],
+  "tick_offset_s": 90,
+  "snap_tolerance": "0 days 00:10:00",
+  "surface": {
+    "P1_own_expiry_fwd|1.0|0.001": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P1_own_expiry_fwd|1.0|0.002": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P1_own_expiry_fwd|1.0|0.003": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P1_own_expiry_fwd|1.0|0.005": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P1_own_expiry_fwd|1.0|0.0075": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P1_own_expiry_fwd|1.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P1_own_expiry_fwd|2.0|0.001": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P1_own_expiry_fwd|2.0|0.002": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P1_own_expiry_fwd|2.0|0.003": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P1_own_expiry_fwd|2.0|0.005": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P1_own_expiry_fwd|2.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P1_own_expiry_fwd|2.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P1_own_expiry_fwd|3.0|0.001": {
+      "n": 31,
+      "trig": 3,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 3
+    },
+    "P1_own_expiry_fwd|3.0|0.002": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P1_own_expiry_fwd|3.0|0.003": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P1_own_expiry_fwd|3.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P1_own_expiry_fwd|3.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P1_own_expiry_fwd|3.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P1_own_expiry_fwd|4.0|0.001": {
+      "n": 31,
+      "trig": 3,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 3
+    },
+    "P1_own_expiry_fwd|4.0|0.002": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P1_own_expiry_fwd|4.0|0.003": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P1_own_expiry_fwd|4.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P1_own_expiry_fwd|4.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P1_own_expiry_fwd|4.0|0.01": {
+      "n": 31,
+      "trig": 7,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 7
+    },
+    "P1_own_expiry_fwd|6.0|0.001": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P1_own_expiry_fwd|6.0|0.002": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P1_own_expiry_fwd|6.0|0.003": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P1_own_expiry_fwd|6.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P1_own_expiry_fwd|6.0|0.0075": {
+      "n": 31,
+      "trig": 7,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 7
+    },
+    "P1_own_expiry_fwd|6.0|0.01": {
+      "n": 31,
+      "trig": 8,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 8
+    },
+    "P2_front_fwd|1.0|0.001": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P2_front_fwd|1.0|0.002": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P2_front_fwd|1.0|0.003": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P2_front_fwd|1.0|0.005": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P2_front_fwd|1.0|0.0075": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P2_front_fwd|1.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P2_front_fwd|2.0|0.001": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P2_front_fwd|2.0|0.002": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P2_front_fwd|2.0|0.003": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P2_front_fwd|2.0|0.005": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P2_front_fwd|2.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P2_front_fwd|2.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P2_front_fwd|3.0|0.001": {
+      "n": 31,
+      "trig": 3,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 3
+    },
+    "P2_front_fwd|3.0|0.002": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P2_front_fwd|3.0|0.003": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P2_front_fwd|3.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P2_front_fwd|3.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P2_front_fwd|3.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P2_front_fwd|4.0|0.001": {
+      "n": 31,
+      "trig": 3,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 3
+    },
+    "P2_front_fwd|4.0|0.002": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P2_front_fwd|4.0|0.003": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P2_front_fwd|4.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P2_front_fwd|4.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P2_front_fwd|4.0|0.01": {
+      "n": 31,
+      "trig": 7,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 7
+    },
+    "P2_front_fwd|6.0|0.001": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P2_front_fwd|6.0|0.002": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P2_front_fwd|6.0|0.003": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P2_front_fwd|6.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P2_front_fwd|6.0|0.0075": {
+      "n": 31,
+      "trig": 7,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 7
+    },
+    "P2_front_fwd|6.0|0.01": {
+      "n": 31,
+      "trig": 8,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 8
+    },
+    "P3_binance_1m|1.0|0.001": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P3_binance_1m|1.0|0.002": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P3_binance_1m|1.0|0.003": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P3_binance_1m|1.0|0.005": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P3_binance_1m|1.0|0.0075": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P3_binance_1m|1.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P3_binance_1m|2.0|0.001": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P3_binance_1m|2.0|0.002": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P3_binance_1m|2.0|0.003": {
+      "n": 31,
+      "trig": 2,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 2
+    },
+    "P3_binance_1m|2.0|0.005": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P3_binance_1m|2.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P3_binance_1m|2.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P3_binance_1m|3.0|0.001": {
+      "n": 31,
+      "trig": 3,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 3
+    },
+    "P3_binance_1m|3.0|0.002": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P3_binance_1m|3.0|0.003": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P3_binance_1m|3.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P3_binance_1m|3.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P3_binance_1m|3.0|0.01": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P3_binance_1m|4.0|0.001": {
+      "n": 31,
+      "trig": 3,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 3
+    },
+    "P3_binance_1m|4.0|0.002": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P3_binance_1m|4.0|0.003": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P3_binance_1m|4.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P3_binance_1m|4.0|0.0075": {
+      "n": 31,
+      "trig": 6,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 6
+    },
+    "P3_binance_1m|4.0|0.01": {
+      "n": 31,
+      "trig": 7,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 7
+    },
+    "P3_binance_1m|6.0|0.001": {
+      "n": 31,
+      "trig": 4,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 4
+    },
+    "P3_binance_1m|6.0|0.002": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P3_binance_1m|6.0|0.003": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P3_binance_1m|6.0|0.005": {
+      "n": 31,
+      "trig": 5,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 5
+    },
+    "P3_binance_1m|6.0|0.0075": {
+      "n": 31,
+      "trig": 7,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 7
+    },
+    "P3_binance_1m|6.0|0.01": {
+      "n": 31,
+      "trig": 8,
+      "unobservable": 15,
+      "n_vps": 15,
+      "trig_vps": 8
+    }
+  },
+  "note": "EVENT COUNT ONLY - no PnL, no counterfactual return, not a gate"
+}

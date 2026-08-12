@@ -1,0 +1,43 @@
+{
+  "metrics": {
+    "nn": {
+      "mse": 0.8248884136929706,
+      "spearman": 0.07832504708928682,
+      "sign_da": 0.5337816703159212
+    },
+    "har_rs": {
+      "mse": 0.8282868496410839,
+      "spearman": 0.03615270810259798,
+      "sign_da": 0.499843603378167
+    },
+    "naive": {
+      "mse": 1.6471179454184597,
+      "spearman": 0.0132055122899608,
+      "sign_da": 0.490147012824523
+    },
+    "train_mean": {
+      "mse": 0.8303551231763542,
+      "spearman": NaN,
+      "sign_da": 0.4831091648420394
+    }
+  },
+  "gate": {
+    "split": "val",
+    "nn_vs_har_mse_ratio": 0.9958970301779076,
+    "beats_har_5pct": false,
+    "beats_naive": true,
+    "beats_train_mean": true,
+    "secondary_sign_da_055": false,
+    "secondary_beats_har_da": true,
+    "n_obs": 6394,
+    "primary_verdict": "FAIL",
+    "secondary_verdict": "FAIL"
+  },
+  "har_beta": [
+    0.00805638014072826,
+    -0.021436331398970103,
+    -0.06508864319416725,
+    0.03758389689297843,
+    -0.00277917989268895
+  ]
+}

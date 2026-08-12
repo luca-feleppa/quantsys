@@ -1,0 +1,20 @@
+{
+  "split": "val",
+  "archs": [
+    "itransformer",
+    "nhits",
+    "tcnmamba"
+  ],
+  "pairwise_corr": {
+    "itransformer|nhits": 0.7755282463069223,
+    "itransformer|tcnmamba": 0.8145093369039335,
+    "nhits|tcnmamba": 0.8864616999786373
+  },
+  "mean_corr": 0.8254997610631644,
+  "min_corr": 0.7755282463069223,
+  "max_corr": 0.8864616999786373,
+  "kill_thresh": 0.99,
+  "proceed_thresh": 0.97,
+  "verdict": "PROCEED",
+  "n_obs": 6420
+}

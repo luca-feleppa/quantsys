@@ -1,0 +1,58 @@
+{
+  "gate": "B1_stage1_l2_incremental",
+  "pre_reg": "STATUS.md 2026-07-31",
+  "horizon_hours": 3,
+  "burn_in": 120,
+  "alpha": 0.01,
+  "l2_features": [
+    "ofi_abs",
+    "log_depth",
+    "dimb25_abs"
+  ],
+  "baseline_cols": [
+    "xc_h",
+    "xc_w",
+    "xc_m"
+  ],
+  "run_hours": 410,
+  "run_start": "2026-07-14 10:00:00+00:00",
+  "run_end": "2026-07-31 11:00:00+00:00",
+  "n_obs": 409,
+  "n_eval": 289,
+  "n_eff": 96.33333333333333,
+  "qlike_baseline": 0.4638884710368565,
+  "qlike_candidate": 0.4861487845963343,
+  "qlike_naive": 0.40188368121120704,
+  "ratio_cand_over_base": 1.0479863479032425,
+  "mse_log_baseline": 0.5765430435693759,
+  "mse_log_candidate": 0.6008558836227268,
+  "diebold_mariano": {
+    "cand_vs_base": {
+      "dm": 1.7192204221240408,
+      "dm_hln": 1.7043456776532744,
+      "p_value": 0.08939503389623711,
+      "mean_diff": 0.022260313559477714,
+      "hac_lag": 2,
+      "n": 289,
+      "n_eff": 96.33333333333333,
+      "better": "b"
+    },
+    "base_vs_naive": {
+      "dm": 1.739538439116683,
+      "dm_hln": 1.724487902579333,
+      "p_value": 0.08569274728698555,
+      "mean_diff": 0.06200478982564948,
+      "hac_lag": 2,
+      "n": 289,
+      "n_eff": 96.33333333333333,
+      "better": "b"
+    }
+  },
+  "conditions": {
+    "cond1_significant": false,
+    "cond2_material": false,
+    "cond3_n_obs": true,
+    "cond4_positive_control": false
+  },
+  "verdict": "NESSUNA_CONCLUSIONE"
+}

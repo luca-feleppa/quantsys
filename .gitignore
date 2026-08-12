@@ -36,6 +36,36 @@ models_dvol_probe/
 results/*
 !results/.gitkeep
 
+# IT: ECCEZIONE — i report macchina dei verdetti vol sono la FONTE citata dai
+#     doc ("il record e' il JSON, non la prosa"): vanno versionati, altrimenti
+#     un claim pubblico poggia su un file che esiste su un solo disco. Sono
+#     piccoli (~250 KB in tutto) e immutabili una volta chiuso il loro gate.
+#     Regole di negazione invece di `git add -f` caso per caso: l'incoerenza
+#     precedente (2 file su 41 tracciati) nasceva proprio dal force-add a mano.
+# EN: EXCEPTION — the vol verdicts' machine reports are the source cited by the
+#     docs ("the record is the JSON, not the prose"): they must be versioned, or
+#     a public claim rests on a file living on a single disk. They are small
+#     (~250 KB total) and immutable once their gate closes. Negation rules
+#     instead of case-by-case `git add -f`: the previous inconsistency (2 of 41
+#     files tracked) came precisely from manual force-adds.
+!results/vols/
+results/vols/*
+!results/vols/*.json
+
+# IT: da vol_paper SOLO i record statici di gate chiusi. I sei file live
+#     (forecasts/trades/exec_diag/hedge_ledger/hedge_state/position) cambiano a
+#     ogni tick orario: in git sarebbero churn puro e metterebbero lo stato del
+#     forward test sotto versione. Restano mirror VPS + copia locale.
+# EN: from vol_paper ONLY the static records of closed gates. The six live files
+#     (forecasts/trades/exec_diag/hedge_ledger/hedge_state/position) change at
+#     every hourly tick: in git they would be pure churn and would put forward-test
+#     state under version control. They stay as VPS mirror + local copy.
+!results/vol_paper/
+results/vol_paper/*
+!results/vol_paper/baseline_report.json
+!results/vol_paper/edge_information_stage1.json
+!results/vol_paper/pin_close_feasibility.json
+
 # ── Log rotativi ─────────────────────────────────────────────
 logs/*
 !logs/.gitkeep

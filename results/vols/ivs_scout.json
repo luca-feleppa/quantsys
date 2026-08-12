@@ -1,0 +1,104 @@
+{
+  "meta": {
+    "n_files": 12,
+    "files": [
+      "btc_options_20260612.parquet",
+      "btc_options_20260613.parquet",
+      "btc_options_20260615.parquet",
+      "btc_options_20260616.parquet",
+      "btc_options_20260617.parquet",
+      "btc_options_20260618.parquet",
+      "btc_options_20260619.parquet",
+      "btc_options_20260620.parquet",
+      "btc_options_20260621.parquet",
+      "btc_options_20260622.parquet",
+      "btc_options_20260623.parquet",
+      "btc_options_20260624.parquet"
+    ],
+    "n_hourly_snapshots": 90,
+    "n_rows_subsampled": 64050,
+    "params": {
+      "subsample_per_hour": 1,
+      "oi_min": 50.0,
+      "front_tenor_days": [
+        2.0,
+        9.0
+      ],
+      "back_tenor_days": [
+        25.0,
+        45.0
+      ],
+      "skew_tenor_band": [
+        20.0,
+        45.0
+      ],
+      "moneyness_otm": 0.1
+    }
+  },
+  "1_term_structure": {
+    "n_snapshots": 73,
+    "atm_front_mean_pct": 36.834931506849315,
+    "atm_back_mean_pct": 38.452465753424654,
+    "slope_mean_pct": 1.6175342465753426,
+    "slope_std_pct": 2.924164220048777,
+    "slope_min_pct": -7.899999999999999,
+    "slope_max_pct": 7.739999999999998,
+    "slope_frac_inverted": 0.2328767123287671,
+    "slope_autocorr_lag1": 0.7816220337711828,
+    "slope_sign_flips_per_snap": 0.125
+  },
+  "2_skew": {
+    "tenor_band_days": [
+      20.0,
+      45.0
+    ],
+    "moneyness_target": 0.1,
+    "n_snapshots": 81,
+    "skew_mean_pct": 8.334320987654321,
+    "skew_std_pct": 1.381659351516716,
+    "skew_min_pct": 5.310000000000002,
+    "skew_max_pct": 11.240000000000002,
+    "skew_frac_put_rich": 1.0,
+    "skew_autocorr_lag1": 0.9008654804774019
+  },
+  "3_surface_residuals": {
+    "n_snapshots_fitted": 90,
+    "n_liquid_resid_obs": 22812,
+    "n_instruments_with_series": 479,
+    "fit_rmse_pct_median": 1.5626665282309324,
+    "resid_abs_median_pct": 0.3554561525058647,
+    "resid_abs_p90_pct": 2.5141222726977053,
+    "resid_std_pct": 2.110242470719518,
+    "resid_autocorr_lag1_median": 0.7663752042800227,
+    "resid_autocorr_lag1_mean": 0.6393562148842664,
+    "resid_autocorr_lag1_demeaned_median": 0.7663752042800227,
+    "resid_autocorr_lag1_demeaned_mean": 0.6393562148842664,
+    "resid_autocorr_lag1_p25": 0.48657715496918585,
+    "resid_autocorr_lag1_p75": 0.8756526539788121,
+    "resid_autocorr_frac_positive": 0.9457202505219207,
+    "per_instrument_resid_std_median_pct": 0.38055545300791993
+  },
+  "4_execution": {
+    "n_liquid": 30209,
+    "n_liquid_atm": 7992,
+    "half_spread_price_btc_median": 0.0005,
+    "rel_half_spread_median": 0.03703703703703707,
+    "rel_half_spread_p25": 0.016918967052537762,
+    "rel_half_spread_p75": 0.09090909090909091,
+    "half_spread_ivpts_median_all": 1.5263888888888848,
+    "half_spread_ivpts_median_atm": 1.0068468468468477,
+    "half_spread_ivpts_p75_atm": 2.4432539682539693
+  },
+  "verdict": {
+    "verdict": "EVIDENCE of exploitable relative-value structure (persistent residuals AND magnitude > round-trip spread)",
+    "edge_vs_roundtrip_cost_ratio": 1.2485127606900728,
+    "notes": [
+      "resid abs p90 = 2.51 IV-pts vs round-trip cost ~2.01 IV-pts (ratio 1.25x)",
+      "residual lag-1 autocorr median = 0.77 (raw, includes static per-strike basis)",
+      "residual lag-1 autocorr median DEMEANED = 0.77 (genuine mean-reverting dynamics)",
+      "term-slope lag-1 autocorr = 0.78",
+      "skew lag-1 autocorr = 0.90"
+    ],
+    "CAVEAT": "Testnet/recorded data cannot validate live execution (fills, latency, depth at quote) of these strategies; this is a structural scout only."
+  }
+}

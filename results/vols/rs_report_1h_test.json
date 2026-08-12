@@ -1,0 +1,43 @@
+{
+  "metrics": {
+    "nn": {
+      "mse": 0.9936623656390856,
+      "spearman": -0.038009047417486314,
+      "sign_da": 0.45942142298670835
+    },
+    "har_rs": {
+      "mse": 0.9984314609005193,
+      "spearman": -0.053014570781513934,
+      "sign_da": 0.4647380766223612
+    },
+    "naive": {
+      "mse": 1.8902517103227807,
+      "spearman": 0.04838618401171261,
+      "sign_da": 0.5250977326035966
+    },
+    "train_mean": {
+      "mse": 0.9938669363824802,
+      "spearman": 0.0,
+      "sign_da": 0.47146207974980453
+    }
+  },
+  "gate": {
+    "split": "test",
+    "nn_vs_har_mse_ratio": 0.9952234124742702,
+    "beats_har_5pct": false,
+    "beats_naive": true,
+    "beats_train_mean": true,
+    "secondary_sign_da_055": false,
+    "secondary_beats_har_da": false,
+    "n_obs": 6395,
+    "primary_verdict": "FAIL",
+    "secondary_verdict": "FAIL"
+  },
+  "har_beta": [
+    0.00805638014072826,
+    -0.021436331398970103,
+    -0.06508864319416725,
+    0.03758389689297843,
+    -0.00277917989268895
+  ]
+}
