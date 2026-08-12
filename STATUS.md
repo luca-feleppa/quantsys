@@ -7,7 +7,7 @@
 
 ## ▶️ RIPARTI DA QUI — 2026-08-12
 
-**Giornata di esecuzione del piano di ieri: ④ chiuso come previsto, ② NON eseguibile come scritto.** Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. Due scritture, entrambe pre-verificate: `raw_candles.parquet` (+97 candele, dopo la verifica per-expiry) e l'unit `04b` sul VPS (wind-down della leg hedge). Il contatore E1 passa da **8 a 12/40**, esattamente il +4 predetto.
+**Giornata di esecuzione del piano di ieri: ④ chiuso come previsto, ② NON eseguibile come scritto.** Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. Due scritture, entrambe pre-verificate: `raw_candles.parquet` (+97 candele, dopo la verifica per-expiry) e l'unit `04b` sul VPS (wind-down della leg hedge). Il contatore E1 passa da **8 a 12/40**, esattamente il +4 predetto. In coda, chiusa una lacuna di versionamento: i **record macchina dei verdetti vol** erano gitignored pur essendo la fonte citata dai doc (⑤).
 
 **Routine eseguita — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.0h · `04b` 1.3h); nessuna promozione macro; regime B7 fresco 143/168 **prima** del refresh.
 
@@ -70,15 +70,46 @@ Applicata la regola permanente: enumerate le expiry dello stadio 2 con il loro t
 
 ⚠ **Staleness B7 ora 240/168:** alla **prossima** sessione la routine lancerà da sola `01b --regime-incremental` (scrive `regime_probs.parquet` + checkpoint). Atteso, e nessun esperimento a dati congelati è aperto.
 
-### 🔜 DOMANI 13/08 — due azioni, dopo le 08:01 UTC (10:01 italiane), senza limite superiore
+### ⑤ Versionati i record macchina dei verdetti vol — il JSON era la fonte, e viveva su un disco solo
 
-Nessuna finestra da cronometrare: con la banda 999 non può aprirsi alcun hedge, quindi il passo si può fare a qualunque ora dopo il settlement.
+I doc affermano ripetutamente che *il record è il JSON, non la prosa*, ma `results/` era ignorato in blocco: dei 41 report in `results/vols/` ne risultavano tracciati **2**, entrambi aggiunti a mano con force-add. Un claim pubblico poggiava quindi su file esistenti su una sola macchina — fra cui `hedged_vs_unhedged.json` (chiuso ieri) e i C3 del 31/07 **da cui viene la banda pubblicata −22.42% ÷ −31.65%**.
 
-**① Verificare il flatten della 13ª** in `results/vol_paper/hedge_ledger.jsonl`: evento con `reason` in `{"settled", "expired"}` per `position_key {side: 1, strike: 63500.0, expiry_ms: 1786608000000}`, `h_usd_after: 0.0`, e `hedge_state.json` **assente**. Se manca, fermarsi e capire perché prima di procedere.
+Versionati **42 file (~250 KB)**: tutti i report di `results/vols/` più i tre record statici di gate chiusi in `results/vol_paper/` (`baseline_report`, `edge_information_stage1`, `pin_close_feasibility`). Restano ignorati i **sei file live** di `vol_paper` (`forecasts`, `trades`, `exec_diag`, `hedge_ledger`, `hedge_state`, `position`): cambiano a ogni tick e in git sarebbero churn puro. Meccanismo: **regole di negazione nel `.gitignore`**, non force-add caso per caso — l'incoerenza 2-su-41 nasceva proprio dall'aggiunta manuale, e un report futuro ora compare da solo in `git status`. Verificato prima del commit: nessun path assoluto, host, IP o credenziale nei 42 file.
 
-**② Chiudere il wind-down:** in `deploy/vps/quantsys-volpaper.service` `ExecStart` torna a `... scripts/04b_vol_paper.py --execute` (via i tre flag hedge) e il commento IT+EN transitorio va sostituito con la ragione definitiva (v1 unhedged = design di produzione, gate FAIL 2/3 dell'11/08). Poi deploy: `install` in `/etc/systemd/system/`, `daemon-reload`, `restart`. ⚠ Il timer `quantsys-volpaper-restart` rilancia comunque alle 00:30 UTC: finché l'unit non è sostituita ogni restart riparte **con** la banda 999 — che è innocua, ma non è lo stato finale.
+⚠ **Due limitazioni dichiarate invece che corrette.** (a) Il blocco `provenance` (quale modello/npz ha prodotto il report) è scritto dal giudice **solo dal 2026-08-01**: i report anteriori, compresi i C3, hanno i numeri ma non l'impronta — ri-generarli costerebbe GPU e toccherebbe lo split test, quindi la loro provenienza resta nei doc. (b) `edge_information_stage1.json` porta `"stage": 1` ma **non** il disclaimer «esplorativo, nessun verdetto, numeri non citabili», che il giudice stampa su stdout senza scriverlo nel file. **Il giudice NON è stato modificato per aggiungerlo:** serve un campione pre-registrato ancora **aperto** (stadio 2, 12/40) e un campione aperto non si tocca nemmeno per un `print`.
 
-**③ Poi** ritirare il contatore hedged dal blocco ③ di `avvio_sessione.ps1` (untracked), **senza toccare** il contatore delle leg opzioni che condivide lo stesso blocco `$pyGateCounters` ed è l'unico numero che dice se `04b` sta eseguendo.
+### 🔜 DOMANI 13/08 — tre azioni, dopo le 08:01 UTC (10:01 italiane), **senza limite superiore di orario**
+
+Con la banda 999 non può aprirsi alcun hedge: non c'è nessuna finestra da cogliere e il passo si fa a qualunque ora del giorno. **Se qualcosa non torna al punto ①, ci si ferma lì** — nulla di ciò che segue è urgente.
+
+**⓪ Routine.** `.\avvio_sessione.ps1` — merge del ledger dal VPS. ⚠ Atteso: la routine lancia da sola `01b --regime-incremental` (staleness B7 a 240/168). È corretto, scrive `regime_probs.parquet` + checkpoint, e non blocca nulla.
+
+**① Verificare il flatten della 13ª** — read-only, **precondizione bloccante**:
+
+```powershell
+Get-Content results\vol_paper\hedge_ledger.jsonl -Tail 3
+Test-Path results\vol_paper\hedge_state.json     # atteso / expected: False
+```
+
+Cercare un evento con `position_key {side: 1, strike: 63500.0, expiry_ms: 1786608000000}`, `h_usd_after: 0.0` e `reason` **in `{"settled", "expired"}`** — ⚠ **entrambi sono validi**: `maybe_hedge` sceglie `expired` se `position.json` esiste ancora ma l'expiry è passata, `settled` se il bookkeeping l'ha già chiusa; oggi è uscito `settled`, domani può uscire l'altro e **non è un'anomalia**. `hedge_state.json` è **presence-mirrored** dal merge (se sparisce sul VPS sparisce in locale), quindi `Test-Path → False` è un check valido e non uno specchio stale.
+
+**② Chiudere il wind-down.** In `deploy/vps/quantsys-volpaper.service`: `ExecStart` torna a `... scripts/04b_vol_paper.py --execute` (via **tutti e tre** i flag hedge) e il commento transitorio IT+EN va **sostituito** con la ragione definitiva (v1 unhedged = design di produzione, gate FAIL 2/3 dell'11/08). Poi commit e deploy:
+
+```powershell
+. .\scripts\vps\common.ps1
+$cfg = Get-VpsConfig -SecretsPath "config\secrets.yaml"; $h = $cfg.Host; $o = $VpsSshOpts
+scp -q @o "deploy\vps\quantsys-volpaper.service" "${h}:/root/quantsys-volpaper.service.new"
+ssh @o $h "install -m 644 /root/quantsys-volpaper.service.new /etc/systemd/system/quantsys-volpaper.service && systemctl daemon-reload && systemctl restart quantsys-volpaper"
+ssh @o $h "systemctl show quantsys-volpaper -p ExecStart --value; systemctl is-active quantsys-volpaper"
+```
+
+Verifica di chiusura: nell'`ExecStart` in vigore **non deve comparire `--hedge`**, e al tick successivo il log **non** deve stampare `V2 HEDGE ATTIVO`. ⚠ Il commit da solo **non** cambia nulla in produzione: finché l'unit sul VPS non è sostituita, il timer `quantsys-volpaper-restart` delle 00:30 UTC riparte **con la banda 999** — innocua, ma non è lo stato finale.
+
+**③ Solo dopo ②**, ritirare il contatore hedged dal blocco ③ di `avvio_sessione.ps1` (untracked). ⚠ **Non toccare il contatore delle leg opzioni**: condivide lo stesso blocco `$pyGateCounters` ed è l'unico numero che dice se `04b` sta eseguendo. Fino a ② quel contatore ha ancora un consumatore — serve a verificare che nessun hedge nuovo si apra.
+
+**Refresh candele — facoltativo:** vale **+1** (la sola 13/08, `tick` 12-08 05:00 → serve close fino a 13-08 11:00), leggibile dalle **13:00 UTC** per la regola `T+2h` misurata oggi. Nessun obbligo: l'arretrato si recupera tutto in un colpo quando serve. Diventa obbligatorio una volta sola, prima del run one-shot di E1 stadio 2.
+
+**Nulla d'altro è sbloccato:** MFIV v2 36/40 (~16/08), E1 12/40 (~9-10/09), L2 `n_eff` 18.4/216, refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse.
 
 **Refresh candele:** vale **+1** (la sola 13/08), leggibile dalle **13:00 UTC**. Nessun obbligo: le kline sono storiche e un singolo refresh recupera tutto l'arretrato in un colpo. Diventa obbligatorio una volta sola, prima del run one-shot di E1 stadio 2. Da 12/40 la soglia cade intorno al **9-10 settembre**, con la solita avvertenza: **1/giorno è il ritmo atteso, non una legge** (un'expiry entra solo se in quella finestra c'è stata una decisione valida).
 
