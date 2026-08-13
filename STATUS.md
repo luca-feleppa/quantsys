@@ -46,7 +46,9 @@ Wedge MFIV−ATM stabile: mediana **+3.00** vol pt (p10 +2.02, p90 +4.20) su 911
 
 ### ③ Contatore hedged ritirato dalla routine
 
-Da `avvio_sessione.ps1` (untracked) sparisce il parsing di `hedge_ledger.jsonl`; resta il solo `[gate] leg opzioni`, che è **l'unico numero che dice se `04b` sta eseguendo**. Verificato: `PARSE OK`, blocco `$pyGateCounters` estratto ed eseguito standalone (`n=43 executed`), **0 byte non-ASCII** — due em-dash introdotti nei commenti sono stati riportati a `-`, perché i `.ps1` senza BOM vengono letti cp1252.
+Da `avvio_sessione.ps1` sparisce il parsing di `hedge_ledger.jsonl`; resta il solo `[gate] leg opzioni`, che è **l'unico numero che dice se `04b` sta eseguendo**. Verificato: `PARSE OK`, blocco `$pyGateCounters` estratto ed eseguito standalone (`n=43 executed`), **0 byte non-ASCII** — due em-dash introdotti nei commenti sono stati riportati a `-`, perché i `.ps1` senza BOM vengono letti cp1252.
+
+⚠ **Correzione a un'etichetta sbagliata e propagata: `avvio_sessione.ps1` è TRACCIATO, non untracked.** Le voci dell'11/08 e del 12/08 lo chiamano «(file untracked)» — è falso: `git ls-files` lo trova, ed è in git dal commit che l'ha creato (`0fdb4cf`). Il file di esclusione locale (`.git/info/exclude`) elenca **solo** la cartella di tooling di sessione col suo manifesto e i file della dashboard: questo script non c'è mai stato. La conseguenza non è cosmetica: una modifica a questo file è una **modifica pendente su un repo pubblico**, quindi va committata, non lasciata su disco — con l'etichetta sbagliata sarebbe rimasta fuori da git e la routine deployata avrebbe divergiato dal tracciato in silenzio. Le voci storiche restano letterali (sono record di quel giorno), la correzione vale **da qui in avanti**.
 
 Nel commento resta scritto **perché** è stato tolto e **perché non va ripristinato "per informazione"**: è il contatore che ha letto l'unità sbagliata **tre volte** (eventi ≠ posizioni ≠ settlement), e un numero senza consumatore invita solo a confrontarlo con una soglia che non è più la sua.
 

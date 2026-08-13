@@ -314,51 +314,42 @@ else:
     & $Py -c $pyOneMinCoverage
     if ($LASTEXITCODE -ne 0) { Write-Warning "check copertura 1m FALLITO/FAILED (exit $LASTEXITCODE)" }
 
-    # IT: contatori dei gate forward aperti (leg opzioni n>=30, hedged n>=20).
-    #     Sola lettura dei ledger di 04b: nessun PnL aggregato, nessun verdetto.
+    # IT: contatore delle leg opzioni eseguite (soglia storica n>=30, gate chiuso
+    #     il 30/07: resta perche' e' l'unico numero che dice se 04b sta ESEGUENDO).
+    #     Sola lettura del ledger di 04b: nessun PnL aggregato, nessun verdetto.
+    #     Il contatore hedged e' stato RITIRATO il 2026-08-13: il suo gate si e'
+    #     chiuso l'11/08 (FAIL 2/3) e il suo ultimo consumatore era la verifica che
+    #     la banda di wind-down 999 non aprisse hedge nuovi - verifica esaurita
+    #     oggi con la rimozione dei tre flag dall'unit del VPS. Record macchina del
+    #     verdetto: results/vols/hedged_vs_unhedged.json (n=20). Da non ripristinare
+    #     "per informazione": questo contatore ha letto l'unita' sbagliata tre volte
+    #     (eventi != posizioni != settlement) e un numero senza consumatore invita
+    #     solo a confrontarlo con una soglia che non e' piu' la sua.
     #     NOTA quoting: solo apici SINGOLI (PS 5.1 strippa le doppie virgolette
     #     negli argomenti ai native exe).
-    # EN: counters of the open forward gates (option legs n>=30, hedged n>=20).
-    #     Read-only over 04b ledgers: no aggregate PnL, no verdict.
+    # EN: counter of executed option legs (historical threshold n>=30, gate closed
+    #     on 07/30: kept because it is the only number telling whether 04b is
+    #     EXECUTING). Read-only over the 04b ledger: no aggregate PnL, no verdict.
+    #     The hedged counter was RETIRED on 2026-08-13: its gate closed on 08/11
+    #     (FAIL 2/3) and its last consumer was the check that the 999 wind-down band
+    #     opened no new hedges - a check discharged today by removing the three
+    #     flags from the VPS unit. Machine record of the verdict:
+    #     results/vols/hedged_vs_unhedged.json (n=20). Do not restore it "for
+    #     information": this counter read the wrong unit three times (events !=
+    #     positions != settlements) and a number without a consumer only invites
+    #     comparing it against a threshold that is no longer its own.
     #     Quoting NOTE: SINGLE quotes only (PS 5.1 strips double quotes in native
     #     exe arguments).
     $pyGateCounters = @'
 import json
 from pathlib import Path
 tp = Path('results/vol_paper/trades.jsonl')
-hp = Path('results/vol_paper/hedge_ledger.jsonl')
 n_rows = n_exec = 0
 if tp.exists():
     rows = [json.loads(l) for l in tp.open(encoding='utf-8') if l.strip()]
     n_rows = len(rows)
     n_exec = sum(1 for r in rows if r.get('executed'))
-# IT: il campione pre-registrato del giudice hedged conta i TRADE aperti con
-#     hedge attivo, NON gli eventi di ledger (1 posizione = open + N rebalance +
-#     flatten): stampare gli eventi invitava a leggere '22 >= 20' e a lanciare il
-#     giudice in anticipo. Unita' di misura = position_key distinte con >=1 hedge
-#     eseguito. Esclusa la posizione 19JUL26 (aperta UNHEDGED, hedge solo da
-#     meta' vita: esclusione pre-dichiarata in STATUS 2026-07-18).
-# EN: the hedged judge's pre-registered sample counts TRADES opened with the hedge
-#     active, NOT ledger events (1 position = open + N rebalance + flatten):
-#     printing events invited reading '22 >= 20' and running the judge early.
-#     Unit = distinct position_key with >=1 executed hedge. The 19JUL26 position
-#     is excluded (opened UNHEDGED, hedge only from mid-life: exclusion
-#     pre-declared in STATUS 2026-07-18).
-EXCLUDED_EXPIRY_MS = 1784448000000  # 2026-07-19 08:00 UTC
-n_hedge_ev = 0
-hedged_pos = set()
-if hp.exists():
-    for l in hp.open(encoding='utf-8'):
-        if not l.strip():
-            continue
-        r = json.loads(l)
-        n_hedge_ev += 1
-        pk = r.get('position_key') or {}
-        if not r.get('executed') or pk.get('expiry_ms') == EXCLUDED_EXPIRY_MS:
-            continue
-        hedged_pos.add(json.dumps(pk, sort_keys=True))
 print(f'[gate] leg opzioni / option legs: n={n_exec} executed ({n_rows} righe/rows) - soglia/threshold n>=30')
-print(f'[gate] hedged: n={len(hedged_pos)} posizioni hedge-attive/hedge-active positions ({n_hedge_ev} eventi/events nel ledger) - soglia/threshold n>=20')
 '@
     & $Py -c $pyGateCounters
     if ($LASTEXITCODE -ne 0) { Write-Warning "contatori gate FALLITI/FAILED (exit $LASTEXITCODE)" }
