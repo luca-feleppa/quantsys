@@ -27,45 +27,37 @@ Wants=network-online.target
 Type=simple
 User=quantsys
 WorkingDirectory=/opt/quantsys
-# IT: STATO TRANSITORIO DI WIND-DOWN (2026-08-12) — il gate hedged-vs-unhedged
-#     si e' chiuso l'11/08 con FAIL 2/3 (varianza -55.3%, ma drag -0.647 SE
-#     contro un budget di -0.25 SE, per il 76% fee perp): --hedge e' FALLITO e
-#     la v1 unhedged e' il design di produzione. Il flag NON viene rimosso in un
-#     colpo per un vincolo di ORDINE: maybe_hedge e reconcile_hedge_state girano
-#     SOLO dentro --hedge, quindi riavviare senza il flag con una leg perp
-#     aperta la lascerebbe NUDA e mai flattenata sul testnet. La banda 999
-#     rende impossibile aprire o ribilanciare un hedge (il check di banda esce
-#     prima di qualunque ordine) MA lascia attivo il flatten a settlement /
-#     expiry / cambio struttura, che gira PRIMA del check di banda: la leg
-#     residua viene chiusa dal codice che ha scritto tutte le altre, cosi'
-#     hedge_ledger.jsonl resta internamente consistente.
-#     ⚠ Non e' un cambio di parametro a giudizio in corso: il congelamento
-#     band=0.30/conv=raw valeva per la durata del gate, ora chiuso, e il
-#     campione giudicato (n=20, ultimo settlement exp 11AUG) e' frozen in
-#     results/vols/hedged_vs_unhedged.json — la posizione hedgiata ancora
-#     aperta e' la 22esima e sta fuori dal campione per costruzione.
-#     ⚠ DA RIMUOVERE dopo il settlement del 13AUG 08:00 UTC, verificato il
-#     flatten nel ledger: ExecStart torna al solo --execute (v1).
-# EN: TRANSIENT WIND-DOWN STATE (2026-08-12) — the hedged-vs-unhedged gate
-#     closed on 08/11 with FAIL 2/3 (variance -55.3%, but drag -0.647 SE against
-#     a -0.25 SE budget, 76% of it perp fees): --hedge FAILED and unhedged v1 is
-#     the production design. The flag is NOT removed in one step because of an
-#     ORDER constraint: maybe_hedge and reconcile_hedge_state run ONLY under
-#     --hedge, so restarting without it while a perp leg is open would leave it
-#     NAKED and never flattened on the testnet. A 999 band makes opening or
-#     rebalancing a hedge impossible (the band check returns before any order)
-#     but keeps the settlement / expiry / structure-change flatten active, since
-#     that runs BEFORE the band check: the residual leg is closed by the same
-#     code that wrote all the others, so hedge_ledger.jsonl stays internally
-#     consistent.
-#     ⚠ This is not a mid-judgment parameter change: the band=0.30/conv=raw
-#     freeze held for the gate's duration, now closed, and the judged sample
-#     (n=20, last settlement exp 11AUG) is frozen in
-#     results/vols/hedged_vs_unhedged.json — the still-open hedged position is
-#     the 22nd and lies outside the sample by construction.
-#     ⚠ TO BE REMOVED after the 13AUG 08:00 UTC settlement, once the flatten is
-#     verified in the ledger: ExecStart goes back to --execute alone.
-ExecStart=/opt/quantsys/.venv/bin/python scripts/04b_vol_paper.py --execute --hedge --hedge-band 999 --hedge-conv raw
+# IT: SHORT-VOL v1 UNHEDGED = design di produzione (dal 2026-08-13). Il gate
+#     pre-registrato hedged-vs-unhedged si e' chiuso l'11/08 con FAIL 2/3: la
+#     varianza del PnL scende del 55.3% (condizione ① PASS con margine) ma il
+#     drag e' -0.647 SE contro un budget pre-dichiarato di -0.25 SE, e il 76%
+#     di quel drag sono fee taker sul perp (funding: 0.9%, l'incognita
+#     dichiarata era la componente sbagliata). La delta-hedge muore sul COSTO
+#     DI REALIZZAZIONE a size 1 contratto, non sulla teoria. Record macchina:
+#     results/vols/hedged_vs_unhedged.json (n=20, ultimo settlement exp 11AUG).
+#     ⚠ Se un giorno si volesse riattivare --hedge, il vincolo di ORDINE vale
+#     in entrambe le direzioni: maybe_hedge e reconcile_hedge_state girano SOLO
+#     dentro il flag, quindi spegnerlo con una leg perp aperta la lascerebbe
+#     NUDA e mai flattenata. La disattivazione qui e' avvenuta in due passi
+#     (banda di wind-down 999 il 12/08, che blocca apertura e ribilanciamento
+#     ma lascia attivo il flatten perche' quel ramo gira PRIMA del check di
+#     banda; rimozione dei tre flag il 13/08 a leg verificata piatta).
+# EN: SHORT-VOL v1 UNHEDGED = production design (since 2026-08-13). The
+#     pre-registered hedged-vs-unhedged gate closed on 08/11 with FAIL 2/3: PnL
+#     variance drops 55.3% (condition ① PASS with margin) but the drag is
+#     -0.647 SE against a pre-declared -0.25 SE budget, and 76% of that drag is
+#     perp taker fees (funding: 0.9% — the declared unknown was the wrong
+#     component). Delta hedging dies on the COST OF REALIZATION at 1-contract
+#     size, not on the theory. Machine record:
+#     results/vols/hedged_vs_unhedged.json (n=20, last settlement exp 11AUG).
+#     ⚠ Should --hedge ever be re-enabled, the ORDER constraint cuts both ways:
+#     maybe_hedge and reconcile_hedge_state run ONLY under the flag, so turning
+#     it off with an open perp leg would leave that leg NAKED and never
+#     flattened. Deactivation here took two steps (999 wind-down band on 08/12,
+#     which blocks opening and rebalancing but keeps the flatten alive because
+#     that branch runs BEFORE the band check; removal of the three flags on
+#     08/13 once the leg was verified flat).
+ExecStart=/opt/quantsys/.venv/bin/python scripts/04b_vol_paper.py --execute
 Environment=PYTHONUNBUFFERED=1
 Restart=always
 RestartSec=60
