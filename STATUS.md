@@ -5,7 +5,76 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-12
+## ▶️ RIPARTI DA QUI — 2026-08-13
+
+**Wind-down della leg hedge CHIUSO: `04b` gira di nuovo come v1 unhedged, che è il design di produzione.** Il piano di ieri è stato eseguito per intero (⓪①②③) e la precondizione bloccante è stata verificata prima di toccare qualunque cosa. Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, **nessun refresh candele** (decisione motivata, ⑤). Una sola scrittura su file di produzione: l'unit systemd sul VPS. Con questo, il gate v2 non ha più nessuna coda operativa aperta.
+
+**Routine eseguita — exit 0.** 4 collector freschi (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.7h); nessuna promozione macro. Refresh B7 incrementale **partito e completato da solo** (240 barre, **0 retrain** — il prossimo cade a t=67680): `regime_probs.parquet` a 66.735 righe fino al 12-08 14:00 UTC, checkpoint riscritto. Era atteso e non ha bloccato nulla.
+
+| Contatore | 12/08 | **13/08** | Soglia | Nota |
+|---|---|---|---|---|
+| ~~hedged vs unhedged~~ | 22 | **ritirato** | — | gate chiuso 11/08, ultimo consumatore esaurito oggi (③) |
+| MFIV comparatore v2 | 36 | **37** | 40 | `--count-only`, nessun run one-shot |
+| E1 stadio 2 | 12 | **12** | 40 | invariato: nessun refresh candele, per scelta (⑤) |
+| L2 h=30 (`n_eff`) | 18.4 | **19.2** | (216) | run contiguo **725h**, nessun buco in 7g |
+| leg opzioni | 42 | **43** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 12.1g | 13.1g | — | non è un debito (decisione 10/08) |
+
+Wedge MFIV−ATM stabile: mediana **+3.00** vol pt (p10 +2.02, p90 +4.20) su 9116 tick accoppiati.
+
+### ① Il flatten c'è, ma con il terzo `reason` — e la ragione spiega perché il piano di ieri non poteva funzionare
+
+```
+2026-08-13 08:01:34+00:00  event:flatten  reason:"structure_changed"
+  position_key {side:1, strike:63500.0, expiry_ms:1786608000000}
+  dh_usd −10460.0 → h_usd_after 0.0   fill 63836.5   fee 8.19e−05 BTC   executed:true
+```
+
+`hedge_state.json` assente sul VPS e in canonico. Il piano di ieri enumerava `reason ∈ {settled, expired}`: è uscito **`structure_changed`**, che è il **terzo arm della stessa guard** (`04b_vol_paper.py`, `maybe_hedge`: `pos is None` → *settled*, `expired` → *expired*, `st["position_key"] != pos_key` → *structure_changed*). Stesso ramo, stesso effetto, nessuna anomalia — l'elenco di ieri era incompleto perché ricavato dai primi due arm.
+
+⚠ **Il perché è la conferma retroattiva della correzione di ieri.** Allo **stesso tick** delle 08:01:34 la 13AUG si è settlata (`settled_ts` in `trades.jsonl`) **e** `04b` ha aperto la 23ª struttura (BTC-14AUG26-64000, edge +0.501): `position.json` non è **mai** stato vuoto, quindi il ramo `settled` non poteva scattare. **La "finestra pulita" post-settlement non esiste affatto** — non dura poche ore come sembrava il 12/08, è larga zero: il book viene rimpiazzato nello stesso tick in cui si liquida. La banda di wind-down non era la strada comoda, era **l'unica**.
+
+**Inerzia della banda 999, misurata:** nessun evento nel ledger dopo il flatten, `hedge_state.json` assente, contatore hedge-attive fermo a **22** come ieri. La 23ª posizione è nuda per progetto — cioè come tutte quelle della v1.
+
+### ② `--hedge` rimosso dall'unit — commit e deploy verificati sui due lati
+
+`deploy/vps/quantsys-volpaper.service`: `ExecStart` → `... scripts/04b_vol_paper.py --execute` (via tutti e tre i flag). Il commento transitorio è sostituito dalla **ragione definitiva** (gate FAIL 2/3 dell'11/08: varianza −55.3% ma drag −0.647·SE contro un budget di −0.25·SE, per il 76% fee taker sul perp e lo 0.9% funding; record macchina `results/vols/hedged_vs_unhedged.json`, n=20). Commit `3269fcb`.
+
+⚠ **Il vincolo di ordine è stato riscritto in forma simmetrica, non cancellato.** Vale anche a rovescio: `maybe_hedge`/`reconcile_hedge_state` girano solo dentro il flag, quindi chiunque un domani lo riaccenda deve sapere che **spegnerlo** con una leg aperta la lascia nuda. Il commento documenta anche i due passi (banda 999 il 12/08, rimozione dei flag il 13/08 a leg verificata piatta): la procedura è ricostruibile da git senza rileggere questo file.
+
+**Verifiche, prima e dopo.** Prima: md5 dell'unit in vigore sul VPS **identico** a `HEAD` (`7453faad…`) → nessuna deriva fra deployato e tracciato. Il processo attivo era ripartito alle **00:30:03 UTC** col timer, quindi ancora a banda 999 — la conferma che *il commit da solo non cambia la produzione*. Dopo: `ExecStart` in vigore **senza `--hedge`**, md5 remoto = locale (`39965061…`), `is-active: active`, restart **15:48:25 UTC**; nel log di boot **nessun `V2 HEDGE ATTIVO`** e nessuna riconciliazione, primo tick regolare (`2026-08-13 14:00`, `edge=+0.628 → HOLD`, la 14AUG è già aperta).
+
+### ③ Contatore hedged ritirato dalla routine
+
+Da `avvio_sessione.ps1` (untracked) sparisce il parsing di `hedge_ledger.jsonl`; resta il solo `[gate] leg opzioni`, che è **l'unico numero che dice se `04b` sta eseguendo**. Verificato: `PARSE OK`, blocco `$pyGateCounters` estratto ed eseguito standalone (`n=43 executed`), **0 byte non-ASCII** — due em-dash introdotti nei commenti sono stati riportati a `-`, perché i `.ps1` senza BOM vengono letti cp1252.
+
+Nel commento resta scritto **perché** è stato tolto e **perché non va ripristinato "per informazione"**: è il contatore che ha letto l'unità sbagliata **tre volte** (eventi ≠ posizioni ≠ settlement), e un numero senza consumatore invita solo a confrontarlo con una soglia che non è più la sua.
+
+### ④ Nota di metodo: `2>&1 | Select-String` su uno script che lancia Python
+
+Lo smoke della routine è stato tentato con `.\avvio_sessione.ps1 ... 2>&1 | Select-String ...` ed è morto su `NativeCommandError` — PS 5.1 incapsula lo stderr dell'exe nativo in ErrorRecord, ed è la gotcha già a manifesto per `Tee-Object`. **Vale identica per qualunque pipe con `2>&1`, non solo per `Tee-Object`.** Verificata l'assenza di danni collaterali: quel run era morto prima di scrivere, `mfiv_30h.parquet` intatto a 9116 righe. Sostituito da un test mirato: estrazione del blocco via AST ed esecuzione standalone — che è anche il test giusto, perché isola la modifica.
+
+### ⑤ Refresh candele NON fatto — decisione, non dimenticanza
+
+Verifica per-expiry eseguita comunque (regola permanente: prima si guarda, poi si scrive). `raw_candles.parquet` locale finisce a `2026-08-12 14:00` (close usabile 13:00). Le due `no_rv` del monitor sono la **13/08** (tick 12-08 05:00, serve close a 13-08 11:00 → un refresh oggi la renderebbe osservabile: **+1 esatto**) e la **14/08** (tick 13-08 05:00, matura domani). Nessun'altra.
+
+**Non applicato.** Il criterio è il **consumatore del numero**: a 12/40 o 13/40 non scatta niente, il giudice E1 resta `NO_RUN` sotto 40, e la soglia cade intorno al 9-10 settembre a prescindere da quando le osservazioni diventano *visibili* — maturano da sole sul VPS, il refresh non le crea. Dall'altro lato ogni refresh è una scrittura su un file di dati di produzione: farlo ogni giorno per +1 è la versione lenta dell'automatismo che `-RefreshCandles` è spento **apposta** per evitare (toglie la possibilità di congelare i dati per un pre-registrato e fa dipendere i confini train/val/test da quante sessioni sono state aperte). Il rischio del rinvio — scoprire un intoppo nel path proprio il giorno che serve — è coperto: quel path è stato esercitato **ieri**, con la regola `T+2h` misurata sui file.
+
+**Resta obbligatorio una volta sola:** subito prima del run one-shot di E1 stadio 2 (prerequisito ⑤ della sua pre-reg), quando il contatore deve essere veritiero perché è il numero che autorizza il giudice.
+
+### 🔜 PROSSIMA SESSIONE — nessuna azione pendente
+
+**Per la prima volta da settimane la coda operativa è vuota:** il gate v2 è chiuso, il wind-down è concluso su entrambi i lati (git + VPS), il contatore ritirato. La prossima sessione è **⓪ routine e basta**, salvo che un contatore scatti.
+
+**L'unico che può scattare a breve è MFIV v2 a 37/40** (~16/08, cadenza ~1/giorno ma non garantita). Quando arriva a 40: run **one-shot manuale** del comparatore pre-registrato — `--count-only` nella routine non lo lancia mai, per costruzione.
+
+**Fermi e non sbloccati:** E1 stadio 2 12/40 (~9-10/09, con refresh candele obbligatorio **prima** del one-shot), L2 `n_eff` 19.2/216, refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse.
+
+**🗒️ Coda:** vuota.
+
+---
+
+## ▶️ 2026-08-12
 
 **Giornata di esecuzione del piano di ieri: ④ chiuso come previsto, ② NON eseguibile come scritto.** Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. Due scritture, entrambe pre-verificate: `raw_candles.parquet` (+97 candele, dopo la verifica per-expiry) e l'unit `04b` sul VPS (wind-down della leg hedge). Il contatore E1 passa da **8 a 12/40**, esattamente il +4 predetto. In coda, chiusa una lacuna di versionamento: i **record macchina dei verdetti vol** erano gitignored pur essendo la fonte citata dai doc (⑤).
 
@@ -78,7 +147,9 @@ Versionati **42 file (~250 KB)**: tutti i report di `results/vols/` più i tre r
 
 ⚠ **Due limitazioni dichiarate invece che corrette.** (a) Il blocco `provenance` (quale modello/npz ha prodotto il report) è scritto dal giudice **solo dal 2026-08-01**: i report anteriori, compresi i C3, hanno i numeri ma non l'impronta — ri-generarli costerebbe GPU e toccherebbe lo split test, quindi la loro provenienza resta nei doc. (b) `edge_information_stage1.json` porta `"stage": 1` ma **non** il disclaimer «esplorativo, nessun verdetto, numeri non citabili», che il giudice stampa su stdout senza scriverlo nel file. **Il giudice NON è stato modificato per aggiungerlo:** serve un campione pre-registrato ancora **aperto** (stadio 2, 12/40) e un campione aperto non si tocca nemmeno per un `print`.
 
-### 🔜 DOMANI 13/08 — tre azioni, dopo le 08:01 UTC (10:01 italiane), **senza limite superiore di orario**
+### ~~🔜 DOMANI 13/08~~ — ESEGUITO il 13/08 per intero: vedi la sezione del 2026-08-13
+
+> ⚠ Blocco tenuto **letterale** perché era una **previsione**. ①②③ sono andati come scritto; l'unico scarto è il `reason` del flatten, uscito `structure_changed` invece che `settled`/`expired` — terzo arm della stessa guard, e la sua causa (book rimpiazzato nello stesso tick del settlement) dimostra che la finestra pulita cercata il 12/08 è larga **zero**. Il refresh candele facoltativo **non** è stato applicato: motivazione in ⑤ della sezione 13/08.
 
 Con la banda 999 non può aprirsi alcun hedge: non c'è nessuna finestra da cogliere e il passo si fa a qualunque ora del giorno. **Se qualcosa non torna al punto ①, ci si ferma lì** — nulla di ciò che segue è urgente.
 
