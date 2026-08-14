@@ -5,7 +5,51 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-13
+## ▶️ RIPARTI DA QUI — 2026-08-14
+
+**Sessione di sola routine, come previsto: coda vuota, nessuna azione pendente, nessuna scrittura su file di produzione.** Zero GPU, zero commit di codice, working tree pulito a `f0d745f`. Il monitoraggio è passato per intero e i contatori sono avanzati da soli.
+
+**Routine eseguita — exit 0.** 4 collector freschi (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 2.0h). Macro: vintage `20260730` invariato sui due lati, **nessuna promozione**. Regime B7: **fresco, 0 barre nuove** (nessun refresh, nessun retrain). Merge: chain 13/08 +81.180 e 14/08 +117.164 righe, L2 +5.950/+8.637, trades +1.739/+3.205, `forecasts` 833→852, `trades.jsonl` +1, `hedge_ledger.jsonl` **+0** (atteso: la leg è spenta dal 13/08). `hedge_state.json` assente sul VPS — coerente con `--hedge` rimosso dall'unit.
+
+| Contatore | 13/08 | **14/08** | Soglia | Nota |
+|---|---|---|---|---|
+| MFIV comparatore v2 | 37 | **38** | 40 | `--count-only`, nessun run one-shot |
+| E1 stadio 2 | 12 | **12** | 40 | invariato: nessun refresh candele, per scelta (②) |
+| L2 h=30 (`n_eff`) | 19.2 | **19.9** | (216) | run contiguo **746h** (+21h), nessun buco in 7g |
+| leg opzioni | 43 | **44** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 13.1g | 13.9g | — | non è un debito (decisione 10/08) |
+
+Derivazione MFIV incrementale: **+242 snapshot → 9358 righe**. Wedge MFIV−ATM **mediana +2.99** vol pt (p10 +2.03, p90 +4.18) su 9358 tick accoppiati — invariato entro il centesimo rispetto al +3.00 di ieri, nessuna deriva del segnale di convessità su tutta la serie.
+
+### ① MFIV v2 a 38/40 — l'unico contatore che può scattare a breve
+
++1 oggi, cadenza confermata ~1/giorno ma **non garantita** (dipende dalla copertura tick del chain, non da un atto locale). Proiezione: soglia intorno al **16/08**. Alla prima sessione con `n≥40` il passo è il run **one-shot manuale** di `scripts/vol/mfiv_comparator_judge.py` **senza** `--count-only` — la routine non lo lancerà mai da sé, per costruzione. Fino ad allora PnL, edge e correlazioni restano non calcolati: la disciplina one-shot è intatta.
+
+### ② E1 — verifica per-expiry rifatta, e la nota di ieri va corretta al rialzo: il refresh varrebbe **+2**, non +1
+
+Query read-only sull'`hourly_close()` del giudice, prima di qualunque decisione (regola permanente). `close` usabile fino a `2026-08-12 13:00` — **identico a ieri**, conferma che nessun refresh è avvenuto. Le tre `no_rv` sono:
+
+| expiry | tick di decisione | serve close fino a | ore mancanti |
+|---|---|---|---|
+| 13/08 | 12-08 05:00 | **13-08 11:00** | 22 |
+| 14/08 | 13-08 05:00 | **14-08 11:00** | 31 |
+| 15/08 | 14-08 05:00 | 15-08 11:00 (matura domani) | 31 |
+
+Ieri il § ⑤ scriveva «+1 esatto» per un refresh: era vero **ieri**, quando solo la 13/08 aveva la finestra chiusa. Oggi anche la 14/08 richiede close fino alle 11:00 di stamattina, che sono già passate → un refresh porterebbe il contatore a **14/40**. Il numero cambia ogni giorno perché il file è fermo mentre le expiry maturano: è la ragione per cui va **ricalcolato**, mai riportato in avanti.
+
+**Non applicato lo stesso, e per lo stesso criterio: il consumatore del numero.** A 14/40 non scatta niente, il giudice resta `NO_RUN` sotto 40, e la soglia cade intorno al **9-10/09** a prescindere da quando le osservazioni diventano *visibili* — maturano da sole sul VPS. Resta obbligatorio **una volta sola**, subito prima del one-shot di E1 (prerequisito ⑤ della sua pre-reg), quando il contatore deve essere veritiero perché è il numero che autorizza il giudice.
+
+### 🔜 PROSSIMA SESSIONE
+
+**⓪ routine e basta**, salvo che MFIV v2 tocchi 40 → in quel caso, e solo in quel caso, run one-shot manuale del comparatore.
+
+**Fermi e non sbloccati:** E1 stadio 2 12/40 (~9-10/09, con refresh candele obbligatorio **prima** del one-shot), L2 `n_eff` 19.9/216, refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse.
+
+**🗒️ Coda:** vuota.
+
+---
+
+## ▶️ 2026-08-13
 
 **Wind-down della leg hedge CHIUSO: `04b` gira di nuovo come v1 unhedged, che è il design di produzione.** Il piano di ieri è stato eseguito per intero (⓪①②③) e la precondizione bloccante è stata verificata prima di toccare qualunque cosa. Zero GPU, nessun modello toccato, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, **nessun refresh candele** (decisione motivata, ⑤). Una sola scrittura su file di produzione: l'unit systemd sul VPS. Con questo, il gate v2 non ha più nessuna coda operativa aperta.
 
