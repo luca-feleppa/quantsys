@@ -5,7 +5,52 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-14
+## ▶️ RIPARTI DA QUI — 2026-08-15
+
+**Sessione di sola routine, come previsto dal piano di ieri. Coda vuota, nessuna azione pendente, nessuna scrittura su file di produzione.** Zero GPU, zero commit di codice, working tree pulito a `63883ae`. La condizione di deviazione (MFIV v2 a 40) **non** si è verificata: il contatore è a 39.
+
+**Routine eseguita — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.1h · `04b` 1.7h). Macro: vintage `20260730` invariato sui due lati, **nessuna promozione**. Regime B7: **fresco, 0 barre nuove**. Merge: chain 14/08 +116.974 e 15/08 +124.336 righe, L2 +8.625/+9.124, trades +3.394/+1.296, `forecasts` 852→877, `trades.jsonl` +1, `hedge_ledger.jsonl` **+0** (atteso, leg spenta dal 13/08). `hedge_state.json` assente sul VPS — coerente con `--hedge` rimosso dall'unit.
+
+| Contatore | 14/08 | **15/08** | Soglia | Nota |
+|---|---|---|---|---|
+| MFIV comparatore v2 | 38 | **39** | 40 | `--count-only`, nessun run one-shot |
+| E1 stadio 2 | 12 | **12** | 40 | invariato: nessun refresh candele, per scelta (②) |
+| L2 h=30 (`n_eff`) | 19.9 | **20.7** | (216) | run contiguo **770h** (+24h), nessun buco in 7g |
+| leg opzioni | 44 | **45** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 13.9g | 15.0g | — | non è un debito (decisione 10/08) |
+
+Derivazione MFIV incrementale: **+295 snapshot → 9653 righe**. Wedge MFIV−ATM **mediana +3.01** vol pt (p10 +2.04, p90 +4.21) su 9653 tick accoppiati — invariato entro il centesimo rispetto al +3.01/+2.99 dei due giorni precedenti: nessuna deriva del segnale di convessità.
+
+### ① MFIV v2 a 39/40 — scatta plausibilmente alla prossima sessione
+
++1 oggi, cadenza ~1/giorno confermata su quattro sessioni consecutive ma **non garantita** (dipende dalla copertura tick del chain, non da un atto locale: a differenza di E1 il contatore avanza da solo, ma la cadenza resta *osservata*, non una legge — cfr. 10/08). Alla prima sessione con `n≥40` il passo è il run **one-shot manuale** di `scripts/vol/mfiv_comparator_judge.py` **senza** `--count-only`; la routine non lo lancerà mai da sé, per costruzione. Fino ad allora PnL, edge e correlazioni restano non calcolati.
+
+### ② E1 — la verifica per-expiry rifatta dà **+3**, non il +2 di ieri
+
+Query read-only sull'`hourly_close()` del giudice prima di qualunque decisione (regola permanente). `close` usabile fino a `2026-08-12 13:00` — **identico agli ultimi tre giorni**, conferma che nessun refresh è avvenuto. Le `no_rv` sono passate da 3 a **4**:
+
+| expiry | tick di decisione | serve close fino a | candele fino a | maturo |
+|---|---|---|---|---|
+| 13/08 | 12-08 05:00 | 13-08 11:00 | 13-08 12:00 | sì |
+| 14/08 | 13-08 05:00 | 14-08 11:00 | 14-08 12:00 | sì |
+| 15/08 | 14-08 05:00 | **15-08 11:00** | 15-08 12:00 | **sì** (sessione girata alle 12:41 UTC) |
+| 16/08 | 15-08 05:00 | 16-08 11:00 | 16-08 12:00 | no, matura domani |
+
+Un refresh candele oggi porterebbe quindi il contatore a **15/40**, non a 14. La colonna "candele fino a" è l'off-by-one di `hourly_close()`, che scarta l'ultima riga: per rendere osservabile un close a `T` servono candele a `T+1h` — soddisfatto per la 15/08 perché alle 12:41 UTC la barra `12:00` esiste (in formazione, scartata) e la `11:00` è completa.
+
+**Non applicato, stesso criterio dei giorni scorsi: il consumatore del numero.** A 15/40 non scatta niente, il giudice resta `NO_RUN` sotto 40, e la soglia cade intorno al **9-10/09** a prescindere da quando le osservazioni diventano *visibili* — maturano da sole sul VPS. Il refresh resta obbligatorio **una volta sola**, subito prima del one-shot di E1 (prerequisito ⑤ della sua pre-reg), quando il contatore deve essere veritiero perché è il numero che autorizza il giudice.
+
+### 🔜 PROSSIMA SESSIONE
+
+**⓪ routine e basta**, salvo che MFIV v2 tocchi 40 → in quel caso, e solo in quel caso, run one-shot manuale del comparatore. È l'esito più probabile (39/40 con cadenza ~1/giorno), ma va **letto dal contatore**, non assunto.
+
+**Fermi e non sbloccati:** E1 stadio 2 12/40 (~9-10/09, con refresh candele obbligatorio **prima** del one-shot), L2 `n_eff` 20.7/216, refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse.
+
+**🗒️ Coda:** vuota.
+
+---
+
+## ▶️ 2026-08-14
 
 **Sessione di sola routine, come previsto: coda vuota, nessuna azione pendente, nessuna scrittura su file di produzione.** Zero GPU, zero commit di codice, working tree pulito a `f0d745f`. Il monitoraggio è passato per intero e i contatori sono avanzati da soli.
 
