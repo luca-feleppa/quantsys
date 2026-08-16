@@ -47,9 +47,43 @@ L'unica esclusa è **`2026-08-17 08:00`**: chain valida, entry ricostruibile dai
 
 Nessun refresh candele, stesso criterio dei giorni scorsi: **il consumatore del numero**. Le `no_rv` sono passate da 4 a **5** (+1/giorno, coerente con la maturazione automatica sul VPS). La tabella per-expiry **non** è stata rifatta oggi: la decisione non dipende da essa — a 15 o 16 su 40 non scatta nulla, il giudice resta `NO_RUN` sotto 40, e la soglia cade intorno al **9-10/09** a prescindere da quando le osservazioni diventano *visibili*. Il refresh resta obbligatorio **una volta sola**, subito prima del one-shot di E1 (prerequisito ⑤ della sua pre-reg).
 
-### 🔜 PROSSIMA SESSIONE
+### 🔜 PROSSIMA SESSIONE — RUNBOOK MFIV v2 (scritto oggi, a numeri NON visti)
 
-**⓪ routine, poi leggere il contatore MFIV con la correzione di ①.** Se `--count-only` ≥ 41 (equivalentemente: 40 expiry settlate), allora — e solo allora — run **one-shot manuale** di `scripts/vol/mfiv_comparator_judge.py` **senza** `--count-only`. La verifica ex-ante che distingue candidati da osservazioni complete è in `scratchpad/check_n_eff_mfiv.py` (fuori dal repo, ricostruibile: replica il loop di `build_sample` sostituendo il blocco PnL con un flag di qualificazione).
+> Scritto **prima** di vedere qualunque numero decisionale: è una pre-decisione, non un piano. Se domani l'esito suggerisce di deviare da questi passi, la deviazione va motivata come tale — il goalpost-moving a risultati visti è esattamente ciò che il protocollo vieta.
+
+**① Routine.** `.\avvio_sessione.ps1` — come sempre.
+
+**② Leggere il contatore, non assumerlo.** Il numero stampato dalla routine è **soglia + 1** (vedi ① sopra):
+
+| `--count-only` legge | campione reale | azione |
+|---|---|---|
+| ≤ 40 | ≤ 39 | **nessun run**, si rimanda di un giorno |
+| **≥ 41** | **≥ 40** | si procede a ③ |
+
+In caso di dubbio (es. delivery non ancora pubblicata dall'endpoint), la verifica ex-ante è read-only e costa due minuti: replica il loop di `build_sample` sostituendo il blocco PnL con un flag di qualificazione, e conta le expiry con `e <= now`. Nessun numero decisionale viene toccato.
+
+**③ One-shot — UNA volta, dalla root di progetto.**
+```
+python scripts/vol/mfiv_comparator_judge.py
+```
+Senza `--count-only`. Se ritorna `NESSUN RUN / NO RUN` (exit 2) il contatore era ottimista: **non si rilancia nella stessa sessione**, si rimanda. Il giudice **non si tocca** — né per un print, né per "sistemare" la discrepanza del contatore.
+
+**④ Registrare il record macchina.** Il verdetto va in `results/vols/mfiv_comparator_report.json`, che è **tracciato** (`.gitignore` lo whitelista esplicitamente): committarlo insieme all'aggiornamento di `STATUS.md`. Il JSON è la fonte, la prosa è derivata.
+
+**⑤ Conseguenze pre-dichiarate (pre-reg 2026-07-20) — da applicare alla lettera.**
+
+- **FAIL** → il comparatore live resta **ATM IV**, MFIV resta colonna diagnostica permanente, **item chiuso**. Va scritto comunque, e va scritto in **entrambe** le copie del corpus KILL (§ STATO NOTO del manifesto operativo **e** `TEORIA.md` §12 — la copia pubblica; se divergono ha ragione `TEORIA.md`).
+- **PASS** → MFIV diventa **candidato** comparatore per una **pre-reg v3** di `04b`. ⚠ **Nessuna attivazione domani, in nessun caso.** Tre blocchi indipendenti, tutti da soddisfare:
+  1. la pre-reg richiede una **v3 dedicata** con `EDGE_THRESHOLD` ricalibrato sul wedge — non è un cambio di costante, è un nuovo gate;
+  2. ⚠ **E1 stadio 2 è APERTO** (12/40, ~9-10/09) e il suo predittore è `x_i = log(rv_pred/var_iv)` **letto da `forecasts.parquet`, prodotto da `04b`**: cambiare il comparatore live **perturberebbe un campione confermativo in raccolta**. Questo è il vincolo che a numeri visti si dimentica per primo;
+  3. le costanti pre-registrate di `04b` sono intoccabili a campione aperto.
+  
+  In pratica: un PASS domani **non** produce alcuna modifica al live: produce una riga di roadmap con data di sblocco ≥ chiusura di E1.
+- **In ENTRAMBI i casi — obbligo non-gating della pre-reg:** ri-stima del **break-even short-vol** col wedge in **log-varianza** (`descr_log_wedge_median/p10/p90`, già emessi dal giudice), documentata in `STATUS.md`. È il valore permanente dell'esperimento, indipendente dall'esito.
+
+**⑥ Cosa NON fare.** Non ricalibrare `DELTA_RHO_MIN` né `N_MIN` a numeri visti (SE di uno Spearman a n=40 ≈ 0.16, **dichiarato ex-ante**: un Δρ sotto soglia è un FAIL, non un "quasi"). Non ripetere il run. Non estendere il campione per "arrotondare" il verdetto.
+
+**⑦ Refresh candele — decisione DIFFERITA a domani, non pianificata.** Non serve al gate MFIV (che legge `mfiv_30h`, chain, `forecasts`, delivery cache — **non** `raw_candles.parquet`) e non sblocca E1 (porterebbe il contatore a ~16/40, soglia 40). Se lo si fa comunque, l'ordine è **one-shot MFIV prima, refresh dopo**: non perché il refresh possa toccare l'input del gate — non può — ma perché l'ordine è gratis e rende il record inattaccabile senza doverlo argomentare.
 
 **Fermi e non sbloccati:** E1 stadio 2 12/40 (~9-10/09, con refresh candele obbligatorio **prima** del one-shot), L2 `n_eff` 21.5/216, refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse.
 
