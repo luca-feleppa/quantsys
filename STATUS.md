@@ -5,7 +5,59 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-15
+## ▶️ RIPARTI DA QUI — 2026-08-16
+
+**La condizione di deviazione si è verificata a metà: il contatore della routine ha toccato 40, ma il campione effettivo del giudice è 39.** Il run one-shot **non** è stato lanciato. Zero GPU, zero scritture su file di produzione, nessuna modifica al giudice. La verifica che ha fermato il run è read-only e model-independent (condizione ③ ex-ante), costo ~2 minuti.
+
+**Routine eseguita — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.2h · `04b` 1.8h). Macro: vintage `20260730` invariato sui due lati, **nessuna promozione**. Regime B7: **fresco, 0 barre nuove**. Merge: chain 15/08 +111.248 e 16/08 +114.520 righe, L2 +8.151/+8.470, trades +992/+915, `forecasts` 877→900, `trades.jsonl` +1, `exec_diag` +24, `hedge_ledger.jsonl` **+0** (atteso, leg spenta dal 13/08). `hedge_state.json` assente sul VPS — coerente con `--hedge` rimosso dall'unit.
+
+| Contatore | 15/08 | **16/08** | Soglia | Nota |
+|---|---|---|---|---|
+| MFIV comparatore v2 (`--count-only`) | 39 | **40** | 40 | ma **n effettivo 39** — vedi ① |
+| E1 stadio 2 | 12 | **12** | 40 | invariato: nessun refresh candele, per scelta (②) |
+| L2 h=30 (`n_eff`) | 20.7 | **21.5** | (216) | run contiguo **793h** (+23h), nessun buco in 7g |
+| leg opzioni | 45 | **46** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 15.0g | 15.9g | — | non è un debito (decisione 10/08) |
+
+Derivazione MFIV incrementale: **+261 snapshot → 9914 righe**. Wedge MFIV−ATM **mediana +3.01** vol pt (p10 +2.05, p90 +4.19) su 9914 tick accoppiati — invariato entro il centesimo per la terza sessione consecutiva.
+
+### ① MFIV v2 — il contatore dice 40, il campione è 39: **NESSUN RUN**
+
+`--count-only` e il run reale **non contano la stessa cosa**, e la differenza è strutturale, non un caso limite di oggi. In `build_sample`, `count_only=True` fa `break` al primo tick con MFIV fresco (≤30') e forecast (≤60'); il run reale impone **due filtri in più** sullo stesso tick — chain valida per lo straddle ATM (`_straddle_at`, `continue`) e **settlement disponibile** (`delivery_price_cached is None` → `break`, expiry esclusa). Quindi `n_reale ≤ n_count_only` **sempre**, e lo scarto è tipicamente esattamente 1: l'ultima expiry della serie è qualificabile dai tick di oggi ma settla domani.
+
+Verifica read-only (nessuna rete, nessuna scrittura, nessun PnL/edge/ρ calcolato — replica la sola *qualificazione* del loop reale):
+
+| | n |
+|---|---|
+| `--count-only` (tick-rule) | 40 |
+| con chain valida | 40 |
+| **con expiry già settlata → campione del run** | **39** |
+
+L'unica esclusa è **`2026-08-17 08:00`**: chain valida, entry ricostruibile dai tick del 16/08, ma settla domani. Delle 39 usabili, 22 sono già in `delivery_cache.json` e 17 richiederebbero un fetch di rete.
+
+**Perché non ho lanciato lo stesso, dato che il guard `n<40` è strutturale.** Il giudice avrebbe restituito `NO_RUN` senza scrivere il report, quindi il peeking era impossibile in ogni caso — ma il run reale, **prima** di arrivare al guard, esegue `build_sample()` completa: 17 fetch di rete a Deribit e una riscrittura di `delivery_cache.json`, che vive sotto `results/vol_paper/` (albero dichiarato non-rigenerabile). Costo non nullo, informazione zero. Il guard protegge il *gate*, non gli effetti collaterali che lo precedono.
+
+⚠ **Regola di lettura permanente del contatore MFIV, da qui in avanti:** il numero stampato dalla routine è **la soglia + 1**. Il gate scatta quando `--count-only` legge **41**, non 40 — oppure, in modo equivalente e meno fragile, quando la verifica ex-ante conta 40 expiry già settlate. Questo è il **quarto** scarto di unità sulla stessa famiglia di contatori forward (i primi tre sul contatore hedged, cfr. 11/08): il pattern è sempre lo stesso — il monitor conta *candidati*, il giudice conta *osservazioni complete*, e la differenza è l'ultimo evento, che è candidato oggi e osservazione domani.
+
+**Il giudice NON è stato toccato** (regola permanente: a campione aperto non si modifica, nemmeno per un print). La discrepanza si corregge in **lettura**, non nel codice: correggerla nello script significherebbe editare il giudice pre-registrato a un giorno dalla sua unica esecuzione.
+
+**Domani il gate scatta**, salvo sorprese: la 17/08 settla alle 08:00 UTC e la sessione gira tipicamente verso mezzogiorno UTC → `n = 40` esatti (`--count-only` leggerà 41). Va comunque **letto**, non assunto.
+
+### ② E1 — invariato a 12, serie close ferma al 12/08 13:00 (lag 94h)
+
+Nessun refresh candele, stesso criterio dei giorni scorsi: **il consumatore del numero**. Le `no_rv` sono passate da 4 a **5** (+1/giorno, coerente con la maturazione automatica sul VPS). La tabella per-expiry **non** è stata rifatta oggi: la decisione non dipende da essa — a 15 o 16 su 40 non scatta nulla, il giudice resta `NO_RUN` sotto 40, e la soglia cade intorno al **9-10/09** a prescindere da quando le osservazioni diventano *visibili*. Il refresh resta obbligatorio **una volta sola**, subito prima del one-shot di E1 (prerequisito ⑤ della sua pre-reg).
+
+### 🔜 PROSSIMA SESSIONE
+
+**⓪ routine, poi leggere il contatore MFIV con la correzione di ①.** Se `--count-only` ≥ 41 (equivalentemente: 40 expiry settlate), allora — e solo allora — run **one-shot manuale** di `scripts/vol/mfiv_comparator_judge.py` **senza** `--count-only`. La verifica ex-ante che distingue candidati da osservazioni complete è in `scratchpad/check_n_eff_mfiv.py` (fuori dal repo, ricostruibile: replica il loop di `build_sample` sostituendo il blocco PnL con un flag di qualificazione).
+
+**Fermi e non sbloccati:** E1 stadio 2 12/40 (~9-10/09, con refresh candele obbligatorio **prima** del one-shot), L2 `n_eff` 21.5/216, refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse.
+
+**🗒️ Coda:** vuota.
+
+---
+
+## ▶️ 2026-08-15
 
 **Sessione di sola routine, come previsto dal piano di ieri. Coda vuota, nessuna azione pendente, nessuna scrittura su file di produzione.** Zero GPU, zero commit di codice, working tree pulito a `63883ae`. La condizione di deviazione (MFIV v2 a 40) **non** si è verificata: il contatore è a 39.
 
