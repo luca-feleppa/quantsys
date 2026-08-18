@@ -5,7 +5,94 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-16
+## ▶️ RIPARTI DA QUI — 2026-08-18
+
+**Il gate MFIV-comparatore v2 è SCATTATO e si è CHIUSO in giornata: FAIL sulle due condizioni sostanziali** (③ `n≥40` soddisfatta). Run one-shot manuale, **una volta sola**, dopo la verifica ex-ante del campione prescritta dal runbook di ieri. Conseguenza pre-dichiarata applicata alla lettera: il comparatore dell'edge di `04b` resta **ATM IV**, MFIV resta **colonna diagnostica permanente**, **item chiuso**. Zero GPU, nessuna modifica al path production, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, **nessun refresh candele**. Uniche scritture: il report JSON (tracciato) e i doc.
+
+⚠ **La sessione del 17/08 non è stata aperta**: i contatori avanzano di **due** giorni, non di uno. È la ragione del +2 su MFIV, e va tenuta presente leggendo la tabella.
+
+**Routine eseguita — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.1h · `04b` 1.8h). Macro: vintage `20260730` invariato sui due lati, **nessuna promozione**. Regime B7: **fresco, 0 barre nuove**. Merge: chain 16/08 +120.246, 17/08 +227.988, 18/08 +97.380 righe; L2 +8.806/+17.277/+8.453; trades +1.756/+7.451/+1.806; `forecasts` 900→948, `trades.jsonl` +2, `exec_diag` +50, `hedge_ledger.jsonl` **+0** (atteso, leg spenta dal 13/08). `hedge_state.json` assente sul VPS — coerente con `--hedge` rimosso dall'unit.
+
+| Contatore | 16/08 | **18/08** | Soglia | Nota |
+|---|---|---|---|---|
+| MFIV comparatore v2 (`--count-only`) | 40 | **42** | 40 | campione reale **41** → gate **ESEGUITO e CHIUSO** (①②) |
+| E1 stadio 2 | 12 | **12** | 40 | invariato: nessun refresh candele, per scelta (⑤) |
+| L2 h=30 (`n_eff`) | 21.5 | **23.1** | (216) | run contiguo **841h** (+48h su due giorni), nessun buco in 7g |
+| leg opzioni | 46 | **48** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (`..._1m_l2`) | 15.9g | 17.9g | — | non è un debito (decisione 10/08) |
+
+Derivazione MFIV incrementale: **+558 snapshot → 10.472 righe**. Wedge MFIV−ATM **mediana +2.99** vol pt (p10 +2.06, p90 +4.16) su 10.472 tick accoppiati — invariato entro il centesimo per la quarta sessione consecutiva.
+
+### ① La regola di lettura scritta ieri ha tenuto: il contatore dice 42, il campione è 41
+
+Stessa verifica read-only di ieri, **rifatta** (mai riportata in avanti): replica della sola *qualificazione* del loop di `build_sample`, con il blocco PnL sostituito da un flag e il settlement testato come `e <= now` — nessuna rete, nessuna scrittura, nessun numero decisionale toccato.
+
+| | n |
+|---|---|
+| `--count-only` (tick-rule) | 42 |
+| con chain valida | 42 |
+| **con expiry già settlata → campione del run** | **41** |
+
+L'unica esclusa è **`2026-08-19 08:00`**: qualificabile dai tick di oggi, settla domani. Lo scarto è di nuovo **esattamente 1**, come predetto ieri: il monitor conta candidati, il giudice conta osservazioni complete. Delle 41, 22 erano già in `delivery_cache.json` e 19 hanno richiesto un fetch — costo legittimo **qui**, perché il run era autorizzato (ieri lo stesso costo sarebbe stato pagato per informazione zero).
+
+⚠ **`n = 41`, non 40, e il campione NON è stato troncato a 40.** La pre-reg dice `n ≥ 40`, e la regola di qualificazione è deterministica: prende tutte le expiry che la soddisfano. Troncare a 40 sarebbe stata una scelta *a numeri visti* su quale osservazione buttare via — esattamente ciò che il vincolo anti-goalpost vieta.
+
+### ② Verdetto — FAIL, e la pre-reg aveva dichiarato ex-ante che era l'esito probabile
+
+Record macchina: `results/vols/mfiv_comparator_report.json` (tracciato, committato con questa voce; il JSON è la fonte, questa prosa è derivata).
+
+| Condizione | Richiesto | Misurato | Esito |
+|---|---|---|---|
+| ① `Δρ = ρ_MFIV − ρ_ATM` | ≥ +0.05 | **+0.0343** | **FAIL** |
+| ② stesso segno sulle due metà cronologiche | segno uguale | **−0.0015** / **+0.0610** | **FAIL** |
+| ③ `n ≥ 40` expiry qualificati | ≥ 40 | **41** | PASS |
+
+`ρ_ATM = −0.1439`, `ρ_MFIV = −0.1096` (Spearman di `−edge_x` contro la PnL short, stessi 41 expiry, disegno appaiato: `RV_pred` comune, gli errori del forecast colpiscono simmetricamente i due bracci).
+
+**Perché era prevedibile, e la previsione era scritta prima di girare.** La pre-reg dichiarava: *se il wedge in log-varianza fosse costante, `edge_MFIV = edge_ATM − c` e gli Spearman sarebbero IDENTICI per invarianza di rango* — il gate misurava **solo** se la variazione temporale del wedge (pricing time-varying della convessità) aggiunge potere di ranking. Misurato sui 41 tick d'entry: mediana del log-wedge **0.2005** con interdecile **0.1733**, cioè un livello grande e stabile con una dispersione che sposta poco l'ordinamento → `Δρ ≈ 0`. Con la SE di uno Spearman a `n=41` ≈ 0.16, **dichiarata ex-ante**, un `Δρ = +0.034` è dentro il rumore: è un FAIL, non un "quasi" — e `DELTA_RHO_MIN` non si ricalibra a numeri visti.
+
+⚠ **Osservazione diagnostica, non decisionale: entrambi i ρ sono NEGATIVI.** Sotto tutti e due i comparatori, gli expiry in cui il segnale short era più forte hanno reso *meno*. A `n=41` con SE ≈ 0.16 nessuno dei due è distinguibile da zero, quindi ciò che si può dire è "nessuna relazione rilevabile, semmai di segno sbagliato" — coerente con il FAIL 0/3 del gate v1 e con `always-short` positivo. ⚠ **Non anticipa E1 e non ne tocca il disegno**: E1 misura un estimando diverso (`y = log(RV/var_iv)`, non la PnL), ha un controllo positivo obbligatorio, e le sue definizioni sono congelate dalla sua ⑧. Che la PnL portasse informazione *parziale* sull'esito di E1 era già dichiarato ex-ante nella sua avvertenza di peeking ①: da qui non entra nulla di nuovo.
+
+### ③ Descrittivo non-gating — ri-stima del break-even short-vol (obbligo della pre-reg, indipendente dall'esito)
+
+Wedge in log-varianza sui 41 tick d'entry del campione:
+
+| | log-wedge | varianza | volatilità |
+|---|---|---|---|
+| p10 | +0.1260 | ×1.1343 (+13.4%) | +6.50% |
+| **mediana** | **+0.2005** | **×1.2220 (+22.2%)** | **+10.55%** |
+| p90 | +0.2993 | ×1.3489 (+34.9%) | +16.14% |
+
+**Lettura sul break-even.** Il backtest storico (n=2538, FHS-GJR-GARCH) dava **break-even VRP = 0% per tutte le strutture**, con un fair-value FHS che atterrava vicino alla IV ATM: quel pareggio era quindi misurato **contro il comparatore ATM**. Misurato contro il var-swap rate corretto, lo stesso punto di pareggio corrisponde a una varianza realizzata **18.2% sotto** il rate model-free (`e^−0.2005`): il cuscinetto del braccio short-vol è più ampio di quanto l'ATM mostrasse, di **20.1 punti-log di varianza** mediani (banda interdecile 12.6 ÷ 29.9). Il «il break-even era CONSERVATIVO» annotato in D4 il 18/07 passa così da qualitativo a quantificato, **sul campione del gate** e non sull'intera serie tick.
+
+⚠ **Qualificazione che impedisce di leggerlo come PnL in più.** `04b` vende lo straddle **ATM** e incassa il premio ATM: il wedge dice che il **premio di varianza disponibile nel mercato** è più ricco di quanto il comparatore ATM mostri, **non** che la posizione corrente ne raccolga di più. È un argomento a favore di strutture che vendono una porzione maggiore della strip — direzione in cui lo **strangle 8%** selezionato dal backtest storico già va — e non una revisione del PnL registrato dal forward test.
+
+### ④ Conseguenze pre-dichiarate applicate
+
+- **Comparatore live invariato:** `04b` continua a usare la IV ATM interpolata a 30h. Nessuna costante toccata, nessun riavvio del servizio VPS.
+- **MFIV = colonna diagnostica permanente:** `derive_mfiv.py` resta nella routine (il wedge ha valore descrittivo continuo); ciò che si ritira è il **contatore** del gate (⑥).
+- **Nessuna pre-reg v3**, per due ragioni indipendenti: il gate è FAIL, quindi la premessa della v3 non esiste; e comunque **E1 stadio 2 è aperto** e legge `forecasts.parquet` prodotto da `04b`, quindi il comparatore live non sarebbe toccabile nemmeno a PASS.
+- **Propagato** in `TEORIA.md` §12.2 (IT+EN, copia pubblica), corpus KILL, `CHANGELOG.md`, `RIPRESA.md`, `POST_GATE_V1.md`, `AVVIO.md`.
+
+### ⑤ E1 — invariato a 12, serie close ferma al 12/08 13:00 (lag 142h)
+
+Nessun refresh candele, stesso criterio delle sessioni precedenti: **il consumatore del numero**. Le `no_rv` sono passate da 5 a **7** (+1/giorno, maturazione automatica sul VPS). La tabella per-expiry **non** è stata rifatta: la decisione non ne dipende, e per chiuderla basta un limite superiore — un refresh oggi porterebbe il contatore **al più a 19/40** (12 osservabili + 7 `no_rv`, e non tutte maturerebbero), contro una soglia di 40. Il giudice resta `NO_RUN`, e la soglia cade intorno al **9-10/09** a prescindere da quando le osservazioni diventano *visibili*. Il refresh resta obbligatorio **una volta sola**, subito prima del one-shot di E1 (prerequisito ⑤ della sua pre-reg), quando il contatore deve essere veritiero perché è il numero che autorizza il giudice.
+
+### ⑥ Ritiro del contatore MFIV dalla routine — l'ultimo consumatore è esaurito
+
+Stesso criterio del ritiro del contatore hedged (13/08): un contatore si ritira quando il gate che autorizzava **smette di esistere**, non prima. `mfiv_comparator_judge.py --count-only` nel blocco ③ di `avvio_sessione.ps1` serviva a decidere *quando* lanciare il one-shot: lanciato e chiuso, il numero non ha più nessun lettore e continuerebbe a stampare una soglia già superata. Rimosso. **Resta `derive_mfiv.py`**, che non è un contatore di gate ma la manutenzione incrementale di una colonna diagnostica permanente, con il wedge come output descrittivo. Il giudice resta sul disco e resta rieseguibile: il record probatorio è il JSON committato, non la sua ri-esecuzione.
+
+### 🔜 PROSSIMA SESSIONE
+
+**⓪ routine e basta.** Nessun gate in soglia, nessuna azione pendente, coda vuota. Il primo evento reale è **E1 stadio 2 intorno al 9-10/09**, e il suo unico prerequisito operativo è un `-RefreshCandles` **immediatamente prima** del one-shot — non prima, e mai per il solo warning del blocco ③.
+
+**Fermi e non sbloccati:** E1 stadio 2 12/40 (~9-10/09), L2 `n_eff` 23.1/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (oggi).
+
+**🗒️ Coda:** vuota.
+
+---
+
+## ▶️ 2026-08-16
 
 **La condizione di deviazione si è verificata a metà: il contatore della routine ha toccato 40, ma il campione effettivo del giudice è 39.** Il run one-shot **non** è stato lanciato. Zero GPU, zero scritture su file di produzione, nessuna modifica al giudice. La verifica che ha fermato il run è read-only e model-independent (condizione ③ ex-ante), costo ~2 minuti.
 

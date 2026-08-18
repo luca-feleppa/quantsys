@@ -1,0 +1,17 @@
+{
+  "prereg": "MFIV-comparatore v2 (STATUS 2026-07-20)",
+  "generated_utc": "2026-08-18 11:46:59.434185+00:00",
+  "n": 41,
+  "n_min": 40,
+  "rho_atm": -0.1439024390243903,
+  "rho_mfiv": -0.10958188153310107,
+  "delta_rho": 0.03432055749128922,
+  "delta_rho_half1": -0.0015037593984962572,
+  "delta_rho_half2": 0.061038961038961045,
+  "cond1_delta_rho_ge_0.05": false,
+  "cond2_sign_consistent": false,
+  "verdict": "FAIL",
+  "descr_log_wedge_median": 0.20052471057009993,
+  "descr_log_wedge_p10": 0.12598360688681523,
+  "descr_log_wedge_p90": 0.29931798489334044
+}

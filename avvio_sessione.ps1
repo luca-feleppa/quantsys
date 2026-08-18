@@ -6,8 +6,8 @@
 #          servono barre nuove). NESSUN processo residente parte piu' a casa:
 #          01c/01d/01e e 04b vivono TUTTI sul VPS (systemd) dal 2026-07-18;
 #       3. monitoraggio ricorrente linea vol (CPU-only, dal 2026-07-25):
-#          derivazione MFIV incrementale + conteggio expiry qualificati
-#          (--count-only) + contatori dei gate forward aperti.
+#          derivazione MFIV incrementale (wedge diagnostico) + contatori dei
+#          gate forward aperti.
 #     Anti-duplicazione: se un processo e' gia' vivo NON viene rilanciato
 #     (due 04b scriverebbero position/trades in conflitto).
 #     NOTA encoding: file deliberatamente ASCII-only - PS 5.1 legge i .ps1
@@ -24,8 +24,8 @@
 #          bars exist). NO resident process starts at home anymore: 01c/01d/01e
 #          and 04b ALL live on the VPS (systemd) since 2026-07-18;
 #       3. recurring vol-line monitoring (CPU-only, since 2026-07-25):
-#          incremental MFIV derivation + qualifying-expiry count (--count-only)
-#          + counters of the open forward gates.
+#          incremental MFIV derivation (diagnostic wedge) + counters of the
+#          open forward gates.
 #     Encoding note: deliberately ASCII-only - PS 5.1 reads BOM-less .ps1 as
 #     cp1252 and unicode characters corrupt parsing.
 #     Usage: .\avvio_sessione.ps1 [-Days 7] [-SkipPull] [-SkipMonitor] [-RefreshCandles]
@@ -159,8 +159,8 @@ if ($barsNew -match '^-?\d+$') {
 #     esatta della promozione macro avvenuta per automazione il 2026-07-31.
 #     Quando serve: prima di annotare il contatore E1 se il blocco 4 stampa il
 #     warning di ritardo, e prima del run one-shot di E1 stadio 2 (prerequisito 5
-#     della sua pre-registrazione). Fra i gate aperti solo E1 legge le barre: il
-#     giudice hedged legge i ledger, il comparatore MFIV il chain.
+#     della sua pre-registrazione). Fra i gate aperti solo E1 legge le barre
+#     (hedged e comparatore MFIV sono entrambi CHIUSI).
 #     ATTENZIONE - effetto a distanza di una sessione, voluto: estendere le
 #     candele fa avanzare il contatore di staleness B7, quindi il refresh
 #     incrementale del regime puo' partire al PROSSIMO avvio (blocco 3, che qui
@@ -178,8 +178,8 @@ if ($barsNew -match '^-?\d+$') {
 #     on 2026-07-31.
 #     When it is needed: before recording the E1 counter if block 4 prints the lag
 #     warning, and before the one-shot run of E1 stage 2 (prerequisite 5 of its
-#     pre-registration). Among the open gates only E1 reads the bars: the hedged
-#     judge reads the ledgers, the MFIV comparator the chain.
+#     pre-registration). Among the open gates only E1 reads the bars
+#     (hedged and MFIV comparator are both CLOSED).
 #     WARNING - deliberate one-session delayed effect: extending the candles moves
 #     the B7 staleness counter forward, so the incremental regime refresh may start
 #     at the NEXT startup (block 3, which has already run above). The two writes
@@ -196,20 +196,24 @@ if ($RefreshCandles) {
 # IT: i tre passi che la routine di sessione richiedeva a mano (STATUS 2026-07-22
 #     "monitoraggio ricorrente per sessione"). Tutti CPU-only e OFF-PATH: nessun
 #     file di produzione toccato, zero GPU.
-#     ATTENZIONE - DISCIPLINA ONE-SHOT (pre-reg MFIV v2): qui si lancia SOLO --count-only,
-#     che calcola timestamp e NIENTE altro (nessun PnL, nessun edge, nessuna
-#     correlazione); il giudice ha comunque il guard n<N_MIN -> NO_RUN e non
-#     scrive report sotto soglia. Il run one-shot vero va lanciato A MANO alla
-#     prima sessione con n>=40: NON automatizzarlo qui.
+#     CONTATORE MFIV RITIRATO IL 2026-08-18: il gate MFIV-comparatore v2 e' stato
+#     eseguito e CHIUSO (FAIL a n=41), quindi --count-only non ha piu' nessun
+#     lettore e stamperebbe una soglia gia' superata. Stesso criterio del ritiro
+#     del contatore hedged (13/08): un contatore si ritira quando il gate che
+#     autorizzava smette di esistere, non prima. Resta derive_mfiv, che NON e' un
+#     contatore di gate ma la manutenzione incrementale di una colonna
+#     diagnostica permanente (output descrittivo: il wedge MFIV-ATM).
 #     Ordine vincolante: derive_mfiv DOPO il merge (legge la chain appena
 #     scaricata). Fail-soft: un errore non blocca la routine.
 # EN: the three steps the session routine required manually (STATUS 2026-07-22).
 #     All CPU-only and OFF-PATH: no production file touched, zero GPU.
-#     WARNING - ONE-SHOT DISCIPLINE (MFIV v2 pre-reg): only --count-only runs here, which
-#     computes timestamps and NOTHING else (no PnL, no edge, no correlation); the
-#     judge also guards n<N_MIN -> NO_RUN and writes no report below threshold.
-#     The real one-shot run must be launched BY HAND at the first session with
-#     n>=40: do NOT automate it here.
+#     MFIV COUNTER RETIRED ON 2026-08-18: the MFIV comparator v2 gate has been run
+#     and CLOSED (FAIL at n=41), so --count-only has no reader left and would print
+#     an already-cleared threshold. Same criterion as the hedged counter retirement
+#     (13/08): a counter is retired when the gate it authorized ceases to exist,
+#     not before. derive_mfiv stays: it is NOT a gate counter but the incremental
+#     maintenance of a permanent diagnostic column (descriptive output: the
+#     MFIV-ATM wedge).
 #     Binding order: derive_mfiv AFTER the merge (it reads the freshly pulled
 #     chain). Fail-soft: an error does not stop the routine.
 if (-not $SkipMonitor) {
@@ -219,11 +223,7 @@ if (-not $SkipMonitor) {
     #     enough): $LASTEXITCODE is checked explicitly.
     Write-Output "[sessione] monitoraggio vol: derivazione MFIV incrementale / incremental MFIV derivation..."
     & $Py (Join-Path $ProjRoot "scripts\vol\derive_mfiv.py")
-    if ($LASTEXITCODE -ne 0) { Write-Warning "derive_mfiv FALLITO/FAILED (exit $LASTEXITCODE) - conteggio MFIV sotto sara' su dati non aggiornati / count below is on stale data" }
-
-    Write-Output "[sessione] monitoraggio vol: conteggio expiry qualificati (solo timestamp) / qualifying-expiry count (timestamps only)..."
-    & $Py (Join-Path $ProjRoot "scripts\vol\mfiv_comparator_judge.py") --count-only
-    if ($LASTEXITCODE -ne 0) { Write-Warning "mfiv_comparator_judge --count-only FALLITO/FAILED (exit $LASTEXITCODE)" }
+    if ($LASTEXITCODE -ne 0) { Write-Warning "derive_mfiv FALLITO/FAILED (exit $LASTEXITCODE) - il wedge stampato sara' su dati non aggiornati / the printed wedge is on stale data" }
 
     # IT: continuita' del recorder L2 - NON e' la stessa cosa della freschezza gia'
     #     stampata dagli HEARTBEAT del merge. Il campione del filone order-book e' fatto
