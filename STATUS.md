@@ -7,7 +7,7 @@
 
 ## ▶️ RIPARTI DA QUI — 2026-08-18
 
-**Il gate MFIV-comparatore v2 è SCATTATO e si è CHIUSO in giornata: FAIL sulle due condizioni sostanziali** (③ `n≥40` soddisfatta). Run one-shot manuale, **una volta sola**, dopo la verifica ex-ante del campione prescritta dal runbook di ieri. Conseguenza pre-dichiarata applicata alla lettera: il comparatore dell'edge di `04b` resta **ATM IV**, MFIV resta **colonna diagnostica permanente**, **item chiuso**. Zero GPU, nessuna modifica al path production, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato, **nessun refresh candele**. Uniche scritture: il report JSON (tracciato) e i doc.
+**Il gate MFIV-comparatore v2 è SCATTATO e si è CHIUSO in giornata: FAIL sulle due condizioni sostanziali** (③ `n≥40` soddisfatta). Run one-shot manuale, **una volta sola**, dopo la verifica ex-ante del campione prescritta dal runbook di ieri. Conseguenza pre-dichiarata applicata alla lettera: il comparatore dell'edge di `04b` resta **ATM IV**, MFIV resta **colonna diagnostica permanente**, **item chiuso**. Zero GPU, nessuna modifica al path production, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. Scritture: il report JSON (tracciato), i doc e — **a fine sessione, su decisione esplicita** — `data/raw_candles.parquet` (⑦: +141 barre, contatore E1 **12 → 17**).
 
 ⚠ **La sessione del 17/08 non è stata aperta**: i contatori avanzano di **due** giorni, non di uno. È la ragione del +2 su MFIV, e va tenuta presente leggendo la tabella.
 
@@ -16,7 +16,7 @@
 | Contatore | 16/08 | **18/08** | Soglia | Nota |
 |---|---|---|---|---|
 | MFIV comparatore v2 (`--count-only`) | 40 | **42** | 40 | campione reale **41** → gate **ESEGUITO e CHIUSO** (①②) |
-| E1 stadio 2 | 12 | **12** | 40 | invariato: nessun refresh candele, per scelta (⑤) |
+| E1 stadio 2 | 12 | **17** | 40 | +5 dal refresh candele di fine sessione (⑦); era 12 per tutta la sessione (⑤) |
 | L2 h=30 (`n_eff`) | 21.5 | **23.1** | (216) | run contiguo **841h** (+48h su due giorni), nessun buco in 7g |
 | leg opzioni | 46 | **48** | (30) | gate chiuso il 30/07, FAIL 0/3 |
 | barre 1m (`..._1m_l2`) | 15.9g | 17.9g | — | non è un debito (decisione 10/08) |
@@ -76,17 +76,37 @@ Wedge in log-varianza sui 41 tick d'entry del campione:
 
 ### ⑤ E1 — invariato a 12, serie close ferma al 12/08 13:00 (lag 142h)
 
+> ⚠ **Superata in giornata da ⑦:** il refresh è stato poi eseguito su decisione esplicita, a valle del one-shot. Il ragionamento sotto resta il criterio con cui la sessione era stata condotta e va letto in quell'ordine.
+
 Nessun refresh candele, stesso criterio delle sessioni precedenti: **il consumatore del numero**. Le `no_rv` sono passate da 5 a **7** (+1/giorno, maturazione automatica sul VPS). La tabella per-expiry **non** è stata rifatta: la decisione non ne dipende, e per chiuderla basta un limite superiore — un refresh oggi porterebbe il contatore **al più a 19/40** (12 osservabili + 7 `no_rv`, e non tutte maturerebbero), contro una soglia di 40. Il giudice resta `NO_RUN`, e la soglia cade intorno al **9-10/09** a prescindere da quando le osservazioni diventano *visibili*. Il refresh resta obbligatorio **una volta sola**, subito prima del one-shot di E1 (prerequisito ⑤ della sua pre-reg), quando il contatore deve essere veritiero perché è il numero che autorizza il giudice.
 
 ### ⑥ Ritiro del contatore MFIV dalla routine — l'ultimo consumatore è esaurito
 
 Stesso criterio del ritiro del contatore hedged (13/08): un contatore si ritira quando il gate che autorizzava **smette di esistere**, non prima. `mfiv_comparator_judge.py --count-only` nel blocco ③ di `avvio_sessione.ps1` serviva a decidere *quando* lanciare il one-shot: lanciato e chiuso, il numero non ha più nessun lettore e continuerebbe a stampare una soglia già superata. Rimosso. **Resta `derive_mfiv.py`**, che non è un contatore di gate ma la manutenzione incrementale di una colonna diagnostica permanente, con il wedge come output descrittivo. Il giudice resta sul disco e resta rieseguibile: il record probatorio è il JSON committato, non la sua ri-esecuzione.
 
+### ⑦ Refresh candele eseguito a fine sessione — E1 12 → 17, e la regola nel manifesto era sbagliata di un'ora
+
+**Fatto su decisione esplicita, dopo il one-shot MFIV** (ordine gratuito e già prescritto dal runbook ⑦ di ieri: il gate non legge `raw_candles.parquet`, ma l'ordine rende il record inattaccabile senza doverlo argomentare). `01_update_data.py --candles-only`: **66.675 → 66.816 barre (+141)**, arco 2019-01-01 → 2026-08-18. Non toccati: `features.parquet`, `lstm_dataset.npz`, scaler, `PipelineState`.
+
+**Predizione registrata PRIMA di scrivere, e misurazione dopo — la predizione era sbagliata di 1.**
+
+| | valore |
+|---|---|
+| contatore prima | 12 / 40 |
+| **predetto** (regola `T+1h`) | **18** / 40 |
+| **misurato** | **17** / 40 |
+
+Le `no_rv` sono passate da 7 a **2**: sono maturate le expiry 13→17/08, **non** la 18/08. La 18/08 ha `tick` 17-08 05:00 e richiede close fino a **18-08 11:00**; il file arriva a `11:00`, ma `hourly_close()` scarta l'ultima riga → il close usabile si ferma a **10:00**, un'ora corta.
+
+⚠ **La regola vera è `T+2h`, ed era già stata MISURATA il 12/08** (§ di quella sessione, «la regola `T+2h` regge — misurata oggi, non ereditata»): il download si ferma a `floor(adesso) − 1h` perché `quantsys/data` **scarta la barra in formazione**, e `hourly_close()` ne scarta **un'altra**. Sono due off-by-one in serie, non uno. La predizione di oggi ha usato la versione a `T+1h` che sopravviveva nella nota operativa del manifesto — cioè la copia **auto-caricata**, quella che si rilegge proprio quando il refresh conta davvero. **Corretta oggi in quella nota** (`hourly_close()` da solo spiega solo metà dello scarto). Lezione generale, la stessa del 12/08 da un'altra porta: quando due copie di una regola divergono, quella che ti fa sbagliare è **quella che leggi per prima**, non quella più dettagliata.
+
+**Conseguenze operative: nessuna.** A 17/40 il giudice E1 resta `NO_RUN`, la soglia resta intorno al **9-10/09**, e il refresh **obbligatorio** immediatamente prima del one-shot (prerequisito ⑤ della pre-reg E1) resta dovuto: quello di oggi non lo sostituisce, perché a quella data serviranno le expiry di allora. **Staleness B7: 141 barre nuove, sotto la soglia di 168** → il refresh incrementale del regime **non** è partito, e partirà da solo alla prima sessione in cui il gap la supera (~fra un giorno). `regime_probs.parquet` invariato.
+
 ### 🔜 PROSSIMA SESSIONE
 
-**⓪ routine e basta.** Nessun gate in soglia, nessuna azione pendente, coda vuota. Il primo evento reale è **E1 stadio 2 intorno al 9-10/09**, e il suo unico prerequisito operativo è un `-RefreshCandles` **immediatamente prima** del one-shot — non prima, e mai per il solo warning del blocco ③.
+**⓪ routine e basta.** Nessun gate in soglia, nessuna azione pendente, coda vuota. Il primo evento reale è **E1 stadio 2 intorno al 9-10/09** (oggi **17/40**), e il suo unico prerequisito operativo è un `-RefreshCandles` **immediatamente prima** del one-shot — non prima, e mai per il solo warning del blocco ③. ⚠ Il refresh di oggi porta lo staleness B7 a **141/168**: alla prima sessione che supera la soglia la routine lancia da sé il refresh incrementale del regime. È atteso e corretto, ma va **notato** se in quel momento c'è un esperimento a dati congelati. ⚠ Quando il refresh servirà davvero, la regola è **`T+2h`** (⑦), non `T+1h`.
 
-**Fermi e non sbloccati:** E1 stadio 2 12/40 (~9-10/09), L2 `n_eff` 23.1/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (oggi).
+**Fermi e non sbloccati:** E1 stadio 2 **17/40** (~9-10/09), L2 `n_eff` 23.1/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (oggi).
 
 **🗒️ Coda:** vuota.
 
