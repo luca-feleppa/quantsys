@@ -5,7 +5,58 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-18
+## ▶️ RIPARTI DA QUI — 2026-08-20
+
+**Sessione di sola routine, più il refresh candele su decisione esplicita.** Nessun gate in soglia, nessun one-shot, zero GPU. Scritture: `data/raw_candles.parquet` (+52 barre) e le derivazioni incrementali della routine (`mfiv_30h.parquet`). Npz, scaler, `PipelineState`, vintage macro `20260730`: **invariati**.
+
+⚠ **Buco di continuità da sanare, e va detto:** la **routine del 19/08 è stata eseguita** (`logs/quantsys_20260819_1622*`, merge VPS + derivazione MFIV 10.472 → 10.791 righe) ma **non è mai stata scritta qui**. Questa voce copre quindi **due** giorni. Il numero che ne risente è solo la lettura dei delta — nessun contatore è stato perso, perché i contatori si ri-misurano, non si accumulano a mano.
+
+**Routine 20/08 — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.0h · `04b` 1.2h). Macro: vintage `20260730` invariato sui due lati, **nessuna promozione**. Regime B7 fresco al momento del check (141 barre < 168). Merge: chain +96.852 (19/08) e +174.498 (20/08) righe; L2 +6.940/+11.671; trades +15.077/+16.209; `forecasts` 975→1001, `trades.jsonl` +1, `exec_diag` +27, `hedge_ledger.jsonl` **+0** (atteso, leg spenta dal 13/08); `hedge_state.json` assente sul VPS.
+
+| Contatore | 18/08 | **20/08** | Soglia | Nota |
+|---|---|---|---|---|
+| E1 stadio 2 | 17 | **20** | 40 | +3 dal refresh (②); era 17 per tutta la routine |
+| L2 h=30 (`n_eff`) | 23.1 | **24.8** | (216) | run contiguo **894h**, nessun buco in 7g |
+| leg opzioni | 48 | **50** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (lag) | 17.9g | 20.1g | — | non è un debito (decisione 10/08) |
+
+Derivazione MFIV incrementale: +306 righe → **11.097**. Wedge MFIV−ATM **mediana +3.01** vol pt (p10 +2.09, p90 +4.31). Il contatore del gate è ritirato dal 18/08; questa resta una colonna diagnostica.
+
+### ① Il warning E1 tradotto nel vincolo binding **prima** di agire — e stavolta produce un numero diverso dal warning
+
+Il blocco ③ ha stampato «serie close STALE → conteggio SOTTOSTIMATO» (lag 54h contro una soglia fissa di 6h). Come prescritto dal protocollo, il warning è stato trattato come **inferenza da proxy** e il vincolo vero è stato derivato in sola lettura da `scripts/vol/edge_information_judge.py` (`build_panel`, `realized_rv`) **prima** di toccare qualunque file:
+
+- le non osservabili erano `no_tick: 35` — **nessun refresh le tocca**, non esiste un tick qualificante in `[E−33h, E−27h]` — e `no_rv: 4`, cioè tick presente e close mancanti;
+- `no_rv = 4` è quindi il **limite superiore** di ciò che un refresh può sbloccare, non 35 e non «il conteggio in generale»;
+- per ciascuna delle 4, il close richiesto è `t0 + 30h` con `t0` = **ultimo** tick nella finestra. Per `E = 21/08 08:00` la finestra è `[19/08 23:00, 20/08 05:00]`, l'ultimo tick sta a `20/08 05:00` e il close servirebbe fino a **`21/08 11:00 UTC`** — non ottenibile oggi a nessuna ora.
+
+**Predizione registrata prima della scrittura: +3, non +4 → contatore atteso 20/40.**
+
+### ② Refresh eseguito — misurato 20, predetto 20
+
+`01_update_data.py --candles-only`: **66.816 → 66.868 barre (+52)**, ultima `open_time` **2026-08-20 15:00 UTC** — letta **dal parquet**, non dal log (il log stampa le candele *caricate*, non quelle *scritte*). Non toccati: `features.parquet`, `lstm_dataset.npz`, scaler, `PipelineState`.
+
+| | valore |
+|---|---|
+| contatore prima | 17 / 40 |
+| **predetto** (`no_rv = 4` meno la 21/08 non maturabile) | **20** / 40 |
+| **misurato** | **20** / 40 · `no_rv` 4 → **1** |
+
+La regola **`T+2h`** corretta nel manifesto il 18/08 ha tenuto al primo impiego: `floor(adesso) − 1h` sul download più la riga scartata da `hourly_close()`. ⚠ La differenza rispetto al 18/08 — dove la predizione sbagliò di 1 — **non** è la regola oraria: è che oggi il limite superiore è stato derivato **per-expiry** invece di essere assunto uguale a `no_rv`. Le due correzioni sono indipendenti e servivano entrambe.
+
+### ③ Staleness B7 sopra soglia — il refresh incrementale del regime parte alla prossima sessione
+
+Misurato dopo il refresh: `regime_probs.parquet` arriva al **12/08 14:00**, `raw_candles.parquet` al **20/08 15:00** → **193 barre** contro una soglia di **168**. Alla prossima routine il refresh incrementale (B7) **parte da solo**. È atteso e corretto — `regime_probs.parquet` è diagnostica (val stratificata, `val_nll` per regime), **non** è feature di input, quindi non tocca npz, scaler né macro e non può spostare nessun numero di gate. Va notato e basta.
+
+### 🔜 PROSSIMA SESSIONE
+
+**⓪ routine.** La prima azione non di routine è **E1 stadio 2 intorno al 9-10/09** (oggi **20/40**). ⚠ Il refresh di oggi **non** sostituisce quello **obbligatorio** immediatamente prima del one-shot (prerequisito ⑤ della pre-reg E1): a quella data serviranno le expiry di allora. ⚠ Alla prossima routine parte il refresh incrementale del regime (③).
+
+**Fermi e non sbloccati:** E1 stadio 2 **20/40** (~9-10/09), L2 `n_eff` 24.8/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (18/08).
+
+---
+
+## ▶️ 2026-08-18
 
 **Il gate MFIV-comparatore v2 è SCATTATO e si è CHIUSO in giornata: FAIL sulle due condizioni sostanziali** (③ `n≥40` soddisfatta). Run one-shot manuale, **una volta sola**, dopo la verifica ex-ante del campione prescritta dal runbook di ieri. Conseguenza pre-dichiarata applicata alla lettera: il comparatore dell'edge di `04b` resta **ATM IV**, MFIV resta **colonna diagnostica permanente**, **item chiuso**. Zero GPU, nessuna modifica al path production, npz/scaler/`PipelineState` bit-invariati, vintage macro `20260730` invariato. Scritture: il report JSON (tracciato), i doc e — **a fine sessione, su decisione esplicita** — `data/raw_candles.parquet` (⑦: +141 barre, contatore E1 **12 → 17**).
 
