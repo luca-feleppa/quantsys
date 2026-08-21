@@ -30,9 +30,55 @@ Non è stato lanciato: il campione non è in soglia né vicino (mancano 20 osser
 
 `regime_probs.parquet`: **+193 barre**, **0 retrain** (ultimo a t=65520, prossimo a t=67680), checkpoint walk-forward riscritto fino al **20/08 15:00 UTC** (`n_bars=66928`). Costo: ~1 s. Era la previsione registrata ieri al punto ③ e si è verificata alla barra. Nessun impatto su npz/scaler/macro: `regime_probs.parquet` è diagnostica (val stratificata, `val_nll` per regime), **non** è feature di input.
 
+### ③ Short-vol, filone «vendere più strip»: il backtest storico NON può rispondere, e la misura giusta è già alimentata
+
+Il descrittivo del gate MFIV (18/08) aveva lasciato un'indicazione: il var-swap rate model-free prezza la varianza **+22.2%** sopra l'ATM che `04b` incassa, quindi il premio *disponibile nel mercato* è più ricco del comparatore — argomento a favore di strutture che vendono una porzione maggiore della strip. Primo passo, in sola lettura e a costo zero: capire se l'harness storico sa già rispondere.
+
+**Non lo sa, e la ragione è strutturale.** `scripts/vol/short_vol_hist_backtest.py` costruisce il premio incassato come `prem = fv · (1 + vrp)`: lo **stesso VRP proporzionale** su ogni struttura, con `fv` = fair value FHS della struttura stessa. Il confronto fra strutture tiene quindi costante per costruzione proprio la quantità in discussione — il premio *relativo* lungo la strip — che la MFIV ha misurato **non** essere costante. L'ordinamento prodotto dal report esistente (a VRP=0: straddle mean +0.007720 / Sharpe 0.816 · strangle 8% +0.005467 / Sharpe 0.636, `n=2538`) è quindi la **conseguenza dell'assunzione**, non evidenza contro lo strangle. ⚠ Da non citare come se fosse una misura: il break-even VRP a 0.0000 è identico per tutte e cinque le configurazioni ed è il **pavimento della griglia**, non un numero che discrimina.
+
+**La misura corretta è model-free e i dati sono già registrati.** Il chain (`data/iv/chain/`) ha `mark_price`, `bid_price`, `ask_price` per ogni strike: il premio realmente incassabile su straddle ATM e strangle W% si legge dai quote, e il payoff a settlement dalle candele orarie — nessun FHS, nessun VRP assunto, e il costo di realizzazione (bid/ask) entra come misura invece che come stima. È l'unico modo di confrontare due strutture senza imporre la risposta.
+
+**Condizione ③ verificata EX-ANTE, in sola lettura, prima di scrivere qualunque esperimento:**
+
+| | valore |
+|---|---|
+| expiry daily con tick d'entry in `[E−31h, E−29h]` | 38 |
+| di cui con strike ATM **e** ±8% quotati entro il 2% dal target | 38 |
+| di cui anche con close di settlement disponibile | **36** |
+| finestra | 16/07 → 20/08 |
+| cadenza | ~1 expiry/giorno |
+
+⚠ **Il campione NON si può estendere all'indietro.** I file chain esistono dal 12/06, ma prima del 16/07 il poller girava solo in finestre diurne (era ancora su questo PC; migrazione VPS il 18/07): alle **02:00 UTC**, dove cade l'entry a `E−30h`, non esiste tick. È forward-only come il recorder L2 — al contrario delle kline 1m, che sono ri-scaricabili. ⚠ Il conteggio ha inoltre la stessa natura del contatore E1: le osservazioni si accumulano da sole sul VPS, ma il **settlement** dipende da `raw_candles.parquet`, quindi il *numero* avanza solo col refresh esplicito.
+
+**Non fatto:** nessuna pre-registrazione scritta, nessuno script di misura, nessuna modifica a `04b`. ⚠ Prima di toccare la struttura scambiata da `04b` va verificato che non interferisca con il campione forward **E1 stadio 2**, che è aperto.
+
+### ④ Pre-registrazione del filone strip: NON scritta, e la ragione è un calcolo ex-ante — l'ali-overlay è dominato dallo straddle a questo tenor
+
+La pre-registrazione era il passo successivo di ③. Prima di scriverla ho derivato le soglie dai dati invece di sceglierle (protocollo, e lezione del gate MFIV: verificare **ex-ante** che la statistica possa vedere l'effetto). La derivazione ha bocciato la struttura, quindi **il gate non esiste e il campione non è stato consumato**.
+
+**Primo calcolo — ali a larghezza fissa 8%, quella ereditata dal backtest storico.** Sui 38 tick d'entry registrati: il paio di ali 8% vale **0.000099 BTC** di mark contro **0.012731** dello straddle ATM (lo 0.8%), il bid è **0.000039** (cattura del 39% del mark) e lo spread relativo mediano sulla call OTM è **~2100% del mark** — il tick di Deribit (0.0001 BTC) è più grande del valore dell'opzione. A tenor 30h l'8% è ~3 deviazioni standard: la struttura del backtest storico non è trasportabile qui.
+
+**Secondo calcolo — larghezza parametrizzata in σ**, l'unica scala confrontabile fra regimi (σ_30h implicita mediana **1.57%** oggi contro **3.08%** di realizzata storica: il regime è a metà vol, ed è la ragione per cui l'8% fisso è morto). Lati separati e osservabili all'entry — premio e spread dai quote registrati, dispersione dal payoff storico σ-normalizzato (2019→2026, solo candele):
+
+| ampiezza | mark (BTC) | bid/mark | premio vs ATM | sd payoff | payoff = 0 |
+|---|---|---|---|---|---|
+| ATM (k=0) | 0.012731 | **93%** | 100% | 0.026239 | 0.0% |
+| k = 0.5σ | 0.006454 | 92% | 51% | 0.022175 | 51.4% |
+| k = 1σ | 0.003097 | 90% | 24% | 0.017507 | 77.3% |
+| k = 2σ | 0.000855 | 79% | 6.7% | 0.011367 | 94.3% |
+| k = 3σ | 0.000342 | **64%** | 2.7% | 0.008125 | 97.8% |
+
+**Il fatto strutturale: allontanandosi dallo strike il premio cade molto più in fretta del rischio, e il costo di realizzazione sale.** A 1σ il premio è il 24% dell'ATM ma la dispersione del payoff è ancora il 67%; a 2σ il premio è il 6.7% contro una dispersione del 43%. In più la quota di premio teorico che lo spread si mangia passa dal 7% (ATM) al 10% (1σ) al 36% (3σ). Su qualunque misura di premio per unità di rischio l'ali-overlay è **dominato dallo straddle ATM** — e questo prima ancora di prezzare il rischio di coda delle ali nude.
+
+⚠ **Un numero che NON va citato come edge.** Il primo calcolo produceva un «edge» negativo per ogni ampiezza, straddle ATM incluso (−0.011 BTC): è **invalido**, perché mette insieme premi del 2026 e payoff medi 2019→2026, cioè due regimi di vol diversi. Se ne accorge da solo — dice che lo short straddle perde, in contraddizione con il backtest storico e con `always-short` del gate v1. Serve a mostrare **perché** i due lati non si possono unire fra epoche, non a stimare un edge.
+
+**Conseguenza.** Il wedge MFIV resta vero (+22.2% in varianza) ma **non è raccoglibile con le ali a questo tenor**: la varianza del var-swap pesa `1/K²`, quindi il grosso del wedge vive vicino allo strike, dove il premio incrementale è piccolo rispetto al rischio aggiunto. Nessuna pre-registrazione, nessuna modifica a `04b`, campione non consumato — resta disponibile per una domanda meglio posta. **Domanda superstite, non indagata:** a tenor più lungo (settimanali/mensili) le ali portano premio molto maggiore rispetto a tick e spread, ma cambierebbero il design dell'intero braccio (il 30h è stato scelto per la cadenza delle osservazioni). È un'ipotesi nuova, non una variante di questa.
+
 ### 🔜 PROSSIMA SESSIONE
 
 **⓪ routine.** La prima azione non di routine resta **E1 stadio 2 intorno al 9-10/09** (oggi **20/40**), con il refresh candele obbligatorio immediatamente prima del one-shot. Il refresh B7 non si ripresenta prima di ~168 barre.
+
+**① filone strip: CHIUSO ex-ante il 21/08 (④), nessuna pre-registrazione.** L'ali-overlay è dominato dallo straddle ATM su premio-per-unità-di-rischio e il campione **non è stato consumato**. Non riaprirlo a questo tenor: la domanda superstite è a tenor più lungo ed è un'ipotesi diversa, che richiederebbe di ridisegnare il braccio.
 
 **Fermi e non sbloccati:** E1 stadio 2 **20/40** (~9-10/09), L2 `n_eff` 25.4/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (18/08).
 
