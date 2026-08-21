@@ -74,11 +74,23 @@ La pre-registrazione era il passo successivo di ③. Prima di scriverla ho deriv
 
 **Conseguenza.** Il wedge MFIV resta vero (+22.2% in varianza) ma **non è raccoglibile con le ali a questo tenor**: la varianza del var-swap pesa `1/K²`, quindi il grosso del wedge vive vicino allo strike, dove il premio incrementale è piccolo rispetto al rischio aggiunto. Nessuna pre-registrazione, nessuna modifica a `04b`, campione non consumato — resta disponibile per una domanda meglio posta. **Domanda superstite, non indagata:** a tenor più lungo (settimanali/mensili) le ali portano premio molto maggiore rispetto a tick e spread, ma cambierebbero il design dell'intero braccio (il 30h è stato scelto per la cadenza delle osservazioni). È un'ipotesi nuova, non una variante di questa.
 
+### ⑤ Pagina interattiva delle architetture — costruita fuori dal repo, e per ora **effimera**
+
+Costruita una pagina HTML autonoma che spiega graficamente le architetture: pipeline dei dati, iTransformer, TCN+Mamba, N-HiTS, CAFN, le due miscele di teste (gate appreso vs gate esterno per regime), la coda di output comune, il **cablaggio interno** dei quattro tipi di blocco (attenzione, convoluzione, stato, decomposizione) e una vista letterale di nodi e connessioni. 12 schede, spiegazione estesa per ogni blocco, percorso guidato passo-passo, parametri (B, T, F, `d_model`, patch, expert, teste) che ricalcolano le forme dei tensori ovunque.
+
+**I diagrammi sono ricavati leggendo i `forward`, non la documentazione** — precedente diretto: l'audit del 2026-05-14 trovò 14 discrepanze doc↔codice, quindi la documentazione non è una fonte affidabile per un disegno. Tre dettagli che una versione "a memoria" avrebbe sbagliato e che sono stati verificati sul codice: l'attenzione dell'iTransformer è **bidirezionale** (i token sono feature, non istanti) mentre quella della CAFN è **causale**; il token macro dell'iTransformer entra e viene **rimosso prima del pooling**; **TCN+Mamba accetta `x_macro` e lo ignora**.
+
+**Verifica.** I diagrammi non sono SVG scritti a mano ma generati da una descrizione dichiarativa (riga + corsia), quindi le posizioni le calcola il layout. Il controllo esegue davvero il codice della pagina in un DOM finto sotto Node, cattura l'SVG prodotto per **ogni scheda × 4 combinazioni di parametri** (48 render, incluse combinazioni estreme) e verifica: elementi fuori dal viewBox, box sovrapposti, testi più larghi del proprio riquadro, archi verso nodi inesistenti, spiegazioni mancanti. Esito finale: **0 problemi geometrici, 0 di contenuto**. Al primo giro aveva intercettato un errore di sintassi che avrebbe lasciato la pagina completamente bianca.
+
+⚠ **Il file vive nella cartella temporanea di sessione, che è effimera.** Non è nel repo per una ragione precisa: metterlo tra i tracciati significa pagina pubblica su GitHub e, per la direttiva di sincronizzazione della documentazione, versione **bilingue IT/EN paragrafo per paragrafo** — lavoro reale, non una copia di file. **Decisione rimandata all'utente**; finché non è presa, la pagina va considerata persa a fine sessione.
+
 ### 🔜 PROSSIMA SESSIONE
 
 **⓪ routine.** La prima azione non di routine resta **E1 stadio 2 intorno al 9-10/09** (oggi **20/40**), con il refresh candele obbligatorio immediatamente prima del one-shot. Il refresh B7 non si ripresenta prima di ~168 barre.
 
-**① filone strip: CHIUSO ex-ante il 21/08 (④), nessuna pre-registrazione.** L'ali-overlay è dominato dallo straddle ATM su premio-per-unità-di-rischio e il campione **non è stato consumato**. Non riaprirlo a questo tenor: la domanda superstite è a tenor più lungo ed è un'ipotesi diversa, che richiederebbe di ridisegnare il braccio.
+**① decisione aperta sulla pagina delle architetture (⑤):** portarla nel repo come doc bilingue tracciata, oppure lasciarla fuori. Finché non si decide vive in una cartella temporanea di sessione e va data per persa.
+
+**② filone strip: CHIUSO ex-ante il 21/08 (④), nessuna pre-registrazione.** L'ali-overlay è dominato dallo straddle ATM su premio-per-unità-di-rischio e il campione **non è stato consumato**. Non riaprirlo a questo tenor: la domanda superstite è a tenor più lungo ed è un'ipotesi diversa, che richiederebbe di ridisegnare il braccio.
 
 **Fermi e non sbloccati:** E1 stadio 2 **20/40** (~9-10/09), L2 `n_eff` 25.4/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (18/08).
 
