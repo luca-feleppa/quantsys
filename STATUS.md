@@ -183,6 +183,78 @@ copies, with the **mechanism**, not just the outcome; the thread closes **at thi
 **NO CONCLUSION** (positive control dark) → nothing is concluded, and the resolution limit is
 stated.
 
+### Condizione ③ — ESITO EX-ANTE · Condition ③ — EX-ANTE OUTCOME (2026-08-25)
+
+> 🇮🇹 Eseguita **prima di stimare qualsiasi cosa**, come impone la pre-registrazione.
+> Sonda: `scripts/vol/sig_har_probe.py` (file nuovo, sola lettura, **zero scritture**).
+> Train `n = 51882`, npz corrente, `h = 30`, `bars/day = 24`. **val e test non toccati.**
+> **EN** Run **before estimating anything**, as the pre-registration requires. Probe:
+> `scripts/vol/sig_har_probe.py` (new file, read-only, **zero writes**). Train `n = 51882`,
+> current npz, `h = 30`, `bars/day = 24`. **val and test untouched.**
+
+🇮🇹 **Due esiti, in direzioni opposte.**
+
+1. **Identità analitica CONFERMATA a precisione macchina.** L'area di Lévy del percorso
+   lead-lag, calcolata **numericamente** sui segmenti (non assunta), coincide con `Σ r²` sulla
+   finestra: scarto relativo massimo `2.836e-15` (W=24) e `2.211e-15` (W=30). E
+   `ρ(log QV, log RV_W) = 1.000000`: il termine di ordine 2 **è** la varianza realizzata della
+   finestra, senza residuo. La metà *matematica* della previsione regge esattamente.
+2. **Previsione di ridondanza FALSIFICATA come enunciata.** Contro `xc_h`:
+   `ρ = 0.943937` (W=24, la finestra congelata) e `ρ = 0.976018` (W=30, appaiata a `h`) —
+   **sotto 0.99 in entrambe**. La Spearman, invariante per trasformazione monotona e quindi
+   immune alla questione di scala livelli-vs-log, dà `0.934469` / `0.970699`. Non è un
+   artefatto di finestra: appaiando `W` a `h` la ρ sale ma resta corta.
+
+**Causa, misurata e non congetturata.** `xc_h` **non** è `log(RV_h)`: è `log(C_h)` con
+`C = RV − J`. HAR-C (C3, 31/07) ha rimosso i salti dalla baseline **per decisione**. Il termine
+di ordine 2 è `RV = C + J`, quindi la parte non spiegata dal disegno incumbent è il salto:
+`R²(log QV | 3 regressori HAR-C) = 0.953186` a W=30 (`0.891585` a W=24), e il residuo correla
+`0.355747` con la colonna dei salti `xj_h`. ⚠ L'errore della pre-reg è in una **parentesi**
+(«stesso insieme informativo di `xc_h`»): la baseline era stata cambiata da HAR-RV a HAR-C un
+mese prima, e il ramo ① era stato scritto contro il regressore della baseline **vecchia**.
+
+**Conseguenze sul gate — nessuna soglia toccata, nessuna condizione riscritta.**
+- **Il ramo ① NON si chiude analiticamente: va stimato.** L'esperimento resta intero, non
+  dimezzato. Metà del meccanismo pre-dichiarato è caduta, ed è scritta qui perché la pre-reg lo
+  impone («è la metà del meccanismo»).
+- ⚠ **La costruzione resta CONGELATA a `W = 24`.** La sua giustificazione era falsa (`h = 30`,
+  non 24), ma cambiare `W` **a numeri visti** sarebbe goalpost-moving sulla costruzione, che è
+  esattamente ciò che la pre-registrazione esiste per vietare. `W = 30` resta la lettura
+  diagnostica **dichiarata prima** di girare, e la sua funzione è già stata assolta: dimostra
+  che lo scarto da 0.99 non è la finestra.
+- **Il ramo ① si riduce a una domanda VICINA a C3, non identica.** C3 confrontò `{xc_*}` contro
+  `{xc_*, xj_*}`; qui si aggiunge `log(RV_h)` a `{xc_*}`. `log(C+J)` **non** sta nello span
+  lineare di `{log C, log1p(J)}`, quindi il verdetto di C3 non lo predice per identità — va
+  misurato, e costa un OLS a 4 regressori.
+- **Il prior NON si ritocca** (85% FAIL, due meccanismi): resta registrato com'era, con
+  l'annotazione che uno dei due meccanismi è stato falsificato prima dell'esecuzione. Il ramo ②
+  (dicotomia pari/dispari) è intatto e non è toccato da questo esito.
+
+**EN** **Two outcomes, opposite directions.** (1) **Analytic identity CONFIRMED to machine
+precision**: the lead-lag Lévy area, computed **numerically** over segments (not assumed),
+equals `Σ r²` over the window — max relative gap `2.836e-15` (W=24), `2.211e-15` (W=30) — and
+`ρ(log QV, log RV_W) = 1.000000`: the order-2 term **is** the window's realized variance.
+(2) **The redundancy prediction is FALSIFIED as stated**: against `xc_h`, `ρ = 0.943937` (W=24,
+frozen) and `0.976018` (W=30, matched to `h`), both **below 0.99**; Spearman — monotone-invariant,
+hence immune to the levels-vs-log scale question — gives `0.934469` / `0.970699`. **Measured
+cause:** `xc_h` is `log(C_h)`, not `log(RV_h)`, because HAR-C (C3, 31/07) removed jumps **by
+decision**; the order-2 term is `RV = C + J`, so the unexplained part is the jump —
+`R²(log QV | HAR-C) = 0.953186` at W=30 (`0.891585` at W=24), residual correlating `0.355747`
+with `xj_h`. The pre-registration's arm ① had been written against the **previous** baseline's
+regressor. **Consequences: no threshold touched.** Arm ① **does not close analytically and must
+be estimated**; the construction stays **frozen at `W = 24`** (changing it at numbers seen would
+be goalpost-moving, and `W = 30` — the pre-declared diagnostic — has already done its job by
+showing the shortfall is not the window); arm ① is a question **adjacent to, not identical with,
+C3**, since `log(C+J)` is not in the linear span of `{log C, log1p(J)}`; the **prior is not
+retouched**, and arm ② (even/odd dichotomy) is untouched by this outcome.
+
+**Azione esatta da cui ripartire · Exact restart action.** Estendere
+`scripts/vol/sig_har_probe.py` con le **6 colonne** della costruzione congelata (log-signature
+di profondità 3 del percorso aumentato + termine di variazione quadratica lead-lag a `W = 24`),
+poi eseguire **su val** nell'ordine: (a) **controllo positivo** — colonna oracolo calibrata a
+`ΔQLIKE = −0.004290`, che deve accendersi, altrimenti il verdetto è **NESSUNA CONCLUSIONE**;
+(b) SignatureHAR vs HAR-C, QLIKE + DM appaiato **HAC lag 29**. Il **test** resta non toccato.
+
 ---
 
 ## ▶️ RIPARTI DA QUI — 2026-08-25
