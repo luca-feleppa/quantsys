@@ -5,6 +5,186 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE GATE — SignatureHAR · 2026-08-25
+
+> 🇮🇹 Scritto PRIMA di girare (protocollo sperimentale, passo 1). Gate **aperto**.
+> **EN** Written BEFORE running (experimental protocol, step 1). **Open** gate.
+
+🇮🇹 **Domanda.** I termini di *path signature* — la famiglia di feature che la letteratura
+sui percorsi vende come rappresentazione completa di una traiettoria — aggiungono potere
+predittivo alla baseline **HAR-C** sul target `log_rv` a 1h, oppure no?
+
+**EN** **Question.** Do *path signature* terms — the feature family the rough-path literature
+sells as a complete representation of a trajectory — add predictive power to the **HAR-C**
+baseline on the 1h `log_rv` target, or not?
+
+### Ipotesi/prior onesto (pre-dichiarato) · Hypothesis / honest prior (pre-declared)
+
+🇮🇹 **Prior: FAIL, con un meccanismo derivato — non un «proviamo e vediamo».** Due rami, due
+ragioni diverse, entrambe falsificabili:
+
+1. **Ordine 2 — nullo per RIDONDANZA ANALITICA.** Sul percorso *lead-lag*, il termine
+   antisimmetrico di livello 2 **è** la variazione quadratica, cioè la varianza realizzata
+   della finestra. HAR-C ce l'ha già come regressore (`xc_h`). Previsione: correlazione
+   `|ρ| ≥ 0.99` con `xc_h`, quindi contributo nullo **per costruzione, verificabile prima di
+   stimare qualsiasi cosa** (condizione ③).
+2. **Ordine ≥ 2 antisimmetrico e ordine 3 — nullo per la DICOTOMIA PARI/DISPARI.** L'area di
+   Lévy e i termini di livello 3 codificano l'**ordine degli eventi** dentro la finestra —
+   informazione **dispari**. La sintesi trasversale di §12 (`TEORIA.md`) dà i momenti dispari
+   per impredicibili su questo asset, per le NN *e* per le baseline econometriche: segno,
+   asimmetria, semivarianza firmata, salti. Se la previsione regge, SignatureHAR è la
+   **quinta conferma indipendente** della dicotomia, su una famiglia di feature costruita
+   apposta per catturare l'ordinamento.
+
+**Probabilità soggettive: FAIL ~85%, PASS ~15%.** ⚠ Il prior è registrato per essere
+confrontato, non per essere creduto: un PASS falsificherebbe la lettura trasversale del
+progetto ed è per questo che l'esperimento vale.
+
+**EN** **Prior: FAIL, with a derived mechanism** — not a "let's try and see". Two arms, two
+distinct reasons, both falsifiable: (1) **order 2 is null by ANALYTIC REDUNDANCY** — on the
+lead-lag path the level-2 antisymmetric term **is** the quadratic variation, i.e. the window's
+realized variance, which HAR-C already carries as `xc_h`; predicted `|ρ| ≥ 0.99`, hence a null
+contribution **by construction, checkable before estimating anything** (condition ③);
+(2) **antisymmetric order ≥ 2 and order 3 are null by the EVEN/ODD DICHOTOMY** — Lévy area and
+level-3 terms encode the **ordering of events** inside the window, i.e. **odd** information,
+which §12's cross-cutting reading declares unpredictable on this asset for NNs *and*
+econometric baselines. Subjective probabilities: **FAIL ~85%, PASS ~15%**.
+
+### Costruzione, congelata qui · Construction, frozen here
+
+🇮🇹
+- **Percorso:** finestra causale di `W = 24` barre orarie che termina in `t` (stesso insieme
+  informativo di `xc_h`), percorso 2-D **aumentato col tempo** `P = {(k/W, x_k)}`, con `x_k`
+  log-rendimento cumulato dentro la finestra.
+- **Colonne aggiunte:** **log-signature di profondità 3** del percorso aumentato (**5**
+  termini indipendenti per `d = 2`, profondità 3: le relazioni di shuffle sono già rimosse dal
+  logaritmo) **+ 1** termine di variazione quadratica dal percorso **lead-lag** = **6 colonne**
+  sopra le 3 di HAR-C.
+- **Implementazione nativa, zero dipendenze nuove:** per un percorso lineare a tratti in 2-D la
+  log-signature fino all'ordine 3 si calcola in forma chiusa con l'identità di Chen. Non si
+  aggiungono `signatory`/`iisignature`/`torchcde` al progetto.
+- **Stima:** OLS su `y = log-RV`, stesso `build_har_cj_frame`, stesso train, stesso eval, stessa
+  metrica QLIKE del giudice. **Fra HAR-C e SignatureHAR cambia SOLO il set di regressori.**
+- ⚠ **Limite dichiarato:** un solo scale (la finestra `h` = 24 barre). Ai scale settimanale e
+  mensile HAR media già per costruzione, e l'ipotesi sull'ordinamento riguarda il percorso
+  breve. Un esito negativo si enuncia «**a questo scale**», non «la signature non serve».
+
+**EN** Causal window `W = 24` hourly bars ending at `t` (same information set as `xc_h`);
+**time-augmented** 2-D path; **depth-3 log-signature** (**5** independent terms for `d = 2`,
+shuffle relations already removed by the logarithm) **+ 1** quadratic-variation term from the
+**lead-lag** path = **6 columns** on top of HAR-C's 3. **Native implementation, no new
+dependency** (closed form via Chen's identity for a piecewise-linear 2-D path). OLS on
+`y = log-RV`, same frame, same train, same eval, same QLIKE: **only the regressor set differs**.
+⚠ Declared limit: a single scale (the `h` window) — a negative result is stated «**at this
+scale**».
+
+### Script/giudice · Script / judge
+
+🇮🇹 **Nuovo script standalone `scripts/vol/sig_har_probe.py`**, in sola lettura su
+`data/raw_candles.parquet` e sull'npz, che riusa `build_har_cj_frame` e la QLIKE di
+`quantsys/model/vol_metrics.py`. ⚠ **`scripts/vol/dev_vols_qlike.py` NON viene modificato
+durante questo gate:** è il giudice di campioni forward pre-registrati aperti, e toccarlo
+fuori dalla richiesta è il tipo di modifica che invalida un campione non ri-raccoglibile.
+L'integrazione nel giudice dietro env-flag si fa **solo** a PASS acquisito.
+
+**EN** **New standalone script `scripts/vol/sig_har_probe.py`**, read-only, reusing
+`build_har_cj_frame` and the QLIKE of `quantsys/model/vol_metrics.py`. ⚠ **`dev_vols_qlike.py`
+is NOT modified during this gate** — it judges open pre-registered forward samples. Integration
+behind an env-flag happens **only** after a PASS.
+
+### Split
+
+🇮🇹 **val** (`QUANTSYS_VOLS_SPLIT=val`), `n_val = 6485`, fissato dall'npz. Il **test**
+(`n = 6486`) si tocca **una volta sola**, a gate val superato, one-shot.
+**EN** **val**, `n_val = 6485`, fixed by the npz. **test** (`n = 6486`) is touched **once
+only**, after the val gate passes.
+
+### Leva sperimentale · Experimental lever
+
+🇮🇹 `QUANTSYS_HAR_SIG` — **riservata e inerte**: nessun path di produzione la legge oggi. Lo
+script della sonda è un file nuovo, quindi **impatto zero** sul path production a prescindere
+dall'env. Nessun training, nessuna GPU, nessuna sandbox `QUANTSYS_MODELS_ROOT` necessaria:
+l'esperimento è **interamente lato baseline**.
+**EN** `QUANTSYS_HAR_SIG` — **reserved and inert**: no production path reads it today. The probe
+is a new file, so **zero impact** regardless of the env. No training, no GPU: the experiment is
+**entirely on the baseline side**.
+
+### Condizioni di PASS (tutte, AND) · PASS conditions (all, AND)
+
+🇮🇹
+1. **Materialità, SOGLIA DERIVATA:** `QLIKE(SignatureHAR) ≤ 0.33269` su val, cioè
+   `ΔQLIKE ≤ −0.004290` contro `QLIKE(HAR-C) = 0.33698`. **Derivazione, non scelta:** la banda
+   pubblicata `−22.42% ÷ −31.65%` ha per lato val il rapporto `NN/HAR-C = 0.26143/0.33698 =
+   0.7758`; un miglioramento relativo `x` della baseline porta il rapporto a `0.7758/(1−x)`.
+   Perché la banda si sposti di **1 punto percentuale** (da −22.42% a −21.42%) serve
+   `x = 1.273%`, cioè `0.33698 × 0.01273 = 0.004290`. La soglia è **esattamente la
+   materialità editoriale**: sotto di essa l'esito non cambierebbe nulla di pubblicato.
+2. **Significatività:** Diebold-Mariano appaiato SignatureHAR vs HAR-C sulle perdite QLIKE,
+   varianza **HAC lag 29** (il target somma h=30 barre e le finestre si sovrappongono, §7ter),
+   **p ≤ 0.05**. Un Δ materiale con `p > 0.05` è un **FAIL**, non un «quasi».
+3. **Numerosità e controllo positivo.** `n_val = 6485` è fissato dall'npz: il vincolo binding
+   non è `n` ma la **risoluzione dello strumento**. Condizione: una **colonna oracolo**
+   calibrata per produrre esattamente un miglioramento di `0.004290` deve essere registrata
+   come **materiale** dalla stessa catena OLS+QLIKE. Se il controllo positivo **non si
+   accende**, il verdetto è **NESSUNA CONCLUSIONE**, non FAIL — precedente pubblico: B1 stadio
+   1 (§12.3-bis), dove il controllo positivo evitò un falso negativo.
+
+**Condizione ③ verificata EX-ANTE, prima di spendere qualunque risorsa:** correlazione fra il
+termine di variazione quadratica lead-lag e `xc_h` sul train. Se `|ρ| ≥ 0.99` il **ramo
+ordine 2 si chiude analiticamente**, senza stimare nulla, e il gate prosegue **solo** sui
+termini di ordinamento (metà dell'esperimento non viene eseguita). Se `|ρ| < 0.99` la
+previsione di ridondanza è **falsificata** e va scritto, perché è la metà del meccanismo.
+
+**EN**
+1. **Materiality, DERIVED threshold:** `QLIKE(SignatureHAR) ≤ 0.33269` on val, i.e.
+   `ΔQLIKE ≤ −0.004290` against `QLIKE(HAR-C) = 0.33698`. **Derived, not chosen:** the published
+   band's val side is the ratio `NN/HAR-C = 0.26143/0.33698 = 0.7758`; a relative baseline gain
+   `x` moves it to `0.7758/(1−x)`, so a **1 percentage-point** band move requires `x = 1.273%`
+   = `0.004290` in absolute QLIKE. The threshold **is** editorial materiality.
+2. **Significance:** paired Diebold-Mariano vs HAR-C on QLIKE losses, **HAC lag 29**,
+   **p ≤ 0.05**. A material Δ with `p > 0.05` is a **FAIL**, not a near-miss.
+3. **Sample size and positive control.** `n_val = 6485` is fixed by the npz: the binding
+   constraint is **instrument resolution**, not `n`. An **oracle column** calibrated to produce
+   exactly a `0.004290` improvement must be registered as **material** by the same OLS+QLIKE
+   chain. If the positive control **does not fire**, the verdict is **NO CONCLUSION**, not FAIL
+   — public precedent: B1 stage 1 (§12.3-bis).
+
+**Condition ③ verified EX-ANTE, before spending anything:** correlation between the lead-lag
+quadratic-variation term and `xc_h` on train. If `|ρ| ≥ 0.99` the **order-2 arm closes
+analytically**, without estimating anything. If `|ρ| < 0.99` the redundancy prediction is
+**falsified** and must be written down — it is half the mechanism.
+
+### Conseguenze pre-dichiarate · Pre-declared consequences
+
+🇮🇹 **PASS** → la baseline di riferimento cambia e la **banda pubblicata si restringe**. È la
+stessa classe di conseguenza dei gate C1/A10 (2026-07-28): l'esito **non** si applica in
+autonomia ai documenti pubblici. Si esegue la valutazione **one-shot su test**, si porta il
+numero come **decisione**, e solo dopo si aggiornano `TEORIA.md` §12.2 **e** il § STATO NOTO
+della copia auto-caricata — le due copie del corpus vanno tenute in sincrono, altrimenti
+divergono. Sbloccherebbe inoltre l'integrazione in `dev_vols_qlike.py` dietro
+`QUANTSYS_HAR_SIG`, da fare **fuori** da qualunque campione forward aperto.
+
+**FAIL** → si scrive comunque: nuova voce nel corpus KILL, in **entrambe** le copie, con il
+**meccanismo** e non solo l'esito («ordine 2 ridondante per costruzione, ordine 3 dispari»). È
+il tipo di risultato negativo che vale più di un KILL empirico, perché la previsione era
+derivata prima e il ramo ② diventa la quinta conferma indipendente della dicotomia pari/dispari.
+Il filone si chiude **a questo scale** e non si riapre senza un'ipotesi nuova (non «più
+profondità»: la profondità 4 aggiunge solo altri termini di ordinamento).
+
+**NESSUNA CONCLUSIONE** (controllo positivo spento) → non si conclude nulla e si dichiara che
+la catena OLS+QLIKE non risolve un effetto della taglia che interessa.
+
+**EN** **PASS** → the reference baseline changes and the **published band narrows**. Same class
+of consequence as gates C1/A10 (2026-07-28): the outcome is **not** applied autonomously to
+public documents — run the **one-shot test** evaluation, bring the number as a **decision**, then
+update `TEORIA.md` §12.2 **and** the auto-loaded copy's KNOWN STATE section (the two copies of
+the corpus must stay in sync). **FAIL** → written down anyway: a new KILL entry in **both**
+copies, with the **mechanism**, not just the outcome; the thread closes **at this scale**.
+**NO CONCLUSION** (positive control dark) → nothing is concluded, and the resolution limit is
+stated.
+
+---
+
 ## ▶️ RIPARTI DA QUI — 2026-08-25
 
 **Sessione di routine.** Nessun gate in soglia, nessun one-shot, **nessun refresh candele**, zero GPU sul path di produzione. Scritture: solo le derivazioni incrementali della routine (`mfiv_30h.parquet`). Npz, scaler, `PipelineState`, `raw_candles.parquet`, `regime_probs.parquet`, vintage macro `20260730`: **invariati**.
@@ -42,7 +222,9 @@ Il file esiste ancora nella cartella temporanea della sessione del 21/08. La dec
 
 **⓪ routine.** La prima azione non di routine resta **E1 stadio 2 intorno al 9-10/09** (oggi **20/40**), con il refresh candele obbligatorio immediatamente prima del one-shot. Il refresh B7 non si ripresenta prima di quel refresh candele (②).
 
-**① decisione aperta sulla pagina delle architetture (③).**
+**① GATE APERTO — SignatureHAR** (pre-registrazione in cima a questo file, 25/08). Prima azione: la **condizione ③ ex-ante**, cioè la correlazione fra il termine di variazione quadratica lead-lag e `xc_h` sul train — se `|ρ| ≥ 0.99` metà dell’esperimento si chiude senza stimare nulla. Costo: CPU, zero GPU, sola lettura. ⚠ `dev_vols_qlike.py` **non si tocca** finché il gate è aperto.
+
+**② decisione aperta sulla pagina delle architetture (③).**
 
 **Fermi e non sbloccati:** E1 stadio 2 **20/40** (~9-10/09), L2 `n_eff` 28.2/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (18/08), filone strip CHIUSO ex-ante (21/08).
 
