@@ -5,7 +5,52 @@
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-08-21
+## ▶️ RIPARTI DA QUI — 2026-08-24
+
+**Sessione di routine.** Nessun gate in soglia, nessun one-shot, **nessun refresh candele**, zero GPU. Scritture: solo le derivazioni incrementali della routine (`mfiv_30h.parquet`). Npz, scaler, `PipelineState`, `raw_candles.parquet`, `regime_probs.parquet`, vintage macro `20260730`: **invariati**.
+
+⚠ **Le sessioni del 22/08 e 23/08 non sono state aperte:** questa voce copre **tre** giorni. Come il 19/08, ciò che ne risente è la sola lettura dei delta — nessun contatore è perso, perché i contatori si ri-misurano e non si accumulano a mano.
+
+**Routine 24/08 — exit 0.** 4 collector freschi (IV 0.0h · L2 0.0h · trades 0.0h · `04b` 1.0h). Macro: vintage `20260730` invariato sui due lati, **nessuna promozione**. Merge: chain +169.256 (21/08, file già presente) e tre file nuovi 22/08 +301.610, 23/08 +290.180, 24/08 +12.974; L2 +9.540/+17.279/+17.280/+739; trades +11.772/+6.377/+6.296/+215; `forecasts` 1019→1082, `trades.jsonl` 52→54 (+2), `exec_diag` 935→1001 (+66), `hedge_ledger.jsonl` **+0** (atteso, leg spenta dal 13/08); `hedge_state.json` assente sul VPS.
+
+| Contatore | 21/08 | **24/08** | Soglia | Nota |
+|---|---|---|---|---|
+| E1 stadio 2 | 20 | **20** | 40 | invariato: nessun refresh candele in 3 giorni (①) |
+| L2 h=30 (`n_eff`) | 25.4 | **27.5** | (216) | run contiguo **975h**, nessun buco in 7g |
+| leg opzioni | 51 | **53** | (30) | gate chiuso il 30/07, FAIL 0/3 |
+| barre 1m (lag) | 20.9g | 23.5g | — | non è un debito (decisione 10/08) |
+
+Derivazione MFIV incrementale: +746 righe → **12.062**. Wedge MFIV−ATM **mediana +3.09** vol pt (p10 +2.12, p90 +4.97): la mediana è stabile al centesimo da sei sessioni, la coda alta si allarga (p90 +4.54 → +4.97). Colonna diagnostica, contatore ritirato dal 18/08.
+
+### ① Warning E1 ristampato, nessuna azione — e stavolta il limite superiore è quantificato e basta a decidere
+
+Il blocco ③ ha ristampato «serie close STALE → conteggio SOTTOSTIMATO» (lag **83h** contro soglia fissa 6h). Trattato come sempre da inferenza da proxy: la serie close ferma al **20/08 14:00** è vera, la conseguenza va derivata.
+
+Le non osservabili sono `no_tick: 35` — **nessun refresh le tocca**, non esiste un tick qualificante nella finestra — e `no_rv: 5` (era 2 il 21/08: +3 in tre giorni, cadenza ≈ 1/giorno coerente con lo storico). Quindi **5 è il limite superiore** di ciò che un refresh potrebbe sbloccare oggi: il contatore arriverebbe al più a **25/40**, non a 40.
+
+Non lanciato, e la ragione è aritmetica prima che disciplinare: mancano 20 osservazioni e il tetto odierno ne vale 5. Il refresh **obbligatorio** resta quello immediatamente precedente al one-shot (prerequisito ⑤ della pre-reg E1), dove serviranno le expiry di allora. Ogni scrittura su `raw_candles.parquet` è un atto, non un automatismo.
+
+**Stima della data invariata, e ora ricalibrata sul tasso misurato.** Il contatore è funzione dell'avanzamento della serie close, non del calendario: 12 (close 12/08) → 17 (close 18/08) → 20 (close 20/08 15:00) ⇒ ≈ **1 osservazione per giorno di serie close**. Per 20→40 servono ~20 giorni di avanzamento ⇒ close a **~9-10/09**, che è anche la data del refresh obbligatorio.
+
+### ② Regime B7 fresco — 0 barre nuove, ed è la conseguenza attesa
+
+`regime_probs.parquet` è al **20/08 15:00** (`n_bars` 66.928) e `raw_candles.parquet` pure (66.868 barre, ultima `open_time` 20/08 15:00): **0 barre nuove < 168**, nessun refresh incrementale. È corretto per costruzione — il refresh B7 consuma candele orarie, e senza refresh candele non ce ne sono di nuove. Il prossimo refresh B7 non può quindi presentarsi prima del refresh candele di ~9-10/09.
+
+### ③ Pagina delle architetture — ancora su disco, decisione ancora aperta
+
+La voce ⑤ del 21/08 la dava per persa a fine sessione. **Verificato: il file esiste ancora** nella cartella temporanea di quella sessione. La decisione è quindi ancora esercitabile e non è scaduta: portarla nel repo come documentazione **bilingue IT/EN paragrafo per paragrafo** (lavoro reale, e pagina pubblica su GitHub) oppure lasciarla fuori dai tracciati. Finché non è presa, resta materiale effimero — la cartella non è garantita.
+
+### 🔜 PROSSIMA SESSIONE
+
+**⓪ routine.** La prima azione non di routine resta **E1 stadio 2 intorno al 9-10/09** (oggi **20/40**), con il refresh candele obbligatorio immediatamente prima del one-shot. Il refresh B7 non si ripresenta prima di quel refresh candele (②).
+
+**① decisione aperta sulla pagina delle architetture (③).**
+
+**Fermi e non sbloccati:** E1 stadio 2 **20/40** (~9-10/09), L2 `n_eff` 27.5/216 (~fine novembre), refresh macro bloccato fino alla chiusura di E1, direzionale e lever di training vol classi chiuse, `--hedge` FALLITO (11/08), comparatore MFIV FALLITO (18/08), filone strip CHIUSO ex-ante (21/08).
+
+---
+
+## ▶️ 2026-08-21
 
 **Sessione di routine.** Nessun gate in soglia, nessun one-shot, **nessun refresh candele**. Scritture: solo le derivazioni incrementali della routine (`mfiv_30h.parquet`, `regime_probs.parquet` + checkpoint B7). Npz, scaler, `PipelineState`, `raw_candles.parquet`, vintage macro `20260730`: **invariati**.
 
