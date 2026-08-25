@@ -347,6 +347,61 @@ a decision for the user.
 
 ## ▶️ RIPARTI DA QUI — 2026-08-25
 
+> 🇮🇹 **DOMANI, IN UNA RIGA: nessun lavoro in sospeso. Si riparte dalla routine
+> (`.\avvio_sessione.ps1`), non da un gate.** La sessione del 25/08 ha avuto due metà: la
+> **routine** (qui sotto, ①-④) e il **gate SignatureHAR**, aperto ed eseguito **per intero**
+> nella stessa giornata — pre-registrazione, condizione ③ ex-ante, valutazione su val,
+> **VERDETTO FAIL**, corpus KILL aggiornato nelle due copie. Nulla è rimasto a metà: la
+> sezione del gate qui sopra è un **record chiuso**, non una cosa da riprendere.
+> **EN** **TOMORROW, IN ONE LINE: nothing is pending. Start from the routine
+> (`.\avvio_sessione.ps1`), not from a gate.** The 25/08 session had two halves: the
+> **routine** (①-④ below) and the **SignatureHAR gate**, opened and run **end to end** the
+> same day — pre-registration, ex-ante condition ③, val evaluation, **FAIL verdict**, KILL
+> corpus updated in both copies. Nothing was left half-done: the gate section above is a
+> **closed record**, not something to resume.
+
+🇮🇹 **Stato dopo il gate — cosa è cambiato e cosa NO.**
+- **Cambiato:** `TEORIA.md` §12.2 e il corpus KILL della copia auto-caricata hanno una voce
+  nuova (SignatureHAR, FAIL con meccanismo); `scripts/vol/sig_har_probe.py` è un file nuovo,
+  in sola lettura, con `--mode cond3|gate`; `results/vols/sig_har_probe_1h_val.json` è il
+  record macchina; `scripts/README.md` ha la riga della sonda.
+- **NON cambiato, e va verificato che resti così:** `test` **mai toccato** (one-shot intatto);
+  `dev_vols_qlike.py` **non modificato** — giudica campioni forward pre-registrati aperti;
+  npz, scaler, `PipelineState`, `raw_candles.parquet`, `regime_probs.parquet`, vintage macro
+  `20260730`: **invariati**; zero GPU, zero scritture su `data/` e `models/`.
+- **Nessun numero pubblico è cambiato:** il Δ del candidato era sub-materiale **per
+  costruzione della soglia**, quindi la banda `−22.42% ÷ −31.65%` resta quella.
+
+**I due gate che continuano a correre da soli** (non richiedono azione, si leggono dalla
+routine): **E1 stadio 2** a 20/40, che avanza solo col refresh candele — stima close ~9-10/09,
+che è anche la data del refresh macro obbligatorio; **L2 h=30** a `n_eff` 28.2 su 216.
+⚠ **L'unico atto che NON è un automatismo resta `-RefreshCandles`**: non lanciarlo per il solo
+warning «serie close STALE», che è un'inferenza da proxy — prima si verifica quale expiry manca
+e cosa le serve, e se serve davvero la regola è **`T+2h`**, non `T+1h`.
+
+**Se domani si vuole aprire qualcosa di nuovo**, l'unica coda lasciata da questo gate è una
+**decisione, non un compito**: i termini di ordinamento hanno mostrato un contenuto piccolo,
+significativo e **sub-materiale**, ma su uno split già consumato e con p non corretti per
+molteplicità. È materiale da **nuova pre-registrazione** (ipotesi, soglia e split dichiarati
+prima), oppure si lascia dov'è. Non è schedulato.
+
+**EN** **Changed:** a new KILL entry in `TEORIA.md` §12.2 and in the auto-loaded copy;
+`scripts/vol/sig_har_probe.py` (new, read-only, `--mode cond3|gate`);
+`results/vols/sig_har_probe_1h_val.json` as the machine record; the probe's row in
+`scripts/README.md`. **Unchanged, and it must stay so:** `test` never touched,
+`dev_vols_qlike.py` not modified, npz / scaler / `PipelineState` / `raw_candles.parquet` /
+`regime_probs.parquet` / macro vintage `20260730` all invariant, zero GPU, zero writes to
+`data/` and `models/`. **No published number moved** — the candidate's Δ was sub-material by
+the threshold's own construction. **Self-running gates:** E1 stage 2 at 20/40 (advances only
+with the candle refresh; close ~9-10/09, same date as the mandatory macro refresh) and L2 h=30
+at `n_eff` 28.2/216. ⚠ `-RefreshCandles` stays a deliberate act, never a response to the
+«close series STALE» warning alone, and when it is genuinely needed the rule is **`T+2h`**.
+**The only thing this gate leaves behind is a decision, not a task:** the ordering terms'
+small, significant, sub-material content is material for a **new pre-registration**, or it
+stays where it is. Not scheduled.
+
+---
+
 **Sessione di routine.** Nessun gate in soglia, nessun one-shot, **nessun refresh candele**, zero GPU sul path di produzione. Scritture: solo le derivazioni incrementali della routine (`mfiv_30h.parquet`). Npz, scaler, `PipelineState`, `raw_candles.parquet`, `regime_probs.parquet`, vintage macro `20260730`: **invariati**.
 
 **Routine 25/08 — exit 0.** 4 collector freschi (IV 0.1h · L2 0.0h · trades 0.2h · `04b` 2.0h). Macro: vintage `20260730` invariato sui due lati, **nessuna promozione**. Merge: chain +251 su `atm_30h`, `dvol` +21, `atm_greeks` +251, file 24/08 +240.174; L2 +15.108; trades +10.853; `forecasts` 1082→1102, `trades.jsonl` 54→55 (+1), `exec_diag` 1001→1021 (+20), `hedge_ledger.jsonl` **+0** (atteso, leg spenta dal 13/08); `hedge_state.json` assente sul VPS.
