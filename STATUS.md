@@ -248,12 +248,100 @@ showing the shortfall is not the window); arm ① is a question **adjacent to, n
 C3**, since `log(C+J)` is not in the linear span of `{log C, log1p(J)}`; the **prior is not
 retouched**, and arm ② (even/odd dichotomy) is untouched by this outcome.
 
-**Azione esatta da cui ripartire · Exact restart action.** Estendere
-`scripts/vol/sig_har_probe.py` con le **6 colonne** della costruzione congelata (log-signature
-di profondità 3 del percorso aumentato + termine di variazione quadratica lead-lag a `W = 24`),
-poi eseguire **su val** nell'ordine: (a) **controllo positivo** — colonna oracolo calibrata a
-`ΔQLIKE = −0.004290`, che deve accendersi, altrimenti il verdetto è **NESSUNA CONCLUSIONE**;
-(b) SignatureHAR vs HAR-C, QLIKE + DM appaiato **HAC lag 29**. Il **test** resta non toccato.
+### ESITO DEL GATE — val, 2026-08-25 · GATE OUTCOME — val, 2026-08-25
+
+> 🇮🇹 **VERDETTO: FAIL** (cond① non superata). Report macchina:
+> `results/vols/sig_har_probe_1h_val.json`. **`test` NON toccato.**
+> **EN** **VERDICT: FAIL** (cond① not met). Machine record:
+> `results/vols/sig_har_probe_1h_val.json`. **`test` NOT touched.**
+
+🇮🇹 **Le tre condizioni, nell'ordine pre-registrato.**
+
+| | Misura | Soglia | Esito |
+|---|---|---|---|
+| Riproduzione baseline | `QLIKE(HAR-C) = 0.336979` da `har_c_fold_qlike` **e** dalla catena della sonda, scarto `< 1e-12` | pubblicato `0.33698` | ✅ identica |
+| ③ Controllo positivo | oracolo calibrato `λ* = 7.0985` → `Δ = −0.004290` esatto, `p = 0.002781` | deve accendersi | ✅ **acceso** |
+| ① Materialità | `QLIKE = 0.332913` | `≤ 0.33269` | ❌ **corta di `0.000223`** |
+| ② Significatività | `DM = −3.1837`, `p = 0.001461`, HAC lag 29, `n_eff = 216.2` | `p ≤ 0.05` | ✅ superata |
+
+**Il caso è l'inverso di quello che la pre-reg si aspettava di dover arbitrare.** La pre-reg
+avvertiva che «un Δ materiale con `p > 0.05` è un FAIL, non un quasi»; è arrivato il simmetrico —
+un Δ **significativo ma sub-materiale**, che copre il **94.8%** della soglia. Tradotto in
+conseguenza editoriale, che è ciò che la soglia misura: la banda pubblicata passerebbe da
+**−22.42% a −21.47%**, cioè **0.947 punti percentuali**, sotto la barra di 1.00 pp. **FAIL, e la
+soglia non si tocca:** era derivata prima e a numeri non visti, ed è esattamente il caso per cui
+serviva.
+
+**Meccanismo — la decomposizione per braccio (DESCRITTIVA, fuori dal verdetto).**
+
+| Braccio | Colonne | Δ QLIKE | p (DM, HAC 29) |
+|---|---|---|---|
+| ordine 2, **pari** | `sig_qv` | `−0.000829` | `0.262` |
+| livello 1 (rendimento totale) | `sig_x` | `−0.001571` | `0.162` |
+| livello 2 antisimm. (area di Lévy) | `sig_area` | `−0.000540` | `0.032` |
+| livello 3 | `sig_ttx`, `sig_txx` | `−0.002131` | `0.039` |
+| **ordinamento** (area + livello 3) | 3 colonne | `−0.002966` | `0.007` |
+| log-signature completa | 5 colonne | `−0.004126` | `0.001` |
+
+⚠ p-value **non corretti per molteplicità**, su uno split già consumato dal gate: generano
+ipotesi, non le confermano.
+
+**Il prior aveva ragione sul verdetto e torto su ENTRAMBI i meccanismi.**
+- **Ramo ①** (ordine 2 nullo): l'esito è nullo (`p = 0.262`) ma **non per la ragione
+  pre-dichiarata**. Non è ridondanza con `xc_h` — quella era già stata falsificata ex-ante — è
+  che la parte incrementale è il **salto**, e i salti non portano informazione: è il risultato
+  di **C3**, ottenuto per altra via. Il termine di ordine 2 arriva a HAR-C come `RV = C + J`, e
+  `J` è rumore da togliere, non segnale da aggiungere.
+- **Ramo ②** (ordinamento nullo per la dicotomia pari/dispari): **falsificato in direzione**. I
+  termini di ordinamento portano un contributo **piccolo ma statisticamente rilevabile**
+  (`Δ = −0.002966`, `p = 0.007`), ed è la componente **maggiore** delle due — il contrario della
+  previsione. ⚠ **L'errore del prior è concettuale e va registrato:** la dicotomia di §12 dice
+  che i momenti **dispari sono impredicibili come TARGET**, non che gli input dispari siano
+  inutili per predire un target **pari**. Usare il segno del percorso per prevedere varianza è
+  esattamente ciò che fa il termine di leva di un GJR — e nel repo il GJR c'è. Il ramo ② aveva
+  esteso la dicotomia a un dominio in cui non era mai stata enunciata.
+
+**Cosa NON è stato fatto.** Nessuna valutazione su `test` (one-shot intatto). Nessuna modifica a
+`dev_vols_qlike.py`, nessuna integrazione dietro `QUANTSYS_HAR_SIG` (era condizionata al PASS).
+Nessun documento pubblico cambia numero: il Δ è sub-materiale **per costruzione della soglia**.
+
+**EN** **VERDICT: FAIL on cond①.** Baseline reproduced exactly (`0.336979` from both the
+production function and the probe chain, gap `< 1e-12`); **positive control fires** (`λ* =
+7.0985`, `Δ = −0.004290`, `p = 0.002781`); candidate `QLIKE = 0.332913`, **short of the
+`0.33269` bar by `0.000223`** (94.8% of the threshold), while cond② passes (`DM = −3.1837`,
+`p = 0.001461`). **The mirror image of what the pre-registration expected to arbitrate:** it
+warned that a material Δ with `p > 0.05` is a FAIL, not a near-miss — what arrived is a
+**significant but sub-material** Δ, which would move the published band from **−22.42% to
+−21.47%**, i.e. **0.947 percentage points**, under the 1.00 pp bar. The threshold is not
+touched: it was derived at numbers unseen, and this is exactly the case it existed for.
+**Mechanism (descriptive, outside the verdict):** the even order-2 term contributes nothing
+(`Δ = −0.000829`, `p = 0.262`) while the **ordering** terms do (`Δ = −0.002966`, `p = 0.007`) —
+p-values unadjusted for multiplicity, on a split already consumed. **The prior was right on the
+verdict and wrong on BOTH mechanisms:** arm ① is null, but through **C3**'s result (the
+incremental part is the jump, and jumps carry nothing), not through redundancy with `xc_h`; arm
+② is **falsified in direction**, and its error is conceptual — §12's dichotomy says odd moments
+are unpredictable **as targets**, not that odd inputs are useless for predicting an **even**
+target, which is precisely what a GJR leverage term does. **Not done:** no `test` evaluation
+(one-shot intact), no change to `dev_vols_qlike.py`, no `QUANTSYS_HAR_SIG` integration (it was
+conditional on a PASS), and no published number changes — the Δ is sub-material by the
+threshold's own construction.
+
+**Azione esatta da cui ripartire · Exact restart action.** 🇮🇹 **Gate CHIUSO, niente da
+riprendere su questo filone.** Il verdetto è scritto in entrambe le copie del corpus KILL
+(`TEORIA.md` §12 e la copia auto-caricata) e il filone si chiude **a questo scale**; non si
+riapre con «più profondità» (la profondità 4 aggiunge solo altri termini di ordinamento, e
+l'ordinamento è già stato misurato qui). ⚠ **L'unica domanda che questo gate lascia aperta non è
+sua:** i termini di ordinamento hanno un contenuto **piccolo, significativo e sub-materiale**,
+misurato però su uno split già consumato e con p non corretti — è materiale da **nuova
+pre-registrazione** (ipotesi, soglia e split dichiarati prima), non un risultato da usare così.
+Non è un'azione schedulata: è una decisione dell'utente.
+**EN** **Gate CLOSED, nothing to resume on this thread.** The verdict is written in both copies
+of the KILL corpus and the thread closes **at this scale**; it does not reopen with "more
+depth" (depth 4 only adds further ordering terms, and ordering has just been measured). ⚠ The
+one open question is not this gate's: the ordering terms carry a **small, significant,
+sub-material** content, measured on an already-consumed split with unadjusted p-values — that is
+material for a **new pre-registration**, not a result to be used as is. Not a scheduled action:
+a decision for the user.
 
 ---
 

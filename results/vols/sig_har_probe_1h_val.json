@@ -1,0 +1,116 @@
+{
+  "gate": "SignatureHAR",
+  "prereg": "STATUS.md 2026-08-25",
+  "split": "val",
+  "window_frozen": 24,
+  "h": 30,
+  "n_eval": 6485,
+  "n_train": 51882,
+  "construction": {
+    "logsig_antisymmetry_max": 2.498001805406602e-16,
+    "level1_x_vs_sum_returns_max": 2.220446049250313e-16,
+    "degenerate_columns": [
+      "sig_t"
+    ]
+  },
+  "baseline_har_c": {
+    "qlike_production_fn": 0.33697940716798486,
+    "qlike_probe_chain": 0.33697940716798486,
+    "qlike_published": 0.33698,
+    "cond": 119.93059722899078
+  },
+  "positive_control": {
+    "lambda": 7.098471632778108,
+    "qlike": 0.33268940716798473,
+    "delta": -0.004290000000000127,
+    "target_delta": -0.00429,
+    "p_value": 0.002781436345313194,
+    "fires": true
+  },
+  "candidate": {
+    "qlike": 0.3329134775449518,
+    "delta": -0.004065929623033038,
+    "cond": 5650552261661545.0,
+    "rank": 9,
+    "ncol": 10,
+    "dm": -3.183747003234762,
+    "p_value": 0.001460694751208894,
+    "hac_lag": 29,
+    "n_eff": 216.16666666666666
+  },
+  "descriptive_arms": {
+    "solo_qv_pari": {
+      "cols": [
+        "sig_qv"
+      ],
+      "qlike": 0.3361502442222759,
+      "delta": -0.00082916294570895,
+      "p_value": 0.26178410872823926,
+      "rank": 5,
+      "ncol": 5
+    },
+    "solo_rendimento_l1": {
+      "cols": [
+        "sig_x"
+      ],
+      "qlike": 0.3354084796404692,
+      "delta": -0.001570927527515642,
+      "p_value": 0.16211988079568218,
+      "rank": 5,
+      "ncol": 5
+    },
+    "solo_area_levy": {
+      "cols": [
+        "sig_area"
+      ],
+      "qlike": 0.3364396417567639,
+      "delta": -0.0005397654112209715,
+      "p_value": 0.03185943177069714,
+      "rank": 5,
+      "ncol": 5
+    },
+    "solo_livello3": {
+      "cols": [
+        "sig_ttx",
+        "sig_txx"
+      ],
+      "qlike": 0.3348479341628651,
+      "delta": -0.002131473005119733,
+      "p_value": 0.03853981502196881,
+      "rank": 6,
+      "ncol": 6
+    },
+    "solo_ordinamento": {
+      "cols": [
+        "sig_area",
+        "sig_ttx",
+        "sig_txx"
+      ],
+      "qlike": 0.3340135197134393,
+      "delta": -0.0029658874545455682,
+      "p_value": 0.007164152944754025,
+      "rank": 7,
+      "ncol": 7
+    },
+    "solo_logsig_5": {
+      "cols": [
+        "sig_t",
+        "sig_x",
+        "sig_area",
+        "sig_ttx",
+        "sig_txx"
+      ],
+      "qlike": 0.33285311465412004,
+      "delta": -0.0041262925138648154,
+      "p_value": 0.0013521856355454627,
+      "rank": 8,
+      "ncol": 9
+    }
+  },
+  "conditions": {
+    "cond1_material": false,
+    "cond2_significant": true,
+    "cond3_positive_control": true
+  },
+  "verdict": "FAIL"
+}
