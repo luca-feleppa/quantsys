@@ -1,0 +1,1966 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QUANTSYS — Architetture · Architectures</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --panel2:#f0f2f6; --ink:#15171c; --mut:#5c6270; --line:#d2d6de;
+  --node:#eef0f4; --nodeb:#a9b0bd;
+  --tens:#e4eeff; --tensb:#4d7fc7;
+  --gate:#fff1da; --gateb:#cf9433;
+  --ext:#eaf5e6; --extb:#6f9c57;
+  --re:#c03a63; --acc:#3566c9; --sel:#e2a600;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1116; --panel:#171a21; --panel2:#1e222b; --ink:#e8eaef; --mut:#98a0af; --line:#333a47;
+  --node:#222834; --nodeb:#4a5364; --tens:#18293f; --tensb:#5b86c9; --gate:#31280f; --gateb:#c1902f;
+  --ext:#1a2718; --extb:#6f9c57; --re:#e8718e; --acc:#7ea6f5; --sel:#e0b52c;
+}}
+:root[data-theme="dark"]{
+  --bg:#0f1116; --panel:#171a21; --panel2:#1e222b; --ink:#e8eaef; --mut:#98a0af; --line:#333a47;
+  --node:#222834; --nodeb:#4a5364; --tens:#18293f; --tensb:#5b86c9; --gate:#31280f; --gateb:#c1902f;
+  --ext:#1a2718; --extb:#6f9c57; --re:#e8718e; --acc:#7ea6f5; --sel:#e0b52c;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:1420px;margin:0 auto;padding:26px 20px 70px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;justify-content:space-between}
+h1{font-size:24px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--mut);margin:8px 0 20px;max-width:82ch}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 13px;font-size:14px}
+.btn:hover{border-color:var(--acc)}
+.btn.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(330px,1fr);gap:18px;align-items:start}
+@media (max-width:1080px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.card h2{font-size:19px;margin:0 0 6px;letter-spacing:-.01em}
+.kicker{font:11.5px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--acc);
+  text-transform:uppercase;letter-spacing:.1em;margin:0 0 8px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 6px;
+  padding-top:12px;border-top:1px solid var(--line)}
+.toolbar .sep{flex:1}
+.stepinfo{font:12.5px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mut)}
+.params{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0 0;padding-top:12px;border-top:1px solid var(--line)}
+.params label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+.params input{width:92px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+  padding:5px 7px;color:var(--ink);font:13px ui-monospace,Menlo,Consolas,monospace}
+.svgbox{overflow:auto;margin-top:12px}
+svg{display:block;width:100%;height:auto}
+.nd{cursor:pointer}
+.nd:hover rect{filter:brightness(1.07)}
+.nd.dim{opacity:.3}
+.nd.sel rect{stroke:var(--sel);stroke-width:3.2}
+.edge.dim{opacity:.15}
+#panel{position:sticky;top:18px;max-height:calc(100vh - 36px);overflow:auto}
+#panel h3{font-size:17px;margin:2px 0 2px}
+#pshape{font:12.5px ui-monospace,Menlo,Consolas,monospace;color:var(--acc);margin:0 0 10px}
+#ptext p{margin:9px 0}
+.badge{display:inline-block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mut);margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;list-style:none;margin:10px 0 0;padding:0;
+  font-size:12.5px;color:var(--mut)}
+.legend li{display:flex;align-items:center;gap:7px}
+.sw{width:24px;height:14px;border-radius:4px;border:1.5px solid var(--nodeb);background:var(--node)}
+.sw.t{background:var(--tens);border-color:var(--tensb)}
+.sw.g{background:var(--gate);border-color:var(--gateb)}
+.sw.e{background:var(--ext);border-color:var(--extb);border-style:dashed}
+.sw.r{background:none;border:0;border-top:2px dashed var(--re);height:2px;border-radius:0}
+.foot{color:var(--mut);font-size:13px;margin-top:26px;max-width:100ch}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  fill:var(--ink);font-size:13px}
+text.sh{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;fill:var(--mut)}
+text.eg{font-size:11px;fill:var(--re)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1 id="h1">—</h1>
+  <div style="display:flex;gap:8px">
+    <button class="btn" id="lang">EN</button>
+    <button class="btn" id="theme">—</button>
+  </div>
+</header>
+<p class="sub" id="sub"></p>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="grid">
+  <div class="card">
+    <p class="kicker" id="vkick">—</p>
+    <h2 id="vtitle">—</h2>
+    <p id="vintro" style="color:var(--mut);margin:0"></p>
+
+    <div class="toolbar">
+      <button class="btn" id="prev">—</button>
+      <button class="btn" id="play">—</button>
+      <button class="btn" id="next">—</button>
+      <span class="stepinfo" id="stepinfo"></span>
+      <span class="sep"></span>
+      <button class="btn" id="reflow">—</button>
+      <button class="btn" id="reset">—</button>
+    </div>
+
+    <div class="svgbox" id="svgbox"></div>
+
+    <ul class="legend">
+      <li><span class="sw t"></span> <span id="lg1"></span></li>
+      <li><span class="sw"></span> <span id="lg2"></span></li>
+      <li><span class="sw g"></span> <span id="lg3"></span></li>
+      <li><span class="sw e"></span> <span id="lg4"></span></li>
+      <li><span class="sw r"></span> <span id="lg5"></span></li>
+    </ul>
+
+    <div class="params">
+      <label><span id="lb1"></span><input id="pB" type="number" value="64" min="1" max="2048"></label>
+      <label><span id="lb2"></span><input id="pT" type="number" value="120" min="10" max="512"></label>
+      <label><span id="lb3"></span><input id="pF" type="number" value="104" min="4" max="400"></label>
+      <label><span id="lb4"></span><input id="pD" type="number" value="128" min="8" max="1024"></label>
+      <label><span id="lb5"></span><input id="pP" type="number" value="1" min="1" max="12"></label>
+      <label><span id="lb6"></span><input id="pE" type="number" value="4" min="2" max="16"></label>
+      <label><span id="lb7"></span><input id="pH" type="number" value="4" min="1" max="32"></label>
+    </div>
+  </div>
+
+  <div class="card" id="panel">
+    <span class="badge" id="pbadge">—</span>
+    <h3 id="ptitle">—</h3>
+    <p id="pshape"></p>
+    <div id="ptext"></div>
+  </div>
+</div>
+
+<p class="foot" id="foot"></p>
+</div>
+
+<script>
+/* IT: i diagrammi sono DATI: riga + corsia, il resto lo calcola il layout.
+       È il motivo per cui i blocchi non possono sovrapporsi.
+   EN: the diagrams are DATA: row + lane, the layout computes the rest.
+       That is why the blocks cannot overlap. */
+const P = {B:64, T:120, F:104, D:128, PATCH:1, E:4, Q:5, K:3, MACRO:90, NDYN:86,
+           H:4, KC:3, DIL:4, DST:16, EXP:2, POOL:8, UNITS:7};
+const S = s => String(s).replace(/\{(\w+)\}/g, (_,k)=>{
+  const teff = Math.max(1, Math.floor(P.T/P.PATCH));
+  const v = {B:P.B, T:P.T, F:P.F, D:P.D, E:P.E, Q:P.Q, K:P.K, MACRO:P.MACRO, NDYN:P.NDYN,
+    TEFF:teff, T5:Math.max(1,Math.floor(teff/5)), T15:Math.max(1,Math.floor(teff/15)),
+    F1:P.F+1, NSTR:Math.max(0,P.F-P.NDYN),
+    H:P.H, HD:Math.max(1,Math.floor(P.D/P.H)), D3:P.D*3, D4:P.D*4,
+    KC:P.KC, DIL:P.DIL, PAD:(P.KC-1)*P.DIL, DST:P.DST, EXP:P.EXP,
+    DIN:P.D*P.EXP, POOL:P.POOL, TP:Math.max(1,Math.floor(P.T/P.POOL)),
+    FLAT:Math.max(1,Math.floor(P.T/P.POOL))*P.D, BC:P.T*P.D}[k];
+  return v===undefined ? '{'+k+'}' : v;
+});
+
+/* IT: lingua attiva e risolutore. Una stringa e' o un testo nudo o una coppia {it, en}:
+       L() lascia passare la prima e sceglie il ramo giusto della seconda.
+   EN: active language and resolver. A string is either bare text or an {it, en} pair:
+       L() passes the former through and picks the right branch of the latter. */
+let LANG = 'it';
+const L = o => (o && typeof o === 'object' && !Array.isArray(o) && ('it' in o)) ? o[LANG] : o;
+
+/* IT: testi della cornice statica (intestazione, pulsanti, legenda, parametri, pannello).
+   EN: static chrome copy (header, buttons, legend, parameters, side panel). */
+const UI = {
+  htmlLang:{it:"it", en:"en"},
+  langBtn:{it:"EN", en:"IT"},
+  h1:{it:"QUANTSYS — come funzionano le architetture",
+      en:"QUANTSYS — how the architectures work"},
+  theme:{it:"tema chiaro / scuro", en:"light / dark theme"},
+  sub:{it:`Ogni diagramma è ricavato leggendo il codice dei <code>forward</code>, non la
+      documentazione. <b>Clicca un blocco</b> per la spiegazione estesa, usa <b>▶ percorso</b> per
+      farti guidare passo per passo (o le frecce ← →), e cambia i parametri in fondo per vedere le
+      forme dei tensori aggiornarsi ovunque.`,
+       en:`Every diagram is derived by reading the <code>forward</code> code, not the documentation.
+      <b>Click a block</b> for the extended explanation, use <b>▶ walk</b> to be guided step by step
+      (or the ← → arrow keys), and change the parameters at the bottom to watch the tensor shapes
+      update everywhere.`},
+  prev:{it:"‹ indietro", en:"‹ back"},
+  play:{it:"▶ percorso", en:"▶ walk"},
+  pause:{it:"❚❚ pausa", en:"❚❚ pause"},
+  next:{it:"avanti ›", en:"forward ›"},
+  reflow:{it:"evidenzia i rientri", en:"highlight the feedback paths"},
+  reset:{it:"mostra tutto", en:"show everything"},
+  lg1:{it:"tensore", en:"tensor"},
+  lg2:{it:"operazione", en:"operation"},
+  lg3:{it:"gate / miscela", en:"gate / mixture"},
+  lg4:{it:"ingresso esterno", en:"external input"},
+  lg5:{it:"rientro", en:"feedback path"},
+  lb1:{it:"B (batch)", en:"B (batch)"},
+  lb2:{it:"T (barre)", en:"T (bars)"},
+  lb3:{it:"F (feature)", en:"F (features)"},
+  lb4:{it:"d_model", en:"d_model"},
+  lb5:{it:"patch_size", en:"patch_size"},
+  lb6:{it:"E (expert)", en:"E (experts)"},
+  lb7:{it:"teste attenz.", en:"attn. heads"},
+  helpBadge:{it:"come si legge", en:"how to read it"},
+  helpTitle:{it:"Istruzioni per l'uso", en:"How to use this page"},
+  helpText:{it:`<p>I diagrammi si leggono <b>dall'alto in basso</b>: in cima c'è quello che entra nel
+      modello, in fondo quello che esce. Le frecce grigie sono il percorso principale, quelle verdi
+      tratteggiate arrivano da un canale laterale, quelle rosse tratteggiate sono <b>rientri</b>:
+      qualcosa che torna indietro, o che viene messo da parte e riusato molto più avanti.</p>
+      <p>Il pulsante <b>▶ percorso</b> accende un blocco alla volta e scrive qui la spiegazione: è
+      il modo più rapido di capire un'architettura che non conosci. Il pulsante <b>evidenzia i
+      rientri</b> spegne tutto il resto e lascia solo i percorsi rossi, che sono la parte meno
+      ovvia di ogni rete.</p>
+      <p>I numeri fra parentesi, tipo <code>(64, 120, 104)</code>, sono le <b>dimensioni</b> del
+      tensore in quel punto: quante finestre stai elaborando insieme, quante ore contiene ciascuna,
+      quante grandezze misuri per ogni ora. Cambiando i parametri in fondo si aggiornano ovunque —
+      utile per farsi un'idea di cosa cresce e cosa no.</p>`,
+            en:`<p>The diagrams read <b>top to bottom</b>: at the top is what enters the model, at the
+      bottom what comes out. Grey arrows are the main path, dashed green ones arrive from a side
+      channel, dashed red ones are <b>feedback paths</b>: something that goes back, or that is set
+      aside and reused much later.</p>
+      <p>The <b>▶ walk</b> button lights up one block at a time and writes the explanation here: it
+      is the fastest way to understand an architecture you do not know. The <b>highlight the
+      feedback paths</b> button dims everything else and leaves only the red routes, which are the
+      least obvious part of any network.</p>
+      <p>The numbers in brackets, such as <code>(64, 120, 104)</code>, are the <b>dimensions</b> of
+      the tensor at that point: how many windows you are processing together, how many hours each
+      contains, how many quantities you measure for every hour. Changing the parameters at the
+      bottom updates them everywhere — useful to get a feel for what grows and what does not.</p>`},
+  badge:{tensor:{it:"tensore", en:"tensor"},
+         op:{it:"operazione", en:"operation"},
+         gate:{it:"gate / miscela", en:"gate / mixture"},
+         ext:{it:"ingresso esterno", en:"external input"}},
+  step:{it:(i,n)=>`passo ${i} di ${n}`, en:(i,n)=>`step ${i} of ${n}`},
+  offPath:{it:"fuori dal percorso principale", en:"off the main path"},
+  foot:{it:`Diagrammi ricavati dai forward in quantsys/model (iTransformer, TCN+Mamba, N-HiTS, CAFN,
+      normalizzazione reversibile, gate di regime) e dallo script di addestramento. Dove la
+      documentazione e il codice divergono, qui vale il codice.`,
+        en:`Diagrams derived from the forward passes in quantsys/model (iTransformer, TCN+Mamba,
+      N-HiTS, CAFN, reversible normalisation, regime gate) and from the training script. Where
+      documentation and code diverge, the code is what counts here.`}
+};
+/* IT: ogni stringa visibile e' una coppia {it, en}; L() sceglie in base alla lingua attiva.
+   EN: every visible string is an {it, en} pair; L() picks according to the active language. */
+const VIEWS = {
+
+pipeline:{
+  tab:{it:"① i dati", en:"① the data"},
+  kicker:{it:"a monte di tutte le architetture", en:"upstream of every architecture"},
+  title:{it:"Dalle candele al tensore di input", en:"From candles to the input tensor"},
+  intro:{it:"Quando il modello riceve x, tutto quello che vedi qui è già successo: sono le trasformazioni che rendono i numeri confrontabili fra loro e nel tempo.",
+         en:"By the time the model receives x, everything you see here has already happened: these are the transformations that make the numbers comparable to one another and across time."},
+  nodes:[
+    {id:"cand", lane:"L", row:0, kind:"ext",
+     t:{it:"candele orarie + funding", en:"hourly candles + funding"},
+     info:{it:`<p>Il punto di partenza è la <b>candela oraria</b>: per ogni ora apertura, massimo,
+     minimo, chiusura e volume, più il costo di finanziamento dei contratti perpetui.</p>
+     <p>Il dato grezzo non entra mai così com'è. I prezzi in livelli <b>non sono confrontabili nel
+     tempo</b>: cinquecento dollari di movimento nel 2019 e nel 2026 non significano la stessa
+     cosa. Per questo si lavora sui <b>rendimenti logaritmici</b>, che restano paragonabili fra
+     epoche diverse.</p>`,
+        en:`<p>The starting point is the <b>hourly candle</b>: for every hour open, high, low, close
+     and volume, plus the financing cost of perpetual contracts.</p>
+     <p>Raw data never enters as it is. Prices in levels are <b>not comparable across time</b>: a
+     five-hundred-dollar move in 2019 and in 2026 do not mean the same thing. That is why the work
+     is done on <b>log returns</b>, which stay comparable across different epochs.</p>`}},
+    {id:"feat", lane:"C", row:0, kind:"op",
+     t:{it:"costruzione delle feature", en:"feature construction"},
+     s:{it:"→ {F} colonne ({NDYN} dinamiche + {NSTR} strutturali)",
+        en:"→ {F} columns ({NDYN} dynamic + {NSTR} structural)"},
+     info:{it:`<p>Da ogni candela si ricava un centinaio di grandezze: volatilità su varie finestre,
+     rapporti fra acquisti e vendite, distanze dai livelli di prezzo rilevanti, ora del giorno e
+     giorno della settimana, e altro ancora.</p>
+     <p>Le colonne si dividono in due famiglie. Le <b>dinamiche</b> cambiano di ora in ora. Le
+     <b>strutturali</b> descrivono il contesto e si muovono molto più lentamente. La distinzione
+     non è cosmetica: alcune architetture le trattano diversamente, e il confine viene salvato nel
+     dataset apposta perché il modello lo possa usare.</p>`,
+        en:`<p>About a hundred quantities are derived from each candle: volatility over several
+     windows, ratios between buying and selling, distances from relevant price levels, hour of the
+     day and day of the week, and more.</p>
+     <p>The columns fall into two families. <b>Dynamic</b> ones change hour by hour.
+     <b>Structural</b> ones describe the context and move far more slowly. The distinction is not
+     cosmetic: some architectures treat them differently, and the boundary is stored in the dataset
+     on purpose, so that the model can use it.</p>`}},
+    {id:"scal", lane:"C", row:1, kind:"op",
+     t:{it:"riscalatura robusta", en:"robust rescaling"},
+     s:{it:"mediana e distanza interquartile · calcolate SOLO sul train",
+        en:"median and interquartile range · computed on the TRAIN split ONLY"},
+     info:{it:`<p>Ogni colonna viene ricentrata e riscalata: si sottrae la <b>mediana</b> e si divide
+     per la distanza fra il primo e il terzo quartile. Rispetto a media e deviazione standard,
+     queste due misure sono poco sensibili ai valori estremi — utile su un asset che ogni tanto si
+     muove del venti per cento in un giorno.</p>
+     <p><b>Il punto delicato è "solo sul train".</b> Se i parametri si calcolassero su tutti i
+     dati, il modello userebbe informazione proveniente dal futuro per normalizzare il passato: un
+     errore sottile, che gonfia i risultati senza rompere niente di visibile. I parametri vengono
+     salvati e riusati identici in ogni fase successiva.</p>`,
+        en:`<p>Every column is recentred and rescaled: the <b>median</b> is subtracted and the result
+     divided by the distance between the first and the third quartile. Compared with mean and
+     standard deviation, these two statistics are barely sensitive to extreme values — useful on an
+     asset that occasionally moves twenty per cent in a day.</p>
+     <p><b>The delicate part is "train only".</b> If the parameters were computed over all the
+     data, the model would use information coming from the future in order to normalise the past: a
+     subtle error that inflates the results without breaking anything visible. The parameters are
+     persisted and reused unchanged at every later stage.</p>`}},
+    {id:"win", lane:"C", row:2, kind:"tensor",
+     t:{it:"finestre scorrevoli", en:"sliding windows"},
+     s:{it:"X (N, {T}, {F}) · obiettivo = somma dei rendimenti delle 30 ore successive",
+        en:"X (N, {T}, {F}) · target = sum of the returns over the next 30 hours"},
+     info:{it:`<p>Il modello non guarda una barra alla volta ma una <b>finestra</b> di {T} barre
+     consecutive, circa cinque giorni di storia. La finestra scorre di un'ora per volta.</p>
+     <p>La cosa da prevedere è la somma dei rendimenti logaritmici delle <b>30 ore successive</b>
+     alla fine della finestra. Cambiare quel numero obbliga a rigenerare tutto il dataset:
+     l'orizzonte è scritto dentro i dati, non è una manopola del modello.</p>
+     <p>Una conseguenza da tenere a mente: due finestre vicine condividono {T}−1 barre su {T}.
+     Sono quasi identiche. Contarle come esempi indipendenti fa credere di sapere molto più di
+     quanto si sappia, ed è una trappola che ritorna ogni volta che si misura se un risultato è
+     solido.</p>`,
+        en:`<p>The model does not look at one bar at a time but at a <b>window</b> of {T} consecutive
+     bars, roughly five days of history. The window slides forward one hour at a time.</p>
+     <p>What has to be predicted is the sum of the log returns over the <b>30 hours following</b>
+     the end of the window. Changing that number forces a full regeneration of the dataset: the
+     horizon is written inside the data, it is not a knob on the model.</p>
+     <p>One consequence to keep in mind: two neighbouring windows share {T}−1 bars out of {T}. They
+     are almost identical. Counting them as independent examples makes you believe you know far
+     more than you do, and it is a trap that returns every time you measure whether a result is
+     solid.</p>`}},
+    {id:"spl", lane:"C", row:3, kind:"op",
+     t:{it:"divisione temporale", en:"temporal split"},
+     s:{it:"train 51.882 · validazione 6.485 · test 6.486",
+        en:"train 51,882 · validation 6,485 · test 6,486"},
+     info:{it:`<p>La divisione segue il <b>tempo</b>, non il caso: il train è il passato, la validazione
+     viene dopo, il test per ultimo. Mescolare a caso sarebbe comodo e sbagliato — significherebbe
+     addestrare su giorni che stanno in mezzo a quelli su cui poi si misura, cioè conoscere già il
+     seguito.</p>
+     <p>Il test si guarda <b>una volta sola</b>, alla fine. Ogni sbirciata in più lo trasforma di
+     fatto in una seconda validazione, e il numero finale smette di dire quello che sembra dire.</p>`,
+        en:`<p>The split follows <b>time</b>, not chance: train is the past, validation comes after,
+     test comes last. Shuffling at random would be convenient and wrong — it would mean training on
+     days that sit in between the ones you then measure on, that is, already knowing how it
+     goes.</p>
+     <p>The test split is looked at <b>exactly once</b>, at the end. Every extra peek effectively
+     turns it into a second validation set, and the final number stops saying what it appears to
+     say.</p>`}},
+    {id:"clip", lane:"C", row:4, kind:"op",
+     t:{it:"taglio dei valori estremi", en:"clipping of extreme values"},
+     s:{it:"percentili 0.1 e 99.9, presi dal solo train",
+        en:"percentiles 0.1 and 99.9, taken from the train split only"},
+     info:{it:`<p>I valori più estremi di ciascuna colonna vengono tagliati. Serve a due cose: impedire
+     che un singolo valore assurdo domini l'addestramento, e restare dentro i limiti della
+     precisione ridotta con cui si calcola sulla scheda grafica.</p>
+     <p>Anche qui i limiti si calcolano <b>solo sul train</b> e si applicano poi a validazione e
+     test. È l'unica trasformazione che avviene nello script di addestramento invece che nella
+     costruzione del dataset.</p>`,
+        en:`<p>The most extreme values of each column are clipped. This serves two purposes: keeping a
+     single absurd value from dominating training, and staying within the limits of the reduced
+     precision used on the graphics card.</p>
+     <p>Here too the bounds are computed <b>on the train split only</b> and then applied to
+     validation and test. It is the one transformation that happens in the training script rather
+     than in dataset construction.</p>`}},
+    {id:"batch", lane:"C", row:5, kind:"tensor",
+     t:{it:"quello che il modello riceve", en:"what the model receives"},
+     s:{it:"x ({B}, {T}, {F})", en:"x ({B}, {T}, {F})"},
+     info:{it:`<p>Ecco il tensore che entra: <b>{B} finestre</b> elaborate insieme, ciascuna di
+     <b>{T} ore</b>, ciascuna ora descritta da <b>{F} numeri</b>.</p>
+     <p>Da qui in poi ogni architettura sceglie un modo diverso di attraversare questo blocco: chi
+     lo percorre lungo il tempo, chi lungo le grandezze, chi lo scompone per scale.</p>`,
+        en:`<p>Here is the tensor that goes in: <b>{B} windows</b> processed together, each of
+     <b>{T} hours</b>, each hour described by <b>{F} numbers</b>.</p>
+     <p>From here on every architecture picks a different way of traversing this block: some run
+     along time, some along the quantities, some decompose it by scale.</p>`}},
+    {id:"macro", lane:"L", row:4, kind:"ext",
+     t:{it:"blocco macroeconomico", en:"macroeconomic block"},
+     s:{it:"X_macro ({B}, {MACRO})", en:"X_macro ({B}, {MACRO})"},
+     info:{it:`<p>Novanta serie macro (tassi, inflazione, indici azionari e simili). Sono <b>costanti
+     dentro la finestra</b>: non hanno un valore per ciascuna delle {T} ore, ne hanno uno solo per
+     l'intera finestra.</p>
+     <p>Per questo non possono essere colonne della sequenza e viaggiano su un <b>canale
+     separato</b>. Ogni architettura le fa entrare in un punto diverso — e una delle tre non le
+     usa affatto.</p>`,
+        en:`<p>Ninety macro series (rates, inflation, equity indices and the like). They are
+     <b>constant within the window</b>: they do not have one value for each of the {T} hours, they
+     have a single value for the whole window.</p>
+     <p>That is why they cannot be columns of the sequence and travel on a <b>separate
+     channel</b>. Each architecture lets them in at a different point — and one of the three does
+     not use them at all.</p>`}},
+    {id:"gate", lane:"R", row:4, kind:"ext",
+     t:{it:"probabilità di regime", en:"regime probabilities"},
+     s:{it:"g ({B}, {K}) — usate solo dalla variante MoU",
+        en:"g ({B}, {K}) — used by the MoU variant only"},
+     info:{it:`<p>Un modello statistico separato stima, ora per ora, quanto è probabile che il mercato
+     si trovi in ciascuno di tre <b>regimi</b> di volatilità. Il risultato sono tre numeri che
+     sommano a uno.</p>
+     <p>Due cautele. Le probabilità sono <b>filtrate</b>, cioè calcolate col solo passato: la
+     versione "levigata", che guarda anche avanti, sarebbe comodissima e inutilizzabile. E la riga
+     etichettata con un'ora descrive l'ora appena finita, quindi è <b>disponibile solo un'ora
+     dopo</b>: l'allineamento tiene conto del ritardo, altrimenti si starebbe usando il futuro
+     senza accorgersene.</p>`,
+        en:`<p>A separate statistical model estimates, hour by hour, how likely it is that the market
+     is in each of three volatility <b>regimes</b>. The result is three numbers summing to one.</p>
+     <p>Two cautions. The probabilities are <b>filtered</b>, i.e. computed from the past only: the
+     "smoothed" version, which also looks ahead, would be extremely convenient and unusable. And
+     the row labelled with a given hour describes the hour that has just ended, so it is
+     <b>available only one hour later</b>: the alignment accounts for that lag, otherwise you would
+     be using the future without noticing.</p>`}}
+  ],
+  edges:[["cand","feat","side"],["feat","scal"],["scal","win"],["win","spl"],["spl","clip"],
+         ["clip","batch"],["macro","batch","side"],["gate","batch","side"]],
+  steps:["cand","feat","scal","win","spl","clip","batch"]
+},
+itr:{
+  tab:{it:"② iTransformer", en:"② iTransformer"},
+  kicker:{it:"architettura di produzione della linea volatilità",
+          en:"production architecture of the volatility line"},
+  title:{it:"iTransformer — l'attenzione guarda le feature, non il tempo",
+         en:"iTransformer — attention looks at the features, not at time"},
+  intro:{it:"L'inversione che gli dà il nome: invece di chiedersi quali istanti contano, si chiede quali grandezze contano e come si influenzano fra loro.",
+         en:"The inversion it is named after: instead of asking which instants matter, it asks which quantities matter and how they influence one another."},
+  nodes:[
+    {id:"x", lane:"C", row:0, kind:"tensor",
+     t:{it:"input", en:"input"}, s:{it:"x ({B}, {T}, {F})", en:"x ({B}, {T}, {F})"},
+     info:{it:`<p>La finestra completa, così come esce dalla pipeline dei dati (scheda ①): {B} esempi,
+     ciascuno fatto di {T} ore consecutive descritte da {F} grandezze.</p>
+     <p>Vale la pena fermarsi su cosa <b>non</b> c'è qui dentro. Non c'è il prezzo in dollari così
+     com'è, perché è già stato riscalato. Non c'è il futuro, per costruzione. E non c'è nessuna
+     indicazione di <i>quale</i> periodo sia: due momenti storici diversi con la stessa forma
+     arrivano al modello identici. Tutto ciò che la rete potrà usare sta in questi tre numeri.</p>`,
+        en:`<p>The complete window, exactly as it comes out of the data pipeline (board ①): {B}
+     examples, each made of {T} consecutive hours described by {F} quantities.</p>
+     <p>It is worth pausing on what is <b>not</b> in here. There is no dollar price as such, because
+     it has already been rescaled. There is no future, by construction. And there is no indication
+     of <i>which</i> period this is: two different historical moments with the same shape reach the
+     model identical. Everything the network will be able to use is in these three numbers.</p>`}},
+    {id:"lat", lane:"L", row:0, kind:"ext",
+     t:{it:"latente CAFN (facoltativo)", en:"CAFN latent (optional)"},
+     s:{it:"({B}, {T}, d_latent)", en:"({B}, {T}, d_latent)"},
+     info:{it:`<p>Se si usa la CAFN (scheda ⑤), il suo risultato viene <b>aggiunto in coda</b> alle {F}
+     colonne: da qui in poi il modello vede semplicemente qualche grandezza in più, e nient'altro
+     cambia.</p>
+     <p>Quando non si usa, il percorso è identico a prima fin nell'ultimo bit. È una proprietà
+     voluta: una funzionalità spenta non deve avere effetti collaterali.</p>`,
+        en:`<p>If the CAFN is used (board ⑤), its result is <b>appended</b> to the {F} columns: from
+     here on the model simply sees a few more quantities, and nothing else changes.</p>
+     <p>When it is not used, the path is identical to before down to the last bit. This is a
+     deliberate property: a feature that is switched off must have no side effects.</p>`}},
+    {id:"revin", lane:"C", row:1, kind:"op",
+     t:{it:"normalizzazione reversibile (facoltativa)", en:"reversible normalisation (optional)"},
+     s:{it:"ogni finestra viene centrata su se stessa", en:"each window is centred on itself"},
+     info:{it:`<p>Ogni finestra viene normalizzata <b>rispetto a se stessa</b>: le si toglie la propria
+     media e la si divide per la propria variabilità. Aiuta quando il livello generale cambia nel
+     tempo, perché il modello vede sempre grandezze centrate.</p>
+     <p>La parte interessante è che media e variabilità <b>non si buttano</b>: si mettono da parte
+     e si <b>ri-applicano alla previsione</b> in fondo alla rete (la freccia rossa). È l'unico
+     percorso che scavalca l'intera architettura.</p>
+     <p>Sulla linea di produzione della volatilità è disattivata.</p>`,
+        en:`<p>Every window is normalised <b>with respect to itself</b>: its own mean is removed and it
+     is divided by its own variability. This helps when the general level drifts over time, because
+     the model always sees centred quantities.</p>
+     <p>The interesting part is that mean and variability are <b>not thrown away</b>: they are set
+     aside and <b>re-applied to the prediction</b> at the bottom of the network (the red arrow). It
+     is the only path that jumps over the entire architecture.</p>
+     <p>On the production volatility line it is switched off.</p>`}},
+    {id:"clamp", lane:"C", row:2, kind:"op",
+     t:{it:"si gira il tensore e si tagliano gli estremi",
+        en:"the tensor is flipped and the extremes are clipped"},
+     s:{it:"({B}, {F}, {T}) — ora ogni riga è la storia di una grandezza",
+        en:"({B}, {F}, {T}) — now each row is the history of one quantity"},
+     info:{it:`<p>Il tensore viene trasposto: prima le grandezze, poi il tempo. Sembra un dettaglio
+     tecnico ed è invece il gesto che rende possibile tutto il resto: d'ora in poi <b>ogni riga è
+     la storia completa di una singola grandezza</b>.</p>
+     <p>Il taglio dei valori fuori scala protegge dai numeri troppo grandi per la precisione
+     ridotta usata sulla scheda grafica.</p>`,
+        en:`<p>The tensor is transposed: quantities first, then time. It looks like a technical detail
+     and is instead the move that makes everything else possible: from now on <b>each row is the
+     complete history of a single quantity</b>.</p>
+     <p>Clipping out-of-scale values protects against numbers too large for the reduced precision
+     used on the graphics card.</p>`}},
+    {id:"scale", lane:"C", row:3, kind:"op",
+     t:{it:"la storia viene riassunta a tre risoluzioni",
+        en:"the history is summarised at three resolutions"},
+     s:{it:"{TEFF} · {T5} · {T15} passi → tre proiezioni fuse → ({B}, {F}, {D})",
+        en:"{TEFF} · {T5} · {T15} steps → three projections fused → ({B}, {F}, {D})"},
+     info:{it:`<p>La storia di ciascuna grandezza viene compressa <b>tre volte</b>: a risoluzione
+     piena, mediata a blocchi di cinque, mediata a blocchi di quindici. Le tre versioni vengono
+     proiettate e poi fuse in un vettore solo.</p>
+     <p>Il motivo è che un movimento rapido e una tendenza lenta sono due informazioni diverse, e
+     comprimere tutto a una sola risoluzione ne perderebbe una. Alla fine di questo passaggio
+     <b>ogni feature è diventata un vettore</b> — un "token" — e le {T} ore di storia sono
+     interamente contenute lì dentro.</p>`,
+        en:`<p>The history of each quantity is compressed <b>three times</b>: at full resolution,
+     averaged in blocks of five, averaged in blocks of fifteen. The three versions are projected and
+     then fused into a single vector.</p>
+     <p>The reason is that a fast move and a slow trend are two different pieces of information, and
+     compressing everything at a single resolution would lose one of them. At the end of this step
+     <b>each feature has become a vector</b> — a "token" — and the {T} hours of history are entirely
+     contained inside it.</p>`}},
+    {id:"emb", lane:"C", row:4, kind:"op",
+     t:{it:"due etichette per ogni token", en:"two labels for every token"},
+     s:{it:"+ tipo (dinamica / strutturale)  + identità della feature",
+        en:"+ type (dynamic / structural)  + identity of the feature"},
+     info:{it:`<p>A ciascun token si sommano due informazioni apprese: <b>che tipo</b> di grandezza è
+     (dinamica o strutturale) e <b>quale</b> grandezza è.</p>
+     <p>Serve perché l'attenzione di per sé non ha alcun senso dell'ordine: senza queste etichette
+     le feature sarebbero intercambiabili, e il modello non potrebbe imparare che una certa
+     colonna ha un ruolo particolare.</p>`,
+        en:`<p>Two learned pieces of information are added to each token: <b>what type</b> of quantity
+     it is (dynamic or structural) and <b>which</b> quantity it is.</p>
+     <p>This is needed because attention on its own has no sense of order: without these labels the
+     features would be interchangeable, and the model could not learn that a given column plays a
+     particular role.</p>`}},
+    {id:"mtok", lane:"C", row:5, kind:"gate",
+     t:{it:"il macro entra come token aggiuntivo", en:"the macro enters as an extra token"},
+     s:{it:"({B}, {F1}, {D}) — una grandezza in più, in testa alla lista",
+        en:"({B}, {F1}, {D}) — one more quantity, at the head of the list"},
+     info:{it:`<p>Le novanta serie macro vengono compresse in <b>un unico vettore</b> e messe in testa
+     alla lista dei token, come se fossero una grandezza in più.</p>
+     <p>Da quel momento il macro <b>partecipa all'attenzione</b>: può influenzare tutte le altre
+     feature ed esserne influenzato. È un modo elegante di far entrare informazione che non ha una
+     storia oraria propria.</p>`,
+        en:`<p>The ninety macro series are compressed into <b>a single vector</b> and placed at the
+     head of the token list, as if they were one more quantity.</p>
+     <p>From that moment the macro <b>takes part in attention</b>: it can influence all the other
+     features and be influenced by them. It is an elegant way of admitting information that has no
+     hourly history of its own.</p>`}},
+    {id:"mac", lane:"L", row:5, kind:"ext",
+     t:{it:"proiezione del macro", en:"macro projection"},
+     s:{it:"({B}, {MACRO}) → ({B}, 1, {D})", en:"({B}, {MACRO}) → ({B}, 1, {D})"},
+     info:{it:`<p>Novanta numeri diventano un solo vettore della stessa dimensione dei token, così può
+     stare in fila con loro.</p>`,
+        en:`<p>Ninety numbers become a single vector of the same size as the tokens, so that it can
+     queue up alongside them.</p>`}},
+    {id:"lay", lane:"C", row:6, kind:"op",
+     t:{it:"strati di attenzione fra grandezze", en:"attention layers across quantities"},
+     s:{it:"attenzione + rete densa, con collegamenti residui",
+        en:"attention + dense network, with residual connections"},
+     info:{it:`<p>Qui succede la cosa centrale. Ogni token guarda tutti gli altri e decide quanto
+     pesarli: il modello impara <b>quali grandezze si spiegano a vicenda</b> — per esempio che la
+     volatilità recente e l'ampiezza delle candele dicono cose collegate.</p>
+     <p>Due dettagli che contano davvero. Primo: <b>non c'è nessuna maschera causale</b>, e non è
+     una dimenticanza — i token sono grandezze, non istanti, quindi non esiste un "prima" e un
+     "dopo" da proteggere: l'ordine temporale è già stato compresso nel passaggio precedente.
+     Secondo: il costo cresce col <b>quadrato del numero di grandezze</b>, non del numero di ore,
+     ed è la ragione pratica per cui questa inversione conviene.</p>`,
+        en:`<p>This is where the central thing happens. Every token looks at all the others and decides
+     how much to weigh them: the model learns <b>which quantities explain one another</b> — for
+     instance that recent volatility and candle range say related things.</p>
+     <p>Two details that genuinely matter. First: <b>there is no causal mask</b>, and that is not an
+     oversight — the tokens are quantities, not instants, so there is no "before" and "after" to
+     protect: temporal order was already compressed in the previous step. Second: the cost grows
+     with the <b>square of the number of quantities</b>, not of the number of hours, and that is the
+     practical reason why this inversion pays off.</p>`}},
+    {id:"pool", lane:"C", row:7, kind:"op",
+     t:{it:"si toglie il token macro, poi si fa la media",
+        en:"the macro token is removed, then the average is taken"},
+     s:{it:"→ h ({B}, {D})", en:"→ h ({B}, {D})"},
+     info:{it:`<p>Il token del macro viene <b>rimosso</b>, poi si fa la media di tutti quelli rimasti:
+     da {F} vettori si passa a uno.</p>
+     <p>È un punto che leggendo in fretta si sbaglia: il macro <b>non</b> entra nella media finale.
+     Ha già fatto il suo lavoro influenzando le altre grandezze attraverso l'attenzione, e a quel
+     punto viene scartato.</p>`,
+        en:`<p>The macro token is <b>removed</b>, then the average of all the remaining ones is taken:
+     from {F} vectors down to one.</p>
+     <p>This is a point that a hurried reading gets wrong: the macro does <b>not</b> enter the final
+     average. It has already done its job by influencing the other quantities through attention, and
+     at that point it is discarded.</p>`}},
+    {id:"head", lane:"C", row:8, kind:"tensor",
+     t:{it:"→ testa di output (schede ⑥ e ⑦)", en:"→ output head (boards ⑥ and ⑦)"},
+     s:{it:"h ({B}, {D})", en:"h ({B}, {D})"},
+     info:{it:`<p>Un solo vettore riassume l'intera finestra. Da qui il percorso è comune a tutte le
+     architetture: cambia soltanto <b>quale testa</b> lo trasforma in una previsione.</p>`,
+        en:`<p>A single vector summarises the whole window. From here the path is common to all the
+     architectures: only <b>which head</b> turns it into a prediction changes.</p>`}}
+  ],
+  edges:[["lat","x","side"],["x","revin"],["revin","clamp"],["clamp","scale"],["scale","emb"],
+         ["emb","mtok"],["mac","mtok","side"],["mtok","lay"],["lay","pool"],["pool","head"],
+         ["revin","head","re",{it:"media e scala tornano sulla previsione",
+                               en:"mean and scale return onto the prediction"}],
+         ["mtok","pool","re",{it:"entra come token… e viene tolto",
+                              en:"it enters as a token… and is removed"}]],
+  steps:["x","revin","clamp","scale","emb","mtok","lay","pool","head"]
+},
+
+tcn:{
+  tab:{it:"③ TCN + Mamba", en:"③ TCN + Mamba"},
+  kicker:{it:"architettura ibrida", en:"hybrid architecture"},
+  title:{it:"TCN + Mamba — due modi di leggere il tempo, fusi da un gate",
+         en:"TCN + Mamba — two ways of reading time, fused by a gate"},
+  intro:{it:"Qui il tempo resta l'asse principale. Due rami leggono la stessa sequenza con logiche opposte, e un gate impara dimensione per dimensione a quale dei due dare retta.",
+         en:"Here time stays the main axis. Two branches read the same sequence with opposite logics, and a gate learns, dimension by dimension, which of the two to listen to."},
+  nodes:[
+    {id:"x", lane:"C", row:0, kind:"tensor",
+     t:{it:"input", en:"input"}, s:{it:"x ({B}, {T}, {F})", en:"x ({B}, {T}, {F})"},
+     info:{it:`<p>La stessa finestra dell'altra architettura, ma qui non verrà mai trasposta: l'asse del
+     tempo resta quello che conta.</p>`,
+        en:`<p>The same window as in the other architecture, but here it will never be transposed: the
+     time axis remains the one that matters.</p>`}},
+    {id:"lat", lane:"L", row:0, kind:"ext",
+     t:{it:"latente CAFN (facoltativo)", en:"CAFN latent (optional)"},
+     s:{it:"aggiunto in coda alle feature", en:"appended to the features"},
+     info:{it:`<p>Come nell'iTransformer: se c'è, aggiunge colonne e nient'altro. È una proprietà voluta
+     dell'innesto — il modulo esterno non modifica il percorso interno dell'architettura, porta
+     soltanto grandezze in più.</p>
+     <p>La conseguenza pratica è che si può accendere o spegnere la CAFN senza rimettere mano
+     all'architettura, e il confronto fra "con" e "senza" resta pulito: l'unica differenza è il
+     numero di colonne in ingresso.</p>`,
+        en:`<p>As in the iTransformer: if present, it adds columns and nothing else. This is a
+     deliberate property of the graft — the external module does not modify the architecture's
+     internal path, it only brings in extra quantities.</p>
+     <p>The practical consequence is that the CAFN can be switched on or off without touching the
+     architecture, and the comparison between "with" and "without" stays clean: the only difference
+     is the number of input columns.</p>`}},
+    {id:"revin", lane:"C", row:1, kind:"op",
+     t:{it:"normalizzazione reversibile (facoltativa)", en:"reversible normalisation (optional)"},
+     s:{it:"lo stesso ingresso va a entrambi i rami", en:"the same input goes to both branches"},
+     info:{it:`<p>Se attiva, centra la finestra su se stessa. I due rami ricevono <b>esattamente lo
+     stesso ingresso</b>: la differenza fra loro sta in come leggono, non in cosa vedono.</p>`,
+        en:`<p>If active, it centres the window on itself. The two branches receive <b>exactly the same
+     input</b>: the difference between them lies in how they read, not in what they see.</p>`}},
+    {id:"tcnb", lane:"L", row:2, kind:"op",
+     t:{it:"ramo convoluzionale", en:"convolutional branch"},
+     s:{it:"convoluzioni causali dilatate → media su tutte le {T} ore",
+        en:"dilated causal convolutions → average over all {T} hours"},
+     info:{it:`<p>Una pila di convoluzioni che scorrono lungo il tempo. Sono <b>causali</b>: ogni
+     istante usa solo il proprio passato, mai il futuro. E sono <b>dilatate</b>: a ogni strato
+     saltano più indietro, così con pochi strati si copre una finestra lunga senza far esplodere
+     il numero di parametri.</p>
+     <p>Alla fine si fa la <b>media di tutti gli istanti</b>: il riassunto è "distribuito", ogni
+     ora della finestra contribuisce.</p>`,
+        en:`<p>A stack of convolutions sliding along time. They are <b>causal</b>: every instant uses
+     only its own past, never the future. And they are <b>dilated</b>: at each layer they skip
+     further back, so that a long window is covered with few layers without blowing up the parameter
+     count.</p>
+     <p>At the end the <b>average over all instants</b> is taken: the summary is "distributed", every
+     hour of the window contributes.</p>`}},
+    {id:"mamb", lane:"R", row:2, kind:"op",
+     t:{it:"ramo a stato", en:"state branch"},
+     s:{it:"scorrimento ricorsivo → si tiene solo l'ULTIMO istante",
+        en:"recursive scan → only the LAST instant is kept"},
+     info:{it:`<p>Un modello a stato: scorre la sequenza aggiornando una memoria interna, come farebbe
+     una rete ricorrente, ma con una struttura che si può calcolare in parallelo invece che passo
+     per passo.</p>
+     <p>Alla fine si prende <b>solo l'ultimo istante</b>, perché lì è già condensata tutta la
+     storia. È l'opposto esatto della media dell'altro ramo — ed è il motivo per cui i due hanno
+     qualcosa di diverso da dire.</p>`,
+        en:`<p>A state-space model: it scans the sequence updating an internal memory, as a recurrent
+     network would, but with a structure that can be computed in parallel rather than step by
+     step.</p>
+     <p>At the end <b>only the last instant</b> is taken, because the whole history is already
+     condensed there. It is the exact opposite of the other branch's average — and it is the reason
+     the two have something different to say.</p>`}},
+    {id:"fus", lane:"C", row:3, kind:"gate",
+     t:{it:"fusione con gate", en:"gated fusion"},
+     s:{it:"peso = σ(W·[ramo1 ; ramo2]) → fuso = peso·ramo1 + (1−peso)·ramo2",
+        en:"weight = σ(W·[branch1 ; branch2]) → fused = weight·branch1 + (1−weight)·branch2"},
+     info:{it:`<p>Il gate non sceglie un ramo per tutto il batch: produce <b>un peso per ciascuna delle
+     {D} dimensioni</b>. Può quindi prendere alcune componenti dal ramo convoluzionale e altre da
+     quello a stato, e cambiare idea da una finestra all'altra.</p>
+     <p>È la forma più semplice di "mescolare due esperti", e ritorna in forma più elaborata nella
+     scheda ⑥.</p>`,
+        en:`<p>The gate does not pick one branch for the whole batch: it produces <b>one weight for
+     each of the {D} dimensions</b>. It can therefore take some components from the convolutional
+     branch and others from the state branch, and change its mind from one window to the next.</p>
+     <p>It is the simplest form of "mixing two experts", and it comes back in a more elaborate form
+     on board ⑥.</p>`}},
+    {id:"head", lane:"C", row:4, kind:"tensor",
+     t:{it:"→ testa di output (schede ⑥ e ⑦)", en:"→ output head (boards ⑥ and ⑦)"},
+     s:{it:"({B}, {D})", en:"({B}, {D})"},
+     info:{it:`<p>Un vettore riassuntivo, come nell'iTransformer: da qui il percorso è comune.</p>
+     <p>Che due architetture così diverse arrivino alla stessa forma non è un caso: è un contratto
+     deciso a priori. Tutto ciò che sta a valle — teste di output, ritorno alle unità vere,
+     mescolamento degli esperti — funziona con qualunque architettura proprio perché nessuna di
+     esse può cambiare la forma del proprio risultato.</p>`,
+        en:`<p>A summary vector, as in the iTransformer: from here the path is common.</p>
+     <p>That two such different architectures arrive at the same shape is no accident: it is a
+     contract decided up front. Everything downstream — output heads, the return to true units,
+     expert mixing — works with any architecture precisely because none of them is allowed to change
+     the shape of its own result.</p>`}},
+    {id:"noma", lane:"R", row:1, kind:"ext",
+     t:{it:"macro accettato ma IGNORATO", en:"macro accepted but IGNORED"},
+     s:{it:"nessuna freccia in uscita: non entra nel calcolo",
+        en:"no outgoing arrow: it does not enter the computation"},
+     info:{it:`<p><b>Questa architettura non usa il blocco macro.</b> Il parametro esiste nella firma
+     della funzione solo per uniformità con le altre due, e viene scartato.</p>
+     <p>È il tipo di dettaglio che un diagramma disegnato a memoria sbaglia quasi sempre, perché
+     verrebbe naturale supporre che tutte le architetture ricevano gli stessi ingressi. Qui non è
+     così, e la differenza conta se poi si confrontano i risultati.</p>`,
+        en:`<p><b>This architecture does not use the macro block.</b> The parameter exists in the
+     function signature only for uniformity with the other two, and is discarded.</p>
+     <p>It is the kind of detail a diagram drawn from memory almost always gets wrong, because it
+     would feel natural to assume that all architectures receive the same inputs. Here they do not,
+     and the difference matters if you then compare results.</p>`}}
+  ],
+  edges:[["lat","x","side"],["x","revin"],["revin","tcnb","side"],["revin","mamb","side"],
+         ["tcnb","fus","side"],["mamb","fus","side"],["fus","head"]],
+  steps:["x","revin","tcnb","mamb","fus","head"]
+},
+
+nhits:{
+  tab:{it:"④ N-HiTS", en:"④ N-HiTS"},
+  kicker:{it:"architettura a decomposizione", en:"decomposition architecture"},
+  title:{it:"N-HiTS — ogni blocco sottrae quello che ha già spiegato",
+         en:"N-HiTS — each block subtracts what it has already explained"},
+  intro:{it:"È il caso in cui il rientro è letterale: i blocchi lavorano in fila su ciò che resta da spiegare, e ciascuno toglie dal segnale la parte che ha capito.",
+         en:"This is the case where the feedback path is literal: the blocks work in a queue on what is left to explain, and each removes from the signal the part it has understood."},
+  nodes:[
+    {id:"x", lane:"C", row:0, kind:"tensor",
+     t:{it:"input", en:"input"},
+     s:{it:"x ({B}, {T}, {F}) [+ latente CAFN]", en:"x ({B}, {T}, {F}) [+ CAFN latent]"},
+     info:{it:`<p>La finestra, eventualmente arricchita dal latente della CAFN.</p>
+     <p>Questa architettura la userà in modo diverso dalle altre due: invece di riassumerla tutta
+     in una volta, la <b>scompone per scale</b>, un pezzo alla volta, e ogni pezzo tolto semplifica
+     il lavoro del blocco successivo. È l'idea che in statistica si chiama decomposizione: separare
+     tendenza, ciclo e residuo invece di modellare tutto insieme.</p>`,
+        en:`<p>The window, optionally enriched by the CAFN latent.</p>
+     <p>This architecture will use it differently from the other two: instead of summarising it all
+     at once, it <b>decomposes it by scale</b>, one piece at a time, and every piece removed
+     simplifies the next block's job. It is the idea statistics calls decomposition: separating
+     trend, cycle and residual instead of modelling everything together.</p>`}},
+    {id:"proj", lane:"C", row:1, kind:"op",
+     t:{it:"taglio degli estremi + proiezione", en:"clipping + projection"},
+     s:{it:"h ({B}, {T}, {D}) — la sequenza resta lunga {T}",
+        en:"h ({B}, {T}, {D}) — the sequence stays {T} long"},
+     info:{it:`<p>Ogni ora viene proiettata in uno spazio di lavoro di dimensione {D}. Qui non si
+     comprime ancora niente: la sequenza resta intera.</p>`,
+        en:`<p>Every hour is projected into a working space of size {D}. Nothing is compressed yet: the
+     sequence stays whole.</p>`}},
+    {id:"mac", lane:"L", row:1, kind:"ext",
+     t:{it:"il macro viene sommato ovunque", en:"the macro is added everywhere"},
+     s:{it:"stesso vettore aggiunto a tutte le {T} ore",
+        en:"the same vector added to all {T} hours"},
+     info:{it:`<p>Qui il macro entra in modo diverso dall'iTransformer: viene proiettato e poi
+     <b>sommato a ogni singola ora</b> della finestra, identico per tutte.</p>
+     <p>È come alzare o abbassare il livello di fondo dell'intera finestra in base al contesto
+     macroeconomico, invece di lasciargli negoziare la propria influenza attraverso l'attenzione.
+     Più semplice, e meno flessibile.</p>`,
+        en:`<p>Here the macro enters differently from the iTransformer: it is projected and then
+     <b>added to every single hour</b> of the window, identical for all of them.</p>
+     <p>It is like raising or lowering the baseline level of the whole window according to the
+     macroeconomic context, instead of letting it negotiate its own influence through attention.
+     Simpler, and less flexible.</p>`}},
+    {id:"res", lane:"C", row:2, kind:"tensor",
+     t:{it:"residuo iniziale", en:"initial residual"},
+     s:{it:"residuo ← h", en:"residual ← h"},
+     info:{it:`<p>Il residuo è <b>ciò che resta ancora da spiegare</b>. All'inizio è tutto il segnale;
+     a ogni blocco si assottiglia.</p>`,
+        en:`<p>The residual is <b>what is still left to explain</b>. At the start it is the whole
+     signal; at every block it gets thinner.</p>`}},
+    {id:"blk", lane:"C", row:3, kind:"op",
+     t:{it:"blocco a risoluzione fissa", en:"fixed-resolution block"},
+     s:{it:"riduci → rete densa → ricostruzione + contributo",
+        en:"downsample → dense network → reconstruction + contribution"},
+     info:{it:`<p>Il blocco prima <b>riduce la risoluzione</b> della sequenza mediando a gruppi di ore,
+     poi passa il risultato a una piccola rete densa che produce due cose:</p>
+     <p>— una <b>ricostruzione</b> della parte di segnale che è riuscito a spiegare, che verrà
+     <b>sottratta</b> dal residuo;<br>
+     — un <b>contributo</b> alla previsione finale, che si somma a quello degli altri blocchi.</p>
+     <p>Quanto si riduce decide di cosa si occupa il blocco: riduzione forte significa forme lente,
+     tipo la tendenza di fondo; riduzione minima significa movimenti rapidissimi.</p>`,
+        en:`<p>The block first <b>reduces the resolution</b> of the sequence by averaging over groups of
+     hours, then passes the result to a small dense network that produces two things:</p>
+     <p>— a <b>reconstruction</b> of the part of the signal it managed to explain, which will be
+     <b>subtracted</b> from the residual;<br>
+     — a <b>contribution</b> to the final prediction, which is added to that of the other blocks.</p>
+     <p>How much it is reduced decides what the block deals with: strong reduction means slow shapes,
+     such as the underlying trend; minimal reduction means very fast movements.</p>`}},
+    {id:"agg", lane:"C", row:4, kind:"op",
+     t:{it:"somma dei contributi", en:"sum of the contributions"},
+     s:{it:"previsione costruita per strati ({B}, {D})",
+        en:"prediction built up in layers ({B}, {D})"},
+     info:{it:`<p>I contributi dei blocchi si sommano. L'architettura costruisce la previsione <b>per
+     strati</b>: prima le forme grossolane, poi le correzioni fini.</p>`,
+        en:`<p>The blocks' contributions add up. The architecture builds the prediction <b>in
+     layers</b>: coarse shapes first, then fine corrections.</p>`}},
+    {id:"jump", lane:"R", row:3, kind:"ext",
+     t:{it:"ramo dei salti (facoltativo)", en:"jump branch (optional)"},
+     s:{it:"usa il MASSIMO invece della media, e legge il segnale ORIGINALE",
+        en:"uses the MAXIMUM instead of the average, and reads the ORIGINAL signal"},
+     info:{it:`<p>Mediare è un filtro che <b>appiattisce i picchi</b>. Se un blocco iniziale li ha già
+     mediati via, i blocchi successivi non li vedranno mai, perché guardano solo il residuo.</p>
+     <p>Questo ramo aggira il problema in due mosse: prende il <b>massimo</b> invece della media,
+     così un picco sopravvive; e legge il segnale <b>originale</b>, non il residuo, così non
+     dipende da quello che i blocchi precedenti hanno già tolto. La sua ricostruzione viene
+     scartata apposta, per non interferire con la catena dei residui.</p>`,
+        en:`<p>Averaging is a filter that <b>flattens spikes</b>. If an early block has already averaged
+     them away, later blocks will never see them, because they only look at the residual.</p>
+     <p>This branch sidesteps the problem in two moves: it takes the <b>maximum</b> instead of the
+     average, so a spike survives; and it reads the <b>original</b> signal, not the residual, so it
+     does not depend on what earlier blocks have already removed. Its reconstruction is discarded on
+     purpose, so as not to interfere with the residual chain.</p>`}},
+    {id:"head", lane:"C", row:5, kind:"tensor",
+     t:{it:"→ testa di output (schede ⑥ e ⑦)", en:"→ output head (boards ⑥ and ⑦)"},
+     s:{it:"({B}, {D})", en:"({B}, {D})"},
+     info:{it:`<p>Come per le altre due, si arriva a un vettore riassuntivo della stessa forma.</p>
+     <p>Con una differenza di significato: qui quel vettore è una <b>somma di contributi</b>, e in
+     linea di principio si può guardare quanto ha pesato ciascun blocco, cioè ciascuna scala
+     temporale. È una forma di leggibilità che le altre due architetture non offrono
+     gratuitamente.</p>`,
+        en:`<p>As with the other two, you arrive at a summary vector of the same shape.</p>
+     <p>With a difference in meaning: here that vector is a <b>sum of contributions</b>, and in
+     principle you can look at how much each block — that is, each time scale — weighed. It is a form
+     of readability the other two architectures do not offer for free.</p>`}}
+  ],
+  edges:[["x","proj"],["mac","proj","side"],["proj","res"],["res","blk"],["blk","agg"],
+         ["jump","agg","side"],["agg","head"],
+         ["blk","res","re",{it:"residuo ← residuo − ricostruzione",
+                            en:"residual ← residual − reconstruction"}]],
+  steps:["x","proj","res","blk","agg","head"]
+},
+cafn:{
+  tab:{it:"⑤ CAFN", en:"⑤ CAFN"},
+  kicker:{it:"modulo a monte, non una quarta architettura",
+          en:"an upstream module, not a fourth architecture"},
+  title:{it:"CAFN — un'attenzione causale che prepara il terreno",
+         en:"CAFN — a causal attention that prepares the ground"},
+  intro:{it:"La CAFN non prevede niente: codifica. Legge la stessa finestra e produce un riassunto per ogni istante, che poi viene dato in pasto a una qualsiasi delle tre architetture.",
+         en:"The CAFN predicts nothing: it encodes. It reads the same window and produces one summary per instant, which is then fed to any of the three architectures."},
+  nodes:[
+    {id:"x", lane:"C", row:0, kind:"tensor",
+     t:{it:"input", en:"input"},
+     s:{it:"x ({B}, {T}, {F}) [+ canale extra]", en:"x ({B}, {T}, {F}) [+ extra channel]"},
+     info:{it:`<p>La stessa finestra. Il "canale extra" è pensato per dati che esistono solo da poco —
+     per esempio le grandezze raccolte in tempo reale dal mercato delle opzioni.</p>
+     <p>Non possono entrare come input storico per una ragione dirimente: <b>non hanno storia</b>.
+     Addestrare su un periodo in cui quel dato non esisteva, fingendo che ci fosse, produce un
+     modello che sembra funzionare e non funziona.</p>`,
+        en:`<p>The same window. The "extra channel" is meant for data that has only existed for a short
+     time — for instance quantities collected in real time from the options market.</p>
+     <p>They cannot enter as historical input for a decisive reason: <b>they have no history</b>.
+     Training over a period in which that data did not exist, pretending it did, produces a model
+     that looks like it works and does not.</p>`}},
+    {id:"filt", lane:"C", row:1, kind:"op",
+     t:{it:"filtro di pulizia", en:"cleaning filter"},
+     s:{it:"un peso appreso, fra 0 e 1, per ciascuna feature",
+        en:"one learned weight, between 0 and 1, per feature"},
+     info:{it:`<p>Ogni grandezza viene moltiplicata per un peso fra zero e uno che la rete impara. In
+     pratica il modulo decide da solo <b>quanto ascoltare ciascun ingresso</b>, e può quasi
+     zittire quelli che considera rumore.</p>`,
+        en:`<p>Every quantity is multiplied by a weight between zero and one that the network learns.
+     In practice the module decides on its own <b>how much to listen to each input</b>, and can
+     almost silence those it considers noise.</p>`}},
+    {id:"proj", lane:"C", row:2, kind:"op",
+     t:{it:"proiezione + posizione nel tempo", en:"projection + position in time"},
+     s:{it:"({B}, {T}, d) — qui i token sono gli ISTANTI",
+        en:"({B}, {T}, d) — here the tokens are the INSTANTS"},
+     info:{it:`<p>A differenza dell'iTransformer, qui i token sono <b>gli istanti</b>. Quindi l'ordine
+     conta, e va detto esplicitamente al modello aggiungendo un'informazione di posizione.</p>`,
+        en:`<p>Unlike the iTransformer, here the tokens are <b>the instants</b>. So order matters, and
+     it has to be told to the model explicitly by adding positional information.</p>`}},
+    {id:"blk", lane:"C", row:3, kind:"op",
+     t:{it:"blocchi di attenzione causale", en:"causal attention blocks"},
+     s:{it:"ogni istante può guardare solo il proprio passato",
+        en:"each instant may look only at its own past"},
+     info:{it:`<p>Attenzione con <b>maschera causale</b>: l'istante t vede fino a t, mai oltre. È
+     l'opposto dell'iTransformer, e per una buona ragione — lì i token erano grandezze, qui sono
+     momenti nel tempo, e guardare avanti significherebbe barare.</p>`,
+        en:`<p>Attention with a <b>causal mask</b>: instant t sees up to t, never beyond. It is the
+     opposite of the iTransformer, and for a good reason — there the tokens were quantities, here
+     they are moments in time, and looking ahead would mean cheating.</p>`}},
+    {id:"pen", lane:"R", row:3, kind:"gate",
+     t:{it:"penalità sulla forma dell'attenzione", en:"penalty on the shape of attention"},
+     s:{it:"vicinanza + stabilità", en:"locality + stability"},
+     info:{it:`<p>Oltre al risultato, il modulo calcola una <b>penalità</b> che viene aggiunta
+     all'obiettivo di addestramento. Spinge l'attenzione in due direzioni:</p>
+     <p>— <b>vicinanza</b>: scoraggia il mettere troppo peso sul passato lontano, perché una causa
+     plausibile tende a essere recente;<br>
+     — <b>stabilità</b>: scoraggia i cambi bruschi nel modo di guardare fra un istante e il
+     successivo, perché una relazione vera dovrebbe reggere anche un momento dopo.</p>
+     <p>È un vincolo <i>a priori</i> sulla forma della soluzione, non un pezzo della previsione.</p>`,
+        en:`<p>Besides the result, the module computes a <b>penalty</b> that is added to the training
+     objective. It pushes attention in two directions:</p>
+     <p>— <b>locality</b>: it discourages putting too much weight on the distant past, because a
+     plausible cause tends to be recent;<br>
+     — <b>stability</b>: it discourages abrupt changes in the way of looking from one instant to the
+     next, because a real relationship should still hold a moment later.</p>
+     <p>It is an <i>a priori</i> constraint on the shape of the solution, not a piece of the
+     prediction.</p>`}},
+    {id:"lat", lane:"C", row:4, kind:"tensor",
+     t:{it:"latente", en:"latent"},
+     s:{it:"({B}, {T}, d_latent)", en:"({B}, {T}, d_latent)"},
+     info:{it:`<p>Il prodotto finale: per ogni ora della finestra, un vettore compatto che riassume
+     quello che il modulo ha capito di quel momento.</p>`,
+        en:`<p>The final product: for every hour of the window, a compact vector summarising what the
+     module has understood about that moment.</p>`}},
+    {id:"cons", lane:"L", row:5, kind:"ext",
+     t:{it:"rientra nelle tre architetture", en:"feeds back into the three architectures"},
+     s:{it:"iTransformer · TCN+Mamba · N-HiTS", en:"iTransformer · TCN+Mamba · N-HiTS"},
+     info:{it:`<p>Il latente viene concatenato all'input di una delle tre architetture, come se fossero
+     grandezze in più. Da lì il percorso è quello normale.</p>
+     <p>È il senso di "rientro" più chiaro di tutta la pagina: l'uscita di una rete diventa
+     l'ingresso di un'altra, senza cambiare nient'altro.</p>`,
+        en:`<p>The latent is concatenated to the input of one of the three architectures, as if it were
+     extra quantities. From there the path is the usual one.</p>
+     <p>It is the clearest sense of "feedback" on the whole page: the output of one network becomes
+     the input of another, with nothing else changed.</p>`}}
+  ],
+  edges:[["x","filt"],["filt","proj"],["proj","blk"],["blk","pen","side"],["blk","lat"],
+         ["lat","cons","re",{it:"l'uscita di una rete diventa l'ingresso di un'altra",
+                             en:"one network's output becomes another's input"}]],
+  steps:["x","filt","proj","blk","pen","lat","cons"]
+},
+
+moe:{
+  tab:{it:"⑥ MoE e MoU", en:"⑥ MoE and MoU"},
+  kicker:{it:"stesso posto nella rete, logica opposta",
+          en:"same place in the network, opposite logic"},
+  title:{it:"Due modi di mescolare più teste — la differenza è chi decide",
+         en:"Two ways of mixing several heads — the difference is who decides"},
+  intro:{it:"Entrambe sostituiscono la testa finale e ricevono lo stesso vettore riassuntivo. La differenza è se i pesi della miscela li impara la rete o glieli impone qualcosa da fuori.",
+         en:"Both replace the final head and receive the same summary vector. The difference is whether the mixture weights are learned by the network or imposed on it from outside."},
+  nodes:[
+    {id:"h", lane:"C", row:0, kind:"tensor",
+     t:{it:"vettore riassuntivo", en:"summary vector"},
+     s:{it:"h ({B}, {D}) — da una qualsiasi delle tre architetture",
+        en:"h ({B}, {D}) — from any of the three architectures"},
+     info:{it:`<p>Il punto in cui le tre architetture si ricongiungono: da qui in avanti non importa
+     più da dove arriva il vettore.</p>`,
+        en:`<p>The point where the three architectures rejoin: from here on it no longer matters where
+     the vector came from.</p>`}},
+    {id:"g1", lane:"L", row:1, kind:"gate",
+     t:{it:"MoE — il gate lo impara la rete", en:"MoE — the gate is learned by the network"},
+     s:{it:"{E} pesi, calcolati a partire da h", en:"{E} weights, computed from h"},
+     info:{it:`<p>Un piccolo strato guarda il vettore riassuntivo e produce {E} pesi che sommano a uno.
+     Nessuno dice a un expert di cosa occuparsi: la <b>specializzazione emerge</b>
+     dall'addestramento, se emerge.</p>
+     <p>Il vantaggio è la flessibilità. Il rischio è che pesi appresi possano adattarsi anche al
+     rumore dei dati di addestramento — cioè imparare qualcosa che non esiste fuori.</p>`,
+        en:`<p>A small layer looks at the summary vector and produces {E} weights summing to one. Nobody
+     tells an expert what to deal with: <b>specialisation emerges</b> from training, if it emerges
+     at all.</p>
+     <p>The advantage is flexibility. The risk is that learned weights can also fit the noise in the
+     training data — that is, learn something that does not exist outside it.</p>`}},
+    {id:"e1", lane:"L", row:2, kind:"op",
+     t:{it:"{E} teste in parallelo", en:"{E} heads in parallel"},
+     s:{it:"ognuna produce una previsione completa",
+        en:"each produces a complete prediction"},
+     info:{it:`<p>Ogni expert è una testa indipendente che produce la <b>sua</b> previsione completa.
+     Non si dividono il lavoro a pezzi: fanno tutti la stessa cosa, e poi si vota.</p>`,
+        en:`<p>Every expert is an independent head producing <b>its own</b> complete prediction. They do
+     not split the work into pieces: they all do the same thing, and then there is a vote.</p>`}},
+    {id:"s1", lane:"L", row:3, kind:"op",
+     t:{it:"somma pesata", en:"weighted sum"},
+     s:{it:"una previsione sola", en:"a single prediction"},
+     info:{it:`<p>Le {E} previsioni vengono mediate usando i pesi del gate: un expert con peso quasi nullo
+     è come se non ci fosse, per quella finestra.</p>
+     <p>Un rischio noto di questo schema è il <b>collasso</b>: il gate impara a dare quasi tutto il
+     peso sempre allo stesso expert, e gli altri smettono di ricevere segnale di addestramento. Da
+     fuori sembra una miscela, dentro è una testa sola con dei pesi morti — e ci si accorge
+     guardando la distribuzione dei pesi, non la qualità della previsione.</p>`,
+        en:`<p>The {E} predictions are averaged using the gate's weights: an expert with near-zero
+     weight is as good as absent, for that window.</p>
+     <p>A known risk of this scheme is <b>collapse</b>: the gate learns to give almost all the weight
+     to the same expert every time, and the others stop receiving any training signal. From the
+     outside it looks like a mixture, inside it is a single head with dead weights — and you notice
+     by looking at the distribution of the weights, not at the quality of the prediction.</p>`}},
+    {id:"o1", lane:"L", row:4, kind:"tensor",
+     t:{it:"uscita", en:"output"},
+     s:{it:"({B}, {Q}) oppure ({B}, 3)", en:"({B}, {Q}) or ({B}, 3)"},
+     info:{it:`<p>La forma dipende dal tipo di previsione: {Q} quantili, oppure i tre parametri di una
+     distribuzione a code spesse.</p>
+     <p>Da qui in poi non è più visibile che ci fossero {E} esperti: dall'esterno una miscela e una
+     testa singola sono indistinguibili. È comodo, perché permette di cambiare variante senza
+     toccare nulla a valle, ma va ricordato quando si confrontano due modelli — la differenza è
+     interna e non emerge dalla forma del risultato.</p>`,
+        en:`<p>The shape depends on the type of prediction: {Q} quantiles, or the three parameters of a
+     heavy-tailed distribution.</p>
+     <p>From here on it is no longer visible that there were {E} experts: from the outside a mixture
+     and a single head are indistinguishable. That is convenient, because it allows switching variant
+     without touching anything downstream, but it has to be remembered when comparing two models —
+     the difference is internal and does not show up in the shape of the result.</p>`}},
+    {id:"g2", lane:"R", row:1, kind:"ext",
+     t:{it:"MoU — il gate arriva da fuori", en:"MoU — the gate comes from outside"},
+     s:{it:"g ({B}, {K}), probabilità di regime, MAI apprese",
+        en:"g ({B}, {K}), regime probabilities, NEVER learned"},
+     info:{it:`<p>I pesi non li decide la rete: arrivano dal modello statistico dei regimi, calcolati
+     col solo passato e rinormalizzati per sicurezza.</p>
+     <p><b>È questa la proprietà che conta:</b> un gate non addestrabile non può adattarsi al
+     rumore. Si rinuncia a flessibilità in cambio di una garanzia.</p>`,
+        en:`<p>The weights are not decided by the network: they come from the statistical regime model,
+     computed from the past only and renormalised for safety.</p>
+     <p><b>This is the property that matters:</b> a non-trainable gate cannot fit the noise.
+     Flexibility is given up in exchange for a guarantee.</p>`}},
+    {id:"e2", lane:"R", row:2, kind:"op",
+     t:{it:"{K} teste, una per regime", en:"{K} heads, one per regime"},
+     s:{it:"una per ciascuno stato del mercato", en:"one for each state of the market"},
+     info:{it:`<p>Ogni testa può specializzarsi su un regime — mercato calmo, agitato, via di mezzo —
+     perché è sempre e solo quel regime a darle peso.</p>
+     <p>⚠ L'identità dei regimi (quale indice sia "calmo") <b>non è stabile fra ricostruzioni
+     diverse</b> del modello statistico: va ri-derivata dalle varianze stimate, mai assunta.</p>`,
+        en:`<p>Each head can specialise on one regime — calm market, agitated, in between — because it
+     is always and only that regime that gives it weight.</p>
+     <p>⚠ The identity of the regimes (which index is the "calm" one) is <b>not stable across
+     different rebuilds</b> of the statistical model: it must be re-derived from the estimated
+     variances, never assumed.</p>`}},
+    {id:"m2", lane:"R", row:3, kind:"gate",
+     t:{it:"miscela", en:"mixture"},
+     s:{it:"quantili: media livello per livello · distribuzione: varianza totale",
+        en:"quantiles: average level by level · distribution: total variance"},
+     info:{it:`<p>Mescolare due previsioni <b>non</b> è mediare i loro numeri, quando la previsione è
+     una distribuzione. Per i quantili si media livello per livello e poi si riordina, per
+     sicurezza.</p>
+     <p>Per la versione distribuzionale si usa la legge della varianza totale: l'incertezza finale
+     somma l'incertezza <b>dentro</b> ciascun regime e il <b>disaccordo fra</b> i regimi. La
+     conseguenza è elegante: quando il regime è ambiguo, l'incertezza dichiarata <b>si gonfia da
+     sola</b>, che è esattamente ciò che si vorrebbe.</p>`,
+        en:`<p>Mixing two predictions is <b>not</b> averaging their numbers, when the prediction is a
+     distribution. For quantiles you average level by level and then re-sort, for safety.</p>
+     <p>For the distributional version the law of total variance is used: the final uncertainty sums
+     the uncertainty <b>within</b> each regime and the <b>disagreement between</b> regimes. The
+     consequence is elegant: when the regime is ambiguous, the declared uncertainty <b>inflates by
+     itself</b>, which is exactly what you would want.</p>`}},
+    {id:"o2", lane:"R", row:4, kind:"tensor",
+     t:{it:"uscita", en:"output"},
+     s:{it:"stessa forma dell'altra", en:"same shape as the other one"},
+     info:{it:`<p>Il contratto verso l'esterno è identico: chi sta a valle non sa quale delle due
+     miscele sia stata usata. È voluto — permette di cambiare variante senza toccare nient'altro.</p>`,
+        en:`<p>The outward contract is identical: whoever sits downstream does not know which of the two
+     mixtures was used. This is deliberate — it allows switching variant without touching anything
+     else.</p>`}}
+  ],
+  edges:[["h","g1","side"],["h","g2","side"],["g1","e1"],["e1","s1"],["s1","o1"],
+         ["g2","e2"],["e2","m2"],["m2","o2"]],
+  steps:["h","g1","e1","s1","o1","g2","e2","m2","o2"]
+},
+
+out:{
+  tab:{it:"⑦ l'uscita", en:"⑦ the output"},
+  kicker:{it:"comune a tutte le varianti", en:"common to every variant"},
+  title:{it:"Dalla testa al numero che si può davvero usare",
+         en:"From the head to the number you can actually use"},
+  intro:{it:"L'ultimo tratto è identico per tutte le architetture, ed è il punto in cui il progetto ha pagato l'errore più costoso della sua storia.",
+         en:"The last stretch is identical for every architecture, and it is where the project paid for the most expensive mistake in its history."},
+  nodes:[
+    {id:"ho", lane:"C", row:0, kind:"tensor",
+     t:{it:"uscita della testa", en:"output of the head"},
+     s:{it:"({B}, {Q}) oppure ({B}, 3)", en:"({B}, {Q}) or ({B}, 3)"},
+     info:{it:`<p>Quello che la testa produce, in una delle due forme possibili — e in entrambi i casi
+     <b>non è un numero solo</b>.</p>
+     <p>È il punto in cui questo sistema si distingue da un predittore ordinario: non dice «il
+     prossimo valore sarà x», dice anche quanto è incerto al riguardo. Per una strategia che deve
+     decidere quanto rischiare, l'incertezza conta almeno quanto la previsione centrale — spesso
+     di più.</p>`,
+        en:`<p>What the head produces, in one of the two possible shapes — and in both cases <b>it is
+     not a single number</b>.</p>
+     <p>This is where this system differs from an ordinary predictor: it does not say "the next value
+     will be x", it also says how uncertain it is about that. For a strategy that has to decide how
+     much to risk, the uncertainty matters at least as much as the central prediction — often
+     more.</p>`}},
+    {id:"qt", lane:"L", row:1, kind:"op",
+     t:{it:"quantili — la via in produzione", en:"quantiles — the production route"},
+     s:{it:"cinque livelli: 0.10 · 0.25 · 0.50 · 0.75 · 0.90",
+        en:"five levels: 0.10 · 0.25 · 0.50 · 0.75 · 0.90"},
+     info:{it:`<p>Invece di stimare una distribuzione tramite una formula, si stimano direttamente
+     cinque <b>quantili</b>: valori sotto i quali cade una certa percentuale dei casi.</p>
+     <p>Da lì si ricavano le due grandezze che servono: la <b>previsione centrale</b> è il quantile
+     0.50, cioè la mediana; la <b>misura di incertezza</b> è la distanza fra il quantile 0.90 e il
+     0.10.</p>
+     <p>⚠ Attenzione a cosa significa quel secondo numero: <b>non è una deviazione standard</b>, è
+     un'ampiezza fra due percentili. Confonderli fa sbagliare ogni calcolo che ne dipende. E la
+     posizione dei cinque livelli nella lista è cablata nel codice: cambiarne l'ordine
+     corromperebbe centro e incertezza in silenzio.</p>`,
+        en:`<p>Instead of estimating a distribution through a formula, five <b>quantiles</b> are
+     estimated directly: values below which a certain percentage of cases falls.</p>
+     <p>From there the two quantities that are needed are derived: the <b>central prediction</b> is
+     the 0.50 quantile, i.e. the median; the <b>measure of uncertainty</b> is the distance between
+     the 0.90 and the 0.10 quantile.</p>
+     <p>⚠ Beware of what that second number means: <b>it is not a standard deviation</b>, it is a
+     width between two percentiles. Confusing the two makes every calculation that depends on it
+     wrong. And the position of the five levels in the list is hard-wired in the code: changing their
+     order would silently corrupt centre and uncertainty.</p>`}},
+    {id:"ts", lane:"R", row:1, kind:"op",
+     t:{it:"distribuzione a code spesse — la via alternativa",
+        en:"heavy-tailed distribution — the alternative route"},
+     s:{it:"centro, ampiezza, spessore delle code",
+        en:"centre, width, thickness of the tails"},
+     info:{it:`<p>Qui si stimano i parametri di una distribuzione con <b>code spesse</b>: rispetto alla
+     campana gaussiana assegna più probabilità agli eventi estremi, il che su questo asset è più
+     realistico.</p>
+     <p>Il terzo parametro controlla proprio quanto sono spesse le code: più è piccolo, più il
+     modello si aspetta sorprese.</p>`,
+        en:`<p>Here the parameters of a <b>heavy-tailed</b> distribution are estimated: compared with
+     the Gaussian bell it assigns more probability to extreme events, which on this asset is more
+     realistic.</p>
+     <p>The third parameter controls exactly how thick the tails are: the smaller it is, the more the
+     model expects surprises.</p>`}},
+    {id:"rv", lane:"C", row:2, kind:"op",
+     t:{it:"normalizzazione reversibile, al contrario",
+        en:"reversible normalisation, in reverse"},
+     s:{it:"solo se era attiva all'ingresso", en:"only if it was active at the input"},
+     info:{it:`<p>Se all'ingresso la finestra era stata centrata su se stessa, qui le si restituiscono
+     la propria media e la propria scala. È la chiusura del rientro che parte in cima
+     all'architettura.</p>`,
+        en:`<p>If at the input the window had been centred on itself, here its own mean and scale are
+     given back to it. It closes the feedback path that starts at the top of the architecture.</p>`}},
+    {id:"dn", lane:"C", row:3, kind:"gate",
+     t:{it:"ritorno alle unità di misura vere", en:"return to the true units of measure"},
+     s:{it:"si inverte la riscalatura fatta nella scheda ①",
+        en:"the rescaling of board ① is inverted"},
+     info:{it:`<p>Il modello parla nelle unità <b>riscalate</b> del passaggio ② della scheda ①. Tutto
+     il resto del sistema — regole operative, misure di errore — lavora in unità vere.</p>
+     <p><b>Saltare questo passaggio è l'errore più costoso della storia del progetto:</b> non fa
+     fallire nulla, produce soltanto numeri dell'ordine di grandezza sbagliato che si propagano
+     ovunque a valle, dove sembrano legittimi.</p>
+     <p>C'è un'insidia in più quando la cosa da prevedere è una <b>volatilità in scala
+     logaritmica</b>: rimettere solo la scala non basta, perché in quel caso il centro della
+     distribuzione è molto lontano da zero e va risommato esplicitamente.</p>`,
+        en:`<p>The model speaks in the <b>rescaled</b> units of step ② on board ①. All the rest of the
+     system — trading rules, error measures — works in true units.</p>
+     <p><b>Skipping this step is the most expensive mistake in the project's history:</b> it makes
+     nothing fail, it merely produces numbers of the wrong order of magnitude which propagate
+     everywhere downstream, where they look legitimate.</p>
+     <p>There is one further trap when the thing to be predicted is a <b>volatility on a logarithmic
+     scale</b>: putting the scale back is not enough, because in that case the centre of the
+     distribution is very far from zero and has to be added back explicitly.</p>`}},
+    {id:"raw", lane:"C", row:4, kind:"tensor",
+     t:{it:"previsione utilizzabile", en:"usable prediction"},
+     s:{it:"centro e incertezza, in unità vere",
+        en:"centre and uncertainty, in true units"},
+     info:{it:`<p>Solo adesso i numeri significano qualcosa fuori dal modello: sono nell'unità di misura
+     dei dati veri, quindi confrontabili con una soglia, con un costo di transazione o con la
+     previsione di un metodo alternativo.</p>
+     <p>Ed è anche il punto in cui il modello smette di avere l'ultima parola: da qui decidono le
+     regole operative, che possono benissimo scartare una previsione corretta perché troppo incerta
+     o troppo costosa da realizzare.</p>`,
+        en:`<p>Only now do the numbers mean something outside the model: they are in the unit of measure
+     of the real data, hence comparable with a threshold, with a transaction cost, or with the
+     forecast of an alternative method.</p>
+     <p>And it is also the point where the model stops having the last word: from here the trading
+     rules decide, and they may perfectly well discard a correct forecast because it is too uncertain
+     or too expensive to realise.</p>`}},
+    {id:"dir", lane:"R", row:3, kind:"ext",
+     t:{it:"testa direzionale (compito secondario)",
+        en:"directional head (auxiliary task)"},
+     s:{it:"su / fermo / giù", en:"up / flat / down"},
+     info:{it:`<p>In parallelo la rete può classificare la direzione. Non è il prodotto principale:
+     serve soprattutto come <b>compito ausiliario</b>, cioè a costringere la rappresentazione
+     interna a essere utile anche per qualcos'altro — un vincolo che spesso aiuta il compito
+     vero.</p>
+     <p>Pesa una frazione dell'obiettivo di addestramento, e sulla linea della volatilità non è il
+     segnale che si usa per decidere.</p>`,
+        en:`<p>In parallel the network can classify the direction. It is not the main product: it serves
+     mostly as an <b>auxiliary task</b>, i.e. to force the internal representation to be useful for
+     something else as well — a constraint that often helps the real task.</p>
+     <p>It weighs a fraction of the training objective, and on the volatility line it is not the
+     signal used to decide.</p>`}}
+  ],
+  edges:[["ho","qt","side"],["ho","ts","side"],["qt","rv","side"],["ts","rv","side"],
+         ["rv","dn"],["dn","raw"],["dir","dn","side"]],
+  steps:["ho","qt","ts","rv","dn","raw"]
+}
+,
+lay_attn:{
+  tab:{it:"⑧ dentro: attenzione", en:"⑧ inside: attention"},
+  kicker:{it:"cablaggio interno · usato dall'iTransformer",
+          en:"internal wiring · used by the iTransformer"},
+  title:{it:"Uno strato di attenzione, pezzo per pezzo",
+         en:"One attention layer, piece by piece"},
+  intro:{it:"Qui si scende di un livello: non più «cosa fa l'architettura», ma come sono collegati i singoli strati dentro un blocco che viene ripetuto più volte.",
+         en:"Here we go one level down: no longer \"what the architecture does\", but how the individual layers are wired inside a block that gets repeated several times."},
+  nodes:[
+    {id:"in", lane:"C", row:0, kind:"tensor",
+     t:{it:"token in ingresso", en:"input tokens"},
+     s:{it:"({B}, {F}, {D}) — {F} token, ciascuno un vettore di {D} numeri",
+        en:"({B}, {F}, {D}) — {F} tokens, each a vector of {D} numbers"},
+     info:{it:`<p>Ogni token è una <b>riga</b> di {D} numeri. In questa architettura un token è una
+     grandezza (non un istante), e ce ne sono {F}.</p>
+     <p>Tutto lo strato lavora su questa matrice e restituisce una matrice della <b>stessa
+     forma</b>: è per questo che gli strati si possono impilare uno sopra l'altro senza adattatori.</p>`,
+        en:`<p>Every token is a <b>row</b> of {D} numbers. In this architecture a token is a quantity
+     (not an instant), and there are {F} of them.</p>
+     <p>The whole layer works on this matrix and returns a matrix of the <b>same shape</b>: that is
+     why layers can be stacked one on top of another without adapters.</p>`}},
+    {id:"n1", lane:"C", row:1, kind:"op",
+     t:{it:"normalizzazione (prima, non dopo)", en:"normalisation (before, not after)"},
+     s:{it:"media e scala calcolate su ciascun token",
+        en:"mean and scale computed on each token"},
+     info:{it:`<p>Ogni token viene riportato a media zero e scala uno, indipendentemente dagli altri.</p>
+     <p>La posizione conta: qui la normalizzazione sta <b>prima</b> del blocco, non dopo. È una
+     scelta che rende l'addestramento molto più stabile quando gli strati sono tanti, perché il
+     percorso residuo (la freccia rossa) resta una strada pulita che il gradiente può percorrere
+     senza essere schiacciato.</p>`,
+        en:`<p>Every token is brought back to zero mean and unit scale, independently of the others.</p>
+     <p>The position matters: here normalisation sits <b>before</b> the block, not after. It is a
+     choice that makes training far more stable when the layers are many, because the residual path
+     (the red arrow) stays a clean road the gradient can travel without being squashed.</p>`}},
+    {id:"qkv", lane:"C", row:2, kind:"op",
+     t:{it:"una proiezione che produce tre cose",
+        en:"one projection that produces three things"},
+     s:{it:"Linear {D} → {D3}, poi tagliata in tre: domanda, chiave, valore",
+        en:"Linear {D} → {D3}, then split in three: query, key, value"},
+     info:{it:`<p>Un unico strato lineare porta ogni token da {D} a {D3} numeri, che vengono poi
+     tagliati in tre blocchi da {D}: <b>domanda</b>, <b>chiave</b> e <b>valore</b>.</p>
+     <p>L'idea in parole povere: la chiave descrive «cosa offro», la domanda «cosa sto cercando»,
+     il valore «cosa passo a chi mi sceglie». Farne una sola matrice invece di tre è solo
+     efficienza: il risultato è identico.</p>`,
+        en:`<p>A single linear layer takes every token from {D} to {D3} numbers, which are then split
+     into three blocks of {D}: <b>query</b>, <b>key</b> and <b>value</b>.</p>
+     <p>The idea in plain words: the key describes "what I offer", the query "what I am looking for",
+     the value "what I hand over to whoever picks me". Making it one matrix instead of three is pure
+     efficiency: the result is identical.</p>`}},
+    {id:"heads", lane:"C", row:3, kind:"op",
+     t:{it:"divisione in {H} teste", en:"split into {H} heads"},
+     s:{it:"ogni testa lavora su {HD} numeri dei {D}",
+        en:"each head works on {HD} of the {D} numbers"},
+     info:{it:`<p>I {D} numeri vengono divisi fra {H} teste, {HD} ciascuna. Ogni testa fa la sua
+     attenzione separatamente, come se guardasse i token da un punto di vista diverso.</p>
+     <p>Il senso è che una sola attenzione deve scegliere un solo criterio di somiglianza; averne
+     {H} permette di seguire più relazioni contemporaneamente. Alla fine i risultati vengono
+     rimessi insieme.</p>`,
+        en:`<p>The {D} numbers are split among {H} heads, {HD} each. Every head does its own attention
+     separately, as if looking at the tokens from a different point of view.</p>
+     <p>The point is that a single attention has to pick a single similarity criterion; having {H} of
+     them allows several relations to be followed at once. At the end the results are put back
+     together.</p>`}},
+    {id:"att", lane:"C", row:4, kind:"gate",
+     t:{it:"la matrice di attenzione", en:"the attention matrix"},
+     s:{it:"{F} × {F} per ciascuna delle {H} teste",
+        en:"{F} × {F} for each of the {H} heads"},
+     info:{it:`<p>Per ogni coppia di token si calcola quanto il primo debba ascoltare il secondo:
+     nasce una matrice <b>{F} × {F}</b>, una per testa, le cui righe sommano a uno.</p>
+     <p>È qui che il costo diventa quadratico: raddoppiando i token il lavoro quadruplica. Ed è
+     anche il motivo dell'inversione che dà il nome all'architettura — con {F} grandezze e {T} ore,
+     fare l'attenzione fra grandezze costa molto meno che farla fra ore.</p>
+     <p>Le righe di questa matrice <b>non sono pesi appresi</b>: si ricalcolano per ogni finestra.
+     Sono l'unica parte della rete che cambia struttura a seconda dell'input.</p>`,
+        en:`<p>For every pair of tokens it is computed how much the first should listen to the second:
+     this gives a <b>{F} × {F}</b> matrix, one per head, whose rows sum to one.</p>
+     <p>This is where the cost becomes quadratic: doubling the tokens quadruples the work. And it is
+     also the reason for the inversion the architecture is named after — with {F} quantities and {T}
+     hours, doing attention across quantities costs far less than doing it across hours.</p>
+     <p>The rows of this matrix <b>are not learned weights</b>: they are recomputed for every window.
+     They are the only part of the network whose structure changes with the input.</p>`}},
+    {id:"outp", lane:"C", row:5, kind:"op",
+     t:{it:"si rimettono insieme le teste", en:"the heads are put back together"},
+     s:{it:"concatena → Linear {D} → {D}", en:"concatenate → Linear {D} → {D}"},
+     info:{it:`<p>Le {H} uscite vengono riaffiancate e passate in un ultimo strato lineare, che le
+     mescola. Senza questo passaggio le teste resterebbero canali separati che non si parlano.</p>`,
+        en:`<p>The {H} outputs are placed side by side again and passed through a final linear layer
+     that mixes them. Without this step the heads would stay separate channels that never talk to
+     each other.</p>`}},
+    {id:"res1", lane:"C", row:6, kind:"gate",
+     t:{it:"prima somma residua", en:"first residual sum"},
+     s:{it:"uscita = ingresso + risultato dell'attenzione",
+        en:"output = input + result of the attention"},
+     info:{it:`<p>Il risultato non sostituisce l'ingresso: gli si <b>somma</b>. Lo strato quindi impara
+     una <i>correzione</i>, non una trasformazione completa.</p>
+     <p>È forse l'idea più importante delle reti profonde moderne: se lo strato non ha niente di
+     utile da dire può produrre quasi zero, e il segnale passa comunque intatto. Senza questa
+     scorciatoia, impilare molti strati peggiora invece di migliorare.</p>`,
+        en:`<p>The result does not replace the input: it is <b>added</b> to it. The layer therefore
+     learns a <i>correction</i>, not a complete transformation.</p>
+     <p>It is perhaps the single most important idea in modern deep networks: if the layer has
+     nothing useful to say it can output almost zero, and the signal still passes through intact.
+     Without this shortcut, stacking many layers makes things worse instead of better.</p>`}},
+    {id:"n2", lane:"C", row:7, kind:"op",
+     t:{it:"seconda normalizzazione", en:"second normalisation"},
+     s:{it:"stessa logica della prima", en:"same logic as the first"},
+     info:{it:`<p>Si normalizza di nuovo, prima della seconda metà del blocco.</p>
+     <p>Sembra una ripetizione ed è invece necessaria: dopo la somma residua i valori possono essere
+     cresciuti parecchio, perché si è aggiunto qualcosa a qualcos'altro. Rinormalizzare rimette la
+     rete densa nelle condizioni in cui lavora meglio.</p>`,
+        en:`<p>Normalisation happens again, before the second half of the block.</p>
+     <p>It looks like a repetition and is instead necessary: after the residual sum the values may
+     have grown considerably, because something was added to something else. Renormalising puts the
+     dense network back into the conditions in which it works best.</p>`}},
+    {id:"ffn", lane:"C", row:8, kind:"op",
+     t:{it:"rete densa che allarga e restringe",
+        en:"dense network that widens then narrows"},
+     s:{it:"Linear {D} → {D4} → GELU → Linear {D4} → {D}",
+        en:"Linear {D} → {D4} → GELU → Linear {D4} → {D}"},
+     info:{it:`<p>Ogni token, <b>da solo</b>, viene portato a {D4} numeri, passato in una funzione non
+     lineare e riportato a {D}. Nessuno scambio fra token: qui ognuno elabora quello che ha
+     ricevuto nella fase di attenzione.</p>
+     <p>Il ruolo dei due pezzi è complementare: l'attenzione <b>mescola</b> informazione fra token,
+     la rete densa la <b>elabora</b> dentro ciascuno. Allargare a quattro volte prima di
+     restringere dà spazio a rappresentazioni intermedie che nello spazio stretto non
+     starebbero.</p>`,
+        en:`<p>Every token, <b>on its own</b>, is taken to {D4} numbers, passed through a non-linear
+     function and brought back to {D}. No exchange between tokens: here each one processes what it
+     received during the attention phase.</p>
+     <p>The roles of the two pieces are complementary: attention <b>mixes</b> information across
+     tokens, the dense network <b>processes</b> it inside each of them. Widening fourfold before
+     narrowing makes room for intermediate representations that would not fit in the narrow
+     space.</p>`}},
+    {id:"res2", lane:"C", row:9, kind:"gate",
+     t:{it:"seconda somma residua", en:"second residual sum"},
+     s:{it:"stessa logica della prima", en:"same logic as the first"},
+     info:{it:`<p>Come sopra: si somma, non si sostituisce. Con la profondità, alcuni strati vengono
+     anche <b>saltati a caso</b> durante l'addestramento (una forma di regolarizzazione), e la
+     somma residua è ciò che rende il salto innocuo.</p>`,
+        en:`<p>As above: it adds, it does not replace. With depth, some layers are also <b>skipped at
+     random</b> during training (a form of regularisation), and the residual sum is what makes the
+     skip harmless.</p>`}},
+    {id:"out", lane:"C", row:10, kind:"tensor",
+     t:{it:"uscita", en:"output"},
+     s:{it:"({B}, {F}, {D}) — identica alla forma d'ingresso",
+        en:"({B}, {F}, {D}) — identical to the input shape"},
+     info:{it:`<p>Stessa forma dell'ingresso: il blocco è impilabile. L'architettura ne mette in fila
+     più copie, ciascuna con i propri pesi.</p>`,
+        en:`<p>Same shape as the input: the block is stackable. The architecture lines up several
+     copies of it, each with its own weights.</p>`}}
+  ],
+  edges:[["in","n1"],["n1","qkv"],["qkv","heads"],["heads","att"],["att","outp"],["outp","res1"],
+         ["res1","n2"],["n2","ffn"],["ffn","res2"],["res2","out"],
+         ["in","res1","re",{it:"il segnale scavalca l'attenzione",
+                            en:"the signal bypasses the attention"}],
+         ["res1","res2","re",{it:"e scavalca anche la rete densa",
+                              en:"and bypasses the dense network too"}]],
+  steps:["in","n1","qkv","heads","att","outp","res1","n2","ffn","res2","out"]
+},
+
+lay_conv:{
+  tab:{it:"⑨ dentro: convoluzione", en:"⑨ inside: convolution"},
+  kicker:{it:"cablaggio interno · ramo TCN", en:"internal wiring · TCN branch"},
+  title:{it:"Un blocco convoluzionale causale", en:"A causal convolutional block"},
+  intro:{it:"La convoluzione guarda una finestra breve di istanti vicini e la fa scorrere. Qui la particolarità sono due: guarda solo indietro, e salta a passi crescenti.",
+         en:"A convolution looks at a short window of neighbouring instants and slides it along. Here there are two peculiarities: it looks only backwards, and it skips at growing strides."},
+  nodes:[
+    {id:"in", lane:"C", row:0, kind:"tensor",
+     t:{it:"ingresso", en:"input"}, s:{it:"({B}, {T}, {D})", en:"({B}, {T}, {D})"},
+     info:{it:`<p>La sequenza completa: {T} istanti, ciascuno descritto da {D} numeri.</p>
+     <p>Nota la differenza rispetto allo strato di attenzione: là i token erano le {F} grandezze,
+     qui le posizioni sono <b>gli istanti</b>. Cambia tutto il significato di «vicinanza» — qui due
+     posizioni vicine sono due ore consecutive.</p>`,
+        en:`<p>The complete sequence: {T} instants, each described by {D} numbers.</p>
+     <p>Note the difference from the attention layer: there the tokens were the {F} quantities, here
+     the positions are <b>the instants</b>. The whole meaning of "closeness" changes — here two
+     nearby positions are two consecutive hours.</p>`}},
+    {id:"pad", lane:"C", row:1, kind:"op",
+     t:{it:"riempimento solo a sinistra", en:"padding on the left only"},
+     s:{it:"{PAD} posizioni aggiunte prima dell'inizio",
+        en:"{PAD} positions added before the start"},
+     info:{it:`<p>Per fare una convoluzione servono valori anche ai bordi. Se si riempisse da entrambi
+     i lati, il calcolo di un istante userebbe valori <b>successivi</b>: sarebbe una fuga di
+     informazione dal futuro, invisibile ma letale.</p>
+     <p>Riempiendo solo a sinistra si ottiene una convoluzione <b>causale</b>: ogni uscita dipende
+     esclusivamente dal proprio passato. È una di quelle scelte che non migliorano la metrica in
+     addestramento e sono l'unica cosa che rende il risultato credibile.</p>`,
+        en:`<p>To perform a convolution you need values at the edges too. If you padded on both sides,
+     the computation for a given instant would use <b>later</b> values: an information leak from the
+     future, invisible but lethal.</p>
+     <p>Padding on the left only gives a <b>causal</b> convolution: every output depends exclusively
+     on its own past. It is one of those choices that do not improve the training metric and are the
+     only thing that makes the result credible.</p>`}},
+    {id:"conv", lane:"C", row:2, kind:"op",
+     t:{it:"convoluzione dilatata", en:"dilated convolution"},
+     s:{it:"finestra {KC}, salto {DIL} → copre {PAD}+1 istanti",
+        en:"window {KC}, stride {DIL} → covers {PAD}+1 instants"},
+     info:{it:`<p>La finestra prende {KC} posizioni, ma <b>distanziate</b> di {DIL}: invece di guardare
+     tre istanti consecutivi guarda tre istanti lontani fra loro.</p>
+     <p>Impilando blocchi con distanza crescente (1, 2, 4, 8…) si copre una finestra lunghissima
+     con pochi strati e pochi pesi. È il trucco che permette a una convoluzione di avere memoria
+     lunga senza diventare enorme.</p>
+     <p><b>I pesi sono condivisi</b>: la stessa finestra scorre su tutti gli istanti. Il numero di
+     parametri non dipende da quanto è lunga la sequenza.</p>`,
+        en:`<p>The window takes {KC} positions, but <b>spaced</b> by {DIL}: instead of looking at three
+     consecutive instants it looks at three instants far apart from each other.</p>
+     <p>Stacking blocks with growing spacing (1, 2, 4, 8…) covers a very long window with few layers
+     and few weights. It is the trick that lets a convolution have long memory without becoming
+     enormous.</p>
+     <p><b>The weights are shared</b>: the same window slides over all instants. The number of
+     parameters does not depend on how long the sequence is.</p>`}},
+    {id:"na", lane:"C", row:3, kind:"op",
+     t:{it:"normalizzazione + non linearità + spegnimento casuale",
+        en:"normalisation + non-linearity + random switch-off"},
+     s:{it:"LayerNorm → GELU → Dropout", en:"LayerNorm → GELU → Dropout"},
+     info:{it:`<p>Tre passaggi standard: si ricentra, si applica una funzione non lineare (senza la
+     quale una pila di convoluzioni collasserebbe in una sola), e durante l'addestramento si
+     azzera a caso una frazione dei valori per evitare che la rete si appoggi troppo a pochi
+     percorsi.</p>`,
+        en:`<p>Three standard steps: recentre, apply a non-linear function (without which a stack of
+     convolutions would collapse into a single one), and during training zero out a random fraction
+     of the values so that the network does not lean too heavily on a few paths.</p>`}},
+    {id:"res", lane:"C", row:4, kind:"gate",
+     t:{it:"somma residua", en:"residual sum"},
+     s:{it:"uscita = ingresso + correzione", en:"output = input + correction"},
+     info:{it:`<p>Come nello strato di attenzione: il blocco impara una correzione da sommare, non un
+     rimpiazzo. Anche qui il blocco può essere saltato a caso durante l'addestramento.</p>`,
+        en:`<p>As in the attention layer: the block learns a correction to add, not a replacement. Here
+     too the block can be skipped at random during training.</p>`}},
+    {id:"out", lane:"C", row:5, kind:"tensor",
+     t:{it:"uscita", en:"output"},
+     s:{it:"({B}, {T}, {D}) — forma invariata", en:"({B}, {T}, {D}) — shape unchanged"},
+     info:{it:`<p>Stessa forma dell'ingresso: i blocchi si impilano, ciascuno con una distanza di salto
+     maggiore del precedente.</p>`,
+        en:`<p>Same shape as the input: the blocks stack, each with a larger skip distance than the
+     previous one.</p>`}}
+  ],
+  edges:[["in","pad"],["pad","conv"],["conv","na"],["na","res"],["res","out"],
+         ["in","res","re",{it:"scorciatoia", en:"shortcut"}]],
+  steps:["in","pad","conv","na","res","out"]
+},
+lay_ssm:{
+  tab:{it:"⑩ dentro: stato", en:"⑩ inside: state"},
+  kicker:{it:"cablaggio interno · ramo Mamba", en:"internal wiring · Mamba branch"},
+  title:{it:"Un blocco a stato selettivo", en:"A selective state block"},
+  intro:{it:"Invece di guardare una finestra, questo blocco porta con sé una memoria e decide istante per istante quanto aggiornarla e quanto dimenticare.",
+         en:"Instead of looking at a window, this block carries a memory with it and decides instant by instant how much to update it and how much to forget."},
+  nodes:[
+    {id:"in", lane:"C", row:0, kind:"tensor",
+     t:{it:"ingresso", en:"input"}, s:{it:"({B}, {T}, {D})", en:"({B}, {T}, {D})"},
+     info:{it:`<p>La stessa sequenza che vede il ramo convoluzionale: i due rami partono dallo stesso
+     ingresso e differiscono solo nel modo di leggerlo.</p>
+     <p>Questo blocco lo affronterà senza finestre: lo scorre dall'inizio alla fine portandosi
+     dietro una memoria, come farebbe una persona che legge un testo invece di guardarne pezzi
+     staccati.</p>`,
+        en:`<p>The same sequence the convolutional branch sees: the two branches start from the same
+     input and differ only in how they read it.</p>
+     <p>This block will tackle it without windows: it scans from beginning to end carrying a memory
+     along, the way a person reads a text instead of looking at detached fragments of it.</p>`}},
+    {id:"nrm", lane:"C", row:1, kind:"op",
+     t:{it:"normalizzazione", en:"normalisation"},
+     s:{it:"per istante", en:"per instant"},
+     info:{it:`<p>Come negli altri blocchi, la normalizzazione sta all'inizio — prima del calcolo, non
+     dopo.</p>
+     <p>Nei blocchi con memoria è ancora più importante: se i valori entrassero con scale molto
+     diverse, la memoria verrebbe dominata dai pochi istanti più «rumorosi», e il resto della
+     sequenza conterebbe poco o nulla.</p>`,
+        en:`<p>As in the other blocks, normalisation sits at the start — before the computation, not
+     after.</p>
+     <p>In blocks with memory it matters even more: if the values came in at wildly different scales,
+     the memory would be dominated by the few "noisiest" instants, and the rest of the sequence would
+     count for little or nothing.</p>`}},
+    {id:"proj", lane:"C", row:2, kind:"op",
+     t:{it:"si allarga e si divide in due", en:"it widens and splits in two"},
+     s:{it:"Linear {D} → {DIN}×2, poi tagliato: un ramo di lavoro e uno di controllo",
+        en:"Linear {D} → {DIN}×2, then split: a working branch and a control branch"},
+     info:{it:`<p>Lo spazio viene allargato di {EXP} volte, a {DIN} numeri, e il risultato tagliato in
+     due metà. Una metà è il <b>segnale da elaborare</b>, l'altra servirà come <b>controllo</b>
+     (più avanti deciderà quanto del risultato lasciar passare).</p>`,
+        en:`<p>The space is widened {EXP} times, to {DIN} numbers, and the result split into two
+     halves. One half is the <b>signal to process</b>, the other will serve as <b>control</b> (later
+     on it decides how much of the result to let through).</p>`}},
+    {id:"dw", lane:"C", row:3, kind:"op",
+     t:{it:"piccola convoluzione causale + non linearità",
+        en:"small causal convolution + non-linearity"},
+     s:{it:"finestra 4, un canale alla volta", en:"window 4, one channel at a time"},
+     info:{it:`<p>Una convoluzione corta, applicata a ogni canale separatamente. Serve a dare al blocco
+     una sensibilità ai vicini immediati, che la ricorrenza da sola coglie meno bene.</p>
+     <p>Anche questa è causale: riempimento solo a sinistra.</p>`,
+        en:`<p>A short convolution, applied to each channel separately. It gives the block a sensitivity
+     to immediate neighbours, which the recurrence alone captures less well.</p>
+     <p>This one is causal too: padding on the left only.</p>`}},
+    {id:"par", lane:"R", row:3, kind:"ext",
+     t:{it:"i parametri della memoria, dipendenti dall'input",
+        en:"the memory parameters, input-dependent"},
+     s:{it:"passo temporale, ingresso e lettura ({DST} stati)",
+        en:"time step, input and readout ({DST} states)"},
+     info:{it:`<p>Qui sta la differenza rispetto a una ricorrenza classica. I coefficienti che regolano
+     la memoria <b>non sono fissi</b>: vengono calcolati dall'input stesso, istante per istante.</p>
+     <p>Il più importante è il <b>passo temporale</b>: se è piccolo la memoria cambia poco (il
+     blocco «ignora» quell'istante), se è grande la memoria si aggiorna molto. In pratica la rete
+     impara <b>quando vale la pena ricordare</b>, invece di applicare sempre la stessa regola.</p>`,
+        en:`<p>Here lies the difference from a classical recurrence. The coefficients governing the
+     memory <b>are not fixed</b>: they are computed from the input itself, instant by instant.</p>
+     <p>The most important is the <b>time step</b>: if it is small the memory changes little (the
+     block "ignores" that instant), if it is large the memory updates a lot. In practice the network
+     learns <b>when it is worth remembering</b>, instead of always applying the same rule.</p>`}},
+    {id:"scan", lane:"C", row:4, kind:"op",
+     t:{it:"ricorrenza: memoria aggiornata istante per istante",
+        en:"recurrence: memory updated instant by instant"},
+     s:{it:"memoria_t = decadimento · memoria_(t−1) + ingresso_t",
+        en:"memory_t = decay · memory_(t−1) + input_t"},
+     info:{it:`<p>Il cuore del blocco. La memoria viene trascinata in avanti moltiplicandola per un
+     fattore di decadimento e sommandoci il nuovo ingresso. Ripetuto su tutti gli istanti.</p>
+     <p>Scritto così sembrerebbe obbligatorio procedere in ordine, un passo alla volta — lentissimo.
+     Poiché però il decadimento è una semplice moltiplicazione, la formula si può <b>riscrivere in
+     forma chiusa</b> e calcolare a blocchi in parallelo. È il motivo per cui questi modelli sono
+     tornati competitivi.</p>`,
+        en:`<p>The heart of the block. The memory is dragged forward by multiplying it by a decay factor
+     and adding the new input to it. Repeated over all instants.</p>
+     <p>Written like this it would seem mandatory to proceed in order, one step at a time — extremely
+     slow. But because the decay is a simple multiplication, the formula can be <b>rewritten in
+     closed form</b> and computed in parallel blocks. That is why these models became competitive
+     again.</p>`}},
+    {id:"gate", lane:"C", row:5, kind:"gate",
+     t:{it:"controllo e ritorno alla dimensione originale",
+        en:"control and return to the original size"},
+     s:{it:"lettura della memoria × ramo di controllo → Linear {DIN} → {D}",
+        en:"memory readout × control branch → Linear {DIN} → {D}"},
+     info:{it:`<p>Si legge la memoria, la si moltiplica per il ramo di controllo messo da parte prima
+     (quindi il blocco può <b>zittire</b> la propria uscita quando serve), e si torna alla
+     dimensione di partenza.</p>`,
+        en:`<p>The memory is read out, multiplied by the control branch set aside earlier (so the block
+     can <b>silence</b> its own output when needed), and brought back to the starting size.</p>`}},
+    {id:"res", lane:"C", row:6, kind:"gate",
+     t:{it:"somma residua", en:"residual sum"},
+     s:{it:"uscita = ingresso + correzione", en:"output = input + correction"},
+     info:{it:`<p>Come in tutti gli altri blocchi: si somma, non si sostituisce.</p>
+     <p>Qui la scorciatoia ha un ruolo aggiuntivo. Una ricorrenza moltiplica ripetutamente per un
+     fattore di decadimento, e questo tende a far svanire il segnale di addestramento sui passi più
+     lontani; il collegamento residuo offre una strada che quelle moltiplicazioni non le
+     attraversa.</p>`,
+        en:`<p>As in every other block: it adds, it does not replace.</p>
+     <p>Here the shortcut plays an extra role. A recurrence multiplies repeatedly by a decay factor,
+     and this tends to make the training signal vanish on the most distant steps; the residual
+     connection offers a road that does not cross those multiplications.</p>`}},
+    {id:"out", lane:"C", row:7, kind:"tensor",
+     t:{it:"uscita", en:"output"}, s:{it:"({B}, {T}, {D})", en:"({B}, {T}, {D})"},
+     info:{it:`<p>Forma invariata, blocchi impilabili: l'architettura ne mette in fila alcuni, e solo
+     alla fine tiene <b>l'ultimo istante</b>, dove la memoria ha già assorbito tutta la
+     sequenza.</p>
+     <p>È la differenza pratica col ramo convoluzionale, che invece media su tutti gli istanti: due
+     riassunti diversi della stessa storia, ed è per questo che vale la pena tenerli entrambi.</p>`,
+        en:`<p>Shape unchanged, blocks stackable: the architecture lines up a few of them, and only at
+     the end keeps <b>the last instant</b>, where the memory has already absorbed the whole
+     sequence.</p>
+     <p>This is the practical difference from the convolutional branch, which instead averages over
+     all instants: two different summaries of the same history, and that is why it is worth keeping
+     both.</p>`}}
+  ],
+  edges:[["in","nrm"],["nrm","proj"],["proj","dw"],["dw","scan"],["par","scan","side"],
+         ["scan","gate"],["gate","res"],["res","out"],
+         ["proj","gate","re",{it:"il ramo di controllo aspetta qui",
+                              en:"the control branch waits here"}],
+         ["in","res","re",{it:"scorciatoia", en:"shortcut"}]],
+  steps:["in","nrm","proj","dw","par","scan","gate","res","out"]
+},
+
+lay_dec:{
+  tab:{it:"⑪ dentro: decomposizione", en:"⑪ inside: decomposition"},
+  kicker:{it:"cablaggio interno · blocco N-HiTS", en:"internal wiring · N-HiTS block"},
+  title:{it:"Un blocco che spiega una scala e la toglie di mezzo",
+         en:"A block that explains one scale and removes it from the way"},
+  intro:{it:"Il blocco più semplice dei quattro come componenti, e il più particolare come idea: produce due uscite, una da sottrarre all'ingresso e una da sommare al risultato.",
+         en:"The simplest of the four in terms of components, and the most peculiar as an idea: it produces two outputs, one to subtract from the input and one to add to the result."},
+  nodes:[
+    {id:"in", lane:"C", row:0, kind:"tensor",
+     t:{it:"residuo in ingresso", en:"incoming residual"},
+     s:{it:"({B}, {T}, {D})", en:"({B}, {T}, {D})"},
+     info:{it:`<p>Non è il segnale originale: è <b>quello che i blocchi precedenti non hanno ancora
+     spiegato</b>.</p>
+     <p>Per il primo blocco coincidono, perché nessuno ha ancora tolto niente. Dal secondo in poi
+     no: ogni blocco vede un mondo già ripulito dai suoi predecessori, e questo lo costringe a
+     occuparsi di qualcosa di diverso — è la forma di specializzazione più esplicita fra tutte
+     quelle viste in questa pagina.</p>`,
+        en:`<p>It is not the original signal: it is <b>what the previous blocks have not explained
+     yet</b>.</p>
+     <p>For the first block the two coincide, because nobody has removed anything yet. From the
+     second one on they do not: each block sees a world already cleaned up by its predecessors, and
+     this forces it to deal with something different — it is the most explicit form of specialisation
+     among all those seen on this page.</p>`}},
+    {id:"pool", lane:"C", row:1, kind:"op",
+     t:{it:"riduzione della risoluzione", en:"resolution reduction"},
+     s:{it:"finestra {POOL} → {TP} passi invece di {T}",
+        en:"window {POOL} → {TP} steps instead of {T}"},
+     info:{it:`<p>Si media (oppure si prende il massimo) a gruppi di {POOL} istanti: la sequenza si
+     accorcia da {T} a {TP}.</p>
+     <p>È questa scelta che assegna una <b>scala</b> al blocco. Con finestre grandi restano solo le
+     forme lente; con finestra uno si vede tutto il dettaglio. Mettendo in fila blocchi con
+     finestre decrescenti, la rete descrive prima il quadro generale e poi i particolari.</p>`,
+        en:`<p>Averaging (or taking the maximum) over groups of {POOL} instants: the sequence shortens
+     from {T} to {TP}.</p>
+     <p>It is this choice that assigns a <b>scale</b> to the block. With large windows only the slow
+     shapes remain; with a window of one you see all the detail. By lining up blocks with decreasing
+     windows, the network describes the broad picture first and the particulars afterwards.</p>`}},
+    {id:"mlp", lane:"C", row:2, kind:"op",
+     t:{it:"appiattimento + rete densa", en:"flattening + dense network"},
+     s:{it:"{FLAT} numeri in ingresso alla rete",
+        en:"{FLAT} numbers entering the network"},
+     info:{it:`<p>La sequenza ridotta viene stesa in un unico vettore lungo e data a una piccola rete
+     densa.</p>
+     <p>⚠ Attenzione a una conseguenza: la lunghezza di questo vettore dipende da {T} e da {D},
+     quindi il numero di pesi cresce con la finestra. È la ragione per cui questa architettura è
+     sensibile alla lunghezza della storia molto più delle altre due — e si vede facendo crescere
+     T nei parametri qui sotto.</p>`,
+        en:`<p>The reduced sequence is laid out into a single long vector and handed to a small dense
+     network.</p>
+     <p>⚠ Beware of one consequence: the length of this vector depends on {T} and on {D}, so the
+     number of weights grows with the window. That is why this architecture is far more sensitive to
+     the length of the history than the other two — and you can see it by increasing T in the
+     parameters below.</p>`}},
+    {id:"back", lane:"L", row:3, kind:"op",
+     t:{it:"testa di ricostruzione", en:"reconstruction head"},
+     s:{it:"→ {BC} numeri, rimodellati come l'ingresso",
+        en:"→ {BC} numbers, reshaped like the input"},
+     info:{it:`<p>Ricostruisce la parte di segnale che il blocco dichiara di aver spiegato, nella stessa
+     forma dell'ingresso, così da poterla <b>sottrarre</b>.</p>
+     <p>È un'affermazione forte: il blocco non dice solo «ecco il mio contributo», dice anche
+     «questa parte l'ho presa io, non guardatela più».</p>`,
+        en:`<p>It reconstructs the part of the signal the block claims to have explained, in the same
+     shape as the input, so that it can be <b>subtracted</b>.</p>
+     <p>It is a strong claim: the block does not just say "here is my contribution", it also says
+     "this part is mine, stop looking at it".</p>`}},
+    {id:"fore", lane:"R", row:3, kind:"op",
+     t:{it:"testa di contributo", en:"contribution head"},
+     s:{it:"→ {D} numeri", en:"→ {D} numbers"},
+     info:{it:`<p>Il contributo alla previsione finale, che si somma a quello degli altri blocchi.</p>
+     <p>Le due teste condividono la stessa rete densa a monte, ma hanno pesi separati: il blocco può
+     quindi dire «questa parte di segnale l'ho spiegata» e «ecco cosa ne deduco per il futuro» in
+     due modi diversi, invece di essere costretto a una sola risposta.</p>`,
+        en:`<p>The contribution to the final prediction, which adds to that of the other blocks.</p>
+     <p>The two heads share the same upstream dense network, but have separate weights: the block can
+     therefore say "I have explained this part of the signal" and "here is what I infer from it about
+     the future" in two different ways, instead of being forced into a single answer.</p>`}},
+    {id:"sub", lane:"C", row:4, kind:"gate",
+     t:{it:"il residuo si assottiglia", en:"the residual gets thinner"},
+     s:{it:"residuo ← residuo − ricostruzione",
+        en:"residual ← residual − reconstruction"},
+     info:{it:`<p>Il blocco successivo riceverà un ingresso <b>diverso</b>: solo ciò che resta. È il
+     rientro più esplicito di tutta la pagina — l'uscita di un blocco modifica l'ingresso del
+     prossimo.</p>
+     <p>Se un blocco sbaglia e sottrae qualcosa di utile, quell'informazione è persa per tutti
+     quelli dopo. È il prezzo dell'eleganza di questo schema.</p>`,
+        en:`<p>The next block will receive a <b>different</b> input: only what is left. It is the most
+     explicit feedback path on the whole page — one block's output modifies the next one's input.</p>
+     <p>If a block gets it wrong and subtracts something useful, that information is lost for
+     everyone downstream. It is the price of this scheme's elegance.</p>`}}
+  ],
+  edges:[["in","pool"],["pool","mlp"],["mlp","back","side"],["mlp","fore","side"],
+         ["back","sub","side"],["sub","in","re",{it:"torna indietro come nuovo residuo",
+                                                 en:"goes back as the new residual"}]],
+  steps:["in","pool","mlp","back","fore","sub"]
+},
+
+units:{
+  tab:{it:"⑫ nodi e connessioni", en:"⑫ units and connections"},
+  kicker:{it:"il livello più basso", en:"the lowest level"},
+  title:{it:"Cosa sono davvero «i nodi» e «le connessioni»",
+         en:"What \"units\" and \"connections\" really are"},
+  intro:{it:"Le quattro forme di collegamento che compongono tutto il resto. Clicca un riquadro per la spiegazione; il numero di nodi disegnati si regola col parametro in fondo.",
+         en:"The four forms of connection everything else is made of. Click a cell for the explanation; the number of units drawn is set by the parameter at the bottom."},
+  custom:"units",
+  nodes:[
+    {id:"dense", cell:0,
+     t:{it:"strato denso — tutti con tutti", en:"dense layer — everyone with everyone"},
+     info:{it:`<p>Ogni nodo del livello successivo è collegato a <b>tutti</b> quelli del precedente:
+     ogni collegamento ha il suo peso, e il nodo somma quello che riceve, aggiunge un termine
+     fisso e passa il risultato in una funzione non lineare.</p>
+     <p>Il numero di pesi è il <b>prodotto</b> dei due livelli: da {D} a {D4} numeri significa
+     {D}×{D4} collegamenti, ed è il motivo per cui la rete densa dello strato di attenzione contiene
+     gran parte dei parametri del modello.</p>
+     <p>Un nodo non ha un significato assegnato da nessuno: quello che rappresenta emerge
+     dall'addestramento, ed è il motivo per cui non si può «leggere» una rete guardando i suoi
+     nodi uno per uno.</p>`,
+        en:`<p>Every unit of the next level is connected to <b>all</b> of those in the previous one:
+     each connection has its own weight, and the unit sums what it receives, adds a fixed term and
+     passes the result through a non-linear function.</p>
+     <p>The number of weights is the <b>product</b> of the two levels: from {D} to {D4} numbers means
+     {D}×{D4} connections, and that is why the dense network of the attention layer holds most of the
+     model's parameters.</p>
+     <p>A unit has no meaning assigned to it by anyone: what it represents emerges from training, and
+     that is why you cannot "read" a network by looking at its units one by one.</p>`}},
+    {id:"conv", cell:1,
+     t:{it:"convoluzione — pochi collegamenti, ripetuti",
+        en:"convolution — few connections, repeated"},
+     info:{it:`<p>Ogni nodo di uscita guarda solo una <b>finestra breve</b> di nodi vicini, e — questa
+     è la parte importante — la stessa manciata di pesi viene <b>riusata</b> per tutte le
+     posizioni, come uno stampino che scorre.</p>
+     <p>Due conseguenze. Il numero di pesi non dipende dalla lunghezza della sequenza. E la rete
+     assume che <i>ciò che conta abbia la stessa forma ovunque</i>: se un motivo è utile alle tre
+     di notte, lo è anche a mezzogiorno.</p>
+     <p>Nella versione <b>causale</b> la finestra è tagliata a metà: guarda solo indietro.</p>`,
+        en:`<p>Every output unit looks only at a <b>short window</b> of neighbouring units, and — this
+     is the important part — the same handful of weights is <b>reused</b> for every position, like a
+     stencil sliding along.</p>
+     <p>Two consequences. The number of weights does not depend on the length of the sequence. And
+     the network assumes that <i>what matters has the same shape everywhere</i>: if a pattern is
+     useful at three in the morning, it is useful at noon too.</p>
+     <p>In the <b>causal</b> version the window is cut in half: it looks only backwards.</p>`}},
+    {id:"attn", cell:2,
+     t:{it:"attenzione — collegamenti decisi sul momento",
+        en:"attention — connections decided on the spot"},
+     info:{it:`<p>Anche qui ogni nodo è collegato a tutti gli altri, ma la forza dei collegamenti
+     <b>non è un peso appreso</b>: si ricalcola per ogni finestra, confrontando i token fra loro.</p>
+     <p>È la differenza che conta: uno strato denso applica sempre la stessa regola, l'attenzione
+     decide di volta in volta chi ascoltare. Ciò che si impara non è «quanto conta il token 7», ma
+     «come si decide quanto conta un token, viste le circostanze».</p>
+     <p>Il prezzo è il costo quadratico: con {F} token servono {F}×{F} confronti, per ciascuna
+     delle {H} teste.</p>`,
+        en:`<p>Here too every unit is connected to all the others, but the strength of the connections
+     <b>is not a learned weight</b>: it is recomputed for every window, by comparing the tokens with
+     one another.</p>
+     <p>That is the difference that matters: a dense layer always applies the same rule, attention
+     decides case by case whom to listen to. What is learned is not "how much token 7 counts", but
+     "how one decides how much a token counts, given the circumstances".</p>
+     <p>The price is the quadratic cost: with {F} tokens you need {F}×{F} comparisons, for each of
+     the {H} heads.</p>`}},
+    {id:"res", cell:3,
+     t:{it:"collegamento residuo — la scorciatoia",
+        en:"residual connection — the shortcut"},
+     info:{it:`<p>Un collegamento che <b>salta</b> uno o più strati e somma l'ingresso all'uscita.
+     Nessun peso, nessun calcolo: solo una somma.</p>
+     <p>Serve a due cose. In avanti, permette allo strato di imparare una piccola correzione invece
+     di dover ricostruire tutto da capo. All'indietro, dà al segnale di addestramento una strada
+     diretta per tornare agli strati iniziali senza attraversare decine di moltiplicazioni che lo
+     rimpicciolirebbero fino a farlo sparire.</p>
+     <p>È la ragione tecnica per cui oggi si possono addestrare reti profonde: senza queste
+     scorciatoie, aggiungere strati a un certo punto peggiorava i risultati.</p>`,
+        en:`<p>A connection that <b>skips</b> one or more layers and adds the input to the output. No
+     weights, no computation: just a sum.</p>
+     <p>It serves two purposes. Forwards, it lets the layer learn a small correction instead of
+     having to rebuild everything from scratch. Backwards, it gives the training signal a direct road
+     back to the early layers without crossing dozens of multiplications that would shrink it until
+     it disappeared.</p>
+     <p>It is the technical reason why deep networks can be trained today: without these shortcuts,
+     adding layers past a certain point made results worse.</p>`}}
+  ],
+  edges:[],
+  steps:["dense","conv","attn","res"]
+}
+
+};
+
+const LANE = {L:{x:26,w:280}, C:{x:352,w:360}, R:{x:758,w:280}};
+const ROW_H = 124, TOP = 30, W = 1064;
+const wrapText = (s, max) => {
+  const words = String(s).split(' '); const out = []; let cur = '';
+  for (const w of words){
+    if (cur && (cur + ' ' + w).length > max){ out.push(cur); cur = w; }
+    else cur = cur ? cur + ' ' + w : w;
+  }
+  if (cur) out.push(cur);
+  return out;
+};
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const FILL = {tensor:['var(--tens)','var(--tensb)'], op:['var(--node)','var(--nodeb)'],
+              gate:['var(--gate)','var(--gateb)'], ext:['var(--ext)','var(--extb)']};
+
+/* IT: didascalie dei quattro riquadri di ⑫: dipendono dal numero di nodi disegnati,
+       quindi sono funzioni e non stringhe.
+   EN: captions of the four cells of ⑫: they depend on the number of units drawn,
+       hence they are functions and not strings. */
+const CAP = {
+  dense:{it:(n,m)=>`${n}×${m} = ${n*m} pesi, uno per collegamento`,
+         en:(n,m)=>`${n}×${m} = ${n*m} weights, one per connection`},
+  conv:{it:()=>`3 soli pesi (i tre colori) riusati a ogni posizione`,
+        en:()=>`only 3 weights (the three colours) reused at every position`},
+  attn:{it:n=>`${n}×${n-1} collegamenti, ricalcolati a ogni finestra`,
+        en:n=>`${n}×${n-1} connections, recomputed for every window`},
+  res:{it:()=>`nessun peso: l'ingresso viene sommato all'uscita`,
+       en:()=>`no weights: the input is added to the output`}
+};
+
+let view = 'pipeline', sel = null, stepIdx = -1, timer = null, reOnly = false;
+
+function geom(v){
+  const g = {}; let maxRow = 0;
+  for (const n of v.nodes){
+    const lane = LANE[n.lane] || LANE.C;
+    const titleLines = wrapText(S(L(n.t)), n.lane === 'C' ? 40 : 30);
+    const shapeLines = n.s ? wrapText(S(L(n.s)), n.lane === 'C' ? 52 : 40) : [];
+    const h = 22 + titleLines.length * 17 + shapeLines.length * 14;
+    g[n.id] = {x:lane.x, w:lane.w, y:TOP + n.row * ROW_H, h, titleLines, shapeLines};
+    maxRow = Math.max(maxRow, n.row);
+  }
+  return {g, H: TOP + maxRow * ROW_H + 110};
+}
+function edgePath(a, b){
+  const ax = a.x + a.w/2, bx = b.x + b.w/2, ay = a.y + a.h, by = b.y;
+  if (Math.abs(ax - bx) < 2) return `M${ax} ${ay} L${bx} ${by - 9}`;
+  return `M${ax} ${ay} C${ax} ${ay + 40}, ${bx} ${by - 46}, ${bx} ${by - 9}`;
+}
+function rePath(a, b){
+  const ay = a.y + a.h/2, by = b.y + b.h/2;
+  const out = Math.min(a.x, b.x) - 20;
+  return `M${a.x} ${ay} C${out} ${ay}, ${out} ${by}, ${b.x - 9} ${by}`;
+}
+
+function renderUnits(v){
+  // IT: disegno letterale di nodi e collegamenti, in quattro riquadri.
+  // EN: literal drawing of units and connections, in four cells.
+  const CW = 512, CH = 300, GAP = 22, n = Math.max(3, Math.min(12, P.UNITS));
+  let s = `<svg viewBox="0 0 ${CW*2+GAP} ${CH*2+GAP}" role="img" aria-label="${esc(L(v.title))}">`;
+  const cells = [[0,0],[1,0],[0,1],[1,1]];
+  v.nodes.forEach((nd, i) => {
+    const [cx, cy] = cells[nd.cell];
+    const ox = cx*(CW+GAP), oy = cy*(CH+GAP);
+    const selected = sel === nd.id;
+    s += `<g class="nd${selected?' sel':''}" data-id="${nd.id}">`;
+    s += `<rect x="${ox+1}" y="${oy+1}" width="${CW-2}" height="${CH-2}" rx="10"
+           fill="var(--panel2)" stroke="${selected?'var(--sel)':'var(--line)'}" stroke-width="${selected?3:1.4}"/>`;
+    s += `<text x="${ox+CW/2}" y="${oy+30}" text-anchor="middle">${esc(S(L(nd.t)))}</text>`;
+    const cap = t => `<text class="sh" x="${ox+CW/2}" y="${oy+CH-16}" text-anchor="middle">${esc(t)}</text>`;
+    const yTop = oy+70, yBot = oy+CH-40, xL = ox+90, xR = ox+CW-90;
+    const pos = (k, tot, x, y) => [x, y + (tot<2?0:k*( (yBot-yTop) / (tot-1) ))];
+    const dot = (x,y,f) => `<circle cx="${x}" cy="${y}" r="9" fill="${f||'var(--node)'}" stroke="var(--nodeb)" stroke-width="1.5"/>`;
+    const line = (a,b,st,w) => `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${st}" stroke-width="${w||1}" opacity=".75"/>`;
+    if (nd.id === 'dense'){
+      const m = Math.max(2, n-2);
+      for (let i2=0;i2<n;i2++) for (let j=0;j<m;j++)
+        s += line(pos(i2,n,xL,yTop), pos(j,m,xR,yTop), 'var(--nodeb)', .7);
+      for (let i2=0;i2<n;i2++) s += dot(...pos(i2,n,xL,yTop));
+      for (let j=0;j<m;j++) s += dot(...pos(j,m,xR,yTop), 'var(--tens)');
+      s += cap(CAP.dense[LANG](n, m));
+    } else if (nd.id === 'conv'){
+      const cols = ['var(--acc)','var(--extb)','var(--gateb)'];
+      for (let j=0;j<n-2;j++) for (let k=0;k<3;k++)
+        s += line(pos(j+k,n,xL,yTop), pos(j,n-2,xR,yTop), cols[k], 1.5);
+      for (let i2=0;i2<n;i2++) s += dot(...pos(i2,n,xL,yTop));
+      for (let j=0;j<n-2;j++) s += dot(...pos(j,n-2,xR,yTop), 'var(--tens)');
+      s += cap(CAP.conv[LANG]());
+    } else if (nd.id === 'attn'){
+      const yc = oy + CH/2 - 10, x0 = ox+70, dx = (CW-140)/(n-1);
+      for (let i2=0;i2<n;i2++) for (let j=0;j<n;j++) if (i2!==j){
+        const a=[x0+i2*dx,yc], b=[x0+j*dx,yc], h=26+Math.abs(i2-j)*9;
+        s += `<path d="M${a[0]} ${a[1]} Q${(a[0]+b[0])/2} ${yc-h} ${b[0]} ${b[1]}" fill="none"
+               stroke="var(--acc)" stroke-width="${(0.4+1.6/(1+Math.abs(i2-j)))}" opacity=".5"/>`;
+      }
+      for (let i2=0;i2<n;i2++) s += dot(x0+i2*dx, yc, 'var(--tens)');
+      s += cap(CAP.attn[LANG](n));
+    } else {
+      const yc = oy + CH/2 + 10, x0 = ox+80, dx = (CW-160)/3;
+      for (let i2=0;i2<3;i2++)
+        s += `<line x1="${x0+i2*dx+10}" y1="${yc}" x2="${x0+(i2+1)*dx-10}" y2="${yc}" stroke="var(--nodeb)" stroke-width="1.8"/>`;
+      for (let i2=0;i2<4;i2++) s += dot(x0+i2*dx, yc, i2===0||i2===3?'var(--tens)':'var(--node)');
+      s += `<path d="M${x0} ${yc-12} C${x0+dx} ${yc-90}, ${x0+2*dx} ${yc-90}, ${x0+3*dx} ${yc-12}"
+             fill="none" stroke="var(--re)" stroke-width="2" stroke-dasharray="6 4"/>`;
+      s += cap(CAP.res[LANG]());
+    }
+    s += `</g>`;
+  });
+  document.getElementById('svgbox').innerHTML = s + '</svg>';
+  document.querySelectorAll('.nd').forEach(el => el.addEventListener('click', () => select(el.dataset.id)));
+}
+
+function render(){
+  const v = VIEWS[view];
+  if (v.custom === 'units') return renderUnits(v);
+  const {g, H} = geom(v);
+  let s = `<svg viewBox="-30 0 ${W + 30} ${H}" role="img" aria-label="${esc(L(v.title))}"><defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="var(--nodeb)"/></marker>
+    <marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="var(--extb)"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="var(--re)"/></marker></defs>`;
+
+  for (const [from, to, kind, label] of v.edges){
+    const a = g[from], b = g[to];
+    if (!a || !b) continue;
+    const isRe = kind === 're';
+    const dim = (reOnly && !isRe) ? ' dim' : '';
+    const stroke = isRe ? 'var(--re)' : (kind === 'side' ? 'var(--extb)' : 'var(--nodeb)');
+    const dash = isRe ? '6 4' : (kind === 'side' ? '5 4' : 'none');
+    const mk = isRe ? 'ar' : (kind === 'side' ? 'as' : 'a');
+    s += `<path class="edge${dim}" d="${isRe ? rePath(a,b) : edgePath(a,b)}" fill="none"
+           stroke="${stroke}" stroke-width="1.8" stroke-dasharray="${dash}" marker-end="url(#${mk})"/>`;
+    if (label){
+      const lx = Math.min(a.x, b.x) - 28;
+      const ly = (a.y + a.h/2 + b.y + b.h/2) / 2;
+      s += `<text class="edge${dim} eg" x="${lx}" y="${ly}" text-anchor="middle"
+             transform="rotate(-90 ${lx} ${ly})">${esc(L(label))}</text>`;
+    }
+  }
+  for (const n of v.nodes){
+    const q = g[n.id];
+    const [fill, stroke] = FILL[n.kind];
+    const dash = n.kind === 'ext' ? ' stroke-dasharray="5 4"' : '';
+    const cls = 'nd' + (sel === n.id ? ' sel' : '') + (reOnly ? ' dim' : '');
+    s += `<g class="${cls}" data-id="${n.id}"><rect x="${q.x}" y="${q.y}" width="${q.w}"
+           height="${q.h}" rx="9" fill="${fill}" stroke="${stroke}" stroke-width="1.6"${dash}/>`;
+    let ty = q.y + 25;
+    for (const l of q.titleLines){ s += `<text x="${q.x + q.w/2}" y="${ty}" text-anchor="middle">${esc(l)}</text>`; ty += 17; }
+    for (const l of q.shapeLines){ s += `<text class="sh" x="${q.x + q.w/2}" y="${ty}" text-anchor="middle">${esc(l)}</text>`; ty += 14; }
+    s += `</g>`;
+  }
+  document.getElementById('svgbox').innerHTML = s + `</svg>`;
+  document.querySelectorAll('.nd').forEach(el =>
+    el.addEventListener('click', () => select(el.dataset.id)));
+}
+
+function select(id){
+  const v = VIEWS[view];
+  const n = v.nodes.find(x => x.id === id);
+  if (!n) return;
+  sel = id;
+  const i = v.steps.indexOf(id);
+  if (i >= 0) stepIdx = i;
+  document.getElementById('pbadge').textContent = n.kind ? L(UI.badge[n.kind]) : '';
+  document.getElementById('ptitle').textContent = S(L(n.t));
+  document.getElementById('pshape').textContent = n.s ? S(L(n.s)) : '';
+  document.getElementById('ptext').innerHTML = S(L(n.info));
+  document.getElementById('stepinfo').textContent =
+    i >= 0 ? UI.step[LANG](i + 1, v.steps.length) : L(UI.offPath);
+  document.getElementById('panel').scrollTop = 0;
+  render();
+}
+function setView(k){
+  view = k; sel = null; stepIdx = -1; stop();
+  const v = VIEWS[k];
+  document.getElementById('vkick').textContent = L(v.kicker);
+  document.getElementById('vtitle').textContent = L(v.title);
+  document.getElementById('vintro').textContent = L(v.intro);
+  document.getElementById('stepinfo').textContent = '';
+  document.querySelectorAll('#tabs .btn').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+  render();
+}
+function step(d){
+  const v = VIEWS[view];
+  stepIdx = (stepIdx + d + v.steps.length) % v.steps.length;
+  select(v.steps[stepIdx]);
+}
+function stop(){
+  if (timer){ clearInterval(timer); timer = null; document.getElementById('play').textContent = L(UI.play); }
+}
+
+/* IT: la cornice statica non ha piu' testo nel markup: si popola da UI, cosi' la stessa
+       funzione serve al primo caricamento e al cambio di lingua.
+   EN: the static chrome carries no copy in the markup: it is populated from UI, so the same
+       function serves both the first load and the language switch. */
+function applyStatic(){
+  document.documentElement.lang = L(UI.htmlLang);
+  const set = (id, k) => document.getElementById(id).textContent = L(UI[k]);
+  set('h1','h1'); set('theme','theme'); set('lang','langBtn');
+  set('prev','prev'); set('next','next'); set('reflow','reflow'); set('reset','reset');
+  ['lg1','lg2','lg3','lg4','lg5','lb1','lb2','lb3','lb4','lb5','lb6','lb7']
+    .forEach(id => set(id, id));
+  document.getElementById('play').textContent = timer ? L(UI.pause) : L(UI.play);
+  document.getElementById('sub').innerHTML = L(UI.sub);
+  document.getElementById('foot').innerHTML = L(UI.foot);
+  document.getElementById('tabs').innerHTML = Object.entries(VIEWS)
+    .map(([k, v]) => `<button class="btn${k === view ? ' on' : ''}" data-k="${k}">${esc(L(v.tab))}</button>`)
+    .join('');
+  document.querySelectorAll('#tabs .btn').forEach(b =>
+    b.addEventListener('click', () => setView(b.dataset.k)));
+}
+function showHelp(){
+  document.getElementById('pbadge').textContent = L(UI.helpBadge);
+  document.getElementById('ptitle').textContent = L(UI.helpTitle);
+  document.getElementById('pshape').textContent = '';
+  document.getElementById('ptext').innerHTML = L(UI.helpText);
+}
+
+document.getElementById('next').addEventListener('click', () => { stop(); step(1); });
+document.getElementById('prev').addEventListener('click', () => { stop(); step(-1); });
+document.getElementById('play').addEventListener('click', () => {
+  if (timer) return stop();
+  document.getElementById('play').textContent = L(UI.pause);
+  step(1);
+  timer = setInterval(() => {
+    if (stepIdx >= VIEWS[view].steps.length - 1) return stop();
+    step(1);
+  }, 4500);
+});
+document.getElementById('reflow').addEventListener('click', () => { reOnly = !reOnly; render(); });
+document.getElementById('reset').addEventListener('click', () => { reOnly = false; sel = null; stop(); render(); });
+document.getElementById('theme').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+});
+/* IT: il cambio di lingua non azzera lo stato: vista, blocco selezionato e modalita' rientri
+       restano dove sono, cambia solo il testo.
+   EN: switching language does not reset state: view, selected block and feedback-only mode
+       stay where they are, only the copy changes. */
+document.getElementById('lang').addEventListener('click', () => {
+  LANG = LANG === 'it' ? 'en' : 'it';
+  applyStatic();
+  const v = VIEWS[view];
+  document.getElementById('vkick').textContent = L(v.kicker);
+  document.getElementById('vtitle').textContent = L(v.title);
+  document.getElementById('vintro').textContent = L(v.intro);
+  if (sel) select(sel); else { showHelp(); render(); }
+});
+[['pB','B'],['pT','T'],['pF','F'],['pD','D'],['pP','PATCH'],['pE','E'],['pH','H']].forEach(([id, key]) => {
+  document.getElementById(id).addEventListener('input', e => {
+    const val = parseInt(e.target.value, 10);
+    if (!isNaN(val) && val > 0){ P[key] = val; if (sel) select(sel); else render(); }
+  });
+});
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight'){ stop(); step(1); }
+  if (e.key === 'ArrowLeft'){ stop(); step(-1); }
+});
+applyStatic();
+showHelp();
+setView('pipeline');
+</script>
+</body>
+</html>
