@@ -345,6 +345,114 @@ a decision for the user.
 
 ---
 
+## ▶️ RIPARTI DA QUI — 2026-08-29
+
+> 🇮🇹 **DOMANI, IN UNA RIGA: nessun lavoro in sospeso, nessun gate aperto toccato. Si riparte
+> dalla routine (`.\avvio_sessione.ps1`).** La giornata è stata **documentale**: due commit, zero
+> GPU, zero scritture su `data/`, `models/`, `results/`. `E1 stadio 2` resta **aperto e intatto**
+> (20/40), il vintage macro resta `20260730`, `raw_candles.parquet` resta fermo al 20/08 —
+> nessun `-RefreshCandles` è stato applicato.
+> **EN** **TOMORROW, IN ONE LINE: nothing pending, no open gate touched. Start from the routine
+> (`.\avvio_sessione.ps1`).** The day was **documentary**: two commits, zero GPU, zero writes to
+> `data/`, `models/`, `results/`. `E1 stage 2` stays **open and intact** (20/40), the macro
+> vintage stays `20260730`, `raw_candles.parquet` stays at 20/08 — no `-RefreshCandles` applied.
+
+### ① La pagina delle architetture entra nel repo, bilingue · The architectures page enters the repo, bilingual
+
+🇮🇹 **`docs/architetture.html`** (commit `8389c75`) — dodici viste interattive ricavate leggendo i
+`forward`, non la documentazione: pipeline dei dati, iTransformer, TCN+Mamba, N-HiTS, CAFN,
+MoE/MoU, testa di output, e il cablaggio interno di attenzione, convoluzione, stato e
+decomposizione. I diagrammi sono **dati** (riga + corsia) e il layout li dispone, quindi per
+costruzione i blocchi non possono sovrapporsi; le forme dei tensori si derivano dai parametri
+modificabili in pagina. Bilingue **in un unico file** come il resto della documentazione: ogni
+stringa visibile è una coppia `{it, en}` e il toggle IT/EN non azzera lo stato (vista, blocco
+selezionato, modalità rientri). Puntatore nella mappa della documentazione del `README.md`.
+
+⚠ **Due verifiche che non erano nella richiesta, e la ragione per cui valgono:** in questo tipo di
+lavoro **un errore non produce un guasto visibile**. (a) Il ramo IT è stato diffato **campo per
+campo** contro l'originale — testo, topologia degli archi, corsie, righe, passi del percorso
+guidato: identico. Una traduzione che riscrive in silenzio anche una sola frase del testo già
+scritto sarebbe indistinguibile da un miglioramento. (b) Tutte e **12 le viste × 2 lingue** sono
+state renderizzate con un DOM finto, asserendo che nessun campo produca `[object Object]` o
+`undefined` e che nessuna coppia sia dimezzata: è così che si manifesta un risolutore di lingua
+dimenticato — non come eccezione, ma come stringa sbagliata in un pannello che nessuno apre.
+Verificati inoltre contro il codice i due claim più falsificabili della pagina: il token macro è
+rimosso **prima** del pooling (`h[:, 1:, :]`) e `TCN+Mamba` accetta `x_macro` per uniformità di
+firma ma lo **ignora**.
+
+**EN** **`docs/architetture.html`** (commit `8389c75`) — twelve interactive views derived by
+reading the `forward` passes, not the documentation: data pipeline, iTransformer, TCN+Mamba,
+N-HiTS, CAFN, MoE/MoU, output head, plus the internal wiring of attention, convolution, state and
+decomposition. The diagrams are **data** (row + lane) and the layout places them, so by
+construction blocks cannot overlap; tensor shapes derive from parameters editable in the page.
+**Single-file bilingual** like the rest of the docs: every visible string is an `{it, en}` pair
+and the IT/EN toggle does not reset state. Pointer added to the `README.md` documentation map.
+⚠ Two checks that were not requested, and why they matter: in this kind of work **an error
+produces no visible failure**. (a) The IT branch was diffed **field by field** against the
+original — text, edge topology, lanes, rows, walkthrough steps: identical; a translation that
+silently rewrites even one sentence of existing copy would be indistinguishable from an
+improvement. (b) All **12 views × 2 languages** were rendered against a fake DOM, asserting no
+field yields `[object Object]` or `undefined` and no pair is half-missing. The page's two most
+falsifiable claims were also verified against the code: the macro token is dropped **before**
+pooling (`h[:, 1:, :]`), and `TCN+Mamba` accepts `x_macro` for signature uniformity but
+**ignores** it.
+
+### ② Quale baseline regge quale affermazione, in una tabella invece che in cinque paragrafi · Which baseline backs which statement
+
+🇮🇹 **`TEORIA.md` §12.2 + `README.md`** (commit `736f29b`) — la sezione nomina **quattro**
+denominatori (naive, HAR-RV, HAR-CJ, HAR-C) perché la baseline è stata resa progressivamente più
+forte da tre gate successivi. La distinzione che conta c'era già, ma stava a metà di un paragrafo
+di quaranta righe: il **gate** pre-registrato del 2026-06-10 usa **HAR-RV** ed è congelato, il
+**claim** pubblicato usa **HAR-C** dal C3. Aggiunto un **pannello di riconciliazione** in testa
+alla sezione: una riga per affermazione, con denominatore, numeri e ruolo attuale.
+
+Due cose che il pannello rende esplicite e che prima si deducevano solo leggendo altrove: il
+`p ≤ 4.3·10⁻⁴` citato nel README è misurato contro **HAR-CJ** (gate C2), la baseline
+**intermedia**, non contro HAR-C; e gli estremi della banda sono **val e test**, **non** un
+intervallo di confidenza. Nel README la distinzione entra **dove il claim viene fatto** — la riga
+del risultato — e non solo nel blocco di metodologia duecento righe più sotto: un claim deve
+reggere senza la qualifica che sta altrove.
+
+⚠ **Zero numeri nuovi, e verificato meccanicamente:** ognuna delle 25 cifre del pannello compare
+già altrove nel file. È scrittura, non ricalcolo — nessun run, nessuna GPU, nessun artefatto
+toccato.
+
+**EN** **`TEORIA.md` §12.2 + `README.md`** (commit `736f29b`) — the section names **four**
+denominators (naive, HAR-RV, HAR-CJ, HAR-C) because the baseline was progressively strengthened by
+three successive gates. The distinction that matters was already there, but sat halfway through a
+forty-line paragraph: the pre-registered **gate** of 2026-06-10 uses **HAR-RV** and is frozen, the
+published **claim** uses **HAR-C** since C3. A **reconciliation panel** now heads the section: one
+row per statement, with denominator, numbers and current role. Two things it makes explicit that
+previously had to be inferred from elsewhere: the `p ≤ 4.3·10⁻⁴` quoted in the README is measured
+against **HAR-CJ** (gate C2), the **intermediate** baseline, not against HAR-C; and the band's
+endpoints are **val and test**, **not** a confidence interval. In the README the distinction now
+appears **where the claim is made**, not only in the methodology block two hundred lines below.
+⚠ **No new numbers, mechanically verified:** each of the panel's 25 figures already appears
+elsewhere in the file. It is writing, not recomputation.
+
+### ③ Routine di sessione — nulla di anomalo · Session routine — nothing anomalous
+
+🇮🇹 Pull VPS con i 4 collector **tutti freschi** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.4h);
+`hedge_state.json` assente sul VPS, coerente con `--hedge` disattivato dopo il FAIL 2/3. Macro
+ferma al vintage `20260730`, **nessuna promozione**. Regime B7 fresco. MFIV +1159 tick, wedge
+mediano **+3.17 vol pt** (colonna diagnostica). L2: copertura 69.2%, run corrente **1093h senza
+buchi**, `n_eff` 31.5 contro il gate 216. Leg opzioni n=57 ≥ 30. **`E1 stadio 2`: 20/40.**
+
+⚠ Il warning «serie close STALE → conteggio SOTTOSTIMATO» è l'**inferenza da proxy** già
+documentata: il vincolo vero di E1 è per-expiry (`tick+30h`), non il lag della serie. **Nessun
+`-RefreshCandles` applicato.**
+
+**EN** VPS pull with all 4 collectors **fresh** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.4h);
+`hedge_state.json` absent on the VPS, consistent with `--hedge` off after the 2/3 FAIL. Macro at
+vintage `20260730`, **no promotion**. Regime B7 fresh. MFIV +1159 ticks, median wedge **+3.17 vol
+pt** (diagnostic column). L2: 69.2% coverage, current run **1093h with no gap**, `n_eff` 31.5
+against the 216 gate. Option legs n=57 ≥ 30. **`E1 stage 2`: 20/40.**
+⚠ The «close series STALE → count UNDERSTATED» warning is the documented **proxy inference**:
+E1's real constraint is per-expiry (`tick+30h`), not the series lag. **No `-RefreshCandles`
+applied.**
+
+---
+
 ## ▶️ RIPARTI DA QUI — 2026-08-25
 
 > 🇮🇹 **DOMANI, IN UNA RIGA: nessun lavoro in sospeso. Si riparte dalla routine
