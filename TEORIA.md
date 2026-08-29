@@ -740,6 +740,53 @@ The remaining ones (funding-refresh thread safety under `threading.Lock()`, Wind
 
 ### 12.2 Linea attiva — volatilità a 1h · 12.2 Active line — 1h volatility
 
+🇮🇹 **Quale baseline vale per quale affermazione — pannello di riconciliazione.** Questa sezione
+nomina **quattro** denominatori (naive, HAR-RV, HAR-CJ, HAR-C) perché la baseline è stata resa
+progressivamente più forte da tre gate successivi. Due ruoli **non vanno mai fusi**: il
+denominatore del **gate pre-registrato**, che è congelato al 2026-06-10, e quello del **claim
+pubblicato**, che è cambiato due volte da allora. Sono affermazioni diverse su misure diverse, ed
+entrambe sono vere.
+
+| affermazione | denominatore | numeri già pubblicati sotto | ruolo oggi |
+|---|---|---|---|
+| **Gate pre-registrato** (2026-06-10) — `QLIKE_NN ≤ 0.95·QLIKE_HAR` **e** `< QLIKE_naive` | **HAR-RV** | test −30% (0.257 vs 0.368), naive 0.807 | **superato, e congelato**: resta valido rispetto a quella baseline e **non si ri-esegue** — cambiarne il denominatore a posteriori sarebbe goalpost-moving al contrario |
+| **Significatività del vantaggio** (DM+HAC, 2026-07-26) | **HAR-RV** | val −26.6% `p = 7.3·10⁻⁵` · test −36.1% `p = 1.7·10⁻⁶` → banda −27% ÷ −36% | misura di inferenza, **non** un gate |
+| **Controllo di robustezza C2** (2026-07-30) | **HAR-CJ** | val −22.6% · test −31.6%, `p ≤ 4.3·10⁻⁴` | baseline **intermedia**, superata da C3 — ⚠ è da qui che viene il `p ≤ 4.3·10⁻⁴` citato altrove, che quindi **non** è misurato contro HAR-C |
+| **Claim pubblicato** (dal 2026-07-31, gate C3) | **HAR-C** | **−22.42% ÷ −31.65%** | **corrente** — è questa la baseline di riferimento |
+
+⚠ **Gli estremi della banda sono `val` e `test`, non un intervallo di confidenza:** −22.42% è
+val, −31.65% è test, e i decimali identificano la coppia modello/npz/config (paragrafo
+PRECISIONE in coda alla sezione). Leggerli come incertezza è l'errore che il pannello esiste per
+impedire.
+
+⚠ **Il giudice stampa il ruolo accanto a ogni numero** (`scripts/vol/dev_vols_qlike.py`): i
+blocchi delle baseline aggiuntive restano fuori da `metrics`/`gate`, quindi il gate continua a
+essere calcolato contro HAR-RV mentre il claim si legge contro HAR-C. Confonderli è esattamente
+ciò che il pannello a tre baseline dello stdout rende impossibile.
+
+**EN** **Which baseline backs which statement — reconciliation panel.** This section names
+**four** denominators (naive, HAR-RV, HAR-CJ, HAR-C) because the baseline was progressively
+strengthened by three successive gates. Two roles must **never be merged**: the denominator of
+the **pre-registered gate**, frozen on 2026-06-10, and the denominator of the **published
+claim**, which has changed twice since. They are different statements about different
+measurements, and both are true.
+
+| statement | denominator | numbers published below | role today |
+|---|---|---|---|
+| **Pre-registered gate** (2026-06-10) — `QLIKE_NN ≤ 0.95·QLIKE_HAR` **and** `< QLIKE_naive` | **HAR-RV** | test −30% (0.257 vs 0.368), naive 0.807 | **passed, and frozen**: it remains valid with respect to that baseline and is **not re-run** — swapping its denominator after the fact would be goalpost-moving in reverse |
+| **Significance of the edge** (DM+HAC, 2026-07-26) | **HAR-RV** | val −26.6% `p = 7.3·10⁻⁵` · test −36.1% `p = 1.7·10⁻⁶` → band −27% to −36% | an inference measurement, **not** a gate |
+| **Robustness check C2** (2026-07-30) | **HAR-CJ** | val −22.6% · test −31.6%, `p ≤ 4.3·10⁻⁴` | **intermediate** baseline, superseded by C3 — ⚠ this is where the `p ≤ 4.3·10⁻⁴` quoted elsewhere comes from, so it is **not** measured against HAR-C |
+| **Published claim** (since 2026-07-31, gate C3) | **HAR-C** | **−22.42% to −31.65%** | **current** — this is the reference baseline |
+
+⚠ **The band's endpoints are `val` and `test`, not a confidence interval:** −22.42% is val,
+−31.65% is test, and the decimals identify the model/npz/config triple (PRECISION paragraph at
+the end of this section). Reading them as uncertainty is the error this panel exists to prevent.
+
+⚠ **The judge prints the role next to every number** (`scripts/vol/dev_vols_qlike.py`): the
+additional baseline blocks stay outside `metrics`/`gate`, so the gate keeps being computed
+against HAR-RV while the claim is read against HAR-C. Conflating them is exactly what the
+three-baseline stdout panel makes impossible.
+
 🇮🇹 **PASS validato.** ⚠ **Baseline di riferimento cambiata il 2026-07-30 (gate C2) e ri-specificata il 2026-07-31 (gate C3): il claim corrente e' contro HAR-C, banda −22.42% ÷ −31.65%** (ri-espressa il 2026-08-05 alla precisione dell'artefatto canonico — **stessi numeri, non una nuova misura**: fino ad allora la banda era −23% ÷ −32%, con l'estremo inferiore ereditato da HAR-CJ e mai riallineato ad HAR-C; vedi il paragrafo sulla PRECISIONE in coda a questa sezione) — vedi i paragrafi dedicati piu' sotto, **compreso quello sulla PROVENIENZA del numeratore**, che dal 2026-08-04 la lega a un artefatto verificabile (`models/canonical_1h_vols/`, gate R1). Quanto segue e' il PASS **come fu registrato**, contro HAR-RV, e resta valido rispetto a quella baseline. Con target `log_rv` il forecast NN batteva HAR-RV del **30% in QLIKE su test** (0.257 vs 0.368; naive per persistenza 0.807), con val→test coerenti. Giudice: `scripts/vol/dev_vols_qlike.py` (gate pre-registrato: `QLIKE_NN ≤ 0.95·QLIKE_HAR` **e** `< QLIKE_naive`). Modello: iTransformer a 5 membri. ⚠ Nessun backtest di trading sui modelli vol: `03_backtest.py` non ha senso su un target di varianza.
 
 🇮🇹 **Significatività del confronto (Diebold-Mariano, 2026-07-26).** Il rapporto di QLIKE è una stima puntuale: l'inferenza richiede una varianza **HAC**, perché il target somma h=30 barre e le finestre si sovrappongono (§7ter). Su una coppia modello/scaler riaddestrata sullo stesso dataset — 5 seed, nessun contatto col test in training — il vantaggio su HAR-RV è: **val −26.6%** (0.26206 vs 0.35698), DM = −3.97, **p = 7.3·10⁻⁵**; **test −36.1%** (0.23631 vs 0.36998), DM = −4.79, **p = 1.7·10⁻⁶**; HAC lag 29, n ≈ 6.5k, **n_eff ≈ 216**. Il vantaggio **sopravvive** alla correzione per sovrapposizione. Il NN batte HAR in **ogni regime**, stress incluso e validato su test (r0 0.570 · r1 0.542 · r2 0.695 come rapporti NN/HAR). ⚠ Il −36.1% e il −30.2% storico **non sono la stessa misura**: finestre di test diverse (il dataset è stato esteso) e modello riaddestrato — contro HAR-RV la banda è **−27% ÷ −36% secondo split e vintage**, con p ≤ 1.7·10⁻⁶. ⚠⚠ **Questi numeri sono misurati contro HAR-RV, che dal 2026-07-30 NON è più la baseline di riferimento:** il gate C2 ha mostrato che HAR-CJ è una baseline significativamente più forte e la **banda pubblicata è ora −22.42% ÷ −31.65%** (contro HAR-C, dopo C3; scritta −23% ÷ −32% fino al 2026-08-05) — vedi il paragrafo seguente.
