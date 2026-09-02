@@ -405,6 +405,50 @@ is byte-identical, so deployment is a calendar choice, not a risk one.
 
 ---
 
+### ③ Leva `--adaptive` in `04b`: regola d'entry per banda DVOL, INERTE di default · `--adaptive` lever in `04b`: DVOL-band entry rule, INERT by default
+
+🇮🇹 `scripts/04b_vol_paper.py` accetta `--adaptive` (pattern di `--hedge`: cfg `None` = path v1 **bit-identico**,
+parametri congelati **obbligatori ed espliciti** `--adaptive-dvol-threshold` e `--adaptive-k`, fail-fast; incompatibile
+con `--hedge`, pin-close e sizing vega). Con il flag l'entry **non usa il segnale NN**: legge l'ultimo DVOL del poller
+`01c` (`read_dvol`, `None` se più vecchio di 1 h → flat, mai un default su una banda) e sceglie la struttura per banda —
+**sopra soglia** short straddle daily incondizionato con il macchinario v1 (`open_straddle`, side −1); **sotto soglia**
+short iron butterfly a ~7 giorni (`pick_butterfly`: expiry più vicina a 168 h, corpo ATM, ali allo strike quotato più
+vicino a `S·exp(±k·σ_trail·√T)` e strettamente OTM), aperta **solo al tick delle 08 UTC del venerdì**. `open_butterfly`
+esegue 4 ordini market sequenziali **ali prima, corpo dopo**; se una gamba fallisce o la sequenza supera
+`--adaptive-fill-timeout` (120 s), ciò che è stato eseguito viene flattenato in ordine inverso nello stesso tick e il
+roll finisce in `trades.jsonl` come `incomplete` — mai una gamba nuda. `maybe_settle` aggiunge il ramo a 4 gambe
+(ali long: `max(S−Kc,0)/S`, `max(Kp−S,0)/S`) lasciando la formula a 2 gambe **invariata**; diario della regola in
+`results/vol_paper/adaptive.jsonl` (creato solo con il flag); azioni nel forecasts log con prefisso `ADAPT_`.
+**Test `tests/test_adaptive_structure.py` (10):** inerzia (con cfg `None` il tick non legge il DVOL e apre dal
+segnale come v1; formula di settlement a 2 gambe verificata a mano), meccanica (expiry e ali OTM, ordine ali→corpo,
+regola di completamento con flatten inverso e record `incomplete`, settlement a 4 gambe a mano, bande), fail-fast
+(DVOL stale → `None`; flag senza parametri o con altro lever → `SystemExit`). Suite: **504 passed**.
+⚠ **Inerte e NON deployato**: `04b` gira invariato sul VPS senza il flag. L'attivazione richiede una
+pre-registrazione del forward test **in questo file** prima del go-live, e va fatta dopo un settlement con ledger
+flat, con `--execute`, dopo la chiusura di `E1 stadio 2`.
+
+**EN** `scripts/04b_vol_paper.py` accepts `--adaptive` (the `--hedge` pattern: cfg `None` = **bit-identical** v1 path,
+frozen parameters `--adaptive-dvol-threshold` and `--adaptive-k` **required and explicit**, fail-fast; incompatible with
+`--hedge`, pin-close and vega sizing). With the flag the entry **does not use the NN signal**: it reads the latest DVOL
+from the `01c` poller (`read_dvol`, `None` if older than 1 h → flat, never a default onto a band) and picks the
+structure by band — **above threshold** unconditional short daily straddle with the v1 machinery (`open_straddle`,
+side −1); **below threshold** short ~7-day iron butterfly (`pick_butterfly`: expiry nearest 168 h, ATM body, wings at
+the listed strike nearest `S·exp(±k·σ_trail·√T)` and strictly OTM), opened **only at the Friday 08 UTC tick**.
+`open_butterfly` places 4 sequential market orders **wings first, body after**; if a leg fails or the sequence exceeds
+`--adaptive-fill-timeout` (120 s), what was executed is flattened in reverse order within the same tick and the roll
+lands in `trades.jsonl` as `incomplete` — never a naked leg. `maybe_settle` adds the 4-leg branch (long wings:
+`max(S−Kc,0)/S`, `max(Kp−S,0)/S`) leaving the 2-leg formula **unchanged**; rule diary in
+`results/vol_paper/adaptive.jsonl` (created only with the flag); forecasts-log actions carry the `ADAPT_` prefix.
+**Tests `tests/test_adaptive_structure.py` (10):** inertia (with cfg `None` the tick never reads the DVOL and opens
+from the signal as v1; 2-leg settlement formula checked by hand), mechanics (expiry and OTM wings, wings→body order,
+completion rule with reverse flatten and `incomplete` record, 4-leg settlement by hand, bands), fail-fast (stale DVOL
+→ `None`; flag without parameters or with another lever → `SystemExit`). Suite: **504 passed**.
+⚠ **Inert and NOT deployed**: `04b` runs unchanged on the VPS without the flag. Activation requires a forward-test
+pre-registration **in this file** before go-live, after a settlement with a flat ledger, with `--execute`, after
+`E1 stage 2` closes.
+
+---
+
 ## ▶️ RIPARTI DA QUI — 2026-08-29
 
 > 🇮🇹 **DOMANI, IN UNA RIGA: nessun lavoro in sospeso, nessun gate aperto toccato. Si riparte

@@ -127,6 +127,26 @@ IV_MAX_AGE_MIN = 30.0
 FEE_PER_CONTRACT = 0.0003        # IT: taker opzioni, BTC/contratto | EN: options taker, BTC/contract
 FEE_CAP_FRAC = 0.125             # IT: cap 12.5% del premio | EN: 12.5% premium cap
 
+# IT: leva ADATTIVA (--adaptive), INERTE di default: senza flag nulla di questo blocco
+#     viene letto e il path v1 è bit-identico. Con il flag la regola d'entry NON usa il
+#     segnale NN: legge il DVOL (indice mainnet dal poller 01c) e sceglie la struttura
+#     per banda — sopra soglia short straddle daily (macchinario v1), sotto soglia short
+#     iron butterfly a ~7 giorni con 4 gambe (ali comprate PRIMA, corpo venduto dopo).
+#     Soglia e k sono parametri OBBLIGATORI ed espliciti (pattern MINOR-3), mai default.
+# EN: ADAPTIVE lever (--adaptive), INERT by default: without the flag nothing in this
+#     block is read and the v1 path is bit-identical. With the flag the entry rule does
+#     NOT use the NN signal: it reads the DVOL (mainnet index from the 01c poller) and
+#     picks the structure by band — above threshold short daily straddle (v1 machinery),
+#     below threshold short ~7-day iron butterfly with 4 legs (wings bought FIRST, body
+#     sold after). Threshold and k are REQUIRED explicit parameters (MINOR-3 pattern).
+DVOL_PATH = Path("data/iv/dvol.parquet")
+DVOL_MAX_AGE_H = 1.0             # IT: fail-fast se il DVOL è più vecchio | EN: fail-fast if older
+ADAPTIVE_LOG_PATH = OUT_DIR / "adaptive.jsonl"   # IT/EN: creato SOLO con --adaptive / ONLY with --adaptive
+ADAPTIVE_TENOR_HOURS = 168.0     # IT: expiry più vicina a 7 giorni | EN: expiry nearest to 7 days
+ADAPTIVE_ENTRY_HOUR = 8          # IT: entry farfalla al tick delle 08 UTC | EN: butterfly entry at the 08 UTC tick
+ADAPTIVE_ENTRY_WEEKDAY = 4       # IT: venerdì (settlement weekly) | EN: Friday (weekly settlement)
+ADAPTIVE_TRAIL_H = 720           # IT: σ_trail = RV 30g trailing | EN: σ_trail = trailing 30d RV
+
 
 # ──────────────────────────── Deribit testnet client ────────────────────────────
 class DeribitTestnet:
@@ -184,6 +204,45 @@ class DeribitTestnet:
                    if i["strike"] == k and i["option_type"] == "put")
         return {"expiry_ms": int(exp), "t_hours": (exp - now_ms) / 3.6e6,
                 "strike": float(k), "index": idx, "call": call, "put": put}
+
+    # IT: --adaptive — iron butterfly: expiry più vicina al tenor (fra TUTTE le opzioni
+    #     quotate, quindi la weekly a ~7g), corpo ATM come pick_straddle, ali allo strike
+    #     quotato più vicino a S·exp(±k·σ·√T) e STRETTAMENTE OTM rispetto al corpo.
+    # EN: --adaptive — iron butterfly: expiry nearest the tenor (among ALL listed
+    #     options, i.e. the ~7d weekly), ATM body as pick_straddle, wings at the listed
+    #     strike nearest S·exp(±k·σ·√T) and STRICTLY OTM of the body.
+    def pick_butterfly(self, tenor_hours: float, k: float, sigma_ann: float) -> dict:
+        ins = self.get("public/get_instruments",
+                       {"currency": "BTC", "kind": "option", "expired": "false"})
+        now_ms = time.time() * 1000
+        by_exp = {}
+        for i in ins:
+            by_exp.setdefault(i["expiration_timestamp"], []).append(i)
+        exp = min(by_exp, key=lambda e: abs((e - now_ms) / 3.6e6 - tenor_hours))
+        idx = float(self.get("public/get_index_price",
+                             {"index_name": "btc_usd"})["index_price"])
+        strikes = sorted({i["strike"] for i in by_exp[exp]})
+        k0 = min(strikes, key=lambda s: abs(s - idx))
+        t_years = max((exp - now_ms) / 3.6e6, 1.0) / HOURS_PER_YEAR
+        sv = k * sigma_ann * np.sqrt(t_years)
+        up = [s for s in strikes if s > k0]
+        dn = [s for s in strikes if s < k0]
+        if not up or not dn:
+            raise RuntimeError("griglia strike senza ali OTM / strike grid without OTM wings")
+        kc = min(up, key=lambda s: abs(s - idx * np.exp(sv)))
+        kp = min(dn, key=lambda s: abs(s - idx * np.exp(-sv)))
+
+        def _name(strike, typ):
+            return next(i["instrument_name"] for i in by_exp[exp]
+                        if i["strike"] == strike and i["option_type"] == typ)
+
+        return {"expiry_ms": int(exp), "t_hours": (exp - now_ms) / 3.6e6,
+                "strike": float(k0), "index": idx,
+                "call": _name(k0, "call"), "put": _name(k0, "put"),
+                "wing_call": _name(kc, "call"), "wing_put": _name(kp, "put"),
+                "wing_strikes": [float(kc), float(kp)],
+                "k_eff": [float(abs(np.log(kc / idx)) / (sigma_ann * np.sqrt(t_years))),
+                          float(abs(np.log(kp / idx)) / (sigma_ann * np.sqrt(t_years)))]}
 
     def mark_price(self, instrument: str) -> float:
         return float(self.get("public/ticker",
@@ -255,6 +314,66 @@ def read_iv() -> dict | None:
     # EN: annualized IV (%) → implied variance over the 30h window.
     var_iv = (iv / 100.0) ** 2 * (TENOR_HOURS / HOURS_PER_YEAR)
     return {"iv_ts": ts, "iv_30h": iv, "var_iv": var_iv, "iv_age_min": age_min}
+
+
+# ──────────────────────────── adattivo (--adaptive) ────────────────────────────
+def read_dvol(max_age_h: float = DVOL_MAX_AGE_H) -> dict | None:
+    # IT: ultimo punto DVOL del poller 01c (indice mainnet, frazione); None se il file
+    #     manca o è più vecchio di max_age_h → la regola resta FLAT (fail-fast, mai
+    #     un default silenzioso su una banda).
+    # EN: latest DVOL point from the 01c poller (mainnet index, fraction); None if the
+    #     file is missing or older than max_age_h → the rule stays FLAT (fail-fast,
+    #     never a silent default onto a band).
+    if not DVOL_PATH.exists():
+        return None
+    dv = pd.read_parquet(DVOL_PATH, columns=["timestamp", "dvol"]).dropna()
+    if dv.empty:
+        return None
+    row = dv.sort_values("timestamp").iloc[-1]
+    ts = pd.Timestamp(row["timestamp"])
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    age_h = (pd.Timestamp.now(tz="UTC") - ts).total_seconds() / 3600.0
+    if age_h > max_age_h or not np.isfinite(row["dvol"]) or row["dvol"] <= 0:
+        return None
+    return {"dvol": float(row["dvol"]) / 100.0, "dvol_ts": ts, "dvol_age_h": age_h}
+
+
+def sigma_trail_30d(candles: pd.DataFrame, trail_h: int = ADAPTIVE_TRAIL_H) -> float:
+    # IT: vol realizzata annualizzata sulle ultime trail_h barre orarie (causale) —
+    #     la σ con cui si collocano le ali, stessa definizione dei calcoli offline.
+    # EN: annualised realised vol over the last trail_h hourly bars (causal) — the σ
+    #     wings are placed with, same definition as the offline computations.
+    lr2 = np.log(candles["close"] / candles["close"].shift(1)) ** 2
+    return float(np.sqrt(lr2.tail(trail_h).sum() / trail_h * HOURS_PER_YEAR))
+
+
+def adaptive_band(dvol: float, threshold: float) -> str:
+    # IT/EN: la banda si legge UNA volta all'entry; nessuna isteresi (posizione al settlement).
+    return "daily" if dvol >= threshold else "fly"
+
+
+def build_adaptive_cfg(args) -> dict | None:
+    # IT: config SOLO con --adaptive (None = path v1). Fail-fast: soglia DVOL e k
+    #     ESPLICITI (valori congelati da una pre-registrazione, mai default di design);
+    #     incompatibile con --hedge, pin-close e sizing vega (nessuno è nel disegno).
+    # EN: config ONLY with --adaptive (None = v1 path). Fail-fast: EXPLICIT DVOL
+    #     threshold and k (frozen by a pre-registration, never design defaults);
+    #     incompatible with --hedge, pin-close and vega sizing (none is in the design).
+    if not args.adaptive:
+        return None
+    if args.adaptive_dvol_threshold is None or args.adaptive_k is None:
+        raise SystemExit(
+            "--adaptive richiede --adaptive-dvol-threshold e --adaptive-k ESPLICITI "
+            "(valori congelati dalla pre-registrazione) / --adaptive requires EXPLICIT "
+            "--adaptive-dvol-threshold and --adaptive-k (frozen by the pre-registration)")
+    if args.hedge or args.pin_close_hours is not None or args.size_mode != "contracts":
+        raise SystemExit(
+            "--adaptive è incompatibile con --hedge, --pin-close-* e --size-mode vega / "
+            "--adaptive is incompatible with --hedge, --pin-close-* and --size-mode vega")
+    return {"threshold": float(args.adaptive_dvol_threshold), "k": float(args.adaptive_k),
+            "fill_timeout_s": float(args.adaptive_fill_timeout),
+            "tenor_hours": float(args.adaptive_tenor_hours)}
 
 
 # ──────────────────────────── persistenza ────────────────────────────
@@ -763,10 +882,29 @@ def maybe_settle(db: DeribitTestnet, pos: dict) -> bool:
     amt = float(pos.get("amount", SIZE_CONTRACTS))
     payoff = abs(dp - pos["strike"]) / dp * amt
     premium = (pos["prem_call"] + pos["prem_put"]) * amt
+    extra = {}
+    if pos.get("wings"):
+        # IT: iron butterfly (--adaptive): le ali LONG pagano max(S−Kc,0)/S e max(Kp−S,0)/S
+        #     in BTC/contratto e il loro premio è stato PAGATO. Il PnL è quello dello
+        #     straddle corto più quello dello strangle lungo: side·((payoff_corpo −
+        #     payoff_ali) − (premio_corpo − premio_ali)) − fee. Le posizioni a 2 gambe
+        #     non entrano qui: la formula v1 sotto è invariata.
+        # EN: iron butterfly (--adaptive): the LONG wings pay max(S−Kc,0)/S and
+        #     max(Kp−S,0)/S in BTC/contract and their premium was PAID. PnL is the short
+        #     straddle's plus the long strangle's: side·((body_payoff − wing_payoff) −
+        #     (body_premium − wing_premium)) − fee. 2-leg positions never enter here:
+        #     the v1 formula below is unchanged.
+        kc, kp = pos["wing_strikes"]
+        payoff_wings = (max(dp - kc, 0.0) + max(kp - dp, 0.0)) / dp * amt
+        premium_wings = (pos["prem_wing_call"] + pos["prem_wing_put"]) * amt
+        extra = {"payoff_body_btc": payoff, "premium_body_btc": premium,
+                 "payoff_wings_btc": payoff_wings, "premium_wings_btc": premium_wings}
+        payoff = payoff - payoff_wings
+        premium = premium - premium_wings
     pnl = pos["side"] * (payoff - premium) - pos["fee_btc"]
     rec = {**pos, "delivery_price": dp, "payoff_btc": payoff, "pnl_btc": pnl,
            "exit_mode": "settlement",
-           "settled_ts": str(pd.Timestamp.now(tz="UTC").floor("s"))}
+           "settled_ts": str(pd.Timestamp.now(tz="UTC").floor("s")), **extra}
     with open(TRADES_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, default=str) + "\n")
     save_position(None)
@@ -822,9 +960,128 @@ def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool,
     return pos
 
 
+def _adaptive_log(rec: dict):
+    # IT/EN: diario della regola adattiva (banda, DVOL, esito) — file creato SOLO con --adaptive.
+    with open(ADAPTIVE_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, default=str) + "\n")
+
+
+def open_butterfly(db: DeribitTestnet, pick: dict, execute: bool, timeout_s: float,
+                   meta: dict) -> dict | None:
+    # IT: apre lo short iron butterfly in 4 ordini market SEQUENZIALI, ali PRIMA (buy) e
+    #     corpo DOPO (sell): fra i fill la struttura incompleta è long gamma. Regola di
+    #     completamento: se una gamba fallisce o la sequenza supera timeout_s, ciò che è
+    #     stato eseguito viene FLATTENATO nello stesso tick (ordine inverso) e il roll è
+    #     registrato in trades.jsonl come `incomplete` — mai una gamba nuda oltre il tick.
+    #     Senza --execute i fill sono simulati al mark (nessuna informazione di esecuzione).
+    # EN: opens the short iron butterfly as 4 SEQUENTIAL market orders, wings FIRST (buy)
+    #     and body AFTER (sell): between fills the incomplete structure is long gamma.
+    #     Completion rule: if a leg fails or the sequence exceeds timeout_s, whatever was
+    #     executed is FLATTENED in the same tick (reverse order) and the roll is recorded in
+    #     trades.jsonl as `incomplete` — never a naked leg beyond the tick. Without
+    #     --execute fills are simulated at mark (no execution information).
+    legs = [("wing_call", pick["wing_call"], "buy"), ("wing_put", pick["wing_put"], "buy"),
+            ("call", pick["call"], "sell"), ("put", pick["put"], "sell")]
+    amount = SIZE_CONTRACTS
+    t0 = time.time()
+    filled, prem, fill_ts = [], {}, {}
+    failed = None
+    for name, inst, verb in legs:
+        if time.time() - t0 > timeout_s:
+            failed = f"timeout prima di {name} / before {name}"
+            break
+        try:
+            prem[name] = (db.market_order(inst, verb, amount) if execute
+                          else db.mark_price(inst))
+        except Exception as e:  # noqa: BLE001
+            failed = f"{name}: {type(e).__name__}: {e}"
+            break
+        fill_ts[name] = time.time()
+        filled.append((name, inst, verb))
+    if failed is not None:
+        # IT/EN: flatten in ordine inverso con il verbo opposto; fail-soft per gamba.
+        flatten = []
+        for name, inst, verb in reversed(filled):
+            back = "sell" if verb == "buy" else "buy"
+            try:
+                px = db.market_order(inst, back, amount) if execute else db.mark_price(inst)
+                flatten.append({"leg": name, "instrument": inst, "side": back, "price": px})
+            except Exception as e:  # noqa: BLE001
+                flatten.append({"leg": name, "instrument": inst, "side": back,
+                                "error": f"{type(e).__name__}: {e}"})
+                log.error(f"FLATTEN FALLITO su {inst}: gamba potenzialmente NUDA — "
+                          f"verificare a mano / FLATTEN FAILED: leg may be NAKED — check manually")
+        rec = {"entry_ts": str(pd.Timestamp.now(tz="UTC").floor("s")), "structure": "iron_butterfly",
+               "exit_mode": "incomplete", "executed": bool(execute), "reason": failed,
+               "expiry_ms": pick["expiry_ms"], "strike": pick["strike"],
+               "wing_strikes": pick["wing_strikes"], "legs_filled": [f[0] for f in filled],
+               "prem": prem, "flatten": flatten, "span_s": round(time.time() - t0, 3), **meta}
+        with open(TRADES_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, default=str) + "\n")
+        log.warning(f"INCOMPLETE butterfly ({failed}) — {len(filled)} gambe flattenate / legs flattened")
+        return None
+    fee = sum(fee_btc(prem[n], amount) for n in ("call", "put", "wing_call", "wing_put"))
+    pos = {
+        "entry_ts": str(pd.Timestamp.now(tz="UTC").floor("s")),
+        "structure": "iron_butterfly", "side": -1, "executed": bool(execute),
+        "expiry_ms": pick["expiry_ms"], "t_hours_at_entry": round(pick["t_hours"], 2),
+        "strike": pick["strike"], "index_at_entry": pick["index"],
+        "call": pick["call"], "put": pick["put"],
+        "wings": [pick["wing_call"], pick["wing_put"]], "wing_strikes": pick["wing_strikes"],
+        "k_eff": pick["k_eff"], "amount": amount,
+        "prem_call": prem["call"], "prem_put": prem["put"],
+        "prem_wing_call": prem["wing_call"], "prem_wing_put": prem["wing_put"],
+        "fee_btc": fee, "fill_span_s": round(fill_ts["put"] - fill_ts["wing_call"], 3),
+        "fill_ts": {k: str(pd.Timestamp(v, unit="s", tz="UTC")) for k, v in fill_ts.items()},
+        **meta,
+    }
+    save_position(pos)
+    net = prem["call"] + prem["put"] - prem["wing_call"] - prem["wing_put"]
+    log.info(f"OPEN SHORT iron butterfly K={pick['strike']:.0f} ali/wings={pick['wing_strikes']} "
+             f"net={net:.5f} BTC span={pos['fill_span_s']}s "
+             f"({'ORDINI REALI testnet' if execute else 'fill SIMULATO al mark'})")
+    return pos
+
+
+def adaptive_entry(fc: VolForecaster, db: DeribitTestnet, execute: bool, acfg: dict,
+                   sig: dict, now: pd.Timestamp) -> str:
+    # IT: regola d'entry adattiva, da FLAT. Legge il DVOL (fail-fast → NO_DVOL, flat),
+    #     sceglie la banda: daily → short straddle incondizionato col macchinario v1
+    #     (open_straddle, side −1); fly → farfalla SOLO al tick delle 08 UTC del venerdì
+    #     (7 DTE esatti), altrimenti WAIT. Ritorna l'azione da scrivere nel forecasts log.
+    # EN: adaptive entry rule, from FLAT. Reads the DVOL (fail-fast → NO_DVOL, flat), picks
+    #     the band: daily → unconditional short straddle with the v1 machinery
+    #     (open_straddle, side −1); fly → butterfly ONLY at the Friday 08 UTC tick (exactly
+    #     7 DTE), else WAIT. Returns the action to write in the forecasts log.
+    dv = read_dvol()
+    rec = {"ts": str(now.floor("s")), "dvol": None, "band": None, "action": None}
+    if dv is None:
+        rec["action"] = "ADAPT_NO_DVOL"
+        _adaptive_log(rec)
+        return rec["action"]
+    band = adaptive_band(dv["dvol"], acfg["threshold"])
+    rec.update({"dvol": dv["dvol"], "dvol_age_h": round(dv["dvol_age_h"], 3), "band": band})
+    meta = {"dvol_at_entry": dv["dvol"], "band": band, "edge": sig["edge"],
+            "rv_pred": sig["rv_pred"], "var_iv": sig["var_iv"]}
+    if band == "daily":
+        open_straddle(db, -1, sig, execute, None)
+        rec["action"] = "ADAPT_SHORT_DAILY"
+    elif now.weekday() == ADAPTIVE_ENTRY_WEEKDAY and now.hour == ADAPTIVE_ENTRY_HOUR:
+        sigma = sigma_trail_30d(fc.candles)
+        pick = db.pick_butterfly(acfg["tenor_hours"], acfg["k"], sigma)
+        rec.update({"sigma_trail": sigma, "pick": {k: pick[k] for k in
+                                                    ("expiry_ms", "t_hours", "strike", "wing_strikes", "k_eff")}})
+        pos = open_butterfly(db, pick, execute, acfg["fill_timeout_s"], meta)
+        rec["action"] = "ADAPT_FLY" if pos is not None else "ADAPT_INCOMPLETE"
+    else:
+        rec["action"] = "ADAPT_WAIT_FRIDAY"
+    _adaptive_log(rec)
+    return rec["action"]
+
+
 def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
          hedge_cfg: dict | None = None, pin_cfg: dict | None = None,
-         size_cfg: dict | None = None):
+         size_cfg: dict | None = None, adaptive_cfg: dict | None = None):
     # IT: un ciclo completo: settlement → pin-close (SOLO v2) → forecast → IV →
     #     regola → log (sempre) → hedge (SOLO v2). Tutti i cfg=None = v1 bit-identico.
     # EN: one full cycle: settlement → pin-close (v2 ONLY) → forecast → IV → rule
@@ -855,16 +1112,27 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
             row["action"] = "SHORT"
         else:
             row["action"] = "FLAT"
+    sig = {"edge": row["edge"], "rv_pred": f["rv_pred"], "var_iv": row["var_iv"]}
+    # IT: --adaptive — da FLAT la decisione NON è il segnale NN ma la banda DVOL; la
+    #     riga del forecasts log porta l'azione adattiva (prefisso ADAPT_) e il segnale
+    #     resta registrato (edge/rv_pred/var_iv) per le analisi. Con adaptive_cfg=None
+    #     nulla cambia: v1 bit-identico.
+    # EN: --adaptive — from FLAT the decision is NOT the NN signal but the DVOL band; the
+    #     forecasts-log row carries the adaptive action (ADAPT_ prefix) and the signal is
+    #     still recorded (edge/rv_pred/var_iv) for analysis. With adaptive_cfg=None
+    #     nothing changes: bit-identical v1.
+    if adaptive_cfg is not None:
+        row["action"] = ("ADAPT_HOLD" if pos is not None else
+                         adaptive_entry(fc, db, execute, adaptive_cfg, sig,
+                                        pd.Timestamp.now(tz="UTC")))
     append_forecast(row)
     log.info(f"tick {f['candle_ts']}: rv_pred={f['rv_pred']:.3e} "
              f"var_iv={row['var_iv']:.3e} edge={row['edge']:+.3f} → {row['action']}"
              if iv is not None else
              f"tick {f['candle_ts']}: rv_pred={f['rv_pred']:.3e} → NO_IV (poller stale/assente)")
 
-    if row["action"] in ("LONG", "SHORT"):
-        open_straddle(db, +1 if row["action"] == "LONG" else -1,
-                      {"edge": row["edge"], "rv_pred": f["rv_pred"],
-                       "var_iv": row["var_iv"]}, execute, size_cfg)
+    if adaptive_cfg is None and row["action"] in ("LONG", "SHORT"):
+        open_straddle(db, +1 if row["action"] == "LONG" else -1, sig, execute, size_cfg)
 
     # IT: A6 — dopo l'eventuale open, così la riga cattura le leg della posizione
     #     appena aperta al momento dell'ingresso (half-spread di entry reale).
@@ -983,6 +1251,25 @@ def main():
     ap.add_argument("--size-max-contracts", type=float, default=10.0,
                     help="cap fail-safe sull'amount vega-normalizzato / fail-safe "
                          "cap on the vega-normalized amount")
+    # IT: leva adattiva — INERTE senza flag; soglia e k OBBLIGATORI ed espliciti.
+    # EN: adaptive lever — INERT without the flag; threshold and k REQUIRED and explicit.
+    ap.add_argument("--adaptive", action="store_true",
+                    help="regola d'entry per banda DVOL (straddle daily sopra soglia, iron "
+                         "butterfly ~7g sotto), senza segnale NN; INERTE di default / "
+                         "DVOL-band entry rule (daily straddle above threshold, ~7d iron "
+                         "butterfly below), no NN signal; INERT by default")
+    ap.add_argument("--adaptive-dvol-threshold", type=float, default=None,
+                    help="soglia DVOL (frazione) OBBLIGATORIA con --adaptive / DVOL "
+                         "threshold (fraction) REQUIRED with --adaptive")
+    ap.add_argument("--adaptive-k", type=float, default=None,
+                    help="k delle ali in unità di σ_trail·√T, OBBLIGATORIO con --adaptive / "
+                         "wing k in σ_trail·√T units, REQUIRED with --adaptive")
+    ap.add_argument("--adaptive-fill-timeout", type=float, default=120.0,
+                    help="secondi entro cui le 4 gambe devono essere eseguite, altrimenti "
+                         "flatten / seconds within which the 4 legs must fill, else flatten")
+    ap.add_argument("--adaptive-tenor-hours", type=float, default=ADAPTIVE_TENOR_HOURS,
+                    help="tenor della farfalla (expiry più vicina) / butterfly tenor "
+                         "(nearest expiry)")
     args = ap.parse_args()
 
     cfg = load_config("config/default.yaml")
@@ -1066,15 +1353,26 @@ def main():
                     f"USD/vol-pt cap={size_cfg['max_contracts']} contratti — la "
                     f"size fissa v1 è SOSPESA / the v1 fixed size is SUSPENDED")
 
+    # IT: --adaptive — validazione fail-fast (soglia/k espliciti, nessun altro lever v2).
+    # EN: --adaptive — fail-fast validation (explicit threshold/k, no other v2 lever).
+    adaptive_cfg = build_adaptive_cfg(args)
+    if adaptive_cfg is not None:
+        log.warning(f"ADATTIVO ATTIVO: soglia DVOL={adaptive_cfg['threshold']} k={adaptive_cfg['k']} "
+                    f"timeout={adaptive_cfg['fill_timeout_s']}s tenor={adaptive_cfg['tenor_hours']}h — "
+                    f"il segnale NN NON decide l'entry; verificare che la pre-registrazione sia "
+                    f"CHIUSA / the NN signal does NOT decide entries; verify the pre-registration "
+                    f"is FROZEN")
+
     log.info(f"vol-paper avviato/started — soglia edge ±{EDGE_THRESHOLD}, "
              f"size {SIZE_CONTRACTS} contratti/leg, "
              f"{'ESECUZIONE TESTNET' if args.execute else 'SIMULAZIONE mark-price'}"
              f"{' + DELTA-HEDGE v2' if hedge_cfg is not None else ''}"
              f"{' + PIN-CLOSE v2' if pin_cfg is not None else ''}"
-             f"{' + SIZING-VEGA v2' if size_cfg is not None else ''}")
+             f"{' + SIZING-VEGA v2' if size_cfg is not None else ''}"
+             f"{' + ADATTIVO/ADAPTIVE' if adaptive_cfg is not None else ''}")
     while True:
         try:
-            tick(fc, db, args.execute, hedge_cfg, pin_cfg, size_cfg)
+            tick(fc, db, args.execute, hedge_cfg, pin_cfg, size_cfg, adaptive_cfg)
         except KeyboardInterrupt:
             return
         except Exception as e:
