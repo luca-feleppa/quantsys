@@ -345,6 +345,37 @@ a decision for the user.
 
 ---
 
+## ▶️ RIPARTI DA QUI — 2026-09-02
+
+> 🇮🇹 **DOMANI, IN UNA RIGA: nessun gate pubblico toccato, nessun lavoro in sospeso sulla linea
+> pubblica. Si riparte dalla routine (`.vvio_sessione.ps1`).** Giornata a **zero GPU e zero
+> scritture** su `data/`, `models/`, `results/`. `E1 stadio 2` resta **aperto e intatto** (20/40),
+> il vintage macro resta `20260730`, `raw_candles.parquet` resta fermo al 20/08 — nessun
+> `-RefreshCandles` applicato. Le date restano quelle del 29/08: refresh candele ed E1 ~9-10/09.
+> **EN** **TOMORROW, IN ONE LINE: no public gate touched, nothing pending on the public line.
+> Start from the routine (`.vvio_sessione.ps1`).** A **zero-GPU, zero-write** day on `data/`,
+> `models/`, `results/`. `E1 stage 2` stays **open and intact** (20/40), the macro vintage stays
+> `20260730`, `raw_candles.parquet` stays at 20/08 — no `-RefreshCandles` applied. Dates unchanged
+> from 29/08: candle refresh and E1 ~9-10/09.
+
+### ① Routine di sessione — nulla di anomalo · Session routine — nothing anomalous
+
+🇮🇹 Pull VPS con i 4 collector **tutti freschi** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.6h);
+`hedge_state.json` assente sul VPS, coerente con `--hedge` disattivato. Macro archiviata al
+vintage `20260730`, **nessuna promozione**. Regime B7 fresco. MFIV +553 tick, wedge mediano
+**+3.17 vol pt** (colonna diagnostica). L2: copertura 70.9%, run corrente **1200h senza buchi**,
+`n_eff` 35.0 contro il gate 216. Leg opzioni n=61 ≥ 30. **`E1 stadio 2`: 20/40** (serie close al
+20/08: il warning «STALE → SOTTOSTIMATO» è l'inferenza da proxy già documentata, nessun refresh).
+
+**EN** VPS pull with all 4 collectors **fresh** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.6h);
+`hedge_state.json` absent on the VPS, consistent with `--hedge` off. Macro archived at vintage
+`20260730`, **no promotion**. Regime B7 fresh. MFIV +553 ticks, median wedge **+3.17 vol pt**
+(diagnostic column). L2: 70.9% coverage, current run **1200h with no gap**, `n_eff` 35.0 against
+the 216 gate. Option legs n=61 ≥ 30. **`E1 stage 2`: 20/40** (close series at 20/08: the
+«STALE → UNDERSTATED» warning is the documented proxy inference, no refresh).
+
+---
+
 ## ▶️ RIPARTI DA QUI — 2026-08-29
 
 > 🇮🇹 **DOMANI, IN UNA RIGA: nessun lavoro in sospeso, nessun gate aperto toccato. Si riparte

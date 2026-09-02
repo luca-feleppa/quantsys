@@ -1,5 +1,4 @@
 ﻿# RIPRESA — lista residua · remaining list
-
 > 🇮🇹 Riscritto 2026-07-28 (v5, riordinata per scadenza: il gate leg è a un giorno, la finestra GPU è tornata non vuota). File EFFIMERO: eliminarlo a lista esaurita. Pre-registrazioni vincolanti e dettaglio: `STATUS.md` (C1 e A10 in cima + sezione 2026-07-28 sessione 2).
 > **EN** Rewritten 2026-07-28 (v5, reordered by due date: the leg gate is one day out and the GPU queue is non-empty again). EPHEMERAL file: delete when exhausted. Binding pre-registrations and detail: `STATUS.md` (C1 and A10 on top + the 2026-07-28 session-2 section).
 
