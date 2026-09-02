@@ -602,7 +602,7 @@ quantsys_project/
 ├── results/
 │   ├── {arch}/                  # dashboard_results.json, live_signals.jsonl
 │   ├── vols/                    # report giudici vol
-│   └── vol_paper/               # forecasts.parquet, trades.jsonl, position.json, baseline_report.json, exec_diag.jsonl (A6: bid/ask+greeks diagnostici / diagnostic), hedge_state.json + hedge_ledger.jsonl (v2, SOLO con --hedge / --hedge only)
+│   └── vol_paper/               # forecasts.parquet, trades.jsonl, position.json, baseline_report.json, exec_diag.jsonl (A6: bid/ask+greeks diagnostici / diagnostic), hedge_state.json + hedge_ledger.jsonl (v2, SOLO con --hedge / --hedge only) · record a N gambe: corpo = prime 2, campi `_all` solo oltre 2 / N-leg records: body = first 2, `_all` fields only beyond 2
 ├── docs/                        # STATUS_ARCHIVE_2026H1.md (storico ante 07-08, read-only), MODEL_IMPROVEMENTS, ROADMAP_VOL_BOOK, paper/
 ├── tests/                       # pytest (test_recent_fixes, test_live_training_parity, test_regime_incremental)
 ├── deploy/vps/                  # kit deploy VPS (setup_vps.sh + README)

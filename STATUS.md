@@ -376,6 +376,35 @@ the 216 gate. Option legs n=61 ≥ 30. **`E1 stage 2`: 20/40** (close series at 
 
 ---
 
+### ② `exec_diag` generalizzato a N gambe, record a 2 gambe byte-identico · `exec_diag` generalised to N legs, 2-leg record byte-identical
+
+🇮🇹 In `scripts/04b_vol_paper.py` gli aggregati di `exec_diag.jsonl` (`straddle_delta`, `net_delta`,
+`half_spread_btc`, `half_spread_frac`) escono da una funzione **pura**, `exec_diag_aggregate`, calcolata
+sul **corpo** (le prime due gambe, call e put ATM) con la stessa aritmetica e lo stesso ordine di somma
+di prima; le gambe aggiuntive di una posizione (`wings`, oggi assenti) entrano in `legs[]` dopo il corpo
+e i campi dell'intera struttura (`n_legs`, `body_idx`, `structure_delta_all`, `half_spread_*_all`)
+compaiono **solo** con più di due gambe. Consumatori allineati: `scripts/vol/hedge_dry_run.py` isola il
+corpo via `body_idx` invece di pretendere `len == 2`. **Prova di inerzia sui dati veri:**
+`tests/test_exec_diag_multileg.py` rigioca le **1236 righe** storiche di `exec_diag.jsonl` attraverso la
+nuova funzione con uguaglianza **esatta** (`==` sui float, nessuna chiave in più), più il contratto del
+corpo a 4 gambe e il contratto «dato mancante → `None`, mai zero». Suite: **494 passed**.
+⚠ **Non deployato sul VPS**: `04b` gira invariato, nessun riavvio (`E1 stadio 2` aperto). Il path a
+due gambe è byte-identico, quindi il deploy è una scelta di calendario, non di rischio.
+
+**EN** In `scripts/04b_vol_paper.py` the `exec_diag.jsonl` aggregates now come from a **pure** function,
+`exec_diag_aggregate`, computed on the **body** (first two legs, ATM call and put) with the same
+arithmetic and summation order as before; a position's extra legs (`wings`, absent today) follow the
+body in `legs[]`, and whole-structure fields (`n_legs`, `body_idx`, `structure_delta_all`,
+`half_spread_*_all`) appear **only** with more than two legs. Consumers aligned:
+`scripts/vol/hedge_dry_run.py` isolates the body via `body_idx` instead of requiring `len == 2`.
+**Inertia proof on real data:** `tests/test_exec_diag_multileg.py` replays the **1236** historical rows
+through the new function with **exact** equality (float `==`, no extra keys), plus the 4-leg body
+contract and the "missing datum → `None`, never zero" contract. Suite: **494 passed**.
+⚠ **Not deployed to the VPS**: `04b` runs unchanged, no restart (`E1 stage 2` open). The two-leg path
+is byte-identical, so deployment is a calendar choice, not a risk one.
+
+---
+
 ## ▶️ RIPARTI DA QUI — 2026-08-29
 
 > 🇮🇹 **DOMANI, IN UNA RIGA: nessun lavoro in sospeso, nessun gate aperto toccato. Si riparte

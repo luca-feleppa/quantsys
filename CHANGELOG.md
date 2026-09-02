@@ -6,6 +6,12 @@
 
 ---
 
+## 2026-09-02 — `exec_diag` a N gambe senza toccare il record a due · N-leg `exec_diag` without touching the two-leg record
+
+🇮🇹 Gli aggregati di `exec_diag.jsonl` in `scripts/04b_vol_paper.py` escono da una funzione pura (`exec_diag_aggregate`) calcolata sul corpo (prime due gambe); i campi dell'intera struttura compaiono solo oltre le due gambe. `hedge_dry_run.py` isola il corpo via `body_idx`. Test di replay sulle 1236 righe storiche con uguaglianza esatta (`tests/test_exec_diag_multileg.py`). Non deployato: `04b` invariato sul VPS.
+
+**EN** The `exec_diag.jsonl` aggregates in `scripts/04b_vol_paper.py` now come from a pure function (`exec_diag_aggregate`) computed on the body (first two legs); whole-structure fields appear only beyond two legs. `hedge_dry_run.py` isolates the body via `body_idx`. Replay test over the 1236 historical rows with exact equality (`tests/test_exec_diag_multileg.py`). Not deployed: `04b` unchanged on the VPS.
+
 ## 2026-08-29 — Le architetture diventano una pagina, e il denominatore smette di vivere a memoria · The architectures become a page, and the denominator stops living in someone's head
 
 🇮🇹 **`docs/architetture.html`** — dodici viste interattive delle architetture, ricavate leggendo i `forward` e non la documentazione: pipeline dei dati, iTransformer, TCN+Mamba, N-HiTS, CAFN, MoE/MoU, testa di output, più il cablaggio interno di attenzione, convoluzione, stato e decomposizione. I diagrammi sono **dati** (riga + corsia) e il layout li dispone, quindi i blocchi non possono sovrapporsi per costruzione; le forme dei tensori si derivano dai parametri modificabili in pagina, così si vede cosa cresce con `T` e cosa no. Bilingue **in un unico file** come il resto della documentazione: ogni stringa visibile è una coppia `{it, en}`, la cornice statica si popola da un dizionario e il toggle IT/EN non azzera lo stato. ⚠ Il ramo italiano è stato diffato **campo per campo** contro l'originale (testo, topologia degli archi, corsie, passi) e tutte le 12 viste sono state renderizzate in **entrambe** le lingue contro un DOM finto: in questo tipo di lavoro un errore non produce un guasto visibile, e una traduzione che riscrive in silenzio il testo esistente sarebbe indistinguibile da un miglioramento.
