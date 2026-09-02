@@ -63,6 +63,13 @@ def load_ticks(path: Path) -> list:
         if r.get("source") != "position":
             continue
         legs = r.get("legs", [])
+        # IT: il dry-run copre lo straddle: si isola il CORPO (`body_idx`, default
+        #     [0, 1]) — identico a prima sui record a 2 gambe, ignora le gambe extra.
+        # EN: the dry-run hedges the straddle: isolate the BODY (`body_idx`, default
+        #     [0, 1]) — identical on 2-leg records, ignores any extra legs.
+        body_idx = r.get("body_idx") or [0, 1]
+        if len(legs) >= 2 and max(body_idx) < len(legs):
+            legs = [legs[i] for i in body_idx]
         if len(legs) != 2 or any(
                 l.get(k) is None for l in legs for k in ("mark", "underlying", "delta")):
             continue

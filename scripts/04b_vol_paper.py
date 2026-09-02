@@ -322,6 +322,47 @@ def _leg_snapshot(db: DeribitTestnet, instrument: str) -> dict:
             "vega": _f(g.get("vega")), "theta": _f(g.get("theta"))}
 
 
+def exec_diag_aggregate(legs: list, side: int, n_body: int = 2) -> dict:
+    # IT: aggregati di struttura per exec_diag, funzione PURA (testabile offline).
+    #     Il CORPO sono le prime `n_body` gambe (call, put ATM) e gli aggregati storici
+    #     — straddle_delta, net_delta, half_spread_btc, half_spread_frac — si calcolano
+    #     SOLO sul corpo, con la stessa aritmetica e lo stesso ordine di somma di prima:
+    #     su un record a 2 gambe l'output è bit-identico. Con più di `n_body` gambe si
+    #     aggiungono (e SOLO allora) i campi dell'intera struttura: n_legs, body_idx,
+    #     structure_delta_all, half_spread_btc_all, half_spread_frac_all. I consumatori
+    #     che misurano l'ATM leggono il corpo; chi vuole la struttura legge `_all`.
+    # EN: structure aggregates for exec_diag, PURE function (offline-testable). The
+    #     BODY is the first `n_body` legs (ATM call, put) and the historical aggregates
+    #     — straddle_delta, net_delta, half_spread_btc, half_spread_frac — are computed
+    #     on the body ONLY, same arithmetic and summation order as before: on a 2-leg
+    #     record the output is bit-identical. With more than `n_body` legs, and ONLY
+    #     then, whole-structure fields are added: n_legs, body_idx, structure_delta_all,
+    #     half_spread_btc_all, half_spread_frac_all.
+    def _agg(ls):
+        d = None
+        if all(l["delta"] is not None for l in ls):
+            d = sum(l["delta"] for l in ls)
+        hs_btc = hs_frac = None
+        if all(l["bid"] is not None and l["ask"] is not None and l["mark"] is not None
+               for l in ls):
+            hs_btc = sum((l["ask"] - l["bid"]) / 2.0 for l in ls)
+            mark_sum = sum(l["mark"] for l in ls)
+            hs_frac = hs_btc / mark_sum if mark_sum > 0 else None
+        return d, hs_btc, hs_frac
+
+    body = legs[:n_body]
+    d_body, hs_btc, hs_frac = _agg(body)
+    out = {"straddle_delta": d_body,
+           "net_delta": (side * d_body) if d_body is not None else None,
+           "half_spread_btc": hs_btc, "half_spread_frac": hs_frac}
+    if len(legs) > n_body:
+        d_all, hs_btc_all, hs_frac_all = _agg(legs)
+        out.update({"n_legs": len(legs), "body_idx": list(range(n_body)),
+                    "structure_delta_all": d_all,
+                    "half_spread_btc_all": hs_btc_all, "half_spread_frac_all": hs_frac_all})
+    return out
+
+
 def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
     # IT: A6 (ROADMAP_VOL_BOOK, sequencing B3 step 1) — colonne SOLO diagnostiche,
     #     la regola pre-registrata resta INTATTA (nessun input al trading). A ogni
@@ -348,33 +389,30 @@ def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
             src, side = "atm_pick", 0
             strike, expiry_ms = float(pick["strike"]), int(pick["expiry_ms"])
             call, put = pick["call"], pick["put"]
-        legs = [_leg_snapshot(db, call), _leg_snapshot(db, put)]
+        # IT: gambe della struttura: il CORPO (call, put ATM) sempre per primo, poi le
+        #     eventuali gambe aggiuntive della posizione (`wings`, assenti oggi → lista
+        #     vuota, record a 2 gambe come sempre). L'ordine è il contratto che i
+        #     consumatori usano per isolare il corpo (`body_idx`).
+        # EN: structure legs: the BODY (ATM call, put) always first, then any extra legs
+        #     of the position (`wings`, absent today → empty list, 2-leg record as ever).
+        #     The order is the contract consumers use to isolate the body (`body_idx`).
+        extra = list((pos or {}).get("wings") or [])
+        legs = [_leg_snapshot(db, inst) for inst in [call, put] + extra]
 
-        # IT: delta della struttura (1 straddle long) + delta netto della posizione
-        #     (side×struttura; 0 da flat È il dato corretto); None se greeks assenti.
-        # EN: structure delta (1 long straddle) + net position delta (side×structure;
-        #     0 when flat IS the correct datum); None if greeks are missing.
-        straddle_delta = net_delta = None
-        if all(l["delta"] is not None for l in legs):
-            straddle_delta = sum(l["delta"] for l in legs)
-            net_delta = side * straddle_delta
-
-        # IT: half-spread aggregato della struttura, in BTC e in frazione del mark —
-        #     il "haircut" che l'IVS ha dimostrato essere decision-relevant.
-        # EN: aggregate structure half-spread, in BTC and as a mark fraction —
-        #     the "haircut" the IVS work proved decision-relevant.
-        hs_btc = hs_frac = None
-        if all(l["bid"] is not None and l["ask"] is not None and l["mark"] is not None
-               for l in legs):
-            hs_btc = sum((l["ask"] - l["bid"]) / 2.0 for l in legs)
-            mark_sum = sum(l["mark"] for l in legs)
-            hs_frac = hs_btc / mark_sum if mark_sum > 0 else None
+        # IT: delta di struttura + delta netto (side×struttura; 0 da flat È il dato
+        #     corretto) e half-spread aggregato — il "haircut" che l'IVS ha dimostrato
+        #     essere decision-relevant — calcolati sul CORPO da exec_diag_aggregate;
+        #     i campi `_all` compaiono solo con più di 2 gambe.
+        # EN: structure delta + net delta (side×structure; 0 when flat IS the correct
+        #     datum) and aggregate half-spread — the "haircut" the IVS work proved
+        #     decision-relevant — computed on the BODY by exec_diag_aggregate; the
+        #     `_all` fields appear only with more than 2 legs.
+        agg = exec_diag_aggregate(legs, side)
 
         rec = {"ts": str(pd.Timestamp.now(tz="UTC").floor("s")),
                "source": src, "side": side, "strike": strike, "expiry_ms": expiry_ms,
                "t_hours": round((expiry_ms - time.time() * 1000) / 3.6e6, 3),
-               "straddle_delta": straddle_delta, "net_delta": net_delta,
-               "half_spread_btc": hs_btc, "half_spread_frac": hs_frac,
+               **agg,
                "legs": legs}
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, default=str) + "\n")
