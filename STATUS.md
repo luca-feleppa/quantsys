@@ -482,18 +482,41 @@ a decision for the user.
 
 ---
 
-## ▶️ RIPARTI DA QUI — 2026-09-02
+## ▶️ RIPARTI DA QUI — 2026-09-02 (chiusura)
 
-> 🇮🇹 **DOMANI, IN UNA RIGA: nessun gate aperto toccato; una pre-registrazione nuova in testa (FT1,
-> NON avviata, go-live dopo E1). Si riparte dalla routine (`.\avvio_sessione.ps1`).** Giornata a **zero GPU e zero
-> scritture** su `data/`, `models/`, `results/`. `E1 stadio 2` resta **aperto e intatto** (20/40),
-> il vintage macro resta `20260730`, `raw_candles.parquet` resta fermo al 20/08 — nessun
-> `-RefreshCandles` applicato. Le date restano quelle del 29/08: refresh candele ed E1 ~9-10/09.
-> **EN** **TOMORROW, IN ONE LINE: no open gate touched; one new pre-registration on top (FT1,
-> NOT started, go-live after E1). Start from the routine (`.\avvio_sessione.ps1`).** A **zero-GPU, zero-write** day on `data/`,
-> `models/`, `results/`. `E1 stage 2` stays **open and intact** (20/40), the macro vintage stays
-> `20260730`, `raw_candles.parquet` stays at 20/08 — no `-RefreshCandles` applied. Dates unchanged
-> from 29/08: candle refresh and E1 ~9-10/09.
+> 🇮🇹 **DOMANI, IN UNA RIGA: si riparte dalla routine (`.\avvio_sessione.ps1`); nessun gate aperto è
+> stato toccato; in testa c'è una pre-registrazione nuova (FT1, NON avviata).** Sei commit pushati
+> (`f27fb59` → `2308d3c`): routine e suite di test (①), `exec_diag` a N gambe con record a 2 gambe
+> byte-identico (②), leva `--adaptive` inerte in `04b` (③), pre-registrazione FT1. **Zero GPU, zero
+> scritture** su `data/`, `models/`, `results/`; `04b` **invariato sul VPS** (nessun deploy, nessun
+> riavvio); `E1 stadio 2` **aperto e intatto** (20/40); vintage macro `20260730`;
+> `raw_candles.parquet` fermo al 20/08 — nessun `-RefreshCandles` applicato. Suite finale: **504 passed**.
+>
+> **Azione esatta da cui ripartire, in ordine:**
+> 1. **~9-10/09** — `-RefreshCandles` (atto esplicito, regola `T+2h`), poi il giudice one-shot di
+>    `E1 stadio 2` a `n ≥ 40` (manuale, **mai** dalla routine), poi W1-v2.
+> 2. **Dopo la chiusura di E1** — deploy di `04b` con `--adaptive --adaptive-dvol-threshold 0.561
+>    --adaptive-k 1.5 --execute` **dopo un settlement con ledger flat**, sul VPS, su istruzione
+>    esplicita: è il go-live di FT1 (pre-reg in testa). Primo verdetto possibile ~metà novembre.
+> 3. **~30/09** — S1 raggiunge `n = 83`; non produrre il descrittivo prima.
+> 4. **~fine novembre** — B1/L2 a `n_eff` 216.
+>
+> **EN** **TOMORROW, IN ONE LINE: start from the routine (`.\avvio_sessione.ps1`); no open gate was
+> touched; one new pre-registration sits on top (FT1, NOT started).** Six commits pushed
+> (`f27fb59` → `2308d3c`): routine and test suite (①), N-leg `exec_diag` with a byte-identical 2-leg
+> record (②), inert `--adaptive` lever in `04b` (③), FT1 pre-registration. **Zero GPU, zero
+> writes** to `data/`, `models/`, `results/`; `04b` **unchanged on the VPS** (no deploy, no
+> restart); `E1 stage 2` **open and intact** (20/40); macro vintage `20260730`;
+> `raw_candles.parquet` at 20/08 — no `-RefreshCandles` applied. Final suite: **504 passed**.
+>
+> **Exact action to resume from, in order:**
+> 1. **~9-10/09** — `-RefreshCandles` (explicit act, `T+2h` rule), then the one-shot `E1 stage 2`
+>    judge at `n ≥ 40` (manual, **never** from the routine), then W1-v2.
+> 2. **After E1 closes** — deploy `04b` with `--adaptive --adaptive-dvol-threshold 0.561
+>    --adaptive-k 1.5 --execute` **after a settlement with a flat ledger**, on the VPS, on explicit
+>    instruction: that is FT1's go-live (pre-reg on top). First possible verdict ~mid November.
+> 3. **~30/09** — S1 reaches `n = 83`; no descriptive before then.
+> 4. **~late November** — B1/L2 reaches `n_eff` 216.
 
 ### ① Routine di sessione — nulla di anomalo · Session routine — nothing anomalous
 
