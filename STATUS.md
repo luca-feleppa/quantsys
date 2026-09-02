@@ -5,6 +5,143 @@
 
 ---
 
+## 🎯 PRE-REGISTRAZIONE FORWARD TEST — FT1: regola ADATTIVA su tenor e struttura del braccio short-vol · 2026-09-02
+
+> 🇮🇹 Scritta PRIMA di qualunque fill (protocollo sperimentale, passo 1). **Gate aperto, NON avviato.**
+> Valida l'**esecuzione**, non l'edge. Implementazione: leva `--adaptive` di `scripts/04b_vol_paper.py`
+> (inerte di default, commit `045bdd2`); i parametri congelati qui si passano da CLI al go-live.
+> **EN** Written BEFORE any fill (experimental protocol, step 1). **Open gate, NOT started.**
+> Validates **execution**, not edge. Implementation: the `--adaptive` lever of
+> `scripts/04b_vol_paper.py` (inert by default, commit `045bdd2`); the constants frozen here are
+> passed on the CLI at go-live.
+
+### Domanda e perimetro · Question and scope
+
+🇮🇹 **Domanda.** Una struttura scelta per banda di DVOL — short straddle daily sopra soglia, short
+iron butterfly weekly sotto — si esegue **per intero** e **al costo previsto** sul venue paper?
+**Perimetro dichiarato prima:** FT1 **non** conclude sul PnL della struttura (a un roll a settimana
+la dispersione del payoff richiederebbe anni di campione), non conclude sul tenor ottimo e non
+riapre il gate v1. Misura la **meccanica** (completamento, tempi, sequenza, settlement a 4 gambe,
+fee, diagnostica) e il **costo di realizzazione** contro una costante congelata.
+
+**EN** **Question.** Does a structure chosen by DVOL band — short daily straddle above threshold,
+short weekly iron butterfly below — execute **in full** and **at the expected cost** on the paper
+venue? **Scope declared first:** FT1 does **not** conclude on the structure's PnL (at one roll a
+week the payoff dispersion would need years of sample), nor on the optimal tenor, and does not
+reopen the v1 gate. It measures **mechanics** (completion, timing, sequencing, 4-leg settlement,
+fees, diagnostics) and **realisation cost** against a frozen constant.
+
+### Regola, congelata qui · Rule, frozen here
+
+| parametro · parameter | valore · value |
+|---|---|
+| soglia DVOL (ultimo punto del poller `01c`, `None` se > 1 h → flat) · DVOL threshold | **0.561** |
+| banda ≥ soglia · band ≥ threshold | short straddle ATM daily **incondizionato** (nessun segnale NN), tenor 30h, macchinario v1 · unconditional short daily ATM straddle (no NN signal), v1 machinery |
+| banda < soglia · band < threshold | short iron butterfly: vende straddle ATM, compra strangle; expiry più vicina a **168 h**; ali allo strike quotato più vicino a `S·exp(±k·σ_trail·√T)`, **k = 1.5**, `σ_trail` = RV 30g trailing · short iron butterfly, expiry nearest **168 h**, wings at the listed strike nearest `S·exp(±k·σ_trail·√T)`, **k = 1.5** |
+| entry farfalla · butterfly entry | **solo venerdì 08 UTC** al settlement (7 DTE esatti); negli altri giorni flat · **Friday 08 UTC only** (exactly 7 DTE); flat on other days |
+| ordine di esecuzione · execution order | **ali prima** (buy), corpo dopo (sell) · **wings first** (buy), body after (sell) |
+| completamento · completion | gamba fallita o sequenza > **120 s** → flatten inverso nello stesso tick, roll `incomplete` · failed leg or sequence > **120 s** → reverse flatten in the same tick, roll `incomplete` |
+| taglia · size | 1 contratto per gamba · 1 contract per leg |
+| hedge, isteresi, segnale · hedge, hysteresis, signal | **nessuno**: la banda si legge una volta all'entry, la posizione corre al settlement · **none** |
+| esecuzione · execution | `--execute` obbligatorio (senza, fill simulati al mark: nessuna informazione) · `--execute` required |
+
+### Costo misurato, e il venue · Measured cost, and the venue
+
+🇮🇹 `04b` esegue su **testnet**. La **meccanica** si misura sui fill testnet; il **costo** del gate
+si misura al **quotato mainnet** nell'istante del fill: `c_roll = (fee₄ + Σ ½-spread quotato × mark)
+/ premio_netto + legging`, con fee da schedule Deribit, ½-spread delle 4 gambe dallo snapshot di
+chain mainnet più vicino al timestamp del fill, legging al secondo ordine (`½·|Γ|·E[(ΔS)²]`) con il
+`τ` **misurato** primo → ultimo fill. Il ½-spread **realizzato testnet** è riportato accanto,
+**non** gating.
+
+**EN** `04b` executes on **testnet**. **Mechanics** are measured on testnet fills; the gate's
+**cost** is measured at the **mainnet quote** at fill time: `c_roll = (fee₄ + Σ quoted half-spread ×
+mark) / net_premium + legging`, with Deribit schedule fees, the 4 legs' half-spread from the
+mainnet chain snapshot nearest the fill timestamp, second-order legging (`½·|Γ|·E[(ΔS)²]`) with the
+**measured** first → last fill `τ`. The testnet **realised** half-spread is reported alongside,
+**not** gating.
+
+### Gate · Gate
+
+| # | condizione · condition | soglia · threshold | tipo · type |
+|---|---|---|---|
+| ① | mediana su roll farfalla di `c_roll` · median `c_roll` over butterfly rolls | **≤ 0.25153** (costante congelata: break-even in frazione del premio netto della farfalla · frozen constant: break-even as a fraction of the butterfly's net premium) | gating, statistico · statistical |
+| ②a | roll `incomplete` | **0 su n** · **0 of n** | gating, conteggio · count |
+| ②b | mediana primo → ultimo fill · median first → last fill | **≤ 30 s** | gating, conteggio · count |
+| ③a | regressione `exec_diag` a 4 gambe: aggregati del corpo bit-identici al codice a 2 gambe · 4-leg `exec_diag` regression: body aggregates bit-identical to the 2-leg code | scarto **0** — **superato** (`tests/test_exec_diag_multileg.py`, replay di 1236 righe) · gap **0** — **passed** | gating, prima del go-live · before go-live |
+| ③b | fee per gamba registrata = schedule (`min(0.0003, 0.125·premio)·amount`) · recorded per-leg fee = schedule | err. rel. mediano **0** · median rel. err. **0** | gating, sui primi 4 fill · on the first 4 fills |
+| ④ | numerosità · sample size | **≥ 8 roll farfalla completi** · **≥ 8 complete butterfly rolls** | condizione di lettura · reading condition |
+
+🇮🇹 **Famiglia dichiarata:** un solo test statistico (①), nessuna correzione per molteplicità; ②③ sono
+conteggi e controlli. **Lettura di robustezza obbligatoria in entrambi i rami:** ① ricalcolata con
+`τ = 120 s` e con il ½-spread testnet realizzato al posto del quotato mainnet. **Riportati, non
+gating:** giorni flat per transizione, quota del tempo per banda, Δ fill−mark testnet, e — solo se
+la banda daily si attiva — il ½-spread d'entry del daily contro la serie storica di `exec_diag`.
+
+**EN** **Declared family:** one statistical test (①), no multiplicity correction; ②③ are counts and
+controls. **Mandatory robustness reading in both branches:** ① recomputed with `τ = 120 s` and with
+the testnet realised half-spread in place of the mainnet quote. **Reported, not gating:** flat days
+per transition, time share per band, testnet fill−mark Δ, and — only if the daily band activates —
+the daily entry half-spread against the historical `exec_diag` series.
+
+### Criterio di stop, nelle due direzioni · Stop criterion, both directions
+
+🇮🇹
+- **CHIUSO PASS** = ① ∧ ②a ∧ ②b, con ③a/③b superati prima: la struttura adattiva è **eseguibile al
+  costo previsto**. Non dice che guadagna. Apre una decisione (design di produzione del braccio),
+  non la prende.
+- **CHIUSO FAIL su ①**: il costo a 4 gambe a taglia reale supera il break-even → la farfalla non è
+  realizzabile a questo venue/taglia.
+- **CHIUSO FAIL su ②a o ②b**: la struttura non si completa, o troppo lentamente perché il legging
+  assunto regga → il vincolo è la meccanica; si registra quale gamba e quando.
+- **NESSUNA CONCLUSIONE**: ③a/③b falliti (non si parte), oppure **meno di 8 roll farfalla completi
+  in 16 settimane** dal go-live (es. DVOL sopra soglia per quasi tutto il periodo): si riporta la
+  banda daily e si riapre la finestra **senza** cambiare soglie.
+- ⚠ **Non ammesso:** cambiare soglia DVOL, `k`, ordine di esecuzione, regola dei 120 s o la costante
+  di ① a numeri visti; aggiungere bande o tenor durante il test.
+
+**EN**
+- **CLOSED PASS** = ① ∧ ②a ∧ ②b, with ③a/③b passed first: the adaptive structure is **executable at
+  the expected cost**. It does not say it earns. It opens a decision (the arm's production design),
+  it does not take it.
+- **CLOSED FAIL on ①**: 4-leg cost at real size exceeds the break-even → the butterfly is not
+  realisable at this venue/size.
+- **CLOSED FAIL on ②a or ②b**: the structure does not complete, or too slowly for the assumed
+  legging to hold → the constraint is mechanics; record which leg and when.
+- **NO CONCLUSION**: ③a/③b failed (no start), or **fewer than 8 complete butterfly rolls within 16
+  weeks** of go-live (e.g. DVOL above threshold nearly all the time): report the daily band and
+  reopen the window **without** changing thresholds.
+- ⚠ **Not allowed:** changing the DVOL threshold, `k`, execution order, the 120 s rule or the ①
+  constant after seeing numbers; adding bands or tenors during the test.
+
+### Condizione ③ ex-ante, prior, prerequisiti · Ex-ante condition ③, prior, prerequisites
+
+🇮🇹 DVOL al 02/09: **0.369** → il test parte in banda **farfalla**; la banda daily probabilmente
+**non** verrà misurata nei primi 8 roll, e lo si dice adesso. Il floor di 8 roll (≈ 2 mesi) non è di
+potenza — il margine di ① satura in ~2 roll — ma di copertura: un ciclo intero della weekly ladder.
+**Prior:** ① PASS ~80%; **②a è la modalità di fallimento più probabile** (~35%: ali senza ask sul
+testnet); ②b PASS ~85%; ③ ~95%. Esito che sorprenderebbe: `c_roll` mediano > 0.15, che direbbe che
+lo snapshot di chain non rappresenta il book al fill (problema di **misura**, da riportare come tale).
+**Prerequisiti, in ordine:** `E1 stadio 2` chiuso (~9-10/09; toccare `04b` prima invalida un
+campione non ri-raccoglibile) → deploy **dopo un settlement** con ledger flat, systemd VPS,
+`--execute`, mai a casa → **go-live come atto esplicito**. Comando:
+`python scripts/04b_vol_paper.py --execute --adaptive --adaptive-dvol-threshold 0.561 --adaptive-k 1.5`.
+Primo verdetto possibile ~metà novembre.
+
+**EN** DVOL on 02/09: **0.369** → the test starts in the **butterfly** band; the daily band will
+probably **not** be measured in the first 8 rolls, said now. The 8-roll floor (≈ 2 months) is not
+about power — ①'s margin saturates in ~2 rolls — but coverage: one full weekly-ladder cycle.
+**Prior:** ① PASS ~80%; **②a is the most likely failure mode** (~35%: wings without an ask on
+testnet); ②b PASS ~85%; ③ ~95%. A surprising outcome: median `c_roll` > 0.15, which would say the
+chain snapshot does not represent the book at fill (a **measurement** problem, to be reported as
+such). **Prerequisites, in order:** `E1 stage 2` closed (~9-10/09; touching `04b` before invalidates
+a non-recollectable sample) → deploy **after a settlement** with a flat ledger, VPS systemd,
+`--execute`, never at home → **go-live as an explicit act**. Command:
+`python scripts/04b_vol_paper.py --execute --adaptive --adaptive-dvol-threshold 0.561 --adaptive-k 1.5`.
+First possible verdict ~mid November.
+
+---
+
 ## 🎯 PRE-REGISTRAZIONE GATE — SignatureHAR · 2026-08-25
 
 > 🇮🇹 Scritto PRIMA di girare (protocollo sperimentale, passo 1). Gate **aperto**.
@@ -347,13 +484,13 @@ a decision for the user.
 
 ## ▶️ RIPARTI DA QUI — 2026-09-02
 
-> 🇮🇹 **DOMANI, IN UNA RIGA: nessun gate pubblico toccato, nessun lavoro in sospeso sulla linea
-> pubblica. Si riparte dalla routine (`.vvio_sessione.ps1`).** Giornata a **zero GPU e zero
+> 🇮🇹 **DOMANI, IN UNA RIGA: nessun gate aperto toccato; una pre-registrazione nuova in testa (FT1,
+> NON avviata, go-live dopo E1). Si riparte dalla routine (`.\avvio_sessione.ps1`).** Giornata a **zero GPU e zero
 > scritture** su `data/`, `models/`, `results/`. `E1 stadio 2` resta **aperto e intatto** (20/40),
 > il vintage macro resta `20260730`, `raw_candles.parquet` resta fermo al 20/08 — nessun
 > `-RefreshCandles` applicato. Le date restano quelle del 29/08: refresh candele ed E1 ~9-10/09.
-> **EN** **TOMORROW, IN ONE LINE: no public gate touched, nothing pending on the public line.
-> Start from the routine (`.vvio_sessione.ps1`).** A **zero-GPU, zero-write** day on `data/`,
+> **EN** **TOMORROW, IN ONE LINE: no open gate touched; one new pre-registration on top (FT1,
+> NOT started, go-live after E1). Start from the routine (`.\avvio_sessione.ps1`).** A **zero-GPU, zero-write** day on `data/`,
 > `models/`, `results/`. `E1 stage 2` stays **open and intact** (20/40), the macro vintage stays
 > `20260730`, `raw_candles.parquet` stays at 20/08 — no `-RefreshCandles` applied. Dates unchanged
 > from 29/08: candle refresh and E1 ~9-10/09.
