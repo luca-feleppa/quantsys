@@ -360,14 +360,14 @@ a decision for the user.
 
 ### ① Routine di sessione — nulla di anomalo · Session routine — nothing anomalous
 
-🇮🇹 Pull VPS con i 4 collector **tutti freschi** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.6h);
+🇮🇹 Suite di test completa: **491 passed, 1 skipped**. Pull VPS con i 4 collector **tutti freschi** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.6h);
 `hedge_state.json` assente sul VPS, coerente con `--hedge` disattivato. Macro archiviata al
 vintage `20260730`, **nessuna promozione**. Regime B7 fresco. MFIV +553 tick, wedge mediano
 **+3.17 vol pt** (colonna diagnostica). L2: copertura 70.9%, run corrente **1200h senza buchi**,
 `n_eff` 35.0 contro il gate 216. Leg opzioni n=61 ≥ 30. **`E1 stadio 2`: 20/40** (serie close al
 20/08: il warning «STALE → SOTTOSTIMATO» è l'inferenza da proxy già documentata, nessun refresh).
 
-**EN** VPS pull with all 4 collectors **fresh** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.6h);
+**EN** Full test suite: **491 passed, 1 skipped**. VPS pull with all 4 collectors **fresh** (IV 0.0h · L2 0.0h · trades 0.1h · `04b` 1.6h);
 `hedge_state.json` absent on the VPS, consistent with `--hedge` off. Macro archived at vintage
 `20260730`, **no promotion**. Regime B7 fresh. MFIV +553 ticks, median wedge **+3.17 vol pt**
 (diagnostic column). L2: 70.9% coverage, current run **1200h with no gap**, `n_eff` 35.0 against
