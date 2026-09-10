@@ -1,0 +1,50 @@
+{
+  "stage": 2,
+  "n": 40,
+  "sign_agreement": {
+    "mean": 0.35,
+    "se_hac": 0.080860754006264,
+    "t": -1.8550408272025272,
+    "p_value": 0.9682048016818589,
+    "n": 40
+  },
+  "spearman": {
+    "rho": -0.26435272045028146,
+    "ci95": [
+      -0.5629388413256121,
+      0.05721573397854013
+    ],
+    "block": 2,
+    "n_boot": 10000
+  },
+  "positive_control": {
+    "qlike_nn": 0.5925029233994975,
+    "qlike_naive": 0.9761740388006489,
+    "dm": {
+      "dm": -1.2107056997541576,
+      "dm_hln": -1.1652059603028064,
+      "p_value": 0.25101313612627285,
+      "mean_diff": -0.3836711154011516,
+      "hac_lag": 1,
+      "n": 40,
+      "n_eff": 20.0,
+      "better": "a"
+    },
+    "n": 40
+  },
+  "unobservable": {
+    "no_tick": 35,
+    "no_rv": 1
+  },
+  "window": [
+    "2026-08-01 08:00:00+00:00",
+    "2026-09-09 08:00:00+00:00"
+  ],
+  "conditions": {
+    "c1_sign": false,
+    "c2_spearman": false,
+    "c3_n": true,
+    "c4_control": false
+  },
+  "verdict": "NESSUNA CONCLUSIONE"
+}

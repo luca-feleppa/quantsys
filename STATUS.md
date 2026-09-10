@@ -5,6 +5,134 @@
 
 ---
 
+## ▶️ RIPARTI DA QUI — 2026-09-10 (chiusura)
+
+🇮🇹 **Manutenzione documentale successiva, 10/09:** ritirate le checklist esaurite `POST_GATE_V1.md` e `RIPRESA.md`. Residui non conclusi conservati in `docs/ROADMAP_VOL_BOOK.md`; piani modello e dashboard conservati e stato obsoleto riconciliato. `docs/PERF_AUDIT.md` e archivio storico conservati come evidenze. Le citazioni storiche dei file ritirati restano riferimenti alla versione Git dell'epoca. Nessun codice, dato, parametro, gate o servizio modificato. **Ripresa invariata:** audit di potenza FT1 prima del go-live, decisione vintage macro e prerequisiti sotto; verifica live/replay residua conservata nella roadmap, non dichiarata completata.
+
+**EN** **Subsequent documentation maintenance, 09-10:** retired exhausted checklists `POST_GATE_V1.md` and `RIPRESA.md`. Unfinished work retained in `docs/ROADMAP_VOL_BOOK.md`; model and dashboard plans retained and stale status reconciled. `docs/PERF_AUDIT.md` and the historical archive retained as evidence. Historical citations of retired files refer to their contemporary Git versions. No code, data, parameter, gate or service changed. **Resume order unchanged:** FT1 power audit before go-live, macro-vintage decision and prerequisites below; remaining live/replay verification retained in the roadmap, not declared complete.
+
+> 🇮🇹 **DOMANI, IN UNA RIGA: si riparte dalla routine (`.\avvio_sessione.ps1`); `E1 stadio 2` è
+> CHIUSO — verdetto NESSUNA CONCLUSIONE — e la sua chiusura sblocca due cose che vanno fatte
+> NELL'ORDINE GIUSTO.** Fatto oggi: refresh candele esplicito (+485 barre, `raw_candles.parquet`
+> → 2026-09-09 20:00 UTC), B7 riallineato in incrementale (485 barre, **0 retrain**), giudice E1
+> stadio 2 one-shot eseguito a `n = 40`, esito scritto in `STATUS.md` + `TEORIA.md` §12.3-bis,
+> `edge_information_stage2.json` messo sotto versione. **Zero GPU**; scritture su `data/` limitate
+> a candele e regime; vintage macro `20260730` **invariato** (mtime 30/07 verificato dopo ogni
+> scrittura); `04b` **invariato sul VPS**, nessun deploy, nessun riavvio; FT1 **non avviato**.
+> `tests/test_edge_information_judge.py` **7/7** (sentinella sulle costanti pre-registrate).
+>
+> **Azione esatta da cui ripartire, in ordine:**
+> 1. **Routine**: `.\avvio_sessione.ps1`. Attese: B7 fresco, L2 `n_eff` ~41 contro 216, leg opzioni
+>    ≥ 30. ⚠ **Il blocco E1 del monitor è ora senza consumatore** — il gate è chiuso, il suo
+>    contatore non misura più niente di decisionale: va ritirato dalla routine come fu ritirato
+>    quello MFIV il 18/08 (stesso criterio: si ritira quando l'ultimo consumatore è esaurito).
+> 2. **PRIMA di qualunque go-live — audit di potenza della pre-registrazione FT1.** È la lezione di
+>    oggi applicata dove serve: E1 è morto perché ⑥ dimensionò la potenza delle statistiche
+>    principali e **mai quella del controllo**, che è la condizione che poi ha vincolato. FT1 è
+>    **non avviato**, quindi la sua pre-reg si può ancora rinforzare senza goalpost-moving — al
+>    primo fill la finestra si chiude per sempre. Verificare che ogni condizione di FT1 (costo di
+>    realizzazione contro la costante congelata, completamento, sequenza) abbia un `n` minimo
+>    **derivato dalla potenza** e non copiato. Read-only, zero GPU.
+> 3. **Decisione sul refresh macro, e va presa ADESSO o mai.** E1 non lo blocca più; **FT1 lo
+>    ri-bloccherà al go-live**. Vintage corrente `20260730`, promozione solo con
+>    `pull_vps_data.ps1 -PromoteMacro`, in vigore al bootstrap `04b` successivo (00:30 UTC) e da
+>    datare qui. Farlo dopo il go-live significherebbe perturbare un campione forward aperto.
+> 4. **Go-live FT1** su istruzione esplicita, **dopo un settlement con ledger flat**, sul VPS:
+>    `04b --adaptive --adaptive-dvol-threshold 0.561 --adaptive-k 1.5 --execute`.
+> 5. **~30/09** — S1 raggiunge `n = 83`; non produrre il descrittivo prima. **~fine novembre** —
+>    B1/L2 a `n_eff` 216.
+>
+> ⚠ **Nessuna seconda lettura di E1** senza una nuova pre-registrazione (vincolo ⑧), e nessuna
+> inversione della regola sul segno negativo di ① e ②: sotto NESSUNA CONCLUSIONE quei numeri non
+> sono interpretabili.
+
+> **EN** **TOMORROW, IN ONE LINE: start from the routine (`.\avvio_sessione.ps1`); `E1 stage 2` is
+> CLOSED — verdict NO CONCLUSION — and its closure unblocks two things that must be done IN THE
+> RIGHT ORDER.** Done today: explicit candle refresh (+485 bars, `raw_candles.parquet` → 2026-09-09
+> 20:00 UTC), B7 realigned incrementally (485 bars, **0 retrains**), one-shot E1 stage-2 judge run
+> at `n = 40`, outcome written to `STATUS.md` + `TEORIA.md` §12.3-bis, `edge_information_stage2.json`
+> placed under version control. **Zero GPU**; writes to `data/` limited to candles and regime; macro
+> vintage `20260730` **unchanged** (30/07 mtime verified after every write); `04b` **unchanged on the
+> VPS**, no deploy, no restart; FT1 **not started**. `tests/test_edge_information_judge.py` **7/7**
+> (sentinel on the pre-registered constants).
+>
+> **Exact action to resume from, in order:**
+> 1. **Routine**: `.\avvio_sessione.ps1`. Expected: B7 fresh, L2 `n_eff` ~41 against 216, option legs
+>    ≥ 30. ⚠ **The monitor's E1 block now has no consumer** — the gate is closed and its counter no
+>    longer measures anything decisional: retire it from the routine as the MFIV one was retired on
+>    18/08 (same criterion: retire when the last consumer is spent).
+> 2. **BEFORE any go-live — power audit of the FT1 pre-registration.** This is today's lesson applied
+>    where it matters: E1 died because ⑥ dimensioned the power of the primary statistics and **never
+>    that of the control**, which is the condition that ended up binding. FT1 is **not started**, so
+>    its pre-reg can still be strengthened without goalpost-moving — at the first fill that window
+>    shuts for good. Verify that every FT1 condition (realisation cost against the frozen constant,
+>    completion, sequencing) has a minimum `n` **derived from power**, not copied. Read-only, zero GPU.
+> 3. **Macro-refresh decision, and it is NOW or never.** E1 no longer blocks it; **FT1 will re-block
+>    it at go-live**. Current vintage `20260730`, promotion only via `pull_vps_data.ps1 -PromoteMacro`,
+>    effective at the next `04b` bootstrap (00:30 UTC) and to be dated here. Doing it after go-live
+>    would perturb an open forward sample.
+> 4. **FT1 go-live** on explicit instruction, **after a settlement with a flat ledger**, on the VPS:
+>    `04b --adaptive --adaptive-dvol-threshold 0.561 --adaptive-k 1.5 --execute`.
+> 5. **~30/09** — S1 reaches `n = 83`; no descriptive before then. **~late November** — B1/L2 reaches
+>    `n_eff` 216.
+>
+> ⚠ **No second reading of E1** without a new pre-registration (constraint ⑧), and no inversion of the
+> rule on the negative sign of ① and ②: under NO CONCLUSION those numbers are not interpretable.
+
+---
+
+## ▶️ Routine di sessione · Session routine — 2026-09-09
+
+🇮🇹 Eseguita `avvio_sessione.ps1` con i default (7 giorni), exit 0. Pull+merge: +1 tick ATM IV e greeks, +914 righe di chain, +68 righe L2, +22 trade opzioni; `vol_paper` invariato (forecast 1484, trades 68, exec_diag 1421, hedge_ledger 83, +0 righe). `hedge_state.json` assente sul VPS (atteso: hedge off). Macro al vintage 20260730, **nessuna promozione** (mtime del canonico invariato al 30/07, verificato dopo tutte le scritture). Quattro heartbeat freschi (IV/L2/trades 0.0h, `04b` 1.8h). MFIV incrementale: +1 snapshot → 16893 righe, wedge MFIV−ATM mediana **+3.16** vol pt (p10 +2.20, p90 +4.88) — diagnostico, non un contatore di gate. L2: copertura **73.5%** su 2048 ore consolidate, run corrente 1379h, nessun buco negli ultimi 7g; finestre T=120/h=30 = 1230 → **n_eff 41.0** contro un gate vol di 216. File barre 1m fermo al 31/07 (40.3g): tocca solo le analisi a target 1m, `n_eff` a h=30 usa le orarie ed è intatto. Contatore leg opzioni: **67 `executed`** su 68 righe (soglia n≥30).
+
+🇮🇹 **E1 stadio 2 — vincolo binding derivato, poi rimosso.** Prima conta: **20/40**. Il warning «conteggio SOTTOSTIMATO» è un proxy; la misura read-only ha mostrato che nella finestra stadio 2 (42 giorni da 01/08) **41 expiry su 42 avevano già il tick di decisione** e 21 erano bloccate dalla sola RV: `realized_rv` pretende 31 close consecutivi da `tick = E−27h`, cioè fino a **`tick+30h = E+3h`**, e `raw_candles.parquet` era fermo al 20/08 14:00 UTC (ramo 1m di compenso: **0 righe contribuite**). La prima a cadere era `E = 21/08`, che voleva il close delle 11:00 del 21/08. Il contatore non è funzione del calendario ma di quel file, che avanza solo per atto esplicito. **Verifica ex-ante prima di scrivere:** close fino al 31/08 → n=31, al 05/09 → n=36, al 09/09 → **n=40**. Eseguito `01_update_data.py --candles-only`: +485 candele, file 66.868 → **67.353 righe**, ultima **2026-09-09 20:00 UTC** (il log ne dichiarava 486 caricate e 21:00 — *il log non è una misura del file*, terzo caso). Ultima usabile dopo lo scarto di `hourly_close()`: 19:00 UTC, contro un `need` massimo di 11:00 UTC → margine 8h, regola `T+2h` rispettata. Ricontato: **n = 40**, finestra 01/08 → 09/09, non osservabili `no_rv: 1` (11/09, expiry futura). **La predizione ex-ante ha centrato il numero** (a differenza del refresh del 18/08, dove la regola `T+1h` sbagliò di 1). Effetto collaterale predetto e sanato nello stesso ciclo: B7 sarebbe passato a ~485 barre di staleness (soglia 168) → `01b_download_macro.py --regime-incremental`, 485 barre appese, **0 retrain** (il prossimo cade a t=67680, siamo a 67413), `regime_probs` riallineato a 2026-09-09 20:00 UTC. Le 20 osservazioni già contate non si sono mosse: le kline sono storiche e immutabili, il refresh appende.
+
+🇮🇹 **Stato del gate — ESEGUITO, e chiuso.** n=40 = `N_MIN_STAGE2` esatto ha tolto il guard `NO_RUN`; il run confermativo one-shot è stato lanciato per decisione esplicita. **Esito: NESSUNA CONCLUSIONE** — dettaglio nella sezione dedicata qui sotto. Nessuna promozione macro, nessun deploy, nessuna soglia toccata, nessuna variante girata. FT1 resta **non avviato**.
+
+**EN** **Gate status — EXECUTED, and closed.** n=40, exactly `N_MIN_STAGE2`, lifted the `NO_RUN` guard; the one-shot confirmatory run was fired by explicit decision. **Outcome: NO CONCLUSION** — detail in the dedicated section below. No macro promotion, no deployment, no threshold touched, no variant run. FT1 remains **not started**.
+
+---
+
+## 🔬 E1 STADIO 2 — ESEGUITO. **VERDETTO: NESSUNA CONCLUSIONE** (④ controllo positivo fallito) · 2026-09-10
+
+> 🇮🇹 Run confermativo one-shot, pre-registrazione del 2026-07-31 (commit `de47191`), soglie congelate e non toccate. Giudice: `scripts/vol/edge_information_judge.py --stage 2`, report `results/vol_paper/edge_information_stage2.json`.
+> **EN** One-shot confirmatory run, pre-registration of 2026-07-31 (commit `de47191`), thresholds frozen and untouched. Judge: `scripts/vol/edge_information_judge.py --stage 2`, report `results/vol_paper/edge_information_stage2.json`.
+
+**Campione · Sample.** n = **40** expiry osservabili, finestra **2026-08-01 → 2026-09-09**, tutte liquidate dopo il commit della pre-reg. Non osservabili: `no_rv: 1` (11/09, expiry futura), `no_tick: 35` (tutte ante-01/08, rodaggio di `04b` da giugno — fuori dalla finestra di stadio 2).
+
+| condizione · condition | valore · value | esito |
+|---|---|---|
+| ① accordo di segno · sign agreement | **0.3500** (SE HAC 0.08086, t −1.855, p 0.9682) | **False** |
+| ② Spearman ρ(x,y) | **−0.2644**, IC95 bootstrap a blocchi **[−0.5629, +0.0572]** | **False** (lo zero è dentro) |
+| ③ validità campione · sample validity | n = 40 ≥ 40 | True |
+| ④ **controllo positivo** NN vs naive · **positive control** | QLIKE **0.59250** vs **0.97617** (NN migliore del **39.3%**), DM −1.165, **p 0.2510**, n_eff 20.0 | **False** |
+| | | **VERDETTO: NESSUNA CONCLUSIONE** |
+
+🇮🇹 **Perché è "nessuna conclusione" e non un FAIL.** La pre-reg ⑦.4 lo impone: se sulla finestra il previsore non batte la naive a zero parametri, l'affermazione «il segnale non predice `y`» è un'affermazione **sulla finestra**, non sul segnale. ① e ② sono formalmente False ma **ininterpretabili**, ed è esattamente la funzione del controllo.
+
+🇮🇹 **⚠ Il controllo qui è fallito in modo DIVERSO da B1.** In B1 (§12.3-bis) la baseline **perdeva** dalla naive in stima puntuale: l'apparato non funzionava a quell'orizzonte. Qui il NN **batte** la naive del 39.3% in QLIKE, con la differenza nel verso giusto (`mean_diff` −0.38367, `better: "a"`); ciò che manca è la **significatività** — DM p 0.2510 a `n_eff = 20`. Il difetto non è nel benchmark né nell'apparato: è **potenza**. Le due diagnosi vanno tenute distinte, perché prescrivono cose opposte (ri-disegnare vs aspettare campione).
+
+🇮🇹 **Il difetto documentabile, e non è nei numeri: è nella pre-reg stessa.** ⑥ ha dimensionato ex-ante la potenza di ① e ② (MDE |SA−0.5| ≈ 0.26, ρ ≈ 0.53) e **mai quella di ④** — che è la condizione che ha effettivamente vincolato. Il giudice inoltre calcola il DM con `DM_H = 2`, cioè `n_eff = n/2 = 20`, **più conservativo** dei `n_eff ≈ 29` che ⑥ usava per le altre due: la potenza realizzata del controllo era sotto quella proiettata per il gate, e nessuno l'aveva scritto. **Lezione trasferibile:** un controllo positivo obbligatorio è una condizione di PASS a tutti gli effetti, e va dimensionato con la stessa cura delle statistiche principali — altrimenti si costruisce un gate che non può concludere, e lo si scopre a campione consumato.
+
+🇮🇹 **⚠ Ciò che questi numeri NON autorizzano.** ① a 0.35 e ② a −0.264 sono entrambi negativi, e la tentazione è leggerli come «il segnale è anti-predittivo, quindi invertiamo la regola». **Non è licenziato**, per tre ragioni indipendenti: (a) sotto NESSUNA CONCLUSIONE quei due numeri sono ininterpretabili per costruzione; (b) ⑧ vieta esplicitamente «invertire il segno della regola» senza una NUOVA pre-registrazione; (c) ① era pre-dichiarata **a una coda** (`SA > 0.5`), e leggere la coda opposta a numeri visti è la definizione di goalpost-moving. Va però registrato che **il segno è coerente con il ramo (a) del prior pre-dichiarato** — «o il segnale è mal calibrato in livello, o è anti-predittivo» — e questo è un'**ipotesi** generata, non evidenza.
+
+🇮🇹 **Limite superiore misurato, come pre-dichiarato in ⑥.** Entrambe le statistiche principali cadono **dentro** la banda non rilevabile fissata prima del run: |SA − 0.5| = 0.15 contro un MDE di 0.26, |ρ| = 0.264 contro un MDE di 0.53. Il gate non poteva produrre un PASS se non a fronte di un effetto **grande**, e non ne ha trovato uno. Proiezione **post-hoc** e dichiarata tale (nessun valore decisionale): a effetto invariato il controllo ④ raggiungerebbe p < 0.05 attorno a `n_eff ≈ 57`, cioè **~113 expiry ≈ inizio 2027**.
+
+🇮🇹 **Conseguenza applicata (⑨).** Si documenta il difetto e si aspetta campione, **senza toccare le soglie**. In particolare: A13/A14/A7 **non** vengono declassati da lever di alpha a lever di rischio — quella era la conseguenza pre-dichiarata del **FAIL**, e il FAIL non c'è stato. Nessuna seconda lettura senza una nuova pre-registrazione (⑧).
+
+**EN** **Why "no conclusion" and not a FAIL.** Pre-reg ⑦.4 mandates it: if over the window the forecaster does not beat the zero-parameter naive, the claim "the signal does not predict `y`" is a claim **about the window**, not about the signal. ① and ② are formally False but **uninterpretable**, which is precisely the control's function.
+
+**EN** **⚠ The control failed DIFFERENTLY from B1.** In B1 (§12.3-bis) the baseline **lost** to naive in point estimate: the apparatus did not work at that horizon. Here the NN **beats** naive by 39.3% in QLIKE, with the difference in the right direction (`mean_diff` −0.38367, `better: "a"`); what is missing is **significance** — DM p 0.2510 at `n_eff = 20`. The defect is neither in the benchmark nor in the apparatus: it is **power**. The two diagnoses must be kept distinct, because they prescribe opposite things (redesign vs wait for sample).
+
+**EN** **The documentable defect is not in the numbers: it is in the pre-registration itself.** ⑥ dimensioned ex ante the power of ① and ② (MDE |SA−0.5| ≈ 0.26, ρ ≈ 0.53) and **never that of ④** — the condition that actually bound. The judge moreover computes the DM with `DM_H = 2`, i.e. `n_eff = n/2 = 20`, **more conservative** than the `n_eff ≈ 29` ⑥ used for the other two: the control's realised power was below the one projected for the gate, and nobody had written it down. **Transferable lesson:** a mandatory positive control is a PASS condition in full, and must be power-dimensioned with the same care as the primary statistics — otherwise you build a gate that cannot conclude, and find out once the sample is spent.
+
+**EN** **⚠ What these numbers do NOT license.** ① at 0.35 and ② at −0.264 are both negative, and the temptation is to read them as "the signal is anti-predictive, so invert the rule". **Not licensed**, for three independent reasons: (a) under NO CONCLUSION those two numbers are uninterpretable by construction; (b) ⑧ explicitly forbids "inverting the sign of the rule" without a NEW pre-registration; (c) ① was pre-declared **one-sided** (`SA > 0.5`), and reading the opposite tail once the numbers are seen is the definition of goalpost-moving. It should however be recorded that **the sign is consistent with branch (a) of the pre-declared prior** — "either the signal is mis-calibrated in level, or it is anti-predictive" — and that is a generated **hypothesis**, not evidence.
+
+**EN** **Measured upper bound, as pre-declared in ⑥.** Both primary statistics fall **inside** the undetectable band fixed before the run: |SA − 0.5| = 0.15 against an MDE of 0.26, |ρ| = 0.264 against an MDE of 0.53. The gate could not have produced a PASS except against a **large** effect, and it found none. **Post-hoc** projection, declared as such (no decisional value): at unchanged effect size, control ④ would reach p < 0.05 around `n_eff ≈ 57`, i.e. **~113 expiries ≈ early 2027**.
+
+**EN** **Applied consequence (⑨).** Document the defect and wait for sample, **without touching the thresholds**. In particular: A13/A14/A7 are **not** downgraded from alpha levers to risk levers — that was the pre-declared consequence of a **FAIL**, and there was no FAIL. No second reading without a new pre-registration (⑧).
+---
+
 ## 🎯 PRE-REGISTRAZIONE FORWARD TEST — FT1: regola ADATTIVA su tenor e struttura del braccio short-vol · 2026-09-02
 
 > 🇮🇹 Scritta PRIMA di qualunque fill (protocollo sperimentale, passo 1). **Gate aperto, NON avviato.**
@@ -2464,7 +2592,7 @@ La riga centrale **è** la banda pubblicata −23% ÷ −32%. I report `*_c3.jso
 
 ---
 
-## 🎯 PRE-REGISTRAZIONE GATE — E1: L'EDGE NN-vs-IV HA CONTENUTO PREDITTIVO SULLA VARIANZA REALIZZATA A 30h? · 2026-07-31 · **APERTO, MAI ESEGUITO**
+## 🎯 PRE-REGISTRAZIONE GATE — E1: L'EDGE NN-vs-IV HA CONTENUTO PREDITTIVO SULLA VARIANZA REALIZZATA A 30h? · 2026-07-31 · **CHIUSO 2026-09-10 — NESSUNA CONCLUSIONE** (esito in testa al file)
 
 > Scritto PRIMA di girare (protocollo sperimentale, passo 1). **Nessuna leva sperimentale**: il giudice è read-only offline, non tocca `04b`, né le costanti congelate, né il path production — non c'è nulla da rendere inerte perché non si accende nulla.
 

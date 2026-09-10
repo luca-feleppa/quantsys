@@ -64,6 +64,7 @@ results/vols/*
 results/vol_paper/*
 !results/vol_paper/baseline_report.json
 !results/vol_paper/edge_information_stage1.json
+!results/vol_paper/edge_information_stage2.json
 !results/vol_paper/pin_close_feasibility.json
 
 # ── Log rotativi ─────────────────────────────────────────────
