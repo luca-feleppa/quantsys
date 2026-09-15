@@ -5,6 +5,141 @@
 
 ---
 
+## 📐 Audit di potenza della pre-registrazione FT1 — 2026-09-15 (sola lettura, FT1 NON avviato; P1-P6 ADOTTATE come emendamento 1)
+
+🇮🇹 Verifica, prima del go-live, che ogni condizione di FT1 abbia una capacità di discriminare
+**derivata** e non assunta: la lezione di E1 stadio 2, dove la potenza del controllo non era stata
+dimensionata. Input, tutti di produzione e in sola lettura: snapshot di chain mainnet
+`data/iv/chain` (81 giorni, 12/06 → 10/09), DVOL orario `data/iv/dvol.parquet` (2021-03 → 2026-09,
+285 venerdì), candele orarie per `σ_trail`. Zero GPU, zero scritture su `data/`/`results/`, `04b`
+invariato.
+
+🇮🇹 **① è predeterminata dai dati già su disco e non misura l'esecuzione.** `c_roll` ricostruito
+con la selezione di `pick_butterfly` (expiry più vicina a 168 h, corpo ATM, ali a
+`S·exp(±1.5·σ_trail·√T)` strettamente OTM), fee da schedule, ½-spread quotato delle 4 gambe, premio
+netto ai mark, legging al secondo ordine sulle ali (`½·φ(d₁)·σ·τ/√T` per contratto). Mediana
+**0.065** al primo snapshot del venerdì ≥ 08:00 UTC (n = 9, p90 0.080, max 0.099); **0.072** su
+tutti gli snapshot delle 08 UTC (n = 147, SD 0.018); nessun effetto orario (mediane per ora
+0.066-0.072). Quote a due lati sulle 4 gambe mainnet nel 99.8% degli snapshot. Il legging, **unico**
+input di ① che dipende dall'esecuzione di FT1, vale **≤ 5·10⁻⁵** del premio netto anche a
+`τ = 120 s`: quattro ordini di grandezza sotto il margine. Bootstrap della mediana su 8 roll (20 000
+repliche): P(① PASS) = 1.00 a costo ×2.5, 0.94 a ×3.0, 0.50 a ×3.5, 0.06 a ×4.0; elasticità del costo
+al livello di IV −0.60 (a IV ATM 0.25 la mediana attesa sale a ~0.085). Conseguenza: ① passa quasi
+certamente per costruzione, il suo esito è calcolabile **oggi** e non dice nulla su «al costo previsto
+sul venue». La frase «il margine di ① satura in ~2 roll» è giusta nei numeri ma è stata letta come
+potenza, mentre significa che la condizione non discrimina l'esecuzione. L'unico dato di costo che
+FT1 produce davvero è il ½-spread **realizzato testnet**, oggi non gating.
+
+🇮🇹 **②a è la condizione vincolante, e a n = 8 non ha potenza in nessuna delle due direzioni.** Zero
+`incomplete` su N roll ⇒ P(PASS) = (1−p)^N. Con p = 5% per roll, il tasso implicito nel prior della
+pre-reg stessa (35% di almeno un fallimento su 8 ⇒ p ≈ 5.2%), FAIL il 34% delle volte; con p = 31%
+PASS ancora il 5%. Uno 0/8 limita p solo a **≤ 31%** (95% unilaterale); per ≤ 10% servono 29 roll
+puliti, per ≤ 5% ne servono 59, oltre un anno a un roll a settimana. Un PASS di ②a non autorizza
+quindi «la struttura si completa in modo affidabile».
+
+🇮🇹 **④ non è vincolante sul lato banda.** Finestre di 16 venerdì dal 2021: con DVOL di partenza
+< 45 (oggi 39) P(≥ 8 venerdì in banda farfalla) = **1.00** (49 finestre, p10 = 10; dal 2024 31
+finestre, p10 = 14); partendo fra 45 e 56.1 0.90, sopra soglia 0.28. Il rischio sulla numerosità è
+operativo: un tentativo `blocked` ferma il servizio fino alla review manuale, e i venerdì persi non
+si recuperano.
+
+🇮🇹 **Buchi di definizione — la pre-reg (02/09) precede l'esecutore journaled (13-15/09).**
+(i) `incomplete` è definito dalla regola dei 120 s con flatten, ma l'esecutore ha **tre** esiti
+(completo, `verified_flat`, `blocked_operator_review` = risposta persa o ambigua, **nessun** flatten):
+non è dichiarato se un blocco conta in ②a, né come si contano i venerdì persi nell'attesa.
+(ii) Momento di lettura non dichiarato (all'8° roll completo o a 16 settimane): con tolleranza zero
+cambia la curva operativa (a p = 5%, PASS 0.66 con N = 8 contro 0.44 con N = 16), e non è dichiarato
+se il primo `incomplete` chiude subito FAIL. (iii) ②b si calcola su `fill_span_s`, che per
+costruzione è `None` quando la copertura dei trade non è verificabile, e sempre dopo una ri-verifica
+post-cancel: non è dichiarato se quei roll escono dalla mediana o contano come violazione. (iv) ③b
+«errore relativo mediano 0» è un'uguaglianza esatta su float (il ledger v1 registra fee da schedule
+come `0.0005874999999999999`), e `fee_observed` può essere `None`, rendendo ③b non calcolabile sui
+primi 4 fill. (v) **Nel repo non esiste un giudice di FT1:** il calcolo di `c_roll` (quale snapshot,
+mark o mid per il premio netto, gamma del legging) non è congelato in codice né coperto da test
+sentinella sulle costanti.
+
+🇮🇹 **Proposte — ADOTTATE il 2026-09-15 come emendamento 1 in coda alla pre-reg FT1, dove sta il
+testo vincolante.** Una pre-reg non avviata si può ancora rinforzare senza goalpost-moving; soglia DVOL, `k`, ordine di esecuzione, regola dei 120 s e `c*` **non** si toccano.
+(P1) Dichiarare ① **controllo pre-calcolato**, non test: esito atteso PASS con P ≈ 1, utile solo come
+guardia contro un cambio di regime del book; il valore ex-ante va riportato accanto al verdetto.
+(P2) Riscrivere il claim di PASS di ②a col suo limite («nessun `incomplete` su 8, compatibile con
+p ≤ 31%»), oppure dichiarare che FT1 non può stabilire l'affidabilità dell'esecuzione in 16
+settimane. (P3) Definire come contano in ②a i tre esiti dell'esecutore e i venerdì persi per blocco.
+(P4) Momento di lettura = 8° roll completo, con chiusura FAIL immediata al primo `incomplete`.
+(P5) ②b sui soli roll con timing verificato, con un minimo dichiarato di roll misurati (altrimenti
+NESSUNA CONCLUSIONE su ②b); ③b con tolleranza assoluta dichiarata (es. 10⁻⁸ BTC) e
+`fee_observed = None` ⇒ ③b non superato. (P6) Giudice FT1 in codice, congelato e con sentinelle sulle
+costanti, **prima** del go-live. **Azione esatta da cui ripartire:** P1-P6 adottate e committate come
+emendamento 1. Prossimo passo: il **giudice di FT1** in codice con i test sentinella (P6), che è ciò
+che sblocca il go-live; poi decisione sul vintage macro, ritiro del contatore E1, go-live su
+istruzione esplicita.
+
+**EN** Before go-live, checks that every FT1 condition has a **derived**, not assumed, ability to
+discriminate: the lesson of E1 stage 2, where the control's power had not been sized. Inputs, all
+production data read-only: mainnet chain snapshots `data/iv/chain` (81 days, 06-12 → 09-10), hourly
+DVOL `data/iv/dvol.parquet` (2021-03 → 2026-09, 285 Fridays), hourly candles for `σ_trail`. Zero
+GPU, zero writes to `data/`/`results/`, `04b` unchanged.
+
+**EN** **① is predetermined by data already on disk and does not measure execution.** `c_roll`
+rebuilt with `pick_butterfly`'s selection (expiry nearest 168 h, ATM body, wings at
+`S·exp(±1.5·σ_trail·√T)` strictly OTM), schedule fees, quoted half-spread of the 4 legs, net premium
+at marks, second-order legging on the wings (`½·φ(d₁)·σ·τ/√T` per contract). Median **0.065** at the
+first Friday snapshot ≥ 08:00 UTC (n = 9, p90 0.080, max 0.099); **0.072** over all 08 UTC snapshots
+(n = 147, SD 0.018); no time-of-day effect (hourly medians 0.066-0.072). Two-sided quotes on all 4
+mainnet legs in 99.8% of snapshots. Legging, the **only** input of ① that depends on FT1's execution,
+is **≤ 5·10⁻⁵** of net premium even at `τ = 120 s`: four orders of magnitude below the margin.
+Bootstrap of the 8-roll median (20,000 replicates): P(① PASS) = 1.00 at cost ×2.5, 0.94 at ×3.0, 0.50
+at ×3.5, 0.06 at ×4.0; cost elasticity to the IV level −0.60 (at ATM IV 0.25 the expected median rises
+to ~0.085). Consequence: ① passes almost surely by construction, its outcome is computable **today**,
+and it says nothing about "at the expected cost on the venue". The statement "①'s margin saturates in
+~2 rolls" is numerically right but was read as power, whereas it means the condition does not
+discriminate execution. The only cost datum FT1 actually produces is the testnet **realised**
+half-spread, currently non-gating.
+
+**EN** **②a is the binding condition, and at n = 8 it has no power in either direction.** Zero
+`incomplete` in N rolls ⇒ P(PASS) = (1−p)^N. At p = 5% per roll, the rate implied by the pre-reg's own
+prior (35% chance of at least one failure in 8 ⇒ p ≈ 5.2%), it FAILs 34% of the time; at p = 31% it
+still PASSes 5% of the time. A 0/8 bounds p only to **≤ 31%** (95% one-sided); ≤ 10% needs 29 clean
+rolls and ≤ 5% needs 59, over a year at one roll a week. A ②a PASS therefore does not license "the
+structure completes reliably".
+
+**EN** **④ is not binding on the band side.** 16-Friday windows since 2021: starting from DVOL < 45
+(39 today) P(≥ 8 butterfly-band Fridays) = **1.00** (49 windows, p10 = 10; since 2024 31 windows,
+p10 = 14); starting between 45 and 56.1 0.90, above threshold 0.28. The sample-size risk is
+operational: a `blocked` attempt halts the service until manual review, and lost Fridays are not
+recovered.
+
+**EN** **Definitional gaps — the pre-reg (09-02) predates the journaled executor (09-13/15).**
+(i) `incomplete` is defined by the 120 s rule with flatten, but the executor has **three** outcomes
+(complete, `verified_flat`, `blocked_operator_review` = lost or ambiguous response, **no** flatten):
+whether a block counts in ②a, and how Fridays lost while waiting count, is not declared. (ii) Reading
+time not declared (at the 8th complete roll or at 16 weeks): with zero tolerance the operating curve
+changes (at p = 5%, PASS 0.66 with N = 8 vs 0.44 with N = 16), and whether the first `incomplete`
+closes FAIL immediately is not declared. (iii) ②b uses `fill_span_s`, which is `None` by construction
+when trade coverage cannot be verified, and always after a post-cancel re-verification: whether such
+rolls leave the median or count as violations is not declared. (iv) ③b "median relative error 0" is
+an exact float equality (the v1 ledger records schedule fees as `0.0005874999999999999`), and
+`fee_observed` can be `None`, making ③b uncomputable on the first 4 fills. (v) **No FT1 judge exists
+in the repo:** the `c_roll` computation (which snapshot, mark or mid for net premium, legging gamma)
+is neither frozen in code nor covered by sentinel tests on the constants.
+
+**EN** **Proposals — ADOPTED on 2026-09-15 as amendment 1 at the end of the FT1 pre-reg, where the
+binding text lives.** An unstarted pre-reg can still be strengthened without goalpost-moving; the DVOL threshold, `k`, execution order, 120 s rule and `c*` are **not** touched.
+(P1) Declare ① a **pre-computed control**, not a test: expected PASS with P ≈ 1, useful only as a
+guard against a regime change in the book; its ex-ante value is reported next to the verdict.
+(P2) Rewrite ②a's PASS claim with its bound ("no `incomplete` in 8, compatible with p ≤ 31%"), or
+declare that FT1 cannot establish execution reliability within 16 weeks. (P3) Define how the
+executor's three outcomes and Fridays lost to a block count in ②a. (P4) Reading time = 8th complete
+roll, with immediate FAIL closure at the first `incomplete`. (P5) ②b on rolls with verified timing
+only, with a declared minimum of measured rolls (else NO CONCLUSION on ②b); ③b with a declared
+absolute tolerance (e.g. 10⁻⁸ BTC) and `fee_observed = None` ⇒ ③b not passed. (P6) An FT1 judge in
+code, frozen and with sentinels on the constants, **before** go-live. **Exact action to resume
+from:** P1-P6 adopted and committed as amendment 1. Next step: the **FT1 judge** in code with sentinel
+tests (P6), which is what unblocks go-live; then the macro-vintage decision, retiring the E1 counter,
+go-live on explicit instruction.
+
+---
+
 ## 🔍 Revisione indipendente del diff `04b` — 2026-09-15 (locale, non deployato)
 
 🇮🇹 Revisione read-only del diff completo dell'esecutore adattivo su otto categorie
@@ -491,6 +626,103 @@ a non-recollectable sample) → deploy **after a settlement** with a flat ledger
 `--execute`, never at home → **go-live as an explicit act**. Command:
 `python scripts/04b_vol_paper.py --execute --adaptive --adaptive-dvol-threshold 0.561 --adaptive-k 1.5`.
 First possible verdict ~mid November.
+
+### ✏️ Emendamento 1 — 2026-09-15, PRIMA del go-live · Amendment 1 — 2026-09-15, BEFORE go-live
+
+🇮🇹 Adottato prima di qualunque fill, a numeri di FT1 **non visti** (FT1 non è avviato: non esiste
+alcun roll). Motivazione e numeri: sezione «Audit di potenza della pre-registrazione FT1 —
+2026-09-15» in testa. **Invariati:** soglia DVOL 0.561, `k` 1.5, ordine ali-prima, regola dei 120 s,
+`c*` 0.25153, entry del venerdì 08 UTC, taglia, finestra di 16 settimane. Dove questo emendamento e
+le tabelle sopra divergono, **vale l'emendamento**.
+
+- **P1 — ① diventa CONTROLLO pre-calcolato, non test.** Resta gating come guardia (`c_roll` mediano
+  > 0.25153 ⇒ CHIUSO FAIL su ①), ma non è più il test statistico della famiglia: il suo esito è
+  determinato dal book mainnet, non dall'esecuzione. **Valore ex-ante congelato oggi:** mediana
+  **0.065** al primo snapshot del venerdì ≥ 08:00 UTC (n = 9, 10/07 → 04/09), **0.072** su tutti gli
+  snapshot delle 08 UTC (n = 147); P(① PASS) ≈ 1 salvo un book ≥ ~3.5× più largo. Si riporta accanto
+  al verdetto. **Famiglia:** nessun test statistico gating ⇒ nessuna correzione per molteplicità;
+  FT1 è un esperimento di **conteggi e controlli**. Un `c_roll` mediano > 0.15 resta l'esito
+  sorprendente già dichiarato (problema di misura, non di costo).
+- **P2 — claim di ②a con il suo limite.** Un PASS di ②a si enuncia **solo** come «0 roll farfalla
+  incompleti su 8, compatibile con un tasso di incompletezza per roll ≤ 31% (95% unilaterale)». FT1
+  **non può** stabilire l'affidabilità dell'esecuzione in 16 settimane (un bound ≤ 10% richiede 29
+  roll puliti, ≤ 5% ne richiede 59). La conseguenza di un CHIUSO PASS resta quella dichiarata: apre
+  una decisione, non la prende.
+- **P3 — come si contano gli esiti dell'esecutore.** ②a, ②b e ④ si leggono sui **soli tentativi
+  farfalla** (venerdì 08 UTC in banda fly). Un tentativo farfalla è **incompleto** se l'esecutore non
+  chiude `complete`, per **qualunque** causa: `verified_flat` (gamba rifiutata o parziale, timeout
+  prima o dopo l'ultima gamba) **e** `blocked_operator_review` (risposta persa o ambigua, reverse non
+  verificata). Un blocco conta come incompleto e se ne registra la causa, senza distinguere a
+  posteriori fra venue e infrastruttura. **Non** sono tentativi, e non contano né in ②a né in ④:
+  venerdì con `ADAPT_NO_DVOL`, servizio fermo, banda daily, oppure fermati da un journal lasciato da
+  un tentativo precedente (anche della banda daily); si riportano per data e causa. La finestra di 16
+  settimane **non** si allunga. Esiti incompleti o bloccati della banda daily: riportati, non gating.
+- **P4 — momento di lettura.** Il gate si legge **una volta**, all'**8° roll farfalla completo**. Il
+  **primo** tentativo farfalla incompleto chiude **subito** CHIUSO FAIL su ②a. Se a 16 settimane dal
+  go-live i roll completi sono < 8 senza alcun incompleto: NESSUNA CONCLUSIONE, come già scritto.
+- **P5 — ②b e ③b misurabili.** ②b = mediana di `fill_span_s` sui soli roll con
+  `fill_timing_source = "exchange_trades"`; servono **≥ 5 roll misurati su 8** (maggioranza stretta:
+  una mediana su meno della metà dei roll non rappresenta la mediana dei roll), altrimenti NESSUNA
+  CONCLUSIONE. `receipt_span_s` è riportato accanto, non gating. ③b = sul **primo roll farfalla
+  completo**, per **ciascuna** delle 4 gambe `|fee_observed − min(0.0003, 0.125·average_price)·amount|
+  ≤ 10⁻⁸ BTC`; `fee_observed = None` su una gamba ⇒ ③b non superato ⇒ NESSUNA CONCLUSIONE (regola già
+  dichiarata per ③).
+- **P6 — giudice in codice PRIMA del go-live.** Il go-live resta **bloccato** finché non è committato
+  un giudice di FT1 in sola lettura sul ledger che implementi questo emendamento, con test sentinella
+  sulle costanti (0.561, 1.5, 120 s, 0.25153, 8 roll, 16 settimane, ≥ 5 misurati, 10⁻⁸ BTC) e sulle
+  regole di conteggio P3/P4. **Definizione di `c_roll`, congelata qui:** snapshot di chain mainnet
+  più vicino all'**ultimo** fill d'entry, entro ±10 min (altrimenti `c_roll` non disponibile per quel
+  roll, e lo si riporta); strumenti **dei fill**; premio netto e fee da schedule ai **mark** dello
+  snapshot; ½-spread `(ask − bid)/2` per gamba; legging `½·φ(d₁)·σ·τ/√T` sulle due ali con `mark_iv`
+  dello snapshot e `τ = fill_span_s`, oppure `τ = 120 s` se non misurato. ① richiede `c_roll`
+  disponibile su **≥ 5 roll su 8**, altrimenti NESSUNA CONCLUSIONE.
+
+**EN** Adopted before any fill, with FT1 numbers **unseen** (FT1 has not started: no roll exists).
+Rationale and numbers: the «FT1 pre-registration power audit — 2026-09-15» section on top.
+**Unchanged:** DVOL threshold 0.561, `k` 1.5, wings-first order, 120 s rule, `c*` 0.25153, Friday
+08 UTC entry, size, 16-week window. Where this amendment and the tables above diverge, **the
+amendment prevails**.
+
+- **P1 — ① becomes a pre-computed CONTROL, not a test.** It stays gating as a guard (median
+  `c_roll` > 0.25153 ⇒ CLOSED FAIL on ①) but is no longer the family's statistical test: its outcome
+  is determined by the mainnet book, not by execution. **Ex-ante value frozen today:** median
+  **0.065** at the first Friday snapshot ≥ 08:00 UTC (n = 9, 07-10 → 09-04), **0.072** over all
+  08 UTC snapshots (n = 147); P(① PASS) ≈ 1 unless the book is ≥ ~3.5× wider. Reported next to the
+  verdict. **Family:** no gating statistical test ⇒ no multiplicity correction; FT1 is an experiment
+  of **counts and controls**. A median `c_roll` > 0.15 remains the surprising outcome already
+  declared (a measurement problem, not a cost one).
+- **P2 — ②a's claim with its bound.** A ②a PASS is stated **only** as «0 incomplete butterfly rolls
+  out of 8, compatible with a per-roll incompleteness rate ≤ 31% (95% one-sided)». FT1 **cannot**
+  establish execution reliability within 16 weeks (a ≤ 10% bound needs 29 clean rolls, ≤ 5% needs
+  59). A CLOSED PASS keeps its declared consequence: it opens a decision, it does not take it.
+- **P3 — how executor outcomes count.** ②a, ②b and ④ are read on **butterfly attempts only**
+  (Friday 08 UTC in the fly band). A butterfly attempt is **incomplete** if the executor does not
+  close `complete`, for **any** cause: `verified_flat` (rejected or partial leg, timeout before or
+  after the last leg) **and** `blocked_operator_review` (lost or ambiguous response, unverified
+  reverse). A block counts as incomplete and its cause is recorded, without distinguishing venue from
+  infrastructure after the fact. **Not** attempts, and counted neither in ②a nor in ④: Fridays with
+  `ADAPT_NO_DVOL`, service down, daily band, or halted by a journal left by an earlier attempt (daily
+  band included); they are reported by date and cause. The 16-week window is **not** extended.
+  Incomplete or blocked daily-band outcomes: reported, not gating.
+- **P4 — reading time.** The gate is read **once**, at the **8th complete butterfly roll**. The
+  **first** incomplete butterfly attempt closes CLOSED FAIL on ②a **immediately**. If 16 weeks after
+  go-live there are < 8 complete rolls and no incomplete one: NO CONCLUSION, as already written.
+- **P5 — measurable ②b and ③b.** ②b = median `fill_span_s` over rolls with
+  `fill_timing_source = "exchange_trades"` only; **≥ 5 measured rolls out of 8** are required (strict
+  majority: a median over fewer than half the rolls does not represent the rolls' median), else NO
+  CONCLUSION. `receipt_span_s` reported alongside, not gating. ③b = on the **first complete butterfly
+  roll**, for **each** of the 4 legs `|fee_observed − min(0.0003, 0.125·average_price)·amount| ≤
+  10⁻⁸ BTC`; `fee_observed = None` on any leg ⇒ ③b not passed ⇒ NO CONCLUSION (rule already declared
+  for ③).
+- **P6 — judge in code BEFORE go-live.** Go-live stays **blocked** until an FT1 judge, read-only on
+  the ledger and implementing this amendment, is committed with sentinel tests on the constants
+  (0.561, 1.5, 120 s, 0.25153, 8 rolls, 16 weeks, ≥ 5 measured, 10⁻⁸ BTC) and on the P3/P4 counting
+  rules. **`c_roll` definition, frozen here:** mainnet chain snapshot nearest the **last** entry fill,
+  within ±10 min (else `c_roll` unavailable for that roll, and reported); instruments **of the
+  fills**; net premium and schedule fees at the snapshot **marks**; half-spread `(ask − bid)/2` per
+  leg; legging `½·φ(d₁)·σ·τ/√T` on the two wings with the snapshot `mark_iv` and `τ = fill_span_s`,
+  or `τ = 120 s` if unmeasured. ① requires `c_roll` available on **≥ 5 rolls out of 8**, else NO
+  CONCLUSION.
 
 ---
 
