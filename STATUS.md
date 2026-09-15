@@ -5,6 +5,230 @@
 
 ---
 
+## 🔍 Revisione indipendente del diff `04b` — 2026-09-15 (locale, non deployato)
+
+🇮🇹 Revisione read-only del diff completo dell'esecutore adattivo su otto categorie
+(compensazione, durabilità del journal, eccezioni dopo l'invio, verifica per assenza, clock,
+inerzia del path v1, invarianti di scrittura e segreti, qualità dei test). **Nessun rilievo
+bloccante.** Verificate pulite: compensazione (quantità = fill finale noto, verso inverso, arresto
+alla prima reverse non verificata); durabilità (voce `submitting` scritta atomicamente prima di ogni
+ordine, nessuna sequenza kill/riavvio in cui un ordine partito manchi dal journal — manca `fsync`:
+atomico rispetto al kill del processo, non alla perdita di alimentazione); timeout tutti via
+`_monotonic`; inerzia v1 (a flag spento girano solo i tre controlli di presenza del journal);
+scritture solo sotto `results/vol_paper/`; nessun segreto nei record.
+
+🇮🇹 **Corretti (stessa classe dei difetti già chiusi):** (1) `classify_order` verificava **per
+assenza** strumento e verso — ora richiesti, anche nella ri-verifica post-cancel, dove la quantità
+diventa quella della reverse; (2) `order_state="filled"` con `filled_amount < amount` passava come
+parziale terminale — risposta contraddittoria, ora `ambiguous`; (3) `trades` truthy non lista (1,
+True, 3.5) sollevava `TypeError` a ordine eseguito; (4) un `order` non-dict sollevava
+`AttributeError` su `order.get` a ordine inviato (istanza non segnalata dalla revisione, trovata
+controllando il resto della classe). (5) Il test della guardia di `log_exec_diag` **passava anche a
+guardia disattivata**: il fail-soft inghiottiva l'eccezione del doppio — ora conta le chiamate al
+client. (6) Copertura: tabella di `classify_order` e test sul ramo nonterminal **dentro**
+l'executor (aperto anche dopo il cancel → blocked; post-cancel parziale → reverse della quantità
+post-cancel; fill regredito, identità assente o verso opposto → blocked; reverse aperta
+ri-verificata prima di proseguire).
+
+🇮🇹 **Prova di mutazione** (ogni fix o ramo revertito su una copia, uno alla volta): **8/8**
+mutazioni fanno cadere almeno un test. Ha trovato un difetto nei test nuovi — i casi di identità
+avevano fill iniziale **sopra** quello post-cancel, finivano in `ambiguous` per fill regredito e
+passavano anche col bug — corretto prima del conteggio. **Test:** `tests/test_adaptive_structure.py`
+**40/40**; suite completa **534 passed, 1 skipped** in 50.9 s.
+
+🇮🇹 **Aperti, NON corretti di proposito:** (a) **blocco in modalità simulata — DECISO: contratto invariato.**
+Senza `--execute` un errore REST transitorio sul mark produce `blocked_operator_review` e congela il
+processo pur senza esposizione sul venue. Si tiene così: il contratto resta **unico** per le due
+modalità (quello rivisto e coperto dai test), e una prova simulata **misura** il tasso di blocco che
+`--execute` subirebbe invece di nasconderlo. Scartate: niente journal in simulazione (la prova
+smetterebbe di esercitare journal e blocco), fallimento come "fill zero noto" (servirebbe un ramo
+nell'executor e la prova direbbe "tutto bene" dove il reale si blocca), retry sul mark (consuma la
+finestra pre-registrata di 120 s ed è asimmetrico: un ordine non si ritenta). Il danno reale non
+nasce dalla semantica della simulazione ma da una **seconda istanza** sulla directory di produzione,
+che i path fissi (`results/vol_paper/`, relativi alla directory di lancio) rendono possibile:
+regola scritta in `AVVIO.md` §5.3. (b) `timeout_after_<ultima gamba>` smonta una struttura completa pagando lo spread
+due volte: è la regola di completamento **pre-registrata** di FT1, non si tocca. (c) `save_position`
+non è atomica mentre il journal lo è — preesistente nel path v1. (d) Il journal blocca anche il
+servizio v1 — deliberato, ma uno smoke adattivo rimasto bloccato sul VPS ferma il campione v1 finché
+il file non viene rimosso. (e) `receipt_ts` su orologio di sistema, solo diagnostico. **Azione
+esatta da cui ripartire:** pacchetto committato in locale, **non pushato** e non deployato. Poi,
+nell'ordine: audit di potenza della pre-registrazione FT1 prima del go-live; **solo se** prima del
+go-live serve una prova vera sul VPS, prima un flag CLI esplicito di directory di output (path di
+stato sotto una directory passata da riga di comando, default invariato, prova di inerzia a flag
+spento, nuovo giro di revisione su `04b`) — altrimenti il primo tick `--execute` di FT1 fa da prova;
+decisione sul vintage macro; ritiro del contatore E1 dalla routine.
+
+**EN** Read-only review of the adaptive executor's complete diff across eight categories
+(compensation, journal durability, exceptions after submission, verify-by-absence, clock, v1-path
+inertia, write and secret invariants, test quality). **No blocking finding.** Verified clean:
+compensation (quantity = known final fill, reversed side, halt at the first unverified reverse);
+durability (`submitting` entry written atomically before every order, no kill/restart sequence
+where a submitted order is missing from the journal — no `fsync`: atomic against process kill, not
+power loss); all timeouts via `_monotonic`; v1 inertia (with the flag off only the three journal
+presence checks run); writes only under `results/vol_paper/`; no secrets in records.
+
+**EN** **Fixed (same class as the defects already closed):** (1) `classify_order` verified
+instrument and side **by absence** — now required, including in the post-cancel re-verification,
+where the quantity becomes the reverse's; (2) `order_state="filled"` with `filled_amount < amount`
+passed as terminal partial — a contradictory response, now `ambiguous`; (3) truthy non-list
+`trades` (1, True, 3.5) raised `TypeError` with the order executed; (4) a non-dict `order` raised
+`AttributeError` on `order.get` with the order sent (instance not flagged by the review, found by
+checking the rest of the class). (5) The `log_exec_diag` guard test **passed even with the guard
+disabled**: the fail-soft swallowed the double's exception — it now counts client calls. (6)
+Coverage: a `classify_order` case table and tests on the nonterminal branch **inside** the executor
+(still open after cancel → blocked; post-cancel partial → reverse of the post-cancel quantity;
+regressed fill, missing identity or opposite side → blocked; open reverse re-verified before
+continuing).
+
+**EN** **Mutation check** (each fix or branch reverted on a copy, one at a time): **8/8** mutations
+fail at least one test. It found a defect in the new tests — the identity cases had an initial fill
+**above** the post-cancel one, fell into `ambiguous` via regressed fill and passed even with the bug
+— fixed before counting. **Tests:** `tests/test_adaptive_structure.py` **40/40**; full suite
+**534 passed, 1 skipped** in 50.9 s.
+
+**EN** **Open, deliberately NOT fixed:** (a) **blocking in simulated mode — DECIDED: contract unchanged.**
+Without `--execute` a transient REST error on the mark yields `blocked_operator_review` and freezes
+the process despite no venue exposure. It stays that way: the contract remains **single** across
+both modes (the one reviewed and covered by the tests), and a simulated test **measures** the
+blocking rate `--execute` would suffer instead of hiding it. Rejected: no journal in simulation (the
+test would stop exercising journal and blocking), failure as a "known zero fill" (it would need a
+branch in the executor and the test would report "all good" where the real run blocks), retry on
+the mark (consumes the pre-registered 120 s window and is asymmetric: an order cannot be retried).
+The real damage does not come from simulation semantics but from a **second instance** on the
+production directory, which the fixed paths (`results/vol_paper/`, relative to the launch
+directory) make possible: rule written in `AVVIO.md` §5.3. (b) `timeout_after_<last leg>` unwinds a complete structure paying the spread twice: it is
+FT1's **pre-registered** completion rule, not to be touched. (c) `save_position` is not atomic while
+the journal is — pre-existing in the v1 path. (d) The journal also blocks the v1 service —
+deliberate, but an adaptive smoke left blocked on the VPS halts the v1 sample until the file is
+removed. (e) `receipt_ts` on the system clock, diagnostic only. **Exact action to resume from:**
+package committed locally, **not pushed** and not deployed. Then, in order: the FT1
+pre-registration power audit before go-live; **only if** a real VPS test is needed before go-live,
+first an explicit CLI output-directory flag (state paths under a directory passed on the command
+line, default unchanged, inertia proof with the flag off, a new review round on `04b`) — otherwise
+FT1's first `--execute` tick serves as the test; the macro-vintage decision; retiring the E1
+counter from the routine.
+
+---
+
+## 🔧 Identità dei record e regressioni mancanti — 2026-09-15 (locale, non deployato)
+
+🇮🇹 Chiusi i **due difetti di identità** che la qualifica del 13/09 lasciava aperti, e aggiunta la
+famiglia di regressioni che mancava. **(A) Identità dei trade RICHIESTA, non opzionale.**
+`_verify_trade_history` confrontava con `not in (None, atteso)`: un trade **privo** di
+`order_id`/`instrument_name`/`direction` passava la verifica di copertura — la copertura risultava
+"verificata" pur non avendo nulla da verificare, ed è esattamente l'identità che il record di
+recovery conserva. Ora i tre campi devono essere **presenti e coerenti**, e un `order_id` ignoto
+lato ordine chiude subito a ignoto. Stesso punto: un `trade_id` **non hashabile** (lista/dict da
+una risposta malformata) sollevava `TypeError` su `in seen_ids` dentro `_adaptive_submit_leg`, che
+**non è protetto** — il raise avrebbe interrotto il journaling **dopo** che gli ordini erano già
+partiti, cioè nel punto peggiore; ora degrada a **ignoto** come ogni altra copertura non
+verificabile. **(B) Strumento e verso conservati nel record.** `_leg_exec_detail` proiettava solo
+il nome **logico** della gamba e l'order id: strumento e verso delle reverse vivevano **solo** nel
+journal, che su `verified_flat` viene cancellato — la prova di recovery restava senza l'identità di
+ciò che era stato davvero comprato o venduto. Ora la risoluzione finale di ogni gamba (entry e
+reverse, ri-classificate incluse) porta `instrument` e `side`, e la proiezione li persiste.
+
+🇮🇹 **Regressioni aggiunte (12):** identità richiesta e `trade_id` non hashabile → ignoto mai
+eccezione; identità concreta presente nel record dopo la cancellazione del journal; journal scritto
+**prima** del primo ordine e con la gamba in `submitting`; `begin` che **rifiuta** di sovrascrivere
+un tentativo non chiuso; risposta **persa** → nessuna compensazione al buio, journal ritenuto;
+**fill parziale** → si rivende esattamente la quantità nota (0.4, non 1.0) in ordine di entry
+inverso; **timeout** nelle due posizioni (prima della gamba successiva e dopo l'ultima risposta, che
+invalida una struttura pur "tutta filled"); **prima reverse non verificata** che ferma la
+compensazione lasciando l'ala restante non venduta al buio; **blocco al riavvio** su `tick()` e
+`main()`. **Test:** `tests/test_adaptive_structure.py` **30/30** in 8.38 s; suite completa
+**524 passed, 1 skipped** in 55.8 s (il campo aggiunto ai record non ha rotto nessun consumatore).
+
+🇮🇹 **Limiti (invariati dove lo erano):** nessun deploy sul VPS, nessun avvio FT1, nessuna modifica
+a regola d'entry, soglie, sizing o settlement. La **revisione indipendente del diff completo** non è
+stata fatta: i test dimostrano i contratti che asseriscono, non la correttezza dell'intero
+esecutore. Su un journal bloccato la riconciliazione **manuale** resta necessaria, e fee/timing
+possono restare ignoti per costruzione. `CHANGELOG.md` **non** è stato toccato: la voce si scrive
+quando il pacchetto è accettato, non mentre è locale. **Azione esatta da cui ripartire:** revisione
+indipendente del diff `04b` prima di qualunque deploy; poi, nell'ordine già fissato, audit di
+potenza della pre-registrazione FT1 prima del go-live, decisione sul vintage macro, ritiro del
+contatore E1 dalla routine (senza consumatore dal 10/09).
+
+**EN** Closed the **two identity defects** left open by the 09-13 qualification and added the
+missing regression family. **(A) Trade identity REQUIRED, not optional.** `_verify_trade_history`
+compared with `not in (None, expected)`: a trade **missing** `order_id`/`instrument_name`/
+`direction` passed the coverage check — coverage came out "verified" with nothing to verify, and
+that is exactly the identity the recovery record retains. The three fields must now be **present
+and consistent**, and an unknown order-side `order_id` closes to unknown immediately. Same spot: a
+**non-hashable** `trade_id` (list/dict from a malformed response) raised `TypeError` on
+`in seen_ids` inside `_adaptive_submit_leg`, which is **unprotected** — the raise would have
+interrupted journaling **after** orders had been submitted, i.e. at the worst point; it now
+degrades to **unknown** like any other non-verifiable coverage. **(B) Instrument and side retained
+in the record.** `_leg_exec_detail` projected only the leg's **logical** name and the order id: the
+reverses' instrument and side lived **only** in the journal, which is cleared on `verified_flat` —
+so the recovery evidence lost the identity of what had actually been bought or sold. Every leg's
+final resolution (entry and reverse, re-classified included) now carries `instrument` and `side`,
+and the projection persists them.
+
+**EN** **Regressions added (12):** required identity and non-hashable `trade_id` → unknown, never
+an exception; concrete identity present in the record after the journal is cleared; journal written
+**before** the first order with the leg in `submitting`; `begin` **refusing** to overwrite an
+unclosed attempt; **lost** response → no blind compensation, journal retained; **partial fill** →
+exactly the known quantity is reversed (0.4, not 1.0) in reverse entry order; **timeout** in both
+positions (before the next leg, and after the last response, which invalidates an otherwise
+"all filled" structure); **first unverified reverse** halting compensation and leaving the
+remaining wing unsold rather than blind-sold; **restart blocking** on `tick()` and `main()`.
+**Tests:** `tests/test_adaptive_structure.py` **30/30** in 8.38 s; full suite **524 passed, 1
+skipped** in 55.8 s (the field added to the records broke no consumer).
+
+**EN** **Limits (unchanged where they were):** no VPS deployment, no FT1 start, no change to the
+entry rule, thresholds, sizing or settlement. The **independent review of the complete diff** has
+not been done: the tests establish the contracts they assert, not the whole executor's correctness.
+On a blocked journal **manual** reconciliation is still required, and fee/timing can stay unknown
+by construction. `CHANGELOG.md` is deliberately **untouched**: its entry belongs to an accepted
+package, not to local work. **Exact resume action:** independent review of the `04b` diff before
+any deployment; then, in the already-fixed order, the FT1 pre-registration power audit before
+go-live, the macro-vintage decision, and retiring the E1 counter from the routine (without a
+consumer since 09-10).
+
+---
+
+## 🔧 Fix locale, non deployato — 2026-09-13
+
+🇮🇹 **Qualifica della verifica:** riesecuzione indipendente del file di regressione: 18/18 PASS in 3.12 s, dopo lettura dei nuovi test e verifica dell'isolamento temporaneo. Il pacchetto resta **NON accettato per deploy**: mancano la revisione completa e le regressioni su durabilità del journal, risposte perse, fill parziali, timeout, compensazione e blocco al riavvio. La verifica statica segnala inoltre identità dei trade ancora opzionale nella validazione e identità strumento/verso non conservata nel record di recovery dopo cancellazione del journal. Ripresa operativa: correggere questi due punti, completare i test mancanti e revisionare il diff prima di qualsiasi avvio FT1. Il conteggio 18/18 non valida questi contratti ancora scoperti.
+
+**EN** **Verification qualification:** independent regression-file rerun: 18/18 PASS in 3.12 s, after reading the new tests and checking temporary isolation. The package remains **NOT accepted for deployment**: full review and regressions for journal durability, lost responses, partial fills, timeouts, compensation and restart blocking are missing. Static review also identifies optional trade identity validation and instrument/side identity not retained in the recovery record after journal deletion. Operational resume: fix these two points, complete missing tests and review the diff before any FT1 start. The 18/18 count does not validate these uncovered contracts.
+
+🇮🇹 Corrette due lacune di correttezza nell'esecutore adattivo di `scripts/04b_vol_paper.py`
+(locale, **non pushato al VPS, nessun avvio FT1, nessuna modifica della regola d'entry pre-
+registrata**). **(A)** `_fill_timing` usava il max-min dei soli **ultimi** fill per gamba,
+sottostimando lo span quando una gamba aveva più fill: ora `_verify_trade_history` verifica la
+COPERTURA dei trade reali (id univoci, identità ordine/strumento/verso, quantità che sommano al
+`filled_amount` noto, timestamp finiti) prima di trattare fee/timing come completi, e lo span usa
+il primo-ultimo fill **globale** su tutte le gambe di entry; copertura malformata/incompleta →
+fee e timing **ignoti** (mai zero, mai il tempo di ricezione locale al posto del fill). **(B)**
+`log_exec_diag` e la coda del `tick()` scrivevano uno snapshot "flat" anche quando l'entry
+adattiva dello stesso tick lasciava il journal bloccato (`blocked_operator_review`): ora entrambi
+si fermano finché il journal sopravvive; il record `ADAPT_BLOCKED` nel forecasts log resta
+comunque scritto (era già persistito prima del blocco). **Test:** `tests/test_adaptive_structure.py`
+→ **18/18 PASS** (10 preesistenti invariati + 8 nuovi di regressione su A/B). **Limiti:** nessun
+deploy, nessun verdetto FT1; la riconciliazione manuale su un journal bloccato resta necessaria;
+fee/timing dell'exchange possono restare ignoti per costruzione quando la copertura dei trade non
+è completa (comportamento voluto, non un difetto residuo).
+
+**EN** Fixed two correctness gaps in `scripts/04b_vol_paper.py`'s adaptive executor (local,
+**not pushed to the VPS, no FT1 start, no change to the pre-registered entry rule**). **(A)**
+`_fill_timing` used the max-min of the per-leg **last** fills only, undercounting the span when a
+leg had multiple fills: `_verify_trade_history` now checks the real trades' COVERAGE (unique ids,
+order/instrument/side identity, quantities summing to the known `filled_amount`, finite
+timestamps) before treating fee/timing as complete, and the span uses the **global** first-to-last
+fill across all entry legs; malformed/incomplete coverage → fee and timing become **unknown**
+(never zero, never the local receipt time in place of the fill). **(B)** `log_exec_diag` and the
+`tick()` tail still logged a "flat" snapshot even when the same tick's adaptive entry left the
+journal blocked (`blocked_operator_review`): both now stop while the journal survives; the
+`ADAPT_BLOCKED` forecast row stays written regardless (it was already persisted before the
+block). **Tests:** `tests/test_adaptive_structure.py` → **18/18 PASS** (10 pre-existing unchanged
++ 8 new A/B regression tests). **Limits:** no deployment, no FT1 verdict; manual reconciliation on
+a blocked journal is still required; exchange fee/timing can remain unknown by construction when
+trade coverage is incomplete (intended behavior, not a residual defect).
+
+---
+
 ## ▶️ RIPARTI DA QUI — 2026-09-10 (chiusura)
 
 🇮🇹 **Manutenzione documentale successiva, 10/09:** ritirate le checklist esaurite `POST_GATE_V1.md` e `RIPRESA.md`. Residui non conclusi conservati in `docs/ROADMAP_VOL_BOOK.md`; piani modello e dashboard conservati e stato obsoleto riconciliato. `docs/PERF_AUDIT.md` e archivio storico conservati come evidenze. Le citazioni storiche dei file ritirati restano riferimenti alla versione Git dell'epoca. Nessun codice, dato, parametro, gate o servizio modificato. **Ripresa invariata:** audit di potenza FT1 prima del go-live, decisione vintage macro e prerequisiti sotto; verifica live/replay residua conservata nella roadmap, non dichiarata completata.
