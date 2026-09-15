@@ -5,6 +5,88 @@
 
 ---
 
+## 🧭 Riparti da qui — fine sessione 2026-09-15 · Resume here — end of session 2026-09-15
+
+🇮🇹 **Stato.** Commit di oggi tutti su GitHub: `5de0252` (esecutore adattivo di `04b`: identità
+richiesta nei verificatori, revisione indipendente, `tests/test_adaptive_structure.py` 40/40),
+`9ea9000` (audit di potenza FT1 + emendamento 1) e questo. `04b` sul VPS **invariato** (v1,
+`--execute`), nessun deploy, FT1 **non avviato**, go-live **bloccato** fino al giudice (P6). Suite
+534 passed + 1 skipped. **Routine del 15/09 (~14:47 UTC):** 4 heartbeat freschi (IV poller 0.1 h,
+L2 0.0 h, trades 0.2 h, `04b` 1.8 h); merge +1488 righe IV/greeks, chain/orderbook/trades fino al
+15/09; ledger 73 righe, leg opzioni eseguite 72 (soglia 30); posizione aperta short straddle K 77000
+dal 15/09 08:01 UTC, scadenza 16/09 08:00 UTC; nessun journal adattivo, nessun `hedge_state.json`;
+vintage macro `20260730` invariato; B7 fresco (0 barre nuove); L2 copertura 75.1%, `n_eff` 45.6 su
+216, nessun buco in 7 giorni; contatore E1 a 40 con warning «serie close STALE», senza consumatore.
+
+**Azione esatta da cui ripartire, in ordine** (sostituisce le liste delle sezioni sotto):
+1. **Giudice FT1 — P6 dell'emendamento 1, sblocca il go-live.** Script nuovo in sola lettura su
+   `results/vol_paper/` (`adaptive.jsonl`, `trades.jsonl`, `position.json`) e `data/iv/chain`, che
+   implementa l'emendamento alla lettera: tentativi farfalla ed esiti dell'esecutore (P3); lettura
+   all'8° roll completo e FAIL immediato al primo incompleto (P4); ②b su `fill_span_s` verificato
+   con ≥ 5 roll misurati e ③b a 10⁻⁸ BTC per gamba (P5); `c_roll` con la definizione congelata in P6
+   e il valore ex-ante di P1 (0.065 / 0.072) riportato accanto; modalità `--count-only` come i
+   giudici esistenti. **Prima di scrivere:** verificare sui record reali quali campi porta ogni esito
+   (`ADAPT_FLY`/`ADAPT_INCOMPLETE`/`ADAPT_BLOCKED`, record `incomplete`, `exec_legs`). Test sentinella
+   sulle costanti (0.561, 1.5, 120 s, 0.25153, 8 roll, 16 settimane, 5 misurati, 10⁻⁸ BTC) e sulle
+   regole di conteggio, su ledger sintetici; riga in `scripts/README.md` e sync doc. Zero GPU,
+   nessun contatto col VPS.
+2. **Vintage macro — verificare il vincolo prima di decidere.** La nota del 10/09 dice «adesso o
+   mai, FT1 lo ri-bloccherà al go-live», ma la regola adattiva sceglie la struttura **solo** dal DVOL
+   e il forecast del modello entra nei soli metadati d'entry: controllare quali campioni aperti
+   leggono i forecast (S1 incluso) prima di promuovere o no un nuovo vintage. Promozione solo con
+   `pull_vps_data.ps1 -PromoteMacro`, da datare qui.
+3. **Ritiro del contatore E1 dalla routine** (`avvio_sessione.ps1` blocco ③, `AVVIO.md` §5.3): gate
+   chiuso dal 10/09, stesso criterio del ritiro MFIV del 18/08.
+4. **Deploy del pacchetto `04b` sul VPS senza `--adaptive`** (inerte, path v1 bit-identico): solo su
+   istruzione esplicita, procedura di deploy in `AVVIO.md` §5.3bis.
+5. **Solo se prima del go-live serve una prova vera sul VPS:** flag CLI esplicito di directory di
+   output, con prova di inerzia e nuovo giro di revisione su `04b`.
+6. **Go-live FT1** su istruzione esplicita, dopo 1-4, col comando della pre-reg.
+
+Calendario invariato: **~30/09** S1 a `n = 83` (non produrre il descrittivo prima); **~fine
+novembre** B1/L2 a `n_eff` 216.
+
+**EN** **State.** Today's commits are all on GitHub: `5de0252` (`04b` adaptive executor: identity
+required in the verifiers, independent review, `tests/test_adaptive_structure.py` 40/40), `9ea9000`
+(FT1 power audit + amendment 1) and this one. `04b` on the VPS **unchanged** (v1, `--execute`), no
+deployment, FT1 **not started**, go-live **blocked** until the judge (P6). Suite 534 passed + 1
+skipped. **09-15 routine (~14:47 UTC):** 4 fresh heartbeats (IV poller 0.1 h, L2 0.0 h, trades
+0.2 h, `04b` 1.8 h); merge +1488 IV/greeks rows, chain/orderbook/trades through 09-15; ledger 73 rows,
+72 executed option legs (threshold 30); open short straddle K 77000 since 09-15 08:01 UTC, expiring
+09-16 08:00 UTC; no adaptive journal, no `hedge_state.json`; macro vintage `20260730` unchanged; B7
+fresh (0 new bars); L2 coverage 75.1%, `n_eff` 45.6 of 216, no gap in 7 days; E1 counter at 40 with
+the «close series STALE» warning, no consumer.
+
+**Exact action to resume from, in order** (supersedes the lists in the sections below):
+1. **FT1 judge — amendment 1's P6, unblocks go-live.** New read-only script over `results/vol_paper/`
+   (`adaptive.jsonl`, `trades.jsonl`, `position.json`) and `data/iv/chain`, implementing the
+   amendment literally: butterfly attempts and executor outcomes (P3); reading at the 8th complete
+   roll and immediate FAIL at the first incomplete one (P4); ②b on verified `fill_span_s` with ≥ 5
+   measured rolls and ③b at 10⁻⁸ BTC per leg (P5); `c_roll` with P6's frozen definition and P1's
+   ex-ante value (0.065 / 0.072) reported alongside; a `--count-only` mode like the existing judges.
+   **Before writing:** check on real records which fields each outcome carries
+   (`ADAPT_FLY`/`ADAPT_INCOMPLETE`/`ADAPT_BLOCKED`, `incomplete` records, `exec_legs`). Sentinel tests
+   on the constants (0.561, 1.5, 120 s, 0.25153, 8 rolls, 16 weeks, 5 measured, 10⁻⁸ BTC) and on the
+   counting rules, on synthetic ledgers; a row in `scripts/README.md` and doc sync. Zero GPU, no VPS
+   contact.
+2. **Macro vintage — verify the constraint before deciding.** The 09-10 note says «now or never,
+   FT1 will re-block it at go-live», but the adaptive rule picks the structure from the DVOL **only**
+   and the model forecast enters the entry metadata only: check which open samples read the forecasts
+   (S1 included) before promoting a new vintage or not. Promotion only via
+   `pull_vps_data.ps1 -PromoteMacro`, to be dated here.
+3. **Retire the E1 counter from the routine** (`avvio_sessione.ps1` block ③, `AVVIO.md` §5.3): gate
+   closed since 09-10, same criterion as the MFIV retirement on 08-18.
+4. **Deploy the `04b` package to the VPS without `--adaptive`** (inert, bit-identical v1 path): only
+   on explicit instruction, deployment procedure in `AVVIO.md` §5.3bis.
+5. **Only if a real VPS test is needed before go-live:** an explicit CLI output-directory flag, with
+   an inertia proof and a new review round on `04b`.
+6. **FT1 go-live** on explicit instruction, after 1-4, with the pre-reg command.
+
+Calendar unchanged: **~09-30** S1 at `n = 83` (do not produce the descriptive before); **~end of
+November** B1/L2 at `n_eff` 216.
+
+---
+
 ## 📐 Audit di potenza della pre-registrazione FT1 — 2026-09-15 (sola lettura, FT1 NON avviato; P1-P6 ADOTTATE come emendamento 1)
 
 🇮🇹 Verifica, prima del go-live, che ogni condizione di FT1 abbia una capacità di discriminare
