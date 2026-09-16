@@ -30,7 +30,7 @@ classifiers = [
 Homepage      = "https://github.com/luca-feleppa/quantsys"
 Repository    = "https://github.com/luca-feleppa/quantsys"
 Issues        = "https://github.com/luca-feleppa/quantsys/issues"
-Documentation = "https://github.com/luca-feleppa/quantsys/blob/main/TEORIA.md"
+Documentation = "https://github.com/luca-feleppa/quantsys/blob/main/THEORY.md"
 
 [tool.setuptools.packages.find]
 where = ["."]

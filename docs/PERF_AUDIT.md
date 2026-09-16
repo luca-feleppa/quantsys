@@ -1,124 +1,126 @@
-# PERF_AUDIT.md — Audit diagnostico di performance
+🇬🇧 English · [🇮🇹 Italiano](PERF_AUDIT.it.md)
 
-> **Natura del documento.** Ricognizione conoscitiva, non piano di ottimizzazione. Nessun file di
-> `quantsys/` è stato modificato; le probe usate vivono in `scripts/archive/perf_probe/` (untracked,
-> eliminabili). Data: 2026-08-02. Macchina: i7-9700K (8 core / 8 thread, no HT), 15.9 GB RAM,
+# PERF_AUDIT.md — Diagnostic performance audit
+
+> **Nature of the document.** A fact-finding survey, not an optimization plan. No file under
+> `quantsys/` was modified; the probes used live in `scripts/archive/perf_probe/` (untracked,
+> disposable). Date: 2026-08-02. Machine: i7-9700K (8 cores / 8 threads, no HT), 15.9 GB RAM,
 > RTX 2070 SUPER 8 GB, Python 3.12.10, torch 2.5.1+cu121, pandas 3.0.2, numpy 2.4.3, Windows 11.
 >
-> **Convenzione.** Ogni numero è marcato **[M]** = misurato in questa sessione, **[S]** = stimato
-> leggendo il codice o estrapolato da una misura parziale, **[D]** = documentato altrove nel repo e
-> non ri-verificato. Dove non ho una misura e non me la sento di dedurre, scrivo *da verificare*.
+> **Convention.** Every number is tagged **[M]** = measured in this session, **[S]** = estimated
+> by reading the code or extrapolated from a partial measurement, **[D]** = documented elsewhere in the repo and
+> not re-verified. Where I have no measurement and am not comfortable deducing one, I write *to be verified*.
 
 ---
 
-## 0. Sintesi in dieci righe
+## 0. Summary in ten lines
 
-Il tempo di calcolo del progetto è **quasi tutto nel training**, e il training **non è
-compute-bound**: a batch 64 la GPU sta al 5-15% di occupazione e il costo per step è dominato dal
-**lancio dei kernel** (overhead CPU/dispatch), non dalla loro esecuzione. La prova diretta è che
-raddoppiare il batch da 32 a 64 costa +6% di wall-clock invece di +100% **[M]**. Questo ha una
-conseguenza netta sui lever proposti: quelli che riducono il *lavoro aritmetico* (channels_last,
-Numba, estensioni native, Polars) non toccano il collo di bottiglia; l'unico che aggredisce il
-lancio dei kernel — `torch.compile` — dà **1.56×** sullo step, misurato, col backend `cudagraphs`
+The project's compute time is **almost entirely in training**, and training is **not
+compute-bound**: at batch 64 the GPU sits at 5-15% utilization and the per-step cost is dominated by
+**kernel launching** (CPU/dispatch overhead), not by kernel execution. The direct proof is that
+doubling the batch from 32 to 64 costs +6% wall-clock instead of +100% **[M]**. This has a
+clear-cut consequence for the proposed levers: those that reduce the *arithmetic work* (channels_last,
+Numba, native extensions, Polars) do not touch the bottleneck; the only one that attacks
+kernel launching — `torch.compile` — gives **1.56×** on the step, measured, with the `cudagraphs` backend
 **[M]**.
 
-Il data prep, che è il candidato naturale per Polars, costa **2.2 secondi** su 66k barre **[M]**:
-non c'è niente da guadagnare, e il prototipo mostra che tre delle sette colonne portate cambiano
-valore, una delle quali del **7.7%** per una differenza di definizione dello stimatore **[M]**.
+Data prep, the natural candidate for Polars, costs **2.2 seconds** on 66k bars **[M]**:
+there is nothing to gain, and the prototype shows that three of the seven ported columns change
+value, one of them by **7.7%** because of a difference in estimator definition **[M]**.
 
-Sono emersi due difetti collaterali più importanti di qualunque ottimizzazione: un **crash da
-ordine di import** (§7.1) e una **degradazione silenziosa del regime detector** (§7.2).
+Two collateral defects emerged that matter more than any optimization: an **import-order
+crash** (§7.1) and a **silent degradation of the regime detector** (§7.2).
 
 ---
 
-## 1. Come funziona il sistema oggi
+## 1. How the system works today
 
-### 1.1 I quattro percorsi di esecuzione
+### 1.1 The four execution paths
 
-**`01_download_data.py` — rete → CPU → disco.** In ordine: `fetch_klines` (REST Binance, ~66
-chiamate da 1000 candele per coprire 2019→oggi), `fetch_funding_rate` (best-effort, non bloccante),
-troncamento holdout, scrittura `raw_candles.parquet`, `FeatureBuilder.build()` (11 step + Volume
-Profile + funding + 3 interazioni), fit dello scaler **sul solo train** e transform su tutto,
-scrittura `features.parquet`, `create_windows` (stride_tricks + materializzazione), `temporal_split`,
-scrittura `lstm_dataset.npz`, doppio salvataggio del `PipelineState` (arch-locale + canonico).
-Il confine rete/CPU è netto: tutto il download precede tutto il calcolo. Non c'è GPU in questo path.
+**`01_download_data.py` — network → CPU → disk.** In order: `fetch_klines` (Binance REST, ~66
+calls of 1000 candles each to cover 2019→today), `fetch_funding_rate` (best-effort, non-blocking),
+holdout truncation, writing `raw_candles.parquet`, `FeatureBuilder.build()` (11 steps + Volume
+Profile + funding + 3 interactions), scaler fit **on train only** and transform on everything,
+writing `features.parquet`, `create_windows` (stride_tricks + materialization), `temporal_split`,
+writing `lstm_dataset.npz`, double save of the `PipelineState` (arch-local + canonical).
+The network/CPU boundary is clean: all of the download precedes all of the computation. There is no GPU in this path.
 
-**`02_train.py` — disco → CPU → GPU.** `np.load` dell'npz (3.26 GB), calcolo dei clip bounds
-adattivi p0.1/p99.9 su `X_train`, pre-clip di train/val/test, costruzione dei `TensorDataset`
-(tensori CPU residenti in RAM), poi il loop epoche: `run_train` (forward AMP → loss quantile+CE →
-backward → clip → step ogni 2 batch) e `run_eval` sul val. Il `DataLoader` gira con
-**`num_workers=0` forzato su Windows** (riga esplicita in `02_train.py`, che sovrascrive il
-`num_workers: 6` del config): collate e pin avvengono nel processo principale, sincroni rispetto
-allo step. Il confine CPU/GPU è per-batch e attraversato ~810 volte per epoca.
+**`02_train.py` — disk → CPU → GPU.** `np.load` of the npz (3.26 GB), computation of the adaptive
+p0.1/p99.9 clip bounds on `X_train`, pre-clipping of train/val/test, construction of the `TensorDataset`s
+(CPU tensors resident in RAM), then the epoch loop: `run_train` (AMP forward → quantile+CE loss →
+backward → clip → step every 2 batches) and `run_eval` on val. The `DataLoader` runs with
+**`num_workers=0` forced on Windows** (explicit line in `02_train.py`, which overrides the
+`num_workers: 6` in the config): collate and pin happen in the main process, synchronously with
+the step. The CPU/GPU boundary is per-batch and is crossed ~810 times per epoch.
 
-**`03_backtest.py` — GPU in blocco, poi CPU pura.** Tutte le predizioni sono calcolate **in
-anticipo** in batch da 256 (`all_mu`/`all_sigma`/`all_nu`), denormalizzate una volta sola, e il
-`predict()` interno all'event loop è un lookup O(1) su array. L'anello su `range(n-1)` è quindi
-**interamente CPU/Python**, senza GPU e senza I/O. Il Monte Carlo non è sul critical path.
+**`03_backtest.py` — GPU in bulk, then pure CPU.** All predictions are computed **up
+front** in batches of 256 (`all_mu`/`all_sigma`/`all_nu`), denormalized once, and the
+`predict()` inside the event loop is an O(1) array lookup. The loop over `range(n-1)` is therefore
+**entirely CPU/Python**, with no GPU and no I/O. Monte Carlo is not on the critical path.
 
-**`04b_vol_paper.py` — rete, e basta.** `while True`: un tick, poi `time.sleep` fino a `hh:00:90`.
-Il tick fa alcune chiamate REST Deribit (chain, mark, index, ticker, eventuale ordine + hedge perp)
-e **un** forward del modello. Il wall-clock del processo è ~99.9% `sleep`; il tempo attivo è
-dominato dalla latenza di rete verso Deribit, non dal calcolo. Sul VPS l'inferenza è su CPU
-(wheel torch CPU-only).
+**`04b_vol_paper.py` — network, and nothing else.** `while True`: one tick, then `time.sleep` until `hh:00:90`.
+The tick makes a few Deribit REST calls (chain, mark, index, ticker, possible order + perp hedge)
+and **one** model forward. The process wall-clock is ~99.9% `sleep`; active time is
+dominated by network latency to Deribit, not by computation. On the VPS inference runs on CPU
+(CPU-only torch wheel).
 
-### 1.2 Dove va il tempo — ripartizione
+### 1.2 Where the time goes — breakdown
 
-**Suite di test [M]:** `438 passed, 1 skipped in 33.9s` (misurato due volte: 35.6s e 34.0s).
-⚠ Il README dichiara *"355 passed, 1 skipped, ~30s"*: il conteggio è **stale** di 83 test.
+**Test suite [M]:** `438 passed, 1 skipped in 33.9s` (measured twice: 35.6s and 34.0s).
+⚠ The README states *"355 passed, 1 skipped, ~30s"*: the count is **stale** by 83 tests.
 
-**`01_download_data.py`, solo calcolo locale [M]** (rete esclusa — non l'ho cronometrata perché
-dipende dalla banda e dal rate-limit Binance):
+**`01_download_data.py`, local computation only [M]** (network excluded — I did not time it because
+it depends on bandwidth and the Binance rate limit):
 
-| Fase | Tempo | Note |
+| Phase | Time | Notes |
 |---|---|---|
-| `import` del modulo | ~2.2 s | vedi §1.3 |
-| `FeatureBuilder.build()` | **1.72 s** | di cui `_volume_profile` **1.32 s (77%)** |
-| `fit_scaler_only` + `_normalize` | 0.52 s | RobustScaler sklearn |
-| `create_windows` | **4.31 s** | materializza 3.30 GB |
-| `np.savez` del dataset | **5.82 s** | 3.30 GB → 0.57 GB/s |
-| **totale calcolo locale** | **≈ 14.6 s** | |
+| module `import` | ~2.2 s | see §1.3 |
+| `FeatureBuilder.build()` | **1.72 s** | of which `_volume_profile` **1.32 s (77%)** |
+| `fit_scaler_only` + `_normalize` | 0.52 s | sklearn RobustScaler |
+| `create_windows` | **4.31 s** | materializes 3.30 GB |
+| `np.savez` of the dataset | **5.82 s** | 3.30 GB → 0.57 GB/s |
+| **total local computation** | **≈ 14.6 s** | |
 
-Dentro `build()`, tutti gli step diversi dal Volume Profile stanno **sotto i 40 ms ciascuno**
+Inside `build()`, every step other than the Volume Profile stays **under 40 ms each**
 (`_structural_features` 0.04 s, `_frac_diff` 0.04 s, `_vwap` 0.03 s, `_technicals` 0.03 s,
-`_volatility` 0.03 s, gli altri ≤0.02 s). Il data prep è, in pratica, il Volume Profile e nient'altro.
+`_volatility` 0.03 s, the others ≤0.02 s). Data prep is, in practice, the Volume Profile and nothing else.
 
-**`02_train.py` [M]** (da un run reale sandboxed su `QUANTSYS_MODELS_ROOT`, log con timestamp):
+**`02_train.py` [M]** (from a real run sandboxed via `QUANTSYS_MODELS_ROOT`, timestamped log):
 
-| Fase | Tempo | Come misurato |
+| Phase | Time | How measured |
 |---|---|---|
 | `import` + config | ~2.2 s | §1.3 |
-| `np.load` npz 3.26 GB | 4.15 s | probe dedicata, 0.79 GB/s |
-| **clip bounds `np.nanpercentile`** | **36 s** | timestamp di log 19:03:42 → 19:04:18 |
-| epoca (train + eval) | **18 s** | 10 epoche consecutive, tutte 18 s |
-| ├─ di cui train (810 step) | ~14.9 s | 810 × 18.34 ms **[M]** |
-| └─ di cui eval sul val | ~3 s | differenza **[S]** |
-| **5 seed × ~18 epoche** | **≈ 27 min** | coerente col README **[S]** |
+| `np.load` npz 3.26 GB | 4.15 s | dedicated probe, 0.79 GB/s |
+| **clip bounds `np.nanpercentile`** | **36 s** | log timestamps 19:03:42 → 19:04:18 |
+| epoch (train + eval) | **18 s** | 10 consecutive epochs, all 18 s |
+| ├─ of which train (810 steps) | ~14.9 s | 810 × 18.34 ms **[M]** |
+| └─ of which eval on val | ~3 s | difference **[S]** |
+| **5 seeds × ~18 epochs** | **≈ 27 min** | consistent with the README **[S]** |
 
-I 36 secondi dei clip bounds sono **due epoche intere** pagate una volta per invocazione (non per
-seed: il calcolo precede il loop d'ensemble). `np.nanpercentile` fa un sort completo per colonna su
-una matrice `(6.2M, 104)`.
+The 36 seconds of clip bounds are **two full epochs** paid once per invocation (not per
+seed: the computation precedes the ensemble loop). `np.nanpercentile` does a full per-column sort on
+a `(6.2M, 104)` matrix.
 
-**`03_backtest.py` [M/S]:** inferenza batch dei 5 membri su 6.485 campioni = **2.0 s [M]**.
-L'event loop direzionale costa **30–129 µs/barra [M]** a seconda della densità di trade (30 µs con
-pochi trade, 129 µs con 363 trade su 1020 barre — un caso estremo): sull'intero split di test sono
-**0.2–0.9 s**. `bootstrap_sharpe_ci` (5000 resample) = **37 ms [M]**; `mdd_stats` = **2 ms [M]**.
+**`03_backtest.py` [M/S]:** batch inference of the 5 members on 6,485 samples = **2.0 s [M]**.
+The directional event loop costs **30–129 µs/bar [M]** depending on trade density (30 µs with
+few trades, 129 µs with 363 trades over 1020 bars — an extreme case): over the whole test split that is
+**0.2–0.9 s**. `bootstrap_sharpe_ci` (5000 resamples) = **37 ms [M]**; `mdd_stats` = **2 ms [M]**.
 
-⚠ **Il backtest non è eseguibile end-to-end sullo stato su disco corrente**, e questo è corretto:
-il checkpoint in `models/itransformer/` è il modello **vol** (`log_rv`), quindi la σ denormalizzata
-vale 1.61–2.92 in unità di log-varianza e il guard `σ ≥ 0.05·√60 = 0.387` fail-fasta come previsto
-(`RuntimeError` a `03_backtest.py:512`). Ho quindi misurato l'event loop **in isolamento**, pilotando
-le classi `SignalGenerator`/`RiskManager` di produzione con μ/σ sintetici, invece di aggirare il guard.
+⚠ **The backtest cannot run end-to-end on the current on-disk state**, and this is correct:
+the checkpoint in `models/itransformer/` is the **vol** model (`log_rv`), so the denormalized σ
+is 1.61–2.92 in log-variance units and the guard `σ ≥ 0.05·√60 = 0.387` fails fast as intended
+(`RuntimeError` at `03_backtest.py:512`). I therefore measured the event loop **in isolation**, driving
+the production `SignalGenerator`/`RiskManager` classes with synthetic μ/σ, instead of bypassing the guard.
 
-**`04b_vol_paper.py` [M/S]:** forward singolo (batch 1, `no_grad`, AMP off) = **2.74 ms** su GPU
-**[M]**; batch 64 = 4.22 ms **[M]**. Sul VPS, CPU-only, sarà più lento ma resta trascurabile rispetto
-a un tick orario **[S]** — non l'ho misurato sul VPS.
+**`04b_vol_paper.py` [M/S]:** single forward (batch 1, `no_grad`, AMP off) = **2.74 ms** on GPU
+**[M]**; batch 64 = 4.22 ms **[M]**. On the VPS, CPU-only, it will be slower but remains negligible compared with
+an hourly tick **[S]** — I did not measure it on the VPS.
 
-### 1.3 Il costo degli import
+### 1.3 The cost of imports
 
-Misurato su 3 run per riga, interprete nudo ≈ 59 ms **[M]**:
+Measured over 3 runs per row, bare interpreter ≈ 59 ms **[M]**:
 
-| Import | Tempo |
+| Import | Time |
 |---|---|
 | `pandas` | 472 ms |
 | `pandas` + `sklearn.preprocessing` | 1 404 ms |
@@ -126,541 +128,541 @@ Misurato su 3 run per riga, interprete nudo ≈ 59 ms **[M]**:
 | `pandas` + `quantsys.utils` | **2 222 ms** |
 | `pandas` + `quantsys.features` | 1 478 ms |
 
-`quantsys.utils` importa torch a livello di modulo, quindi **ogni script che lo tocca paga ~2.2 s
-prima di fare qualunque cosa**. Il profilo py-spy di `FeatureBuilder` lo conferma dal lato opposto:
-`_load_dll_libraries (torch/__init__.py:238)` raccoglie **87 campioni**, esattamente quanti la riga
-più calda del Volume Profile (`__init__.py:347`, 87 campioni) — in un benchmark che non usa torch.
-Sommando la macchina di import (`get_data`, `_path_stat`, `_compile_bytecode`, `realpath`) si
-superano i 230 campioni, cioè più dell'intero Volume Profile.
+`quantsys.utils` imports torch at module level, so **every script that touches it pays ~2.2 s
+before doing anything at all**. The py-spy profile of `FeatureBuilder` confirms it from the opposite side:
+`_load_dll_libraries (torch/__init__.py:238)` collects **87 samples**, exactly as many as the hottest
+line of the Volume Profile (`__init__.py:347`, 87 samples) — in a benchmark that does not use torch.
+Adding up the import machinery (`get_data`, `_path_stat`, `_compile_bytecode`, `realpath`) exceeds
+230 samples, i.e. more than the entire Volume Profile.
 
-Per `01`/`02` (decine di secondi o minuti) è rumore. Per i giudici one-shot e per la routine di
-sessione, che lanciano più script brevi in sequenza, è la voce dominante.
+For `01`/`02` (tens of seconds or minutes) it is noise. For the one-shot judges and for the session
+routine, which launch several short scripts in sequence, it is the dominant item.
 
-### 1.4 Il training è launch-bound — la misura
+### 1.4 Training is launch-bound — the measurement
 
-Questo è il risultato centrale della Parte 1. Modello: `QuantiTransformer`, **675 995 parametri**,
-d_model 128, 3 layer, patch_size 5 → `T_eff = 24`, F = 104 token (+1 macro). Sono kernel minuscoli
-per una 2070 SUPER.
+This is the central result of Part 1. Model: `QuantiTransformer`, **675 995 parameters**,
+d_model 128, 3 layers, patch_size 5 → `T_eff = 24`, F = 104 tokens (+1 macro). These are tiny kernels
+for a 2070 SUPER.
 
-**Sweep del batch, fwd+bwd puro su batch GPU-resident (nessun DataLoader, nessun H2D) [M]:**
+**Batch sweep, pure fwd+bwd on a GPU-resident batch (no DataLoader, no H2D) [M]:**
 
-| batch | ms/step | sample/s | ms/step senza `.item()` |
+| batch | ms/step | samples/s | ms/step without `.item()` |
 |---|---|---|---|
 | 32 | 16.69 | 1 917 | 18.19 |
-| 64 (**produzione**) | 17.74 | 3 607 | 17.43 |
+| 64 (**production**) | 17.74 | 3 607 | 17.43 |
 | 128 | 19.40 | 6 597 | 19.58 |
 | 256 | 25.96 | 9 861 | 26.91 |
 | 512 | 52.03 | 9 841 | 50.46 |
 | 1024 | 99.84 | 10 256 | 96.92 |
 
-Da 32 a 128 il lavoro aritmetico quadruplica e il wall-clock cresce del **16%**: sotto batch ~256 il
-tempo è quasi indipendente dal lavoro, cioè **dominato dal lancio**. Sopra 512 la curva diventa
-lineare — lì, e solo lì, il training è compute-bound. `nvidia-smi dmon` concorda: **SM 5-15%** a
-batch piccolo, **96-98%** a batch ≥512 **[M]**.
+From 32 to 128 the arithmetic work quadruples and wall-clock grows by **16%**: below batch ~256 the
+time is almost independent of the work, i.e. **dominated by launching**. Above 512 the curve becomes
+linear — there, and only there, training is compute-bound. `nvidia-smi dmon` agrees: **SM 5-15%** at
+small batch, **96-98%** at batch ≥512 **[M]**.
 
-Quantificato in modo difendibile: alla saturazione la GPU macina 10 256 sample/s, quindi 64 campioni
-"valgono" 6.2 ms di calcolo reale; ne spendiamo 17.7. **Circa 11.5 ms per step (65%) sono overhead
-che non scala col lavoro.**
+Quantified in a defensible way: at saturation the GPU processes 10 256 samples/s, so 64 samples
+"are worth" 6.2 ms of real computation; we spend 17.7. **About 11.5 ms per step (65%) is overhead
+that does not scale with the work.**
 
-Due ipotesi che ho testato e che **non** reggono:
-- *Il `loss.item()` per step stalla la pipeline.* Costa +0.3 ms a batch 64 **[M]** — irrilevante,
-  proprio perché essendo già launch-bound la GPU è comunque in attesa della CPU.
-- *Il DataLoader è il collo.* Da solo costa **1.74 ms/batch** a bs=64 **[M]** (collate+pin+H2D);
-  nello step completo il delta rispetto al fwd/bwd puro è ~0.6 ms. È il ~3-9% dello step, non il
-  collo — anche se `num_workers=0` significa che quel costo è interamente sul critical path.
+Two hypotheses I tested that do **not** hold:
+- *The per-step `loss.item()` stalls the pipeline.* It costs +0.3 ms at batch 64 **[M]** — irrelevant,
+  precisely because, being already launch-bound, the GPU is waiting for the CPU anyway.
+- *The DataLoader is the bottleneck.* On its own it costs **1.74 ms/batch** at bs=64 **[M]** (collate+pin+H2D);
+  in the full step the delta relative to pure fwd/bwd is ~0.6 ms. It is ~3-9% of the step, not the
+  bottleneck — even though `num_workers=0` means that cost sits entirely on the critical path.
 
-Il profilo `torch.profiler` su 20 step l'ho eseguito ma **non lo riporto come ripartizione**: con
-`record_shapes` attivo l'overhead di profiling ha gonfiato il totale CPU da 0.40 s a 1.80 s e
-attribuito "self CUDA time" a operazioni CPU-only (`as_strided`, `select`), producendo un'occupazione
-GPU del 476% — un artefatto. Le tre misure dirette sopra sono più affidabili e dicono la stessa cosa.
+I ran the `torch.profiler` profile over 20 steps but **do not report it as a breakdown**: with
+`record_shapes` active the profiling overhead inflated total CPU from 0.40 s to 1.80 s and
+attributed "self CUDA time" to CPU-only operations (`as_strided`, `select`), producing a GPU
+utilization of 476% — an artifact. The three direct measurements above are more reliable and say the same thing.
 
 ---
 
-## 2. I lever, uno per uno
+## 2. The levers, one by one
 
-### (a) `torch.compile` — **SÌ, è l'unico che aggredisce il collo reale**
+### (a) `torch.compile` — **YES, it is the only one that attacks the real bottleneck**
 
-**Compatibilità.** Tre verifiche, tutte misurate:
+**Compatibility.** Three checks, all measured:
 
-1. **`spectral_norm` non c'è sul path di produzione.** In `QuantiTransformer.__init__` la
-   `spectral_norm` è applicata dentro un ramo `if ... and loss_type == "t_student"`. La produzione
-   gira `loss_type: quantile`, quindi il modello **non ha alcuna parametrizzazione**: verificato con
-   `torch.nn.utils.parametrize.is_parametrized` su ogni sotto-modulo → *nessuno* **[M]**. La
-   preoccupazione `torch.compile` ↔ `spectral_norm` è **fuori perimetro** per l'arch di produzione.
-   Resterebbe rilevante solo per il ramo `t_student` e per nhits/tcnmamba, dove la SN è applicata
-   incondizionatamente.
-2. **Lo scan di Mamba non è in gioco**: `tcnmamba` non è sulla linea vol (i checkpoint sono stati
-   eliminati col cleanup 06-12) e non va riaddestrato per questo. Non l'ho testato — *da verificare*
-   se e quando si riapre un run eterogeneo. Nota: lo scan è già vettorizzato (cumprod/cumsum, non un
-   loop Python) e forza float32 internamente, quindi è un candidato plausibile ma non verificato.
-3. **Dynamo traccia il modello per intero**: `graph_count=1`, **`graph_break_count=0`**,
-   `op_count=88` **[M]**. Nessun graph break da risolvere.
+1. **`spectral_norm` is not on the production path.** In `QuantiTransformer.__init__` the
+   `spectral_norm` is applied inside an `if ... and loss_type == "t_student"` branch. Production
+   runs `loss_type: quantile`, so the model **has no parametrization at all**: verified with
+   `torch.nn.utils.parametrize.is_parametrized` on every submodule → *none* **[M]**. The
+   `torch.compile` ↔ `spectral_norm` concern is **out of scope** for the production arch.
+   It would remain relevant only for the `t_student` branch and for nhits/tcnmamba, where SN is applied
+   unconditionally.
+2. **The Mamba scan is not in play**: `tcnmamba` is not on the vol line (its checkpoints were
+   deleted with the 06-12 cleanup) and should not be retrained for this. I did not test it — *to be verified*
+   if and when a heterogeneous run is reopened. Note: the scan is already vectorized (cumprod/cumsum, not a
+   Python loop) and forces float32 internally, so it is a plausible but unverified candidate.
+3. **Dynamo traces the whole model**: `graph_count=1`, **`graph_break_count=0`**,
+   `op_count=88` **[M]**. No graph breaks to resolve.
 
-**Il blocco vero è la toolchain, non il codice.** Il backend di default (`inductor`) fallisce:
-`RuntimeError: Cannot find a working triton installation`. **Triton non è installabile da PyPI su
-Windows** (`pip download triton` → `No matching distribution found`) **[M]**. Esiste il pacchetto
-di terze parti `triton-windows`, che non ho installato né valutato.
+**The real blocker is the toolchain, not the code.** The default backend (`inductor`) fails:
+`RuntimeError: Cannot find a working triton installation`. **Triton cannot be installed from PyPI on
+Windows** (`pip download triton` → `No matching distribution found`) **[M]**. There is a
+third-party package `triton-windows`, which I neither installed nor evaluated.
 
-**Il backend `cudagraphs` non richiede Triton e funziona:**
+**The `cudagraphs` backend does not require Triton and works:**
 
 | | ms/step | speedup |
 |---|---|---|
-| eager (produzione) | 15.30 | — |
+| eager (production) | 15.30 | — |
 | `torch.compile(backend="cudagraphs")` | **9.79** | **1.56×** **[M]** |
 
-Costo di compilazione: il warmup di 12 step passa da 0.52 s a 3.32 s, cioè **~2.8 s una tantum** per
-processo **[M]** — trascurabile su un training da minuti, non trascurabile su uno script one-shot.
+Compilation cost: the 12-step warmup goes from 0.52 s to 3.32 s, i.e. **~2.8 s one-off** per
+process **[M]** — negligible on a training run lasting minutes, not negligible on a one-shot script.
 
-**Guadagno plausibile end-to-end [S].** Il lever tocca solo la parte train dell'epoca (~14.9 s su
-18 s). A 1.56× l'epoca scenderebbe a ~13.5 s, cioè il training 5-seed da ~27 a **~20 min**: **−26%**.
-Non tocca i 36 s dei clip bounds né i 4.15 s di `np.load`. È un guadagno reale e misurato, ma di
-ordine "minuti", non "ore".
+**Plausible end-to-end gain [S].** The lever only touches the train part of the epoch (~14.9 s out of
+18 s). At 1.56× the epoch would drop to ~13.5 s, i.e. 5-seed training from ~27 to **~20 min**: **−26%**.
+It does not touch the 36 s of clip bounds nor the 4.15 s of `np.load`. It is a real, measured gain, but of
+order "minutes", not "hours".
 
-**Perché funziona** è esattamente ciò che dice la §1.4: CUDA Graphs cattura la sequenza di lanci e la
-rieseguq come singola submission, che è la cura specifica per un carico launch-bound. Coerentemente,
-il guadagno atteso a batch grande sarebbe molto minore — *non l'ho misurato a batch 512*.
+**Why it works** is exactly what §1.4 says: CUDA Graphs captures the sequence of launches and
+re-executes it as a single submission, which is the specific cure for a launch-bound workload. Consistently,
+the expected gain at large batch would be much smaller — *I did not measure it at batch 512*.
 
-**Rischio parity: alto, vedi §4.**
+**Parity risk: high, see §4.**
 
-### (b) `channels_last` — **NO, non si applica**
+### (b) `channels_last` — **NO, it does not apply**
 
-`channels_last` è un memory format definito per tensori **4D NCHW** (e 5D NDHWC) e agisce
-selezionando kernel cuDNN diversi per **convoluzioni e normalizzazioni spaziali**. In questa
+`channels_last` is a memory format defined for **4D NCHW** tensors (and 5D NDHWC) and acts by
+selecting different cuDNN kernels for **convolutions and spatial normalizations**. In this
 codebase:
 
-- `grep` su `quantsys/model/` non trova **nessun** `Conv2d`, `BatchNorm2d`, `MaxPool2d` **[M]**.
-- La TCN usa `nn.Conv1d` (tensori 3D NCL) — `channels_last` non è definito per il 3D; l'analogo
-  sarebbe `channels_last_1d`, che non è un formato pubblico stabile in PyTorch.
-- Gli unici tensori 4D del progetto sono i `q/k/v` dell'attention, `(B, n_heads, N, d_head)`, prodotti
-  da `view(...).transpose(1,2)`. Non è un layout spaziale NCHW: è un batch di matrici per
-  `scaled_dot_product_attention`, che non consulta il memory format e vuole comunque il suo layout.
-  Marcarli `channels_last` non cambierebbe kernel; al più aggiungerebbe una copia di rilayout.
+- `grep` on `quantsys/model/` finds **no** `Conv2d`, `BatchNorm2d`, `MaxPool2d` **[M]**.
+- The TCN uses `nn.Conv1d` (3D NCL tensors) — `channels_last` is not defined for 3D; the analogue
+  would be `channels_last_1d`, which is not a stable public format in PyTorch.
+- The only 4D tensors in the project are the attention `q/k/v`, `(B, n_heads, N, d_head)`, produced
+  by `view(...).transpose(1,2)`. This is not an NCHW spatial layout: it is a batch of matrices for
+  `scaled_dot_product_attention`, which does not consult the memory format and wants its own layout anyway.
+  Marking them `channels_last` would not change the kernel; at most it would add a re-layout copy.
 
-Punto chiuso. Non c'è un tensore su cui il formato cambi qualcosa.
+Case closed. There is no tensor on which the format changes anything.
 
-### (c) AMP — **già mappato correttamente, niente da fare**
+### (c) AMP — **already mapped correctly, nothing to do**
 
-| Dove | Stato | Ragione documentata |
+| Where | State | Documented reason |
 |---|---|---|
 | `02_train.py:268` (`run_train`) | **ON** (`use_amp = tcfg["use_amp"] and cuda`) | training |
 | `02b_walkforward_validate.py:310` | ON | training |
 | `02c_optuna_search.py:78` | ON | training |
-| `02b_walkforward:314,341` (eval) | **OFF** esplicito | valutazione deterministica |
-| `EnsembleModel.__call__` (`ensemble.py:355`) | **OFF** (`enabled=False`) | commento in loco: *"evita NaN (spectral_norm + Mamba scan)"* |
-| `crps_t_student` (`model/__init__.py:73`) | **OFF** forzato | *"lgamma instabile in float16"* |
-| `MambaSSM` scan (`tcn_mamba.py:~204`) | promozione a fp32 | *"cumprod/cumsum sensibili a underflow in FP16"* |
+| `02b_walkforward:314,341` (eval) | explicitly **OFF** | deterministic evaluation |
+| `EnsembleModel.__call__` (`ensemble.py:355`) | **OFF** (`enabled=False`) | in-place comment: *"avoids NaN (spectral_norm + Mamba scan)"* |
+| `crps_t_student` (`model/__init__.py:73`) | forced **OFF** | *"lgamma unstable in float16"* |
+| `MambaSSM` scan (`tcn_mamba.py:~204`) | promotion to fp32 | *"cumprod/cumsum sensitive to underflow in FP16"* |
 
-I tre siti OFF sono spenti per **stabilità numerica**, ognuno con la motivazione scritta accanto.
-Non propongo di riaccenderli: non è un'omissione, è una scelta. Osservo solo che l'inferenza
-dell'ensemble in fp32 è, alla luce della §1.4, comunque **launch-bound** (2.74 ms per un forward
-batch-1 su un modello da 676k parametri), quindi l'AMP non le farebbe guadagnare granché nemmeno se
-fosse sicura.
+The three OFF sites are disabled for **numerical stability**, each with its rationale written next to it.
+I do not propose re-enabling them: it is not an omission, it is a choice. I only observe that ensemble
+inference in fp32 is, in light of §1.4, **launch-bound** anyway (2.74 ms for a batch-1 forward
+on a 676k-parameter model), so AMP would not gain it much even if it
+were safe.
 
-### (d) Polars al posto di pandas nel `FeatureBuilder` — **NO, doppiamente**
+### (d) Polars instead of pandas in `FeatureBuilder` — **NO, on two counts**
 
-**Primo motivo: non c'è tempo da recuperare.** Il data prep completo è **2.24 s** su 66k barre
-**[M]**, e il **59%** è `_volume_profile`, che è un **loop Python** su indici campionati con
-`np.bincount`/`argsort`/`searchsorted` dentro — cioè esattamente ciò che Polars *non* esprime.
-Le operazioni che Polars accelererebbe (rolling, groupby-cumsum) sommano ~0.4 s. Anche a 3× uniforme
-si recuperano **~0.27 s** su un percorso che, con rete e I/O, dura decine di secondi.
+**First reason: there is no time to recover.** Full data prep is **2.24 s** on 66k bars
+**[M]**, and **59%** of it is `_volume_profile`, which is a **Python loop** over sampled indices with
+`np.bincount`/`argsort`/`searchsorted` inside — i.e. exactly what Polars does *not* express.
+The operations Polars would accelerate (rolling, groupby-cumsum) add up to ~0.4 s. Even at a uniform 3×
+one recovers **~0.27 s** on a path that, with network and I/O, lasts tens of seconds.
 
-**Secondo motivo: cambia i numeri, e non solo all'ultimo bit.** Ho portato 7 colonne — **tutte e
-sette sono nella lista canonica delle 104**, verificato contro `feature_names` dell'npz **[M]**:
+**Second reason: it changes the numbers, and not just in the last bit.** I ported 7 columns — **all
+seven are in the canonical list of 104**, verified against the npz `feature_names` **[M]**:
 
-| Gruppo | speedup | scarto vs pandas |
+| Group | speedup | deviation vs pandas |
 |---|---|---|
-| `vol_mean_20`, `realized_var_20` | **3.48×** | **bit-identici** (100% dei valori) |
-| `vol_std_20` | (stesso gruppo) | rel_max **2.9e-12**, ULP_max **24 394**, bit-uguali **0.2%** |
-| `vwap_20` (rolling sum) | **1.87×** | **bit-identico** |
-| `vwap` (groupby cumsum) | (stesso gruppo) | rel_max 7.7e-16, ULP_max **6**, bit-uguali 50.1% |
-| `ret_skew_20` | **0.43×** (più **lento**) | **rel_max 7.7e-2, |Δ|max 3.4e-1** |
+| `vol_mean_20`, `realized_var_20` | **3.48×** | **bit-identical** (100% of values) |
+| `vol_std_20` | (same group) | rel_max **2.9e-12**, ULP_max **24 394**, bit-equal **0.2%** |
+| `vwap_20` (rolling sum) | **1.87×** | **bit-identical** |
+| `vwap` (groupby cumsum) | (same group) | rel_max 7.7e-16, ULP_max **6**, bit-equal 50.1% |
+| `ret_skew_20` | **0.43×** (**slower**) | **rel_max 7.7e-2, |Δ|max 3.4e-1** |
 
-Le prime due righe sono la storia che ci si aspetta: somme e medie riassociate danno risultati
-identici o entro pochi ULP; la deviazione standard rolling usa un algoritmo di accumulo diverso
-(verosimilmente Welford contro two-pass) e diverge a 1e-12 relativo — abbastanza da rompere una
-parity bit-perfect, non abbastanza da cambiare una decisione.
+The first two rows are the expected story: re-associated sums and means give identical results
+or results within a few ULPs; the rolling standard deviation uses a different accumulation algorithm
+(presumably Welford versus two-pass) and diverges at 1e-12 relative — enough to break
+bit-perfect parity, not enough to change a decision.
 
-**`ret_skew_20` è il caso serio.** Non è arrotondamento: `rolling_skew` di Polars usa lo stimatore
-**biased** (denominatore *n*), `rolling(20).skew()` di pandas quello **unbiased** Fisher (*n−1*).
-La differenza è **sistematica e del 7.7%** su una feature che il modello di produzione riceve in
-input. Una migrazione fatta colonna per colonna, con i test verdi (i golden test controllano la
-*lista* delle 104 feature e le shape, non i *valori* di ogni colonna), introdurrebbe una modifica
-silenziosa dell'input del modello. E per giunta su un'operazione in cui Polars è **2.3× più lento**.
+**`ret_skew_20` is the serious case.** This is not rounding: Polars' `rolling_skew` uses the
+**biased** estimator (denominator *n*), pandas' `rolling(20).skew()` the **unbiased** Fisher one (*n−1*).
+The difference is **systematic and 7.7%** on a feature that the production model receives as
+input. A migration done column by column, with green tests (the golden tests check the
+*list* of the 104 features and the shapes, not the *values* of each column), would introduce a silent
+change to the model's input. And on top of that, on an operation where Polars is **2.3× slower**.
 
-**Terzo elemento, emerso per caso ma pertinente.** Installare Polars in questo ambiente non è
-gratis: porta `polars-runtime-32`, cioè un secondo runtime Arrow accanto a `pyarrow`. Durante
-l'audit l'installazione/rimozione ha anche perturbato il set di dipendenze (`statsmodels` è stato
-rimosso e ho dovuto reinstallarlo alla 0.14.6 per riportare la suite a `438 passed`). Ho disinstallato
-Polars a fine audit; l'ambiente è tornato identico al baseline.
+**Third element, found by chance but relevant.** Installing Polars in this environment is not
+free: it brings `polars-runtime-32`, i.e. a second Arrow runtime next to `pyarrow`. During
+the audit the install/uninstall also perturbed the dependency set (`statsmodels` was
+removed and I had to reinstall it at 0.14.6 to bring the suite back to `438 passed`). I uninstalled
+Polars at the end of the audit; the environment returned identical to the baseline.
 
-### (e) Numba — **NO, i candidati dichiarati non esistono o sono già vettorizzati**
+### (e) Numba — **NO, the stated candidates either do not exist or are already vectorized**
 
-Verificati uno per uno i tre candidati indicati:
+The three indicated candidates, checked one by one:
 
-1. **Event loop di `03_backtest.py`.** È sequenziale davvero (stato del `RiskManager` che dipende
-   dalla barra precedente), ma costa **0.2–0.9 s sull'intero split di test** **[M]**. Anche
-   un'accelerazione infinita risparmia meno di un secondo. In più è **nopython-incompatibile**:
-   manipola `Enum` (`Side`, `CloseReason`), dataclass Python (`Position`, `Trade`, `DistributionParams`),
-   liste di oggetti, `logging` — riscriverlo per Numba significherebbe riscrivere il risk layer in
-   forma scalare, cioè toccare esattamente il codice che il manifesto vuole bit-invariato.
-2. **Bootstrap CI 5000 iterazioni.** **Già completamente vettorizzato**: `rng.choice` genera una
-   matrice `(5000, n)` e tutte le statistiche sono riduzioni NumPy lungo `axis=1`, senza alcun loop
-   Python. Costa **37 ms** **[M]**. Non c'è niente da compilare.
-3. **Delta-hedge di `04b_vol_paper.py`.** Non è un loop di calcolo: `maybe_hedge` è una manciata di
-   aritmetica scalare per tick, e il tick è **orario**. Il tempo è nelle chiamate REST a Deribit.
-   Numba qui non ha oggetto.
+1. **Event loop of `03_backtest.py`.** It is genuinely sequential (`RiskManager` state that depends
+   on the previous bar), but it costs **0.2–0.9 s over the whole test split** **[M]**. Even
+   an infinite speedup saves less than a second. Moreover it is **nopython-incompatible**:
+   it manipulates `Enum`s (`Side`, `CloseReason`), Python dataclasses (`Position`, `Trade`, `DistributionParams`),
+   lists of objects, `logging` — rewriting it for Numba would mean rewriting the risk layer in
+   scalar form, i.e. touching exactly the code the manifesto wants bit-invariant.
+2. **Bootstrap CI 5000 iterations.** **Already fully vectorized**: `rng.choice` generates a
+   `(5000, n)` matrix and all statistics are NumPy reductions along `axis=1`, with no
+   Python loop. It costs **37 ms** **[M]**. There is nothing to compile.
+3. **Delta-hedge of `04b_vol_paper.py`.** It is not a compute loop: `maybe_hedge` is a handful of
+   scalar arithmetic per tick, and the tick is **hourly**. The time is in the REST calls to Deribit.
+   Numba has nothing to act on here.
 
-Il solo loop davvero caldo del progetto è quello del **Volume Profile** (1.32 s, e la riga più calda
-del profilo py-spy). È numerico, nopython-compatibile in linea di principio — ma vale 1.32 secondi
-una volta per rigenerazione del dataset. Il `mdd_stats` è un vero loop Python su 6485 punti: **2 ms**.
+The only truly hot loop in the project is the **Volume Profile** one (1.32 s, and the hottest line
+in the py-spy profile). It is numerical, nopython-compatible in principle — but it is worth 1.32 seconds
+once per dataset regeneration. `mdd_stats` is a real Python loop over 6485 points: **2 ms**.
 
-### (f) Estensione nativa (Rust/PyO3 o C++/pybind11) — **NO, chiaramente**
+### (f) Native extension (Rust/PyO3 or C++/pybind11) — **NO, clearly**
 
-La domanda è se esista **un** componente insieme abbastanza pesante e abbastanza isolato. Passandoli
-in rassegna:
+The question is whether there exists **a** component that is both heavy enough and isolated enough. Going through
+them:
 
-- *Volume Profile* — isolato sì (funzione pura su 5 array, ritorna 4 array), pesante no: **1.32 s**.
-- *Event loop del backtest* — pesante no (**<1 s**), isolato no (intreccia risk layer, enum, dataclass).
-- *Training* — è il grosso del tempo, ma il calcolo è già in kernel CUDA nativi: il problema è che
-  ce ne sono **troppi e troppo piccoli**, e un'estensione nativa in Python non riduce il numero di
-  lanci. È precisamente il caso che `torch.compile` copre e un'estensione no.
-- *Regime detector* — il full rebuild walk-forward è **[D]** dichiarato ~3 h con `hmm_retrain_days: 90`
-  (~9 h a cadenza mensile) ed è di gran lunga il calcolo più lungo del progetto. Non l'ho eseguito.
-  Ma il costo sta nel **fit Markov-Switching di statsmodels** (EM + ottimizzazione), non in codice
-  Python del repo: sostituirlo significherebbe reimplementare filtro di Hamilton **e** stima ML in
-  Rust, cioè riscrivere la parte scientificamente più delicata e meglio testata (bit-parity sotto
-  test). E il problema pratico è già risolto altrimenti: **B7** (`--regime-incremental`) porta il
-  refresh a minuti con bit-parity garantita da test.
+- *Volume Profile* — isolated yes (pure function over 5 arrays, returns 4 arrays), heavy no: **1.32 s**.
+- *Backtest event loop* — heavy no (**<1 s**), isolated no (intertwines risk layer, enums, dataclasses).
+- *Training* — it is the bulk of the time, but the computation is already in native CUDA kernels: the problem is that
+  there are **too many and too small**, and a native extension in Python does not reduce the number of
+  launches. This is precisely the case that `torch.compile` covers and an extension does not.
+- *Regime detector* — the walk-forward full rebuild is **[D]** stated at ~3 h with `hmm_retrain_days: 90`
+  (~9 h at monthly cadence) and is by far the longest computation in the project. I did not run it.
+  But the cost lies in the **statsmodels Markov-Switching fit** (EM + optimization), not in the repo's Python
+  code: replacing it would mean reimplementing the Hamilton filter **and** ML estimation in
+  Rust, i.e. rewriting the most scientifically delicate and best-tested part (bit-parity under
+  test). And the practical problem is already solved otherwise: **B7** (`--regime-incremental`) brings the
+  refresh down to minutes with bit-parity guaranteed by tests.
 
-**Nessun componente giustifica un'estensione nativa.** Il costo — §3 — sarebbe alto e il beneficio
-misurabile in secondi.
+**No component justifies a native extension.** The cost — §3 — would be high and the benefit
+measurable in seconds.
 
 ---
 
-## 3. Stato della toolchain
+## 3. State of the toolchain
 
-Inventario **[M]** su questa macchina:
+Inventory **[M]** on this machine:
 
-| Componente | Stato |
+| Component | State |
 |---|---|
-| Visual Studio / Build Tools | **assente** — nessuna dir in `Program Files*\Microsoft Visual Studio`, nessuna chiave `HKLM\SOFTWARE\Microsoft\VisualStudio\SxS\VS7`, `vswhere.exe` assente, `cl.exe` non nel PATH, winget non trova `Microsoft.VisualStudio.2022.BuildTools` |
-| Windows SDK | **assente** (`Windows Kits\10\Include` non esiste) |
-| Rust | **assente** — `rustc`, `cargo`, `maturin` non trovati, nessun `~/.cargo` |
-| Triton (per `torch.compile`/inductor) | **assente e non installabile da PyPI su Windows** |
-| py-spy | installato durante l'audit (0.4.2), **lasciato**: profiler out-of-process, nessun conflitto di runtime |
-| polars | installato e poi **disinstallato** (runtime Arrow duplicato accanto a pyarrow) |
+| Visual Studio / Build Tools | **absent** — no dir in `Program Files*\Microsoft Visual Studio`, no key `HKLM\SOFTWARE\Microsoft\VisualStudio\SxS\VS7`, `vswhere.exe` absent, `cl.exe` not in PATH, winget does not find `Microsoft.VisualStudio.2022.BuildTools` |
+| Windows SDK | **absent** (`Windows Kits\10\Include` does not exist) |
+| Rust | **absent** — `rustc`, `cargo`, `maturin` not found, no `~/.cargo` |
+| Triton (for `torch.compile`/inductor) | **absent and not installable from PyPI on Windows** |
+| py-spy | installed during the audit (0.4.2), **left in place**: out-of-process profiler, no runtime conflict |
+| polars | installed and then **uninstalled** (duplicate Arrow runtime next to pyarrow) |
 
-**Cosa servirebbe al VPS Linux.** Dedotto da `deploy/vps/setup_vps.sh` e dalle unit, non indovinato:
-`apt-get install -y git python3-venv python3-pip ufw unattended-upgrades curl` — **non c'è
-`build-essential`, non c'è `gcc`, non ci sono header Python di sviluppo**. L'installazione è
+**What the Linux VPS would need.** Deduced from `deploy/vps/setup_vps.sh` and the units, not guessed:
+`apt-get install -y git python3-venv python3-pip ufw unattended-upgrades curl` — **there is no
+`build-essential`, no `gcc`, no Python development headers**. Installation is
 `pip install torch --index-url .../cpu` → `pip install -r requirements-vps.txt` →
-`pip install -e . --no-deps`, e `pyproject.toml` non dichiara dipendenze. Oggi il VPS costruisce
-zero codice nativo: prende solo wheel. Introdurre un'estensione compilata significherebbe **o**
-aggiungere una toolchain C/Rust al provisioning (e allungare `setup_vps.sh`, che è dichiarato
-idempotente e one-shot), **o** costruire e distribuire wheel manylinux + win_amd64 per ogni release.
+`pip install -e . --no-deps`, and `pyproject.toml` declares no dependencies. Today the VPS builds
+zero native code: it only takes wheels. Introducing a compiled extension would mean **either**
+adding a C/Rust toolchain to provisioning (and lengthening `setup_vps.sh`, which is declared
+idempotent and one-shot), **or** building and distributing manylinux + win_amd64 wheels for every release.
 
-**Cosa cambierebbe per chi clona.** Oggi: `pip install -e .` funziona senza alcuna toolchain di
-sistema e `pytest tests/` gira in ~34 s su CPU, che è precisamente il claim di verificabilità del
-README ("verificabile subito, senza dati"). Con un'estensione nativa quel claim decade: chi clona su
-Windows senza Build Tools non riesce più a installare il package, e il progetto passa da
-"pip install e basta" a "pip install più un compilatore". Per un repo pubblicato a corredo di un CV
-questo è un costo reputazionale concreto, non solo tecnico — ed è sproporzionato rispetto ai secondi
-in gioco.
-
----
-
-## 4. Rischio parity
-
-L'invariante da proteggere è `tests/test_live_training_parity.py` (Δfeature = 0, Δμ = Δσ = 0 fra
-live e training) più i golden sulle 104 feature. Per ogni lever che ha senso:
-
-**`torch.compile` — rischio ALTO, ma delimitabile.** Meccanismi concreti:
-
-- *Kernel diversi e ordine di riduzione.* Con `inductor` i kernel sono **generati**, non quelli di
-  cuDNN/cuBLAS: fusioni, tiling e ordine di accumulo cambiano, e con essi l'ultimo bit. Con
-  `cudagraphs` i kernel restano quelli di eager — è la *submission* a cambiare, non la matematica —
-  quindi il rischio è molto minore, ma **AOTAutograd può ripartizionare il grafo forward/backward e
-  ricomputare invece di salvare attivazioni**, il che sposta l'ordine delle operazioni nel backward.
-  *Da verificare*: non ho confrontato i gradienti eager vs compiled.
-- *Cattura CUDA Graph e shape statiche.* Il graph è catturato su una shape fissa. L'ultimo batch
-  dell'epoca è parziale (`51882 % 64 = 42`) → ricattura o fallback. Non un problema di correttezza,
-  ma di determinismo del percorso.
-- *RNG.* Dropout 0.3 e drop_path 0.2 sono attivi in training. PyTorch gestisce il RNG dentro i graph
-  con offset philox, ma **la sequenza di numeri casuali consumata può differire** da eager: due run
-  "identici" divergerebbero. *Da verificare*.
-
-**La delimitazione che rende il rischio accettabile:** la parity bit-perfect che il progetto
-protegge è **live ↔ training**, cioè riguarda il percorso di **inferenza** (`FeatureBuilder` →
-`_deterministic_predict` → denormalizzazione). `torch.compile` applicato **al solo loop di training**
-non tocca quel percorso: cambierebbe i **pesi** ottenuti (un modello diverso, da ri-giudicare col
-gate), non l'equivalenza fra due percorsi di inferenza sugli stessi pesi. Applicarlo invece
-all'inferenza — `EnsembleModel.__call__`, `04b`, i giudici — romperebbe la parity in senso proprio e
-richiederebbe di ri-verificare `test_live_training_parity.py` con tolleranza, che è esattamente ciò
-che quel test esiste per non fare.
-
-⚠ Conseguenza metodologica, non tecnica: un modello addestrato con `torch.compile` **non è
-confrontabile con l'incumbent** attraverso il claim pubblicato. Vale la regola già scritta nel
-manifesto — un lever si giudica contro una **baseline riaddestrata sullo stesso dataset/scaler**.
-`torch.compile` è un lever di *costo*, non di *qualità*: se cambia il QLIKE, il gate va rifatto.
-
-**Polars — rischio ALTO e non delimitabile.** Rompe la parity in due modi distinti: riassociazione
-floating point (`vol_std_20`, ULP fino a 24k) e **differenza di stimatore** (`ret_skew_20`, 7.7%).
-Il secondo non è un problema di tolleranza: è una feature diversa. E poiché il `FeatureBuilder` è
-condiviso da training e live, un port parziale creerebbe divergenza live↔training **se e solo se**
-i due path venissero migrati in momenti diversi — cioè la modalità di fallimento più probabile.
-
-**Numba, channels_last, estensione nativa — rischio non applicabile**, perché i lever non si
-applicano. Per completezza: se mai si compilasse `_vp_single` con Numba, `np.bincount` con `weights`
-non è supportato in nopython e andrebbe riscritto come loop di accumulo, cambiando l'ordine di somma
-→ le feature `vp_*` cambierebbero all'ultimo bit. Il commento nel codice documenta che l'attuale
-`bincount` fu scelto proprio perché numericamente identico al `np.add.at` precedente.
-
-**AMP** — già off dove serve; nessun cambiamento proposto, nessun rischio nuovo.
+**What would change for whoever clones the repo.** Today: `pip install -e .` works without any system
+toolchain and `pytest tests/` runs in ~34 s on CPU, which is precisely the verifiability claim of the
+README ("verifiable right away, without data"). With a native extension that claim lapses: whoever clones on
+Windows without Build Tools can no longer install the package, and the project goes from
+"just pip install" to "pip install plus a compiler". For a repo published to accompany a CV
+this is a concrete reputational cost, not just a technical one — and it is disproportionate to the seconds
+at stake.
 
 ---
 
-## 5. Cosa NON ha senso fare, e perché
+## 4. Parity risk
 
-In ordine di quanto sono sicuro:
+The invariant to protect is `tests/test_live_training_parity.py` (Δfeature = 0, Δμ = Δσ = 0 between
+live and training) plus the golden tests on the 104 features. For each lever that makes sense:
 
-1. **`channels_last`** — non esiste un tensore 4D NCHW nel progetto. Nessuna convoluzione 2D,
-   nessuna normalizzazione spaziale. Il formato non ha su cosa agire.
-2. **Numba sui candidati dichiarati** — il bootstrap è già una matrice NumPy `(5000, n)` senza loop;
-   il delta-hedge è aritmetica scalare a cadenza oraria; l'event loop del backtest costa meno di un
-   secondo ed è pieno di Enum e dataclass, quindi nopython-incompatibile senza riscrivere il risk layer.
-3. **Estensione nativa** — nessun componente supera il secondo di costo *e* è isolato. Il calcolo
-   più lungo del progetto (regime walk-forward) sta dentro statsmodels, non nel repo, ed è già
-   risolto da B7 in modo bit-exact. Il costo d'ingresso è invece alto e ricade su tre macchine
-   (questa, il VPS senza `build-essential`, e quella di chi clona).
-4. **Polars nel `FeatureBuilder`** — recupererebbe ~0.27 s su un data prep da 2.24 s, non toccando il
-   77% che è un loop Python inesprimibile in Polars, e cambierebbe il valore di almeno una delle 104
-   feature del **7.7%** per differenza di stimatore.
-5. **Riattivare AMP dove è off** — i tre siti sono spenti per NaN documentati (spectral_norm+Mamba,
-   lgamma in fp16, underflow di cumprod). Non è un'omissione da correggere.
-6. **Ottimizzare il data prep in generale** — 2.24 s. Qualunque intervento qui è rumore rispetto ai
-   36 s dei clip bounds o ai 27 minuti di training.
+**`torch.compile` — HIGH risk, but boundable.** Concrete mechanisms:
 
-E una cosa che non ha senso fare *in questo ordine*: inseguire `torch.compile` prima di aver guardato
-i **36 secondi** di `np.nanpercentile` (§6, domanda 1), che sono gratis da recuperare e valgono più
-di due epoche.
+- *Different kernels and reduction order.* With `inductor` the kernels are **generated**, not those of
+  cuDNN/cuBLAS: fusions, tiling and accumulation order change, and with them the last bit. With
+  `cudagraphs` the kernels remain the eager ones — it is the *submission* that changes, not the math —
+  so the risk is much lower, but **AOTAutograd may repartition the forward/backward graph and
+  recompute instead of saving activations**, which shifts the order of operations in the backward.
+  *To be verified*: I did not compare eager vs compiled gradients.
+- *CUDA Graph capture and static shapes.* The graph is captured on a fixed shape. The last batch
+  of the epoch is partial (`51882 % 64 = 42`) → re-capture or fallback. Not a correctness problem,
+  but one of path determinism.
+- *RNG.* Dropout 0.3 and drop_path 0.2 are active in training. PyTorch handles RNG inside graphs
+  with philox offsets, but **the sequence of random numbers consumed may differ** from eager: two
+  "identical" runs would diverge. *To be verified*.
 
----
+**The boundary that makes the risk acceptable:** the bit-perfect parity the project
+protects is **live ↔ training**, i.e. it concerns the **inference** path (`FeatureBuilder` →
+`_deterministic_predict` → denormalization). `torch.compile` applied **to the training loop only**
+does not touch that path: it would change the **weights** obtained (a different model, to be re-judged by the
+gate), not the equivalence between two inference paths on the same weights. Applying it instead
+to inference — `EnsembleModel.__call__`, `04b`, the judges — would break parity in the proper sense and
+would require re-verifying `test_live_training_parity.py` with a tolerance, which is exactly what
+that test exists to avoid.
 
-## 6. Domande aperte
+⚠ Methodological consequence, not a technical one: a model trained with `torch.compile` **is not
+comparable with the incumbent** through the published claim. The rule already written in the
+manifesto applies — a lever is judged against a **baseline retrained on the same dataset/scaler**.
+`torch.compile` is a *cost* lever, not a *quality* lever: if it changes QLIKE, the gate must be redone.
 
-Segnalate, non implementate.
+**Polars — HIGH risk and not boundable.** It breaks parity in two distinct ways: floating-point
+re-association (`vol_std_20`, ULP up to 24k) and **estimator difference** (`ret_skew_20`, 7.7%).
+The second is not a tolerance problem: it is a different feature. And since `FeatureBuilder` is
+shared by training and live, a partial port would create live↔training divergence **if and only if**
+the two paths were migrated at different times — i.e. the most likely failure mode.
 
-1. **I 36 s dei clip bounds.** `np.nanpercentile(X_train.reshape(-1, 104), [0.1, 99.9], axis=0)`
-   ordina completamente ~6.2M valori per colonna. È un costo fisso per invocazione di `02_train`,
-   pari a due epoche. Domanda: serve la precisione esatta del percentile, o basterebbe una stima su
-   un sotto-campione causale? ⚠ Non è una micro-ottimizzazione neutra: i clip bounds entrano nel
-   `PipelineState` e quindi nel contratto train↔inference — cambiarli **cambia i dati** e richiede
-   un gate. Da trattare come lever sperimentale, non come pulizia.
-2. **`torch.compile(backend="cudagraphs")` sul solo training.** 1.56× misurato, ~2.8 s di
-   compilazione, zero graph break, nessuna `spectral_norm` di mezzo. Le domande aperte sono la
-   riproducibilità del RNG sotto cattura del graph e la ricomputazione di AOTAutograd nel backward
-   (§4). Se si vuole aprire, va aperto come esperimento pre-registrato con baseline riaddestrata.
-3. **Il batch di produzione è 64 in un regime launch-bound.** A 1024 la GPU rende 2.8× di throughput.
-   Ma `batch_size` non è una leva di costo: cambia il numero di step, la traiettoria SGD e
-   l'interazione con `gradient_accumulation_steps: 2` — e il config commenta che lr e dropout sono
-   stati tarati sul 1h con un dataset da ~1.7k campioni indipendenti effettivi. **Non toccarlo per
-   ragioni di performance.** La domanda legittima è un'altra: dato che l'ensemble è di 5 seed
-   indipendenti e la GPU è al 5-15%, si potrebbero addestrare **più seed in parallelo nello stesso
-   processo** invece che in sequenza? Sarebbe un guadagno da launch-bound (i lanci si sovrappongono)
-   senza toccare l'iperparametro di nessun membro. Da verificare contro gli 8 GB di VRAM.
-4. **`create_windows` con `window_stride: 1` materializza 3.30 GB** per 66k barre, e il pipeline lo
-   scrive su disco, lo rilegge, e ne fa una copia in RAM col `clamp` (picco ~6.6 GB su 15.9 GB).
-   Il fattore di espansione è 120× (ogni barra compare in 120 finestre). Domanda: c'è ragione di
-   materializzare, invece di generare le finestre con una `Dataset` che indicizza la matrice
-   `(66k, 104)` a costo zero? Cambierebbe l'ordine di nulla — le finestre sono viste — ma toccherebbe
-   il formato dell'npz, che è il contratto fra `01` e `02`/giudici.
+**Numba, channels_last, native extension — risk not applicable**, because the levers do not
+apply. For completeness: if `_vp_single` were ever compiled with Numba, `np.bincount` with `weights`
+is not supported in nopython and would have to be rewritten as an accumulation loop, changing the summation order
+→ the `vp_*` features would change in the last bit. The comment in the code documents that the current
+`bincount` was chosen precisely because it is numerically identical to the previous `np.add.at`.
+
+**AMP** — already off where needed; no change proposed, no new risk.
 
 ---
 
-## 7. Osservazioni collaterali (trovate, non corrette)
+## 5. What does NOT make sense to do, and why
 
-> **Aggiornamento 2026-08-02 (stessa giornata):** i due difetti gravi di questa sezione (§7.1, §7.2)
-> sono stati **corretti**, con regression test; §7.3 (doc stale) riallineata. Le sottosezioni restano
-> nella forma diagnostica originale — descrivono il difetto *com'era* — con una nota di chiusura in
-> testa a ciascuna. Le inefficienze minori di §7.4 sono deliberatamente **non** toccate.
+In order of how certain I am:
 
-### 7.1 ⚠ Crash da ordine di import: `pyarrow` deve inizializzarsi prima di torch+sklearn
+1. **`channels_last`** — there is no 4D NCHW tensor in the project. No 2D convolution,
+   no spatial normalization. The format has nothing to act on.
+2. **Numba on the stated candidates** — the bootstrap is already a NumPy `(5000, n)` matrix with no loop;
+   the delta-hedge is scalar arithmetic at hourly cadence; the backtest event loop costs less than a
+   second and is full of Enums and dataclasses, hence nopython-incompatible without rewriting the risk layer.
+3. **Native extension** — no component both exceeds a second of cost *and* is isolated. The longest
+   computation in the project (regime walk-forward) lives inside statsmodels, not in the repo, and is already
+   solved by B7 in a bit-exact way. The entry cost, on the other hand, is high and falls on three machines
+   (this one, the VPS without `build-essential`, and that of whoever clones).
+4. **Polars in `FeatureBuilder`** — it would recover ~0.27 s on a 2.24 s data prep, without touching the
+   77% that is a Python loop inexpressible in Polars, and it would change the value of at least one of the 104
+   features by **7.7%** because of an estimator difference.
+5. **Re-enabling AMP where it is off** — the three sites are disabled for documented NaNs (spectral_norm+Mamba,
+   lgamma in fp16, cumprod underflow). It is not an omission to fix.
+6. **Optimizing data prep in general** — 2.24 s. Any intervention here is noise compared with the
+   36 s of clip bounds or the 27 minutes of training.
 
-> ✅ **RISOLTO 2026-08-02** — `import pyarrow` ancorato in `quantsys/__init__.py` (best-effort, non
-> diventa una dipendenza dichiarata). Regression test `tests/test_import_order.py`, 4 test in
-> subprocesso: il crash è un'access violation, non un'eccezione Python, quindi non catturabile
-> in-process con `pytest.raises` — si verifica il **codice di uscita**.
+And one thing that does not make sense to do *in this order*: chasing `torch.compile` before having looked at
+the **36 seconds** of `np.nanpercentile` (§6, question 1), which are free to recover and worth more
+than two epochs.
 
-**Riproducibile [M]**, exit code 139 (access violation in `pyarrow/dataset.py` durante il caricamento del modulo):
+---
 
-| Ordine | Esito |
+## 6. Open questions
+
+Flagged, not implemented.
+
+1. **The 36 s of clip bounds.** `np.nanpercentile(X_train.reshape(-1, 104), [0.1, 99.9], axis=0)`
+   fully sorts ~6.2M values per column. It is a fixed cost per invocation of `02_train`,
+   equal to two epochs. Question: is the exact percentile precision needed, or would an estimate on
+   a causal subsample suffice? ⚠ It is not a neutral micro-optimization: the clip bounds enter the
+   `PipelineState` and therefore the train↔inference contract — changing them **changes the data** and requires
+   a gate. To be treated as an experimental lever, not as a cleanup.
+2. **`torch.compile(backend="cudagraphs")` on training only.** 1.56× measured, ~2.8 s of
+   compilation, zero graph breaks, no `spectral_norm` involved. The open questions are
+   RNG reproducibility under graph capture and AOTAutograd recomputation in the backward
+   (§4). If it is to be opened, it must be opened as a pre-registered experiment with a retrained baseline.
+3. **The production batch is 64 in a launch-bound regime.** At 1024 the GPU delivers 2.8× the throughput.
+   But `batch_size` is not a cost lever: it changes the number of steps, the SGD trajectory and
+   the interaction with `gradient_accumulation_steps: 2` — and the config comments that lr and dropout were
+   tuned on 1h with a dataset of ~1.7k effective independent samples. **Do not touch it for
+   performance reasons.** The legitimate question is a different one: given that the ensemble is 5
+   independent seeds and the GPU is at 5-15%, could **several seeds be trained in parallel in the same
+   process** instead of sequentially? It would be a launch-bound gain (the launches overlap)
+   without touching any member's hyperparameters. To be verified against the 8 GB of VRAM.
+4. **`create_windows` with `window_stride: 1` materializes 3.30 GB** for 66k bars, and the pipeline
+   writes it to disk, reads it back, and makes an in-RAM copy of it with `clamp` (peak ~6.6 GB out of 15.9 GB).
+   The expansion factor is 120× (each bar appears in 120 windows). Question: is there a reason to
+   materialize, instead of generating the windows with a `Dataset` that indexes the `(66k, 104)`
+   matrix at zero cost? It would change the order of nothing — the windows are views — but it would touch
+   the npz format, which is the contract between `01` and `02`/judges.
+
+---
+
+## 7. Collateral observations (found, not fixed)
+
+> **Update 2026-08-02 (same day):** the two serious defects in this section (§7.1, §7.2)
+> have been **fixed**, with regression tests; §7.3 (stale doc) realigned. The subsections remain
+> in their original diagnostic form — they describe the defect *as it was* — with a closing note at the
+> top of each. The minor inefficiencies in §7.4 are deliberately **not** touched.
+
+### 7.1 ⚠ Import-order crash: `pyarrow` must initialize before torch+sklearn
+
+> ✅ **RESOLVED 2026-08-02** — `import pyarrow` anchored in `quantsys/__init__.py` (best-effort, it does not
+> become a declared dependency). Regression test `tests/test_import_order.py`, 4 tests in a
+> subprocess: the crash is an access violation, not a Python exception, so it cannot be caught
+> in-process with `pytest.raises` — the **exit code** is checked.
+
+**Reproducible [M]**, exit code 139 (access violation in `pyarrow/dataset.py` while loading the module):
+
+| Order | Outcome |
 |---|---|
 | `import pandas` → `import torch, sklearn.preprocessing` → `read_parquet` | **OK** |
 | `import torch, sklearn.preprocessing` → `import pandas` → `read_parquet` | **SEGFAULT** |
-| come sopra, ma con `import pyarrow.dataset` esplicito prima | **SEGFAULT** |
-| solo `torch` → `read_parquet` | OK |
-| solo `sklearn` → `read_parquet` | OK |
+| as above, but with an explicit `import pyarrow.dataset` first | **SEGFAULT** |
+| `torch` only → `read_parquet` | OK |
+| `sklearn` only → `read_parquet` | OK |
 
-Servono **entrambi** torch e sklearn prima di pyarrow perché il crash avvenga (classico conflitto fra
-runtime OpenMP: torch porta `libiomp5md.dll`, scikit-learn/scipy il proprio).
+**Both** torch and sklearn are needed before pyarrow for the crash to happen (classic conflict between
+OpenMP runtimes: torch ships `libiomp5md.dll`, scikit-learn/scipy their own).
 
-**Perché la produzione non lo vede:** tutti gli script numerati importano `pandas` (riga 30 in
-`03_backtest.py`) **prima** di `torch` (riga 31) e prima di `quantsys.*` (riga 37). L'invariante
-regge **per accidente dell'ordine di import**, non per una regola.
+**Why production does not see it:** all numbered scripts import `pandas` (line 30 in
+`03_backtest.py`) **before** `torch` (line 31) and before `quantsys.*` (line 37). The invariant
+holds **by accident of import order**, not by a rule.
 
-**Perché è un rischio:** `quantsys.utils` importa torch a livello di modulo, e la checklist "nuovo
-script" prescrive `load_config` da `quantsys.utils` senza dire nulla
-sull'ordine. Uno script nuovo scritto in modo naturale (prima gli import del progetto, poi pandas)
-crasha con un access violation senza traceback Python. Ci sono incappato scrivendo una probe di
-questo audit. Non l'ho corretto (vincolo: nessuna modifica a `quantsys/`); se lo si volesse rendere
-strutturale, il posto è un `import pyarrow` eager in cima a `quantsys/utils/__init__.py`, oppure una
-riga nella checklist.
+**Why it is a risk:** `quantsys.utils` imports torch at module level, and the "new
+script" checklist prescribes `load_config` from `quantsys.utils` without saying anything
+about ordering. A new script written in the natural way (project imports first, then pandas)
+crashes with an access violation and no Python traceback. I ran into it while writing a probe for
+this audit. I did not fix it (constraint: no changes to `quantsys/`); if one wanted to make it
+structural, the place is an eager `import pyarrow` at the top of `quantsys/utils/__init__.py`, or a
+line in the checklist.
 
-### 7.2 ⚠ Il fit del regime degrada in silenzio invece di fallire
+### 7.2 ⚠ The regime fit degrades silently instead of failing
 
-> ✅ **RISOLTO 2026-08-02** — `RuntimeError` su zero fit riusciti (non disattivabile) + abort
-> configurabile su `max_fit_failure_ratio` (default 0.5) + diagnostica in `last_fit_diagnostics`;
-> guard rispecchiato in `continue_walkforward`. Aggiunto anche il log mancante sul ramo
-> `_fit_single → None`, che prima era completamente muto. Regression test
-> `tests/test_regime_fit_guard.py` (8 test); bit-parity B7 verificata invariata.
+> ✅ **RESOLVED 2026-08-02** — `RuntimeError` on zero successful fits (cannot be disabled) + configurable
+> abort on `max_fit_failure_ratio` (default 0.5) + diagnostics in `last_fit_diagnostics`;
+> guard mirrored in `continue_walkforward`. Also added the missing log on the
+> `_fit_single → None` branch, which was previously completely silent. Regression test
+> `tests/test_regime_fit_guard.py` (8 tests); B7 bit-parity verified unchanged.
 
-In `quantsys/macro/regime.py:651-653`, il fit Markov-Switching per timestep è dentro
-`except Exception as e: log.warning(...)`. Con `statsmodels` mancante ho osservato **un warning per
-ogni t** e il walk-forward che prosegue fino in fondo: `current_params` resta `None`, `probs_all[t]`
-non viene mai scritto, e si ottiene un risultato **privo di contenuto informativo senza che nessuno
-fallisca**. Solo `continue_walkforward` (il path B7 incrementale) fail-fasta a valle, con un messaggio
-corretto ("serve un full rebuild").
+In `quantsys/macro/regime.py:651-653`, the per-timestep Markov-Switching fit is inside
+`except Exception as e: log.warning(...)`. With `statsmodels` missing I observed **one warning for
+each t** and the walk-forward continuing to the end: `current_params` stays `None`, `probs_all[t]`
+is never written, and one gets a result **devoid of informational content without anything
+failing**. Only `continue_walkforward` (the incremental B7 path) fails fast downstream, with a correct
+message ("a full rebuild is needed").
 
-L'ho scoperto perché durante l'audit `statsmodels` è stato rimosso dall'ambiente da una delle mie
-operazioni pip (poi reinstallato alla 0.14.6; la suite è tornata a `438 passed, 1 skipped`). Il fatto
-che il sintomo si presenti come "6 errori in `test_regime_incremental.py`" e non come un fallimento
-esplicito del rebuild è la parte che segnalo: un full rebuild lanciato in quelle condizioni avrebbe
-prodotto un `regime_probs.parquet` degradato, e la degradazione sarebbe stata visibile solo leggendo
-i warning. Un contatore di fit falliti con soglia di abort sarebbe coerente col resto dei guard
-fail-fast del progetto — ma è una decisione di design, non una svista da correggere di mia iniziativa.
+I discovered it because during the audit `statsmodels` was removed from the environment by one of my
+pip operations (later reinstalled at 0.14.6; the suite returned to `438 passed, 1 skipped`). The fact
+that the symptom shows up as "6 errors in `test_regime_incremental.py`" and not as an explicit failure
+of the rebuild is the part I am flagging: a full rebuild launched under those conditions would have
+produced a degraded `regime_probs.parquet`, and the degradation would have been visible only by reading
+the warnings. A failed-fit counter with an abort threshold would be consistent with the rest of the project's
+fail-fast guards — but it is a design decision, not an oversight to fix on my own initiative.
 
-### 7.3 Doc stale: il conteggio dei test nel README
+### 7.3 Stale doc: the test count in the README
 
-> ✅ **RISOLTO 2026-08-02** — README riallineato a **450 passed, 1 skipped, ~45 s** (438 misurati
-> all'inizio dell'audit + 12 nuovi test dei fix §7.1-7.2). ⚠ La suite è passata da ~34 s a ~45 s:
-> i 4 test di ordine-import girano in **subprocesso** e ognuno paga ~2.2 s di `import torch`.
-> È il prezzo di testare un invariante che si manifesta solo come crash di processo.
+> ✅ **RESOLVED 2026-08-02** — README realigned to **450 passed, 1 skipped, ~45 s** (438 measured
+> at the start of the audit + 12 new tests from the §7.1-7.2 fixes). ⚠ The suite went from ~34 s to ~45 s:
+> the 4 import-order tests run in a **subprocess** and each pays ~2.2 s of `import torch`.
+> That is the price of testing an invariant that manifests only as a process crash.
 
-Il README dichiarava **355 passed, 1 skipped, ~30s** in due punti (sezione "Da dove iniziare" e
-"Riproducibilità"). Il valore reale a inizio audit era **438 passed, 1 skipped, ~34 s** **[M]**.
-È un claim che un lettore esterno verifica in trenta secondi, quindi valeva la pena riallinearlo.
+The README stated **355 passed, 1 skipped, ~30s** in two places (the "Where to start" and
+"Reproducibility" sections). The actual value at the start of the audit was **438 passed, 1 skipped, ~34 s** **[M]**.
+It is a claim an outside reader verifies in thirty seconds, so it was worth realigning.
 
-### 7.4 Inefficienze minori, tutte sotto la soglia di rilevanza
+### 7.4 Minor inefficiencies, all below the relevance threshold
 
-Le elenco per completezza, con la ragione per cui **non** vale la pena toccarle:
+Listed for completeness, with the reason why they are **not** worth touching:
 
-- `create_windows` valuta `np.isnan(wins).any(axis=(1,2))` sulla **vista espansa** (3.3 GB, ogni
-  barra riletta 120 volte) quando la maschera NaN è calcolabile sulla matrice `(66k, 104)` prima
-  dell'espansione. Costa una frazione dei 4.31 s — ma vedi §6.4, il punto vero è la materializzazione.
-- ~~`02_train.py` fa `X_tr.clamp(...)` creando una **copia completa** dei tensori train/val/test
-  (~3.3 GB transitori su 15.9 GB di RAM). `clamp_` in-place eviterebbe il picco.~~ **APPLICATO il
-  2026-08-02** (`f36b406`, −2.59 GB di picco). **Completato il 2026-08-05:** l'altra metà dello stesso
-  picco era `astype(np.float32)` in `to_t()`, che copiava ogni membro npz già float32 — ora
-  `astype(np.float32, copy=False)`, **−2.42 GiB**, bit-identico. ⚠ Le due modifiche sono sicure solo
-  **insieme e in quest'ordine di ragionamento**: `copy=False` restituisce lo stesso ndarray del membro
-  npz, quindi è il `clamp_` in-place a scriverci sopra — l'invariante che rende l'insieme corretto è
-  che `NpzFile.__getitem__` materializzi un array fresco a ogni accesso, ed è inchiodato da
-  `tests/test_npz_load_aliasing.py` (7 test) invece di essere assunto.
-- `_vp_single` accumula in **dict Python** indicizzati da intero (`poc_dist_sampled[i] = ...`) per poi
-  riconvertirli in array con `np.array(sorted(dict.keys()))`. Un array pre-allocato + maschera
-  eviterebbe dict e sort. Vale una frazione di 1.32 s.
-- Il `FeatureBuilder` emette `PerformanceWarning: DataFrame is highly fragmented` in 6 punti
-  (`_funding_features`, le 3 interazioni finali). È cosmetico: la defrag avviene comunque con
-  `df.copy()` prima della normalizzazione, e il commento B3 documenta che la copia intermedia fu
-  rimossa apposta perché ridondante.
-
----
-
-## 8. Cosa non ho fatto
-
-- **Non ho eseguito un training completo 5 seed**: le 27 min sono estrapolate da 10 epoche reali
-  misurate a 18 s l'una più i 42 s di startup, non cronometrate end-to-end.
-- **Non ho eseguito il full rebuild del regime detector** (~3 h dichiarate): il costo è **[D]**, preso
-  dal commento in `config/default.yaml`, non verificato.
-- **Non ho testato `torch.compile` su nhits/tcnmamba** (checkpoint assenti dal 06-12) né sul ramo
-  `t_student`, dove la `spectral_norm` è invece applicata: lì la domanda di compatibilità resta aperta.
-- **Non ho verificato la riproducibilità del RNG né i gradienti** sotto `cudagraphs` (§4): il 1.56×
-  è una misura di velocità, non un certificato di equivalenza.
-- **Non ho misurato l'inferenza sul VPS** (CPU): il forward 2.74 ms è su GPU di questa macchina.
-- **Non ho valutato `triton-windows`** (pacchetto di terze parti) come via per abilitare `inductor`.
-- **Non ho misurato il download di rete** di `01_download_data.py`, che dipende da banda e rate-limit.
-- **Non ho toccato** `tests/test_live_training_parity.py`, i golden sulle 104 feature, i guard
-  fail-fast di `TEORIA.md` §12.5 (il guard σ del backtest è anzi scattato durante l'audit e l'ho
-  lasciato scattare) né il contratto `PipelineState`.
-
-**Stato del repo a fine audit (fase diagnostica):** `git status` mostrava solo
-`?? scripts/archive/perf_probe/`. Nessun file di `quantsys/` modificato; suite a
-`438 passed, 1 skipped` come all'inizio.
+- `create_windows` evaluates `np.isnan(wins).any(axis=(1,2))` on the **expanded view** (3.3 GB, each
+  bar re-read 120 times) when the NaN mask can be computed on the `(66k, 104)` matrix before
+  expansion. It costs a fraction of the 4.31 s — but see §6.4, the real point is materialization.
+- ~~`02_train.py` does `X_tr.clamp(...)`, creating a **full copy** of the train/val/test tensors
+  (~3.3 GB transient out of 15.9 GB of RAM). An in-place `clamp_` would avoid the peak.~~ **APPLIED on
+  2026-08-02** (`f36b406`, −2.59 GB of peak). **Completed on 2026-08-05:** the other half of the same
+  peak was `astype(np.float32)` in `to_t()`, which copied every npz member that was already float32 — now
+  `astype(np.float32, copy=False)`, **−2.42 GiB**, bit-identical. ⚠ The two changes are safe only
+  **together and in this order of reasoning**: `copy=False` returns the same ndarray as the npz
+  member, so it is the in-place `clamp_` that writes over it — the invariant that makes the combination correct is
+  that `NpzFile.__getitem__` materializes a fresh array on every access, and it is pinned down by
+  `tests/test_npz_load_aliasing.py` (7 tests) instead of being assumed.
+- `_vp_single` accumulates into **Python dicts** keyed by integer (`poc_dist_sampled[i] = ...`) and then
+  converts them back into arrays with `np.array(sorted(dict.keys()))`. A pre-allocated array + mask
+  would avoid dicts and sorting. Worth a fraction of 1.32 s.
+- `FeatureBuilder` emits `PerformanceWarning: DataFrame is highly fragmented` at 6 points
+  (`_funding_features`, the 3 final interactions). It is cosmetic: defragmentation happens anyway with
+  `df.copy()` before normalization, and the B3 comment documents that the intermediate copy was
+  removed on purpose because it was redundant.
 
 ---
 
-## 9. Cosa è stato fatto DOPO l'audit (2026-08-02, stessa giornata)
+## 8. What I did not do
 
-L'audit era a perimetro read-only. Su indicazione esplicita sono stati poi implementati i soli
-interventi a **guadagno zero secondi e rischio numerico zero** — quelli che rimuovono modi di
-sbagliare in silenzio, non quelli che rendono il codice più veloce:
+- **I did not run a full 5-seed training**: the 27 min are extrapolated from 10 real epochs
+  measured at 18 s each plus the 42 s of startup, not timed end-to-end.
+- **I did not run the full rebuild of the regime detector** (~3 h stated): the cost is **[D]**, taken
+  from the comment in `config/default.yaml`, not verified.
+- **I did not test `torch.compile` on nhits/tcnmamba** (checkpoints absent since 06-12) nor on the
+  `t_student` branch, where `spectral_norm` is applied: there the compatibility question remains open.
+- **I did not verify RNG reproducibility or gradients** under `cudagraphs` (§4): the 1.56×
+  is a speed measurement, not a certificate of equivalence.
+- **I did not measure inference on the VPS** (CPU): the 2.74 ms forward is on this machine's GPU.
+- **I did not evaluate `triton-windows`** (third-party package) as a way to enable `inductor`.
+- **I did not measure the network download** of `01_download_data.py`, which depends on bandwidth and rate limit.
+- **I did not touch** `tests/test_live_training_parity.py`, the golden tests on the 104 features, the
+  fail-fast guards of `THEORY.md` §12.5 (the backtest σ guard actually fired during the audit and I
+  let it fire) nor the `PipelineState` contract.
 
-| Intervento | File | Test | Impatto numerico |
+**Repo state at the end of the audit (diagnostic phase):** `git status` showed only
+`?? scripts/archive/perf_probe/`. No file under `quantsys/` modified; suite at
+`438 passed, 1 skipped` as at the start.
+
+---
+
+## 9. What was done AFTER the audit (2026-08-02, same day)
+
+The audit had a read-only scope. On explicit instruction, only the
+interventions with **zero seconds gained and zero numerical risk** were then implemented — those that remove ways of
+going wrong silently, not those that make the code faster:
+
+| Intervention | File | Test | Numerical impact |
 |---|---|---|---|
-| `import pyarrow` ancorato alla radice del package | `quantsys/__init__.py` | `tests/test_import_order.py` (4) | **nessuno** |
-| Guard anti-degradazione del walk-forward regime | `quantsys/macro/regime.py` | `tests/test_regime_fit_guard.py` (8) | **nessuno** sul path di successo (bit-parity B7 verde) |
-| Riallineamento conteggio test | `README.md` | — | — |
+| `import pyarrow` anchored at the package root | `quantsys/__init__.py` | `tests/test_import_order.py` (4) | **none** |
+| Anti-degradation guard for the regime walk-forward | `quantsys/macro/regime.py` | `tests/test_regime_fit_guard.py` (8) | **none** on the success path (B7 bit-parity green) |
+| Test count realignment | `README.md` | — | — |
 
-Suite: **450 passed, 1 skipped** (~45 s). Doc aggiornate: `README.md`, `TEORIA.md` §12.5 (elenco
-safety net), `AVVIO.md` §1.2 (nota Windows + diagnosi rapida dell'exit 139), `CHANGELOG.md`,
+Suite: **450 passed, 1 skipped** (~45 s). Docs updated: `README.md`, `THEORY.md` §12.5 (safety
+net list), `START.md` §1.2 (Windows note + quick diagnosis of exit 139), `CHANGELOG.md`,
 `STATUS.md`.
 
-## 10. Leva A — clip bounds sulle barre distinte: TESTATA e NON ADOTTATA (2026-08-02)
+## 10. Lever A — clip bounds on distinct bars: TESTED and NOT ADOPTED (2026-08-02)
 
-**Esito: no-go.** Registrato qui perché un esito negativo misurato vale quanto uno positivo.
+**Outcome: no-go.** Recorded here because a measured negative outcome is worth as much as a positive one.
 
-La leva sembrava la migliore per rapporto guadagno/complessità (31 s → 0.16 s, **222×**). Il test di
-correttezza — *quale dei due stimatori descrive la popolazione giusta* — ha prodotto tre risultati,
-il primo dei quali ha invalidato la premessa dell'implementazione ingenua.
+The lever looked like the best in gain/complexity ratio (31 s → 0.16 s, **222×**). The
+correctness test — *which of the two estimators describes the right population* — produced three results,
+the first of which invalidated the premise of the naive implementation.
 
-**A) `X_train` NON è contiguo.** `create_windows` scarta le finestre contenenti NaN, quindi il
-tensore è fatto di **4 blocchi** separati da 3 discontinuità (a j = 2933, 17520, 35895 sul dataset
-corrente). La ricostruzione ovvia — "la barra j è `X[j,0,:]`" — è **sbagliata in silenzio**: la prova
-di meccanismo l'ha intercettata (ricostruzione ≠ vista espansa, |Δ| = 0.39 dove doveva essere 0).
-Gestendo i blocchi: 52.358 barre distinte, Σ molteplicità = 6.225.840 = `n_tr × W`, ricostruzione
-**bit-identica**. Da cui il fatto strutturale: **la vista espansa non contiene informazione in più**,
-è la stessa popolazione con i bordi sotto-pesati. E i bordi sono 8, non 2 → **952 barre (1.82%)
-sotto-pesate, 0.92% di deficit di peso**: l'artefatto è ~4× la stima iniziale.
+**A) `X_train` is NOT contiguous.** `create_windows` discards windows containing NaNs, so the
+tensor is made of **4 blocks** separated by 3 discontinuities (at j = 2933, 17520, 35895 on the current
+dataset). The obvious reconstruction — "bar j is `X[j,0,:]`" — is **silently wrong**: the mechanism
+check caught it (reconstruction ≠ expanded view, |Δ| = 0.39 where it should have been 0).
+Handling the blocks: 52,358 distinct bars, Σ multiplicities = 6,225,840 = `n_tr × W`, reconstruction
+**bit-identical**. Hence the structural fact: **the expanded view contains no extra information**,
+it is the same population with the edges under-weighted. And the edges are 8, not 2 → **952 bars (1.82%)
+under-weighted, 0.92% weight deficit**: the artifact is ~4× the initial estimate.
 
-**B) La differenza fra i due stimatori è sotto il rumore dello stimatore stesso.** Bootstrap sulle
-barre (B=300, l'unità campionaria vera — le finestre sono 120 copie sfalsate della stessa storia):
-z mediano **0.008**, p90 0.263. Solo **9 bound su 208** distano più di 1 SD bootstrap, 4 più di 2.
-Per il **95.7%** i due stimatori sono statisticamente indistinguibili.
+**B) The difference between the two estimators is below the noise of the estimator itself.** Bootstrap over
+bars (B=300, the true sampling unit — the windows are 120 shifted copies of the same history):
+median z **0.008**, p90 0.263. Only **9 bounds out of 208** differ by more than 1 bootstrap SD, 4 by more than 2.
+For **95.7%** the two estimators are statistically indistinguishable.
 
-**C) Impatto a valle trascurabile:** 0.145% delle celle clippate diversamente, |Δ| mediana
+**C) Negligible downstream impact:** 0.145% of cells clipped differently, median |Δ|
 **0.0008 IQR**.
 
-**Quale è più corretto, allora?** Concettualmente quello sulle **barre distinte**: il peso per
-molteplicità è un artefatto della procedura di windowing — dipende da stride, window size *e da dove
-sono capitati gli scarti NaN* — e non ha alcuna relazione col processo generatore dei dati. Il clip
-bound dovrebbe descrivere la distribuzione marginale della feature nel tempo. Lo stimatore attuale
-è una sua approssimazione con bias di bordo.
+**Which one is more correct, then?** Conceptually the one on **distinct bars**: the multiplicity
+weighting is an artifact of the windowing procedure — it depends on stride, window size *and on where
+the NaN discards happened to fall* — and bears no relation to the data-generating process. The clip
+bound should describe the feature's marginal distribution over time. The current estimator
+is an approximation of it with edge bias.
 
-**Perché comunque no.** ① Il premio è 31 s su 27 min = **1.9%**. ② L'implementazione corretta
-richiede di rilevare la struttura a blocchi, che cambia a ogni rebuild del dataset: è esattamente la
-classe di bug silenzioso che §7.1-7.2 hanno appena rimosso. ③ Tocca il `PipelineState`, quindi
-richiede un gate pre-registrato il cui costo supera di molto il premio.
+**Why not, all the same.** ① The payoff is 31 s out of 27 min = **1.9%**. ② The correct implementation
+requires detecting the block structure, which changes at every dataset rebuild: that is exactly the
+class of silent bug that §7.1-7.2 have just removed. ③ It touches the `PipelineState`, so it
+requires a pre-registered gate whose cost far exceeds the payoff.
 
-**La versione buona dell'idea, se mai servisse:** calcolare i bound in `01_download_data.py` da
-`df_feat`, dove la matrice a livello di barra esiste già e non c'è niente da ricostruire. Pulito ed
-esattamente corretto — ma cambia il contratto `01`↔`02` e cambia comunque i numeri.
+**The good version of the idea, should it ever be needed:** compute the bounds in `01_download_data.py` from
+`df_feat`, where the bar-level matrix already exists and there is nothing to reconstruct. Clean and
+exactly correct — but it changes the `01`↔`02` contract and changes the numbers anyway.
 
-⚠ **Il risultato che vale a prescindere dalla decisione:** i clip bounds sono stimati da ~52k
-osservazioni effettive, **non da 6.2M**. La SD bootstrap è 0.008 (p0.1) e **0.036 (p99.9)** dove
-l'IQR mediana delle feature è 1.004 — il bound superiore porta ~3.6% di IQR di rumore campionario.
-Il calcolo sui 6.2M dà **precisione fittizia**: la ridondanza 120× non aggiunge informazione.
+⚠ **The result that holds regardless of the decision:** the clip bounds are estimated from ~52k
+effective observations, **not from 6.2M**. The bootstrap SD is 0.008 (p0.1) and **0.036 (p99.9)** where
+the median feature IQR is 1.004 — the upper bound carries ~3.6% of IQR of sampling noise.
+Computing on the 6.2M gives **spurious precision**: the 120× redundancy adds no information.
 Probe: `scripts/archive/perf_probe/test_clip_bounds_correctness.py`.
 
-⚠ Verificato per inciso e **falsificato**: `X_train` non contiene NaN (0 su 647M), ma sostituire
-`np.nanpercentile` con `np.percentile` **non aiuta** — è **0.92×, più lento**. L'ipotesi "il costo è
-la gestione dei NaN" è sbagliata; il costo è l'ordinamento di 647M celle ridondanti.
+⚠ Checked incidentally and **falsified**: `X_train` contains no NaNs (0 out of 647M), but replacing
+`np.nanpercentile` with `np.percentile` **does not help** — it is **0.92×, slower**. The hypothesis "the cost is
+NaN handling" is wrong; the cost is sorting 647M redundant cells.

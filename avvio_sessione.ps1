@@ -142,10 +142,10 @@ if ($barsNew -match '^-?\d+$') {
 
 # --- 3bis. Estensione candele su richiesta esplicita / candle extension on demand -
 # IT: NOTA sulla numerazione - qui i blocchi contano anche il "2. processi locali"
-#     (oggi un no-op), quindi questo passo e' 3bis; nella tabella di AVVIO.md 5.3,
+#     (oggi un no-op), quindi questo passo e' 3bis; nella tabella di START.md 5.3,
 #     che elenca i soli tre blocchi attivi, lo stesso passo e' 2bis.
 # EN: numbering NOTE - blocks here also count "2. local processes" (a no-op today),
-#     so this step is 3bis; in the AVVIO.md 5.3 table, which lists the three active
+#     so this step is 3bis; in the START.md 5.3 table, which lists the three active
 #     blocks only, the same step is 2bis.
 # IT: -RefreshCandles estende data/raw_candles.parquet con 01_update_data.py
 #     --candles-only. NON e' un default, ed e' una decisione ogni volta: modellato

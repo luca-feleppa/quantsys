@@ -1,0 +1,62 @@
+🇮🇹 Italiano · [🇬🇧 English](README.md)
+
+# Deploy collector 24/7 su VPS
+
+Kit per i tre collector leggeri (`01c_iv_poller`, `01d_orderbook_recorder`, `01e_trades_recorder`) su un VPS Linux always-on (Ubuntu 24.04 o Debian 12+) (decisione 2026-06-24; acquisto VPS EU entry-level 2026-07-14; 01e aggiunto 2026-07-16). Obiettivo: eliminare i buchi PC-off nella serie IV (dato non rigenerabile), sbloccare B1 (book L2 continuo), rendere replayabile offline il forward test `04b` e accumulare i trade opzioni per gli spread realizzati (retention API ~24h: anche questo non ricostruibile ex-post). Nessun secret sul VPS: tutti i collector usano solo endpoint pubblici non autenticati. Training/GPU restano a casa.
+
+## Sequenza di deploy
+
+**0. Geo-test — PRIMA di installare qualsiasi cosa.** Se Binance risponde 451 l'IP è geo-bloccato: rendi il VPS nella finestra di recesso, non c'è workaround.
+
+```bash
+# sul VPS appena provisionato / on the freshly provisioned VPS
+curl -sO https://raw.githubusercontent.com/luca-feleppa/quantsys/main/deploy/vps/geo_test.sh \
+  || scp deploy/vps/geo_test.sh root@<ip>:   # se il repo è privato / if the repo is private
+bash geo_test.sh          # atteso/expected: VERDETTO PASS
+```
+
+**1. Deploy key (repo privato).** Genera sul VPS una chiave dedicata e aggiungila su GitHub → repo → Settings → Deploy keys (read-only):
+
+```bash
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "quantsys-vps"
+cat ~/.ssh/id_ed25519.pub   # → incolla su GitHub / paste into GitHub
+```
+
+⚠ La chiave è **senza passphrase per necessità**: i `git pull` girano non presidiati da systemd, una passphrase li bloccherebbe. Mitigazioni: deploy key **read-only** e **scoped a questo solo repo** (non una user key), permessi `600`, `ufw` solo-SSH. La chiave usata **da casa verso il VPS** è un'altra cosa: quella è interattiva e **deve** avere una passphrase.
+
+**2. Setup one-shot** (da root; fa pacchetti, utente `quantsys`, ufw, clone, venv con torch-CPU, smoke `--once`, unit systemd attive):
+
+```bash
+git clone git@github.com:luca-feleppa/quantsys.git /opt/quantsys   # solo la prima volta / first time only
+bash /opt/quantsys/deploy/vps/setup_vps.sh
+```
+
+**3. Verifica.** Log live e presenza dei parquet:
+
+```bash
+journalctl -u quantsys-iv -u quantsys-ob -u quantsys-trades -f
+find /opt/quantsys/data -name '*.parquet' -newermt '-1 hour'
+```
+
+**4. Sync verso casa** (Windows, dalla root di progetto; scarica in `data/vps_staging/` e fa merge+heartbeat nella copia canonica):
+
+```powershell
+.\scripts\vps\pull_vps_data.ps1   # host letto da config/secrets.yaml → vps.host (privato, gitignored)
+```
+
+## Semantica dei dati
+
+Il doppio poller (casa accesa + VPS) produce tick duplicati **by design**: il merge deduplica (`atm_30h`/`dvol` su `timestamp`; `chain/*` su `snapshot_ts+instrument_name`; `orderbook/*` su `timestamp+symbol`; `deribit_trades/*` su `trade_id`) e ordina, con scritture atomiche. La copia canonica resta quella di casa (`data/iv/`, `data/orderbook/`, `data/deribit_trades/`); il VPS è la sorgente di continuità e la seconda copia di ridondanza dell'asset IV. `01d` e `01e` vivono SOLO sul VPS (nessuna istanza casa). `04b` a casa continua a leggere il file locale (staleness ≤30 min) alimentato dal poller locale quando il PC è acceso. ⚠ I trade eventualmente replayati offline sulle ore PC-off NON entrano retroattivamente nel gate v1 (campione pre-registrato): vanno in file separati.
+
+## File del kit
+
+| File | Descrizione |
+|---|---|
+| `geo_test.sh` | Check 451 Binance + Deribit prod/testnet, pre-install |
+| `setup_vps.sh` | Provisioning one-shot idempotente (root) |
+| `requirements-vps.txt` | Dipendenze minime collector (+ torch CPU a parte) |
+| `quantsys-iv.service` | Unit systemd 01c (tick 10 min, `Restart=always`) |
+| `quantsys-ob.service` | Unit systemd 01d (polling 5 s, `Restart=always`) |
+| `quantsys-trades.service` | Unit systemd 01e (tick 10 min, `Restart=always`) |
+| `../../scripts/vps/pull_vps_data.ps1` | Pull scp lato casa → staging |
+| `../../scripts/vps/merge_vps_data.py` | Merge dedup → canonico + heartbeat staleness |

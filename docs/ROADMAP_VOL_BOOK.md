@@ -1,43 +1,39 @@
-# ROADMAP — Vol Book: stato e residui · Status and remaining work
+🇬🇧 English · [🇮🇹 Italiano](ROADMAP_VOL_BOOK.it.md)
 
-🇮🇹 **Riconciliata il 2026-09-10.** Coda corrente e preregistrazioni vincolanti: [STATUS.md](../STATUS.md), sezioni in testa. Questo file conserva gli ID e i residui utili; non autorizza training, modifiche live o nuove letture dei gate. Gli esiti completi restano in [TEORIA.md](../TEORIA.md) §12 e nello storico di stato.
+# ROADMAP — Vol Book: Status and remaining work
 
-**EN** **Reconciled on 2026-09-10.** Current queue and binding preregistrations: [STATUS.md](../STATUS.md), opening sections. This file retains useful IDs and remaining work; it authorizes no training, live changes or new gate readings. Full outcomes remain in [TEORIA.md](../TEORIA.md) §12 and the status history.
+**Reconciled on 2026-09-10.** Current queue and binding preregistrations: [STATUS.md](../STATUS.md), opening sections. This file retains useful IDs and remaining work; it authorizes no training, live changes or new gate readings. Full outcomes remain in [THEORY.md](../THEORY.md) §12 and the status history.
 
-## Priorità correnti · Current priorities
+## Current priorities
 
-🇮🇹 E1 stadio 2 è **CHIUSO, NESSUNA CONCLUSIONE** (10/09): niente seconde letture né inversione del segnale senza nuova preregistrazione. FT1 è implementato-inerte e **non avviato**: audit di potenza fatto il 15/09, con emendamento 1 adottato (① declassata a controllo pre-calcolato, claim di ②a col suo limite, conteggio degli esiti dell'esecutore, momento di lettura, ②b/③b misurabili) — il go-live resta bloccato fino al giudice FT1 in codice con test sentinella; decisione sul vintage macro prima del primo fill; go-live solo su istruzione esplicita e con ledger flat dopo settlement. Il contatore E1 della routine va ritirato, essendo privo di consumatore decisionale. Nessuna di queste attività è stata eseguita nella pulizia documentale.
+E1 stage 2 is **CLOSED, NO CONCLUSION** (09-10): no second readings or signal inversion without a new preregistration. FT1 is implemented-inert and **not started**: power audit done on 09-15, with amendment 1 adopted (① downgraded to a pre-computed control, ②a's claim with its bound, executor-outcome counting, reading time, measurable ②b/③b) — go-live stays blocked until the FT1 judge exists in code with sentinel tests; decide the macro vintage before the first fill; go live only on explicit instruction and with a flat ledger after settlement. The routine's E1 counter should be retired because it has no remaining decision consumer. None of these tasks was executed during the documentation cleanup.
 
-**EN** E1 stage 2 is **CLOSED, NO CONCLUSION** (09-10): no second readings or signal inversion without a new preregistration. FT1 is implemented-inert and **not started**: power audit done on 09-15, with amendment 1 adopted (① downgraded to a pre-computed control, ②a's claim with its bound, executor-outcome counting, reading time, measurable ②b/③b) — go-live stays blocked until the FT1 judge exists in code with sentinel tests; decide the macro vintage before the first fill; go live only on explicit instruction and with a flat ledger after settlement. The routine's E1 counter should be retired because it has no remaining decision consumer. None of these tasks was executed during the documentation cleanup.
+## Retained work
 
-## Residui conservati · Retained work
-
-| ID | Stato e vincolo (IT) | Status and constraint (EN) | Fonte / Source |
-|---|---|---|---|
-| A3 / A3-bis | Regime-MoE **eseguito il 19/07**, nessuna conclusione: r1=657<800. Parcheggiato; A8-BIS è fallito, quindi quel ramo di riapertura è decaduto. Nuovo campione e nuova preregistrazione prima di rivalutare. | Regime-MoE **run on 07-19**, no conclusion: r1=657<800. Parked; A8-BIS failed, so that reopening branch lapsed. New sample and preregistration required before reconsideration. | [Implementazione / Implementation](MODEL_IMPROVEMENTS.md), STATUS 19–20/07 |
-| A7 | Skeleton greeks-risk non cablato. Il FAIL hedged non autorizza l'ingresso nel critical path né il sizing HAR-q90; serve una decisione di disegno separata. | Greeks-risk skeleton not wired. The hedged FAIL authorizes neither critical-path integration nor HAR-q90 sizing; a separate design decision is needed. | MODEL_IMPROVEMENTS, TEORIA §12.2 |
-| A9 | MaxPool parallelo N-HiTS implementato-inerte; nessun PASS documentato. Non è una riapertura automatica della classe training chiusa: nuova ipotesi e preregistrazione necessarie. | Parallel N-HiTS MaxPool implemented-inert; no documented PASS. Not an automatic reopening of the closed training class: a new hypothesis and preregistration are required. | `config/arch/nhits.yaml`, `tests/test_nhits_maxpool.py`, STATUS |
-| A13 / A13a | Pin-close e gamma cap inerti. Pin-close parcheggiato: unità utile = trigger, n_trig≥20 nel disegno storico; scegliere offline appaiato o forward eseguito. E1 non conclusivo non promuove né declassa automaticamente la leva. | Pin-close and gamma cap inert. Pin-close parked: useful unit = triggers, historical design n_trig≥20; choose paired offline or executed forward evaluation. Inconclusive E1 neither promotes nor automatically downgrades the lever. | STATUS, `04b --pin-close-hours/--pin-close-band` |
-| A14 | Sizing vega inerte (`--size-mode vega`, `--size-vega-target`). Non attivare sulla base della vecchia checklist post-v1: nuova decisione e preregistrazione sul design corrente. | Vega sizing inert. Do not activate based on the old post-v1 checklist: a new decision and preregistration on the current design are required. | STATUS, `04b` |
-| MacroNormalizer | Pin implementato-inerte (`--macro-norm` su 04b e replay), riferimento dichiarato 20260730. Pin del normalizzatore e promozione del parquet sono decisioni distinte; nessuna attivazione presunta. | Pin implemented-inert (`--macro-norm` on 04b and replay), declared reference 20260730. Normalizer pinning and parquet promotion are separate decisions; no activation is assumed. | [AVVIO](../AVVIO.md), STATUS 31/07 e stato corrente |
-| B1 / L2 | Stadio 1 non conclusivo per controllo positivo fallito. Non riaprire automaticamente a h=3. A h=30 attendere n_eff=216; date subordinate alla continuità. Nessun produttore permanente delle kline 1m. | Stage 1 inconclusive because the positive control failed. No automatic h=3 reopening. At h=30 wait for n_eff=216; dates depend on continuity. No permanent 1m-kline producer. | STATUS 10/08 e stato corrente |
-| CAFN | Parcheggiato, prior basso; riapertura solo con nuova definizione del perimetro e gate. | Parked, low prior; reopen only with a revised scope and gate. | [AVVIO](../AVVIO.md), STATUS 20/07 |
-| Replay C1 | La vecchia checklist lasciava pendente il confronto completo su tick live/replay futuri sovrapposti dopo il funding-refresh. Non confonderlo con la parità del solo refactor C2; conservarlo come verifica da riconciliare prima di dichiarare copertura completa. | The old checklist left the full comparison on future overlapping live/replay ticks pending after funding refresh. Do not confuse it with C2 refactor parity; retain it for reconciliation before claiming complete coverage. | STATUS 18/07 |
-| Dashboard | D1–D6 conservati: proposte ancora utili, non preregistrazioni. Le viste di risultati non possono anticipare gate o descrittivi vincolati. | D1–D6 retained: useful proposals, not preregistrations. Result views must not anticipate restricted gates or descriptives. | [DASHBOARD_IMPROVEMENTS](DASHBOARD_IMPROVEMENTS.md) |
-
-## Voci esaurite rimosse dalla coda · Exhausted items removed from the queue
-
-| ID | Esito (IT) | Outcome (EN) |
+| ID | Status and constraint | Source |
 |---|---|---|
-| v1 n=20 / n=30 | FAIL 0/3 il 18/07 e 30/07; i campioni e i caveat sono nello storico. | FAIL 0/3 on 07-18 and 07-30; samples and caveats are in the history. |
-| A1 / B2, hedge v2 | FAIL 2/3 l'11/08: varianza −55,3%, drag −0,647 SE oltre budget −0,25; 76% fee. Wind-down completato il 13/08. | FAIL 2/3 on 08-11: variance −55.3%, drag −0.647 SE beyond −0.25 budget; 76% fees. Wind-down completed on 08-13. |
-| A12, banda WW | Codice inerte; confronto pre-v2 senza dominanza, scelta fixed 0,30. Nessuna nuova attivazione autorizzata. | Inert code; pre-v2 comparison found no dominance, fixed 0.30 selected. No new activation authorized. |
-| A8-BIS / B4-bis / A10 | Mixup FAIL 20/07; DVOL-feature FAIL 23/07; sparsity FAIL 30/07 con manipulation check superato. Classe training chiusa. | Mixup FAIL 07-20; DVOL-feature FAIL 07-23; sparsity FAIL 07-30 with manipulation check passed. Training class closed. |
-| A4 / C1–C3 | HAR-CJ come input non è una via per riaprire la classe training. Smearing non adottato; HAR-C baseline adottata; ri-specificazione HAR-CJ esaurita. | HAR-CJ inputs do not reopen the training class. Smearing not adopted; HAR-C baseline adopted; HAR-CJ respecification exhausted. |
-| MFIV | Derivazione completata; comparatore v2 FAIL 18/08, n=41. ATM resta comparatore, MFIV diagnostica; nessuna v3. | Derivation completed; comparator v2 FAIL 08-18, n=41. ATM remains comparator, MFIV diagnostic; no v3. |
-| C2 / C4 infrastruttura | Refactor 2ter e greeks+sync completati il 18/07, documentati in README/AVVIO/TEORIA. | 2ter refactor and greeks+sync completed on 07-18, documented in README/AVVIO/TEORIA. |
-| R1 | Non è più un'attività da eseguire il 04/08: usare esito e vincoli di provenienza in STATUS/TEORIA, senza promozione implicita del modello. | No longer a task to run on 08-04: use the outcome and provenance constraints in STATUS/TEORIA, with no implied model promotion. |
+| A3 / A3-bis | Regime-MoE **run on 07-19**, no conclusion: r1=657<800. Parked; A8-BIS failed, so that reopening branch lapsed. New sample and preregistration required before reconsideration. | [Implementation](MODEL_IMPROVEMENTS.md), STATUS 19–20/07 |
+| A7 | Greeks-risk skeleton not wired. The hedged FAIL authorizes neither critical-path integration nor HAR-q90 sizing; a separate design decision is needed. | MODEL_IMPROVEMENTS, THEORY §12.2 |
+| A9 | Parallel N-HiTS MaxPool implemented-inert; no documented PASS. Not an automatic reopening of the closed training class: a new hypothesis and preregistration are required. | `config/arch/nhits.yaml`, `tests/test_nhits_maxpool.py`, STATUS |
+| A13 / A13a | Pin-close and gamma cap inert. Pin-close parked: useful unit = triggers, historical design n_trig≥20; choose paired offline or executed forward evaluation. Inconclusive E1 neither promotes nor automatically downgrades the lever. | STATUS, `04b --pin-close-hours/--pin-close-band` |
+| A14 | Vega sizing inert (`--size-mode vega`, `--size-vega-target`). Do not activate based on the old post-v1 checklist: a new decision and preregistration on the current design are required. | STATUS, `04b` |
+| MacroNormalizer | Pin implemented-inert (`--macro-norm` on 04b and replay), declared reference 20260730. Normalizer pinning and parquet promotion are separate decisions; no activation is assumed. | [START](../START.md), STATUS 31/07 and current status |
+| B1 / L2 | Stage 1 inconclusive because the positive control failed. No automatic h=3 reopening. At h=30 wait for n_eff=216; dates depend on continuity. No permanent 1m-kline producer. | STATUS 10/08 and current status |
+| CAFN | Parked, low prior; reopen only with a revised scope and gate. | [START](../START.md), STATUS 20/07 |
+| Replay C1 | The old checklist left the full comparison on future overlapping live/replay ticks pending after funding refresh. Do not confuse it with C2 refactor parity; retain it for reconciliation before claiming complete coverage. | STATUS 18/07 |
+| Dashboard | D1–D6 retained: useful proposals, not preregistrations. Result views must not anticipate restricted gates or descriptives. | [DASHBOARD_IMPROVEMENTS](DASHBOARD_IMPROVEMENTS.md) |
 
-🇮🇹 **Ritiro checklist:** `POST_GATE_V1.md` e `RIPRESA.md` eliminati il 10/09 dopo riconciliazione. I residui sono nella tabella sopra; gli esiti e le preregistrazioni restano nello storico di STATUS e in Git. Le menzioni nelle voci storiche indicano i file presenti a quella data, non istruzioni correnti. Promemoria operativo conservato: rivalutare rinnovo/disdetta VPS verso dicembre 2026.
+## Exhausted items removed from the queue
 
-**EN** **Checklist retirement:** `POST_GATE_V1.md` and `RIPRESA.md` deleted on 09-10 after reconciliation. Remaining work is in the table above; outcomes and preregistrations remain in STATUS history and Git. Mentions in historical entries refer to files present at that date, not current instructions. Operational reminder retained: review VPS renewal/cancellation around December 2026.
+| ID | Outcome |
+|---|---|
+| v1 n=20 / n=30 | FAIL 0/3 on 07-18 and 07-30; samples and caveats are in the history. |
+| A1 / B2, hedge v2 | FAIL 2/3 on 08-11: variance −55.3%, drag −0.647 SE beyond −0.25 budget; 76% fees. Wind-down completed on 08-13. |
+| A12, WW band | Inert code; pre-v2 comparison found no dominance, fixed 0.30 selected. No new activation authorized. |
+| A8-BIS / B4-bis / A10 | Mixup FAIL 07-20; DVOL-feature FAIL 07-23; sparsity FAIL 07-30 with manipulation check passed. Training class closed. |
+| A4 / C1–C3 | HAR-CJ inputs do not reopen the training class. Smearing not adopted; HAR-C baseline adopted; HAR-CJ respecification exhausted. |
+| MFIV | Derivation completed; comparator v2 FAIL 08-18, n=41. ATM remains comparator, MFIV diagnostic; no v3. |
+| C2 / C4 infrastructure | 2ter refactor and greeks+sync completed on 07-18, documented in README/START/THEORY. |
+| R1 | No longer a task to run on 08-04: use the outcome and provenance constraints in STATUS/THEORY, with no implied model promotion. |
+
+**Checklist retirement:** `POST_GATE_V1.md` and `RIPRESA.md` deleted on 09-10 after reconciliation. Remaining work is in the table above; outcomes and preregistrations remain in STATUS history and Git. Mentions in historical entries refer to files present at that date, not current instructions. Operational reminder retained: review VPS renewal/cancellation around December 2026.
