@@ -1,18 +1,10 @@
-# IT: b1 — BASELINE HAR-RV PER-FOLD per il walk-forward vol (CPU-only, no GPU, no
-#     retrain). Colma il gap di `02b_walkforward_validate.py`, che misura la QLIKE del
-#     NN per fold ma NON la HAR. Ricostruisce gli STESSI fold (walk_forward_folds con
-#     n_folds/embargo/val_frac di config), fitta l'HAR (OLS) sul train di ogni fold e
-#     la valuta sull'held-out, poi confronta con i QLIKE NN già salvati in
-#     results/{arch}/walkforward_metrics_log_rv.json. La HAR è arch-indipendente →
-#     una sola passata serve da baseline per tutti e 3 gli archi.
-#     Gate per-fold (stesso del giudice single-split): QLIKE_NN <= 0.95*QLIKE_HAR.
-# EN: b1 — PER-FOLD HAR-RV BASELINE for the vol walk-forward (CPU-only, no GPU, no
-#     retrain). Fills the gap of `02b_walkforward_validate.py`, which measures the
-#     per-fold NN QLIKE but NOT HAR. Rebuilds the SAME folds (walk_forward_folds with
-#     config n_folds/embargo/val_frac), OLS-fits HAR on each fold's train and evaluates
-#     on the held-out, then compares to the NN QLIKE already saved in
-#     results/{arch}/walkforward_metrics_log_rv.json. HAR is arch-independent → a single
-#     pass is the baseline for all 3 archs. Per-fold gate: QLIKE_NN <= 0.95*QLIKE_HAR.
+# b1 — PER-FOLD HAR-RV BASELINE for the vol walk-forward (CPU-only, no GPU, no
+# retrain). Fills the gap of `02b_walkforward_validate.py`, which measures the
+# per-fold NN QLIKE but NOT HAR. Rebuilds the SAME folds (walk_forward_folds with
+# config n_folds/embargo/val_frac), OLS-fits HAR on each fold's train and evaluates
+# on the held-out, then compares to the NN QLIKE already saved in
+# results/{arch}/walkforward_metrics_log_rv.json. HAR is arch-independent → a single
+# pass is the baseline for all 3 archs. Per-fold gate: QLIKE_NN <= 0.95*QLIKE_HAR.
 import argparse
 import json
 import logging
@@ -32,7 +24,7 @@ log = logging.getLogger("quantsys.script.wf_har")
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
+    # UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -52,10 +44,8 @@ def main():
     interval = cfg["data"]["interval"]
     bars_day = 1440 // interval_minutes_from_cfg(cfg)
 
-    # IT: ricostruisce gli STESSI fold del 02b — solo timestamp (X/y placeholder per la
-    #     lunghezza, niente caricamento del tensore da 3.2 GB).
-    # EN: rebuild the SAME folds as 02b — timestamps only (placeholder X/y for length,
-    #     no 3.2 GB tensor load).
+    # rebuild the SAME folds as 02b — timestamps only (placeholder X/y for length,
+    # no 3.2 GB tensor load).
     d = np.load("data/lstm_dataset.npz", allow_pickle=True)
     t = np.concatenate([d["t_train"], d["t_val"], d["t_test"]])
     n = len(t)
@@ -69,12 +59,12 @@ def main():
                                n_folds=n_folds, embargo_steps=embargo,
                                val_frac=cfg["training"]["val_fraction"])
 
-    # IT: HAR frame una sola volta dai raw candles | EN: HAR frame once from raw candles
+    # HAR frame once from raw candles
     raw = pd.read_parquet("data/raw_candles.parquet")
     har = build_har_frame(raw, h=h, bars_day=bars_day)
     log.info(f"HAR frame: {len(har)} righe · h={h} · bars/day={bars_day} · interval={interval}")
 
-    # ── HAR per-fold (arch-indipendente) ───────────────────────────────────────
+    # ── HAR per-fold (arch-independent) ────────────────────────────────────────
     har_by_fold = {}
     for fold in folds:
         k = fold["fold"]
@@ -88,7 +78,7 @@ def main():
     har_mean = float(np.mean(har_vals)) if har_vals else float("nan")
     naive_mean = float(np.mean(naive_vals)) if naive_vals else float("nan")
 
-    # ── Confronto con la QLIKE NN salvata, per arch ────────────────────────────
+    # ── Comparison with the saved NN QLIKE, per arch ───────────────────────────
     report = {"interval": interval, "h": h, "n_folds_eff": len(folds),
               "har_by_fold": har_by_fold, "har_mean": har_mean, "naive_mean": naive_mean,
               "archs": {}}

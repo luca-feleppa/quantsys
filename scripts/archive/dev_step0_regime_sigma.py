@@ -1,15 +1,11 @@
 """
-IT: STEP 0 (de-risk mixture-of-universes) — diagnostico SENZA training.
-    Domanda: lo spread di NLL per-regime (r0/r1/r2) e' dovuto a sigma MISCALIBRATA per regime
-    (fixabile da una testa-sigma regime-condizionata) o a errore-mu irriducibile (non fixabile)?
-    Metodo: predizioni del modello esistente su VAL -> per ogni regime calcola NLL t-Student,
-    lo std del residuo standardizzato z=(y-mu)/sigma (calibration ratio ~ sigma ottimale), e
-    confronta NLL con scaling sigma GLOBALE vs PER-REGIME (oracolo). Se il per-regime batte il
-    globale di un margine sensibile -> sigma regime-condizionata ha valore -> procedi con la mixture.
-
-EN: STEP 0 de-risk — training-free diagnostic. Is the per-regime NLL spread due to per-regime
-    sigma MIScalibration (fixable by a regime-conditioned sigma head) or irreducible mu-error?
-    Compare t-Student NLL under GLOBAL vs PER-REGIME (oracle) sigma scaling on the val set.
+STEP 0 (de-risk mixture-of-universes) — training-free diagnostic.
+Question: is the per-regime (r0/r1/r2) NLL spread due to per-regime sigma MIScalibration
+(fixable by a regime-conditioned sigma head) or to irreducible mu-error (not fixable)?
+Method: predictions of the existing model on VAL -> per regime compute the t-Student NLL,
+the std of the standardized residual z=(y-mu)/sigma (calibration ratio ~ optimal sigma), and
+compare NLL under GLOBAL vs PER-REGIME (oracle) sigma scaling. If per-regime beats global by
+a meaningful margin -> regime-conditioned sigma has value -> proceed with the mixture.
 """
 from __future__ import annotations
 import os
@@ -53,7 +49,7 @@ def main():
     t_val = data["t_val"]
     print(f"VAL: {len(X)} campioni | arch={ARCH}")
 
-    # ---- inferenza (z-score, pre-denorm; AMP off) ----
+    # ---- inference (z-score, pre-denorm; AMP off) ----
     model = EnsembleModel.load(f"models/{ARCH}", device)
     model.eval()
     n = len(X)
@@ -66,7 +62,7 @@ def main():
             sg[i:i + 256] = np.maximum(sb.squeeze(-1).cpu().numpy(), 1e-9)
             nu[i:i + 256] = np.clip(nb.squeeze(-1).cpu().numpy(), 2.1, 100.0)
 
-    # ---- allinea regime (causale, merge_asof backward) ----
+    # ---- align regime (causal, merge_asof backward) ----
     tv = pd.DataFrame({"i": np.arange(n), "open_time": _to_naive(pd.Series(pd.to_datetime(t_val)))})
     tv = tv.sort_values("open_time")
     reg = pd.read_parquet("data/regime_probs.parquet").reset_index()
@@ -78,13 +74,11 @@ def main():
     regime = merged["regime_dominant"].to_numpy()
 
     names = {0: "R0 Quiet", 1: "R1 Trend", 2: "R2 Stress"}
-    # IT: griglia ampia (floor basso) — la sigma del modello e' globalmente troppo grande
-    #     (std(z)<<1), gli ottimi cadono sotto 0.5; un floor a 0.5 li clampa e maschera lo spread.
-    # EN: wide grid (low floor) — model sigma is globally too large (std(z)<<1), optima fall below
-    #     0.5; a 0.5 floor clamps them and hides the per-regime spread.
+    # wide grid (low floor) — model sigma is globally too large (std(z)<<1), optima fall below
+    # 0.5; a 0.5 floor clamps them and hides the per-regime spread.
     grid = np.linspace(0.15, 3.0, 286)
 
-    # ---- baseline + scaling globale + scaling per-regime (oracolo) ----
+    # ---- baseline + global scaling + per-regime scaling (oracle) ----
     base_all = nll(y, mu, sg, nu).mean()
     lam_g, nll_g_all = best_lambda(y, mu, sg, nu, grid)
 
@@ -133,8 +127,8 @@ def main():
     print(f"  NLL per-regime-scaled (oracolo)    : {nll_perreg_total:.4f}")
     print(f"  GUADAGNO regime-cond. su sigma     : {gain:.4f} nats/campione")
     print("-" * 78)
-    # IT: regola di decisione (euristica): guadagno >= 0.02 nats e spread std(z) >= 0.15
-    #     indicano sigma regime-miscalibrata fixabile -> la mixture ha valore.
+    # decision rule (heuristic): gain >= 0.02 nats and std(z) spread >= 0.15
+    # indicate a fixable regime-miscalibrated sigma -> the mixture has value.
     if gain >= 0.02 and stdz_spread >= 0.15:
         print("  VERDETTO: sigma e' REGIME-MISCALIBRATA -> la testa-sigma regime ha valore. PROCEDI.")
     elif gain >= 0.02:

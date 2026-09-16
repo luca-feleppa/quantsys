@@ -1,45 +1,24 @@
-# IT: GIUDICE HEDGED-VS-UNHEDGED (pre-registrazione V2 delta-hedged, STATUS.md
-#     2026-07-12) — confronto WITHIN-TRADE: per ogni trade del campione hedged,
-#     unhedged = PnL della sola leg opzioni (pnl_btc già loggato in trades.jsonl),
-#     hedged = unhedged + PnL perp inverse ESATTO dal ledger − fee perp − funding.
-#     PnL perp: per ogni intervallo di holding tra fill consecutivi,
-#     pnl = H_usd·(1/s_fill − 1/s_next) (convenzione inverse; formula della
-#     pre-registrazione). Funding: accrual orario dallo storico PUBBLICO Deribit
-#     PROD (get_funding_rate_history: interest_1h + index_price) —
-#     funding_paid_btc = Σ_h H_usd/index·interest_1h (rate>0 → i long pagano);
-#     fonte PROD scelta by design (il funding testnet non è rappresentativo del
-#     costo di mercato) — da ratificare nell'update di congelamento della v2.
-#     Eventi 'reconcile' (fill perso per crash): il PnL del gap non è
-#     attribuibile esattamente → h aggiornato senza PnL, trade FLAGGATO.
-#     CONDIZIONI DI PASS (dalla pre-registrazione, valutate SOLO a n≥20):
-#       1. var(hedged) ≤ 0.6·var(unhedged)
-#       2. mean(hedged) ≥ mean(unhedged) − 0.25·std(unhedged)/√n
-#       3. n ≥ 20 settlement CON hedge attivo (--since = ts attivazione --hedge)
-#     Sotto n=20: verdict NOT_EVALUABLE, nessun numero decisionale.
-#     Output: results/vols/hedged_vs_unhedged.json (per-trade + aggregati +
-#     metadata). Scritto 2026-07-14 PRIMA dell'attivazione (--hedge inerte,
-#     hedge_ledger inesistente): oggi può produrre solo NOT_EVALUABLE.
-# EN: HEDGED-VS-UNHEDGED JUDGE (delta-hedged V2 pre-registration, STATUS.md
-#     2026-07-12) — WITHIN-TRADE comparison: per hedged-sample trade,
-#     unhedged = options-leg PnL only (pnl_btc already logged in trades.jsonl),
-#     hedged = unhedged + EXACT inverse perp PnL from the ledger − perp fees −
-#     funding. Perp PnL: per holding interval between consecutive fills,
-#     pnl = H_usd·(1/s_fill − 1/s_next) (inverse convention; the
-#     pre-registration formula). Funding: hourly accrual from the PUBLIC Deribit
-#     PROD history (get_funding_rate_history: interest_1h + index_price) —
-#     funding_paid_btc = Σ_h H_usd/index·interest_1h (rate>0 → longs pay); PROD
-#     source is by design (testnet funding is not representative of the market
-#     cost) — to be ratified in the v2 freezing update. 'reconcile' events
-#     (fill lost to a crash): gap PnL not exactly attributable → h updated with
-#     no PnL, trade FLAGGED.
-#     PASS CONDITIONS (from the pre-registration, evaluated ONLY at n≥20):
-#       1. var(hedged) ≤ 0.6·var(unhedged)
-#       2. mean(hedged) ≥ mean(unhedged) − 0.25·std(unhedged)/√n
-#       3. n ≥ 20 settlements WITH the hedge active (--since = --hedge activation ts)
-#     Below n=20: NOT_EVALUABLE verdict, no decision numbers.
-#     Output: results/vols/hedged_vs_unhedged.json (per-trade + aggregates +
-#     metadata). Written 2026-07-14 BEFORE activation (--hedge inert, no
-#     hedge_ledger on disk): today it can only return NOT_EVALUABLE.
+# HEDGED-VS-UNHEDGED JUDGE (delta-hedged V2 pre-registration, STATUS.md
+# 2026-07-12) — WITHIN-TRADE comparison: per hedged-sample trade,
+# unhedged = options-leg PnL only (pnl_btc already logged in trades.jsonl),
+# hedged = unhedged + EXACT inverse perp PnL from the ledger − perp fees −
+# funding. Perp PnL: per holding interval between consecutive fills,
+# pnl = H_usd·(1/s_fill − 1/s_next) (inverse convention; the
+# pre-registration formula). Funding: hourly accrual from the PUBLIC Deribit
+# PROD history (get_funding_rate_history: interest_1h + index_price) —
+# funding_paid_btc = Σ_h H_usd/index·interest_1h (rate>0 → longs pay); PROD
+# source is by design (testnet funding is not representative of the market
+# cost) — to be ratified in the v2 freezing update. 'reconcile' events
+# (fill lost to a crash): gap PnL not exactly attributable → h updated with
+# no PnL, trade FLAGGED.
+# PASS CONDITIONS (from the pre-registration, evaluated ONLY at n≥20):
+#   1. var(hedged) ≤ 0.6·var(unhedged)
+#   2. mean(hedged) ≥ mean(unhedged) − 0.25·std(unhedged)/√n
+#   3. n ≥ 20 settlements WITH the hedge active (--since = --hedge activation ts)
+# Below n=20: NOT_EVALUABLE verdict, no decision numbers.
+# Output: results/vols/hedged_vs_unhedged.json (per-trade + aggregates +
+# metadata). Written 2026-07-14 BEFORE activation (--hedge inert, no
+# hedge_ledger on disk): today it can only return NOT_EVALUABLE.
 import argparse
 import json
 import logging
@@ -63,8 +42,7 @@ OUT_PATH = ROOT / "results" / "vols" / "hedged_vs_unhedged.json"
 FUNDING_CACHE = ROOT / "data" / "deribit_funding_perp.parquet"
 FUNDING_URL = "https://www.deribit.com/api/v2/public/get_funding_rate_history"
 
-# IT: soglie PRE-REGISTRATE (STATUS.md 2026-07-12) — non toccarle a risultati visti.
-# EN: PRE-REGISTERED thresholds (STATUS.md 2026-07-12) — do not touch after results.
+# PRE-REGISTERED thresholds (STATUS.md 2026-07-12) — do not touch after results.
 VAR_RATIO_MAX = 0.6
 MEAN_DRAG_SE_FRAC = 0.25
 N_MIN = 20
@@ -78,20 +56,16 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 def _pos_key(d: dict) -> tuple:
-    # IT: chiave trade↔ledger = (side, strike, expiry_ms) — position_key di 04b.
-    # EN: trade↔ledger key = (side, strike, expiry_ms) — 04b's position_key.
+    # trade↔ledger key = (side, strike, expiry_ms) — 04b's position_key.
     return (int(d["side"]), float(d["strike"]), int(d["expiry_ms"]))
 
 
 def fetch_funding_history(start_ms: int, end_ms: int,
                           cache_path: Path = FUNDING_CACHE,
                           no_fetch: bool = False) -> pd.DataFrame:
-    # IT: storico funding perp orario (PROD, pubblico) con cache parquet
-    #     append+dedup: colonne [timestamp(ms), index_price, interest_1h].
-    #     Fetch a chunk di 30 giorni (l'endpoint pagina per finestra temporale).
-    # EN: hourly perp funding history (PROD, public) with append+dedup parquet
-    #     cache: columns [timestamp(ms), index_price, interest_1h]. 30-day
-    #     chunked fetch (the endpoint pages by time window).
+    # hourly perp funding history (PROD, public) with append+dedup parquet
+    # cache: columns [timestamp(ms), index_price, interest_1h]. 30-day
+    # chunked fetch (the endpoint pages by time window).
     cached = pd.read_parquet(cache_path) if cache_path.exists() else \
         pd.DataFrame(columns=["timestamp", "index_price", "interest_1h"])
     have_lo = int(cached["timestamp"].min()) if len(cached) else None
@@ -123,10 +97,8 @@ def fetch_funding_history(start_ms: int, end_ms: int,
 
 def funding_paid_btc(h_usd: float, t0_ms: int, t1_ms: int,
                      funding: pd.DataFrame) -> float:
-    # IT: accrual su [t0,t1): somma dei punti orari nel range (granularità 1h
-    #     dichiarata: errore ≤1h agli estremi). rate>0 → il long (H>0) PAGA.
-    # EN: accrual over [t0,t1): sum of hourly points in range (declared 1h
-    #     granularity: ≤1h error at the ends). rate>0 → the long (H>0) PAYS.
+    # accrual over [t0,t1): sum of hourly points in range (declared 1h
+    # granularity: ≤1h error at the ends). rate>0 → the long (H>0) PAYS.
     if abs(h_usd) < 1e-9 or t1_ms <= t0_ms or funding.empty:
         return 0.0
     m = (funding["timestamp"] >= t0_ms) & (funding["timestamp"] < t1_ms)
@@ -138,16 +110,11 @@ def funding_paid_btc(h_usd: float, t0_ms: int, t1_ms: int,
 
 def perp_leg(events: list[dict], funding: pd.DataFrame,
              settle_ms: int | None = None) -> dict:
-    # IT: ricostruzione della leg perp di UN trade dai suoi eventi ledger
-    #     (ordinati per ts): PnL inverse esatto tra fill consecutivi, fee
-    #     sommate dal ledger, funding accruato sull'holding. 'reconcile' cambia
-    #     H senza fill → nessun PnL sul gap, flag. Se l'ultimo evento lascia
-    #     H≠0 (flatten mancante) il trade è flaggato open_residual.
-    # EN: perp-leg reconstruction for ONE trade from its ledger events (sorted
-    #     by ts): exact inverse PnL between consecutive fills, fees summed from
-    #     the ledger, funding accrued over the holding. 'reconcile' changes H
-    #     with no fill → no gap PnL, flagged. If the last event leaves H≠0
-    #     (missing flatten) the trade is flagged open_residual.
+    # perp-leg reconstruction for ONE trade from its ledger events (sorted
+    # by ts): exact inverse PnL between consecutive fills, fees summed from
+    # the ledger, funding accrued over the holding. 'reconcile' changes H
+    # with no fill → no gap PnL, flagged. If the last event leaves H≠0
+    # (missing flatten) the trade is flagged open_residual.
     ev = sorted(events, key=lambda e: pd.Timestamp(e["ts"]).value)
     pnl_gross, fees, fund_paid = 0.0, 0.0, 0.0
     h_cur, s_last, t_last = 0.0, None, None
@@ -163,8 +130,7 @@ def perp_leg(events: list[dict], funding: pd.DataFrame,
                 fund_paid += funding_paid_btc(h_cur, t_last, t_ms, funding)
             s_last, t_last = price, t_ms
         else:
-            # IT: reconcile — H cambia senza prezzo: gap non attribuibile.
-            # EN: reconcile — H changes with no price: unattributable gap.
+            # reconcile — H changes with no price: unattributable gap.
             has_reconcile = True
             if t_last is not None:
                 fund_paid += funding_paid_btc(h_cur, t_last, t_ms, funding)
@@ -172,10 +138,8 @@ def perp_leg(events: list[dict], funding: pd.DataFrame,
         h_cur = float(e.get("h_usd_after", h_cur))
         fees += float(e.get("fee_btc") or 0.0)
     open_residual = abs(h_cur) > 1e-9
-    # IT: residuo aperto: funding accruato fino al settlement (se noto) come
-    #     stima conservativa; PnL prezzo del residuo NON stimabile → flag.
-    # EN: open residual: funding accrued to settlement (when known) as a
-    #     conservative estimate; residual price PnL NOT estimable → flag.
+    # open residual: funding accrued to settlement (when known) as a
+    # conservative estimate; residual price PnL NOT estimable → flag.
     if open_residual and settle_ms and t_last is not None and settle_ms > t_last:
         fund_paid += funding_paid_btc(h_cur, t_last, settle_ms, funding)
     return {"pnl_perp_gross": pnl_gross, "fees_perp": fees,
@@ -185,16 +149,11 @@ def perp_leg(events: list[dict], funding: pd.DataFrame,
 
 def evaluate(trades: list[dict], ledger: list[dict], funding: pd.DataFrame,
              since: pd.Timestamp | None) -> dict:
-    # IT: campione hedged = trade settled con entry_ts ≥ since (attivazione
-    #     --hedge): include i trade post-attivazione SENZA fill perp (hedge mai
-    #     fuori banda = PnL perp 0, che È il dato corretto). Senza --since,
-    #     fallback = solo trade con fill nel ledger (campione BIASED: esclude
-    #     gli zero-rebalance — warning esplicito).
-    # EN: hedged sample = settled trades with entry_ts ≥ since (--hedge
-    #     activation): includes post-activation trades WITHOUT perp fills
-    #     (hedge never out of band = 0 perp PnL, which IS the correct datum).
-    #     Without --since, fallback = only trades with ledger fills (BIASED
-    #     sample: excludes zero-rebalance ones — explicit warning).
+    # hedged sample = settled trades with entry_ts ≥ since (--hedge
+    # activation): includes post-activation trades WITHOUT perp fills
+    # (hedge never out of band = 0 perp PnL, which IS the correct datum).
+    # Without --since, fallback = only trades with ledger fills (BIASED
+    # sample: excludes zero-rebalance ones — explicit warning).
     by_key: dict[tuple, list] = {}
     for e in ledger:
         pk = e.get("position_key")
@@ -258,8 +217,7 @@ def evaluate(trades: list[dict], ledger: list[dict], funding: pd.DataFrame,
 
 
 def main() -> int:
-    # IT: boilerplate UTF-8 console Windows (checklist nuovo script — bug cp1252).
-    # EN: Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
+    # Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -280,8 +238,7 @@ def main() -> int:
     if since is not None and since.tz is None:
         since = since.tz_localize("UTC")
 
-    # IT: range funding = min entry → max expiry dei trade nel campione.
-    # EN: funding range = sample trades' min entry → max expiry.
+    # funding range = sample trades' min entry → max expiry.
     funding = pd.DataFrame(columns=["timestamp", "index_price", "interest_1h"])
     settled = [t for t in trades if "pnl_btc" in t]
     if settled and ledger:

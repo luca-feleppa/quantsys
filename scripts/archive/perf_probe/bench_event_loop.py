@@ -1,28 +1,20 @@
 """
-Probe temporanea (PERF AUDIT) — costo per barra dell'event loop direzionale.
 Temporary probe (PERF AUDIT) — per-bar cost of the directional event loop.
 
-Il backtest 03 NON e' eseguibile end-to-end sullo stato su disco (il checkpoint
-e' il modello VOL: il guard sigma fail-fasta, correttamente). Qui si isola il
-solo anello Python — SignalGenerator + RiskManager sulle stesse classi di
-produzione, guidate da mu/sigma sintetici — per rispondere alla domanda "vale
-Numba?" senza toccare il path production.
 Backtest 03 is NOT runnable end-to-end against the on-disk state (the checkpoint
 is the VOL model: the sigma guard fail-fasts, correctly). Here we isolate the
 Python loop alone — production SignalGenerator + RiskManager driven by synthetic
 mu/sigma — to answer "is Numba worth it?" without touching the production path.
 
-Uso / Usage: python scripts/archive/perf_probe/bench_event_loop.py
+Usage: python scripts/archive/perf_probe/bench_event_loop.py
 """
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
-# IT: pandas PRIMA di torch/sklearn — obbligatorio su questa macchina: l'ordine
-#     inverso fa crashare pyarrow con access violation (vedi docs/PERF_AUDIT.md).
-# EN: pandas BEFORE torch/sklearn — mandatory on this box: the reverse order
-#     crashes pyarrow with an access violation (see docs/PERF_AUDIT.md).
+# pandas BEFORE torch/sklearn — mandatory on this box: the reverse order
+# crashes pyarrow with an access violation (see docs/PERF_AUDIT.md).
 import pandas as pd  # noqa: E402,F401
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -43,8 +35,7 @@ def main():
     cfg = load_config(str(ROOT / "config/default.yaml"))
     rcfg, bcfg = cfg["risk"], cfg["backtest"]
 
-    # IT: prezzi reali dal parquet (l'anello tocca ATR/OHLC veri).
-    # EN: real prices from the parquet (the loop touches true ATR/OHLC).
+    # real prices from the parquet (the loop touches true ATR/OHLC).
 
     raw = pd.read_parquet(ROOT / "data/raw_candles.parquet").tail(6485).reset_index(drop=True)
     ohlcv = raw[["open", "high", "low", "close"]].to_numpy(dtype=np.float64)
@@ -53,8 +44,7 @@ def main():
                     np.abs(ohlcv[:, 1] - np.roll(ohlcv[:, 3], 1)))
     atr = pd.Series(tr).rolling(14, min_periods=1).mean().to_numpy()
 
-    # IT: mu/sigma sintetici in spazio RAW plausibile (h=30 barre 1h).
-    # EN: synthetic mu/sigma in a plausible RAW space (h=30 1h-bars).
+    # synthetic mu/sigma in a plausible RAW space (h=30 1h-bars).
     rng = np.random.default_rng(42)
     mu_a = rng.normal(0.0, 0.004, n)
     sig_a = np.abs(rng.normal(0.020, 0.004, n)) + 0.005
@@ -89,8 +79,7 @@ def main():
             atr_i = max(atr[i], c_c * 0.0005)
             mu, sigma, nu = float(mu_a[i]), float(sig_a[i]), float(nu_a[i])
             side, dist = sig_gen.generate(mu, sigma, nu)
-            # IT: stesso idioma di 03_backtest — `position` e' Optional[Position].
-            # EN: same idiom as 03_backtest — `position` is Optional[Position].
+            # same idiom as 03_backtest — `position` is Optional[Position].
             if rm.position:
                 rm.update_trailing(c_c, atr_i)
                 reason = rm.check_exit(h_n, l_n, c_n, i + 1, side)
@@ -112,7 +101,7 @@ def main():
     print(f"  proiezione su test split (6.5k barre) : {t:.3f} s")
     print(f"  proiezione su dataset intero (66k)    : {t*66410/n:.2f} s")
 
-    # ── bootstrap CI: gia' vettorizzato? ────────────────────────────────────
+    # ── bootstrap CI: already vectorized? ───────────────────────────────────
     pnl = [tr_.net_pnl for tr_ in rm.trades] or list(rng.normal(0, 50, 200))
     if len(pnl) < 30:
         pnl = list(rng.normal(0, 50, 200))

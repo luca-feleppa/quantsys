@@ -1,27 +1,19 @@
 """
-short_vol_premium_validate.py — verifica di robustezza del backtest storico short-vol.
 short_vol_premium_validate.py — robustness check for the historical short-vol backtest.
 
-IT: Il backtest `short_vol_hist_backtest.py` prezza il premio con FHS GJR-GARCH (no superficie IV
-    storica). Punto debole: il break-even VRP=0 dipende dal realismo di quel premio modellato. Qui
-    lo rendiamo *hard*: sui 12 giorni di chain REALE (`data/iv/chain`) confrontiamo, per le stesse
-    scadenze/strike che venderemmo, il FAIR VALUE FHS contro il MARK e il BID Deribit reali.
-      • FHS ≈ mark  → premio storico AFFIDABILE, il backtest regge.
-      • FHS ≫/≪ mark → bias, da ricalibrare.
-    Misura anche l'half-spread reale (mark−bid)/mark = haircut bid da applicare al backtest storico
-    per renderlo net-of-cost e apples-to-apples col braccio live.
-EN: The backtest prices the premium with FHS GJR-GARCH (no historical IV surface). Weak point: the
-    VRP=0 break-even hinges on that modeled premium being realistic. Here we make it *hard*: over the
-    12 real chain days we compare, for the same expiries/strikes we'd sell, the FHS FAIR VALUE vs the
-    real Deribit MARK and BID. FHS≈mark → premium trustworthy; else bias. Also measures the real
-    half-spread = bid haircut to apply to the historical backtest.
+The backtest (`short_vol_hist_backtest.py`) prices the premium with FHS GJR-GARCH (no historical
+IV surface). Weak point: the VRP=0 break-even hinges on that modeled premium being realistic. Here
+we make it *hard*: over the 12 real chain days (`data/iv/chain`) we compare, for the same
+expiries/strikes we'd sell, the FHS FAIR VALUE vs the real Deribit MARK and BID.
+  • FHS ≈ mark  → historical premium TRUSTWORTHY, the backtest holds.
+  • FHS ≫/≪ mark → bias, to be recalibrated.
+Also measures the real half-spread (mark−bid)/mark = bid haircut to apply to the historical
+backtest to make it net-of-cost and apples-to-apples with the live arm.
 
-IT: CAUSALE: σ_entry e residui FHS solo da candele ≤ snapshot d'ingresso. n piccolo (~overlap candele
-    ↔ chain) ⇒ è un check di BIAS, non una statistica large-sample.
-EN: CAUSAL: σ_entry and FHS residuals only from candles ≤ entry snapshot. Small n (candle↔chain
-    overlap) ⇒ a BIAS check, not a large-sample statistic.
+CAUSAL: σ_entry and FHS residuals only from candles ≤ entry snapshot. Small n (candle↔chain
+overlap) ⇒ a BIAS check, not a large-sample statistic.
 
-Uso / usage:  python scripts/vol/short_vol_premium_validate.py
+Usage:  python scripts/vol/short_vol_premium_validate.py
 """
 import sys
 import json
@@ -32,10 +24,10 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from short_vol_hist_backtest import (  # noqa: E402  (riuso kernel identico al backtest | reuse identical kernel)
+from short_vol_hist_backtest import (  # noqa: E402  (reuse the backtest's identical kernel)
     fit_gjr, fhs_fair_value, TENOR_H, EXPIRY_HOUR,
 )
-from _chain_io import load_chain  # noqa: E402  (loader chain condiviso, A3 | shared chain loader)
+from _chain_io import load_chain  # noqa: E402  (shared chain loader, A3)
 
 ROOT = Path(__file__).resolve().parents[2]
 CANDLES = ROOT / "data" / "raw_candles.parquet"
@@ -46,7 +38,7 @@ N_PATHS = 6000
 
 
 def pick_leg(snap, opt_type, target_K):
-    # IT: leg col tipo richiesto, strike più vicino, mark valido; tiene mark+bid. | EN: nearest valid leg, mark+bid.
+    # leg of the requested type, nearest strike, valid mark; keeps mark+bid.
     cand = snap[(snap["option_type"].str.upper().str[0] == opt_type) & (snap["mark_price"] > 0)]
     if cand.empty:
         return None
@@ -56,8 +48,7 @@ def pick_leg(snap, opt_type, target_K):
 
 
 def causal_garch_at(r, entry_idx, fit_window=24 * 365 * 2):
-    # IT: fit GJR causale (≤ entry, finestra cappata) + recursion fino a entry → (σ_entry, z_pool, params).
-    # EN: causal GJR fit (≤ entry, capped window) + recursion up to entry → (σ_entry, z_pool, params).
+    # causal GJR fit (≤ entry, capped window) + recursion up to entry → (σ_entry, z_pool, params).
     lo = max(1, entry_idx - fit_window)
     prm = fit_gjr(r[lo:entry_idx])
     if prm is None:
@@ -102,7 +93,7 @@ def main():
     for exp in exps:
         exp = pd.Timestamp(exp)
         entry_t = exp - timedelta(hours=TENOR_H)
-        if entry_t < snap_min or entry_t > cand_end:        # serve candela ≤ entry per σ | need candle ≤ entry
+        if entry_t < snap_min or entry_t > cand_end:        # need a candle ≤ entry for σ
             continue
         sub = chain[chain["expiry"] == exp]
         snaps = sub["snapshot_ts"].unique()
@@ -113,7 +104,7 @@ def main():
             continue
         snap = sub[sub["snapshot_ts"] == s_entry]
         spot = float(snap["underlying_price"].iloc[0])
-        # IT: barra candela più vicina allo snapshot (≤) per σ causale | EN: nearest candle bar (≤) for causal σ
+        # candle bar nearest to the snapshot (≤) for causal σ
         entry_idx = int((times <= pd.Timestamp(s_entry)).to_numpy().nonzero()[0][-1])
         g = causal_garch_at(r, entry_idx)
         if g is None:
@@ -129,8 +120,7 @@ def main():
             mark = lc["mark"] + lp["mark"]
             bid = (lc["bid"] if np.isfinite(lc["bid"]) else lc["mark"]) + \
                   (lp["bid"] if np.isfinite(lp["bid"]) else lp["mark"])
-            # IT: FHS prezzato sugli strike REALI scelti dalla chain (non i target teorici).
-            # EN: FHS priced on the REAL chosen strikes (not the theoretical targets).
+            # FHS priced on the REAL chosen strikes (not the theoretical targets).
             fv = fhs_fair_value(spot, lc["K"], lp["K"], sig_entry, zpool, prm, N_PATHS, rng)
             rows.append({"expiry": exp.isoformat(), "struct": struct, "width": w,
                          "fhs": fv, "mark": mark, "bid": bid,

@@ -1,54 +1,33 @@
 """
-02d — Ottimizzazione CONGIUNTA end-to-end: CAFN + iTransformer + TCN-Mamba + N-HiTS.
+02d — JOINT end-to-end optimization: CAFN + iTransformer + TCN-Mamba + N-HiTS.
 
-IT: Loop di training end-to-end. La CAFN estrae un latente causale dal tensore
-    feature di mercato e i tre modelli a valle si allenano IN CONTEMPORANEA su quel
-    segnale. Loss congiunta = Σ_arch loss_predittiva(pred_arch, y) + λ·penalità_causale
-    della CAFN. Un solo backward propaga i gradienti attraverso i tre modelli E la
-    CAFN: i modelli massimizzano l'accuratezza, la CAFN stabilizza le relazioni
-    causali (prossimità + stabilità dell'attenzione mascherata causalmente).
+End-to-end training loop. The CAFN extracts a causal latent from the market
+feature tensor and the three downstream models train SIMULTANEOUSLY on that
+signal. Joint loss = Σ_arch predictive_loss(pred_arch, y) + λ·CAFN causal penalty.
+A single backward propagates gradients through the three models AND the CAFN:
+the models maximize accuracy, the CAFN stabilizes causal relationships
+(proximity + stability of the causally-masked attention).
 
-    ⚠ PROBE PRE-REGISTRATO, INERTE DI DEFAULT (TEORIA.md §12.1 (protocollo sperimentale)):
-      • Output ISOLATO in `models/cafn/` e `results/cafn/` — NON tocca i modelli
-        production `models/{arch}` né la parity live (BLOCKER #1).
-      • La CAFN si addestra sul tensore CANONICO 104-feature (storia 2019→oggi).
-        I dati Deribit grezzi (greche/book/IV) sono forward-collected (giorni di
-        storia, storico short-tenor non gratis) → entrano SOLO come canale `extra`
-        OPZIONALE futuro (flag `--deribit-extra`, inerte finché non c'è storia),
-        MAI come input storico di training (sarebbe lookahead / dataset inesistente).
-      • PRIOR onesto: è una variante di CLASSE-MODELLO; il progetto ha ripetutamente
-        mostrato che ciò NON sposta il soffitto direzionale OOS (anti-corr val→test,
-        cross-arch err≈0.995, distill 06-06 OOS≡baseline). GATE pre-registrato sotto.
-      • Memoria: training simultaneo dei 3 modelli su 8GB → rischio OOM (il repo
-        impone training 3-arch SEQUENZIALE). Default piccoli + `--smoke` CPU.
+⚠ PRE-REGISTERED PROBE, INERT BY DEFAULT (THEORY.md §12.1 (experimental protocol)):
+  • Output ISOLATED in `models/cafn/` and `results/cafn/` — does NOT touch the
+    production models `models/{arch}` nor the live parity (BLOCKER #1).
+  • The CAFN trains on the CANONICAL 104-feature tensor (history 2019→today).
+    Raw Deribit data (greeks/book/IV) is forward-collected (days of history,
+    short-tenor history not free) → it enters ONLY as an OPTIONAL future `extra`
+    channel (`--deribit-extra` flag, inert until history exists), NEVER as a
+    historical training input (that would be lookahead / a non-existent dataset).
+  • Honest PRIOR: this is a MODEL-CLASS variation; the project has repeatedly
+    shown this does NOT move the OOS directional ceiling (val→test anti-corr,
+    cross-arch err≈0.995, 06-06 distill OOS≡baseline). Pre-registered GATE below.
+  • Memory: simultaneous 3-model training on 8GB → OOM risk (repo mandates
+    SEQUENTIAL 3-arch training). Small defaults + `--smoke` CPU.
 
-EN: End-to-end training loop. The CAFN extracts a causal latent from the market
-    feature tensor and the three downstream models train SIMULTANEOUSLY on that
-    signal. Joint loss = Σ_arch predictive_loss(pred_arch, y) + λ·CAFN causal penalty.
-    A single backward propagates gradients through the three models AND the CAFN:
-    the models maximize accuracy, the CAFN stabilizes causal relationships
-    (proximity + stability of the causally-masked attention).
-
-    ⚠ PRE-REGISTERED PROBE, INERT BY DEFAULT (TEORIA.md §12.1 (experimental protocol)):
-      • Output ISOLATED in `models/cafn/` and `results/cafn/` — does NOT touch the
-        production models `models/{arch}` nor the live parity (BLOCKER #1).
-      • The CAFN trains on the CANONICAL 104-feature tensor (history 2019→today).
-        Raw Deribit data (greeks/book/IV) is forward-collected (days of history,
-        short-tenor history not free) → it enters ONLY as an OPTIONAL future `extra`
-        channel (`--deribit-extra` flag, inert until history exists), NEVER as a
-        historical training input (that would be lookahead / a non-existent dataset).
-      • Honest PRIOR: this is a MODEL-CLASS variation; the project has repeatedly
-        shown this does NOT move the OOS directional ceiling (val→test anti-corr,
-        cross-arch err≈0.995, 06-06 distill OOS≡baseline). Pre-registered GATE below.
-      • Memory: simultaneous 3-model training on 8GB → OOM risk (repo mandates
-        SEQUENTIAL 3-arch training). Small defaults + `--smoke` CPU.
-
-GATE PRE-REGISTRATO / PRE-REGISTERED GATE (valutazione val-first, su `X_val`):
-    PASS sse il setup CAFN-congiunto batte il baseline NO-CAFN (stessi modelli,
-    stesse seed/epoche, `latent=None`) di ≥3% in MSE-mu su val PER ALMENO 2 dei 3
-    modelli. FAIL → CAFN come coordinatore è KILL (documentare in STATUS, flag
-    inerte). NESSUNA iterazione a risultato visto; il test split si tocca solo a
-    gate val superato.
+PRE-REGISTERED GATE (val-first evaluation, on `X_val`):
+    PASS iff the joint-CAFN setup beats the NO-CAFN baseline (same models,
+    same seeds/epochs, `latent=None`) by ≥3% in MSE-mu on val FOR AT LEAST 2 of the 3
+    models. FAIL → CAFN as coordinator is KILL (document in STATUS, flag
+    inert). NO iteration after seeing results; the test split is touched only once
+    the val gate is passed.
 """
 import argparse
 import json
@@ -76,17 +55,15 @@ OUT_DIR = ROOT / "models" / "cafn"
 RES_DIR = ROOT / "results" / "cafn"
 
 
-# IT: estrae μ scalare dall'output (gestisce t_student tuple e quantile (B,Q)).
-# EN: extract scalar μ from output (handles t_student tuple and quantile (B,Q)).
+# extract scalar μ from output (handles t_student tuple and quantile (B,Q)).
 def _mu_of(out) -> torch.Tensor:
     head = out[0]
-    if head.ndim == 2:                       # quantile_preds (B, Q) → mediana / median
+    if head.ndim == 2:                       # quantile_preds (B, Q) → median
         return head[:, head.shape[1] // 2]
     return head                              # (B,) mu
 
 
-# IT: costruisce i 3 modelli a valle alla larghezza AUMENTATA n_feat+d_latent.
-# EN: builds the 3 downstream models at the AUGMENTED width n_feat+d_latent.
+# builds the 3 downstream models at the AUGMENTED width n_feat+d_latent.
 def build_downstream(archs, n_in, T, mcfg, device):
     models = {}
     lt = mcfg.get("loss_type", "t_student")
@@ -111,8 +88,7 @@ def build_downstream(archs, n_in, T, mcfg, device):
     return models
 
 
-# IT: una epoca (train o eval). use_cafn=False → baseline latent=None (per il gate).
-# EN: one epoch (train or eval). use_cafn=False → latent=None baseline (for the gate).
+# one epoch (train or eval). use_cafn=False → latent=None baseline (for the gate).
 def run_epoch(cafn, models, X, y, opt, device, lam, batch, train=True,
               use_cafn=True, max_steps=None):
     N = X.shape[0]
@@ -192,8 +168,7 @@ def main():
 
     cfg = load_config("config/default.yaml")
     mcfg = dict(cfg.get("model", {}))
-    # IT: overlay opzionale config/cafn.yaml (se presente) per i parametri CAFN.
-    # EN: optional config/cafn.yaml overlay (if present) for CAFN params.
+    # optional config/cafn.yaml overlay (if present) for CAFN params.
     cafn_yaml = ROOT / "config" / "cafn.yaml"
     if cafn_yaml.exists():
         try:
@@ -205,14 +180,13 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     RES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── Dati / Data ───────────────────────────────────────────────────────────
+    # ── Data ──────────────────────────────────────────────────────────────────
     if args.smoke:
         log.info("SMOKE: dati sintetici / synthetic data (CPU-safe, loop validation)")
         torch.manual_seed(0)
         T, Fdim, Ntr, Nvl = 24, 16, 256, 96
         Xtr = torch.randn(Ntr, T, Fdim); Xvl = torch.randn(Nvl, T, Fdim)
-        # IT: target con dipendenza causale debole dal passato (segnale apprendibile).
-        # EN: target with weak causal dependence on the past (learnable signal).
+        # target with weak causal dependence on the past (learnable signal).
         ytr = Xtr[:, -2, 0] * 0.5 + 0.1 * torch.randn(Ntr)
         yvl = Xvl[:, -2, 0] * 0.5 + 0.1 * torch.randn(Nvl)
     else:
@@ -227,7 +201,7 @@ def main():
     log.info(f"Archs a valle / downstream: {args.archs} | λ_causal={args.lambda_causal} "
              f"| device={device}")
 
-    # ── Costruzione moduli / Module construction ──────────────────────────────
+    # ── Module construction ───────────────────────────────────────────────────
     cafn = CausalAttentionFlowNetwork(
         n_features=Fdim, d_model=args.cafn_d_model, n_heads=4,
         n_layers=args.cafn_layers, d_latent=args.d_latent, max_len=max(T + 1, 64)
@@ -240,7 +214,7 @@ def main():
     all_params = [p for g in [cafn, *models.values()] for p in g.parameters()]
     opt = torch.optim.AdamW(all_params, lr=args.lr, weight_decay=1e-4)
 
-    # ── Loop di training congiunto / Joint training loop ──────────────────────
+    # ── Joint training loop ───────────────────────────────────────────────────
     history = []
     t0 = time.time()
     for ep in range(1, args.epochs + 1):
@@ -256,7 +230,7 @@ def main():
     gate = {"evaluated": False}
     if not args.no_gate:
         log.info("Gate: baseline NO-CAFN (latent=None) — stessi modelli, ri-inizializzati.")
-        base_models = build_downstream(args.archs, Fdim, T, mcfg, device)  # larghezza ORIGINALE
+        base_models = build_downstream(args.archs, Fdim, T, mcfg, device)  # ORIGINAL width
         base_opt = torch.optim.AdamW(
             [p for m in base_models.values() for p in m.parameters()],
             lr=args.lr, weight_decay=1e-4)
@@ -280,7 +254,7 @@ def main():
         log.info(f"GATE: {wins}/{len(args.archs)} archi ≥3% → "
                  f"{'PASS' if passed else 'FAIL (CAFN-coordinatore KILL come da prior)'}")
 
-    # ── Salvataggio ISOLATO / ISOLATED save ───────────────────────────────────
+    # ── ISOLATED save ─────────────────────────────────────────────────────────
     torch.save(cafn.state_dict(), OUT_DIR / "cafn.pt")
     for a, m in models.items():
         torch.save(m.state_dict(), OUT_DIR / f"downstream_{a}.pt")

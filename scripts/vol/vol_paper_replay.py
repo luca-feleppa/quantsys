@@ -1,48 +1,25 @@
-# IT: REPLAY OFFLINE DEL FORWARD TEST VOL-PAPER (04b) — simula i tick orari
-#     che il processo live avrebbe eseguito nelle ore a PC spento, usando SOLO
-#     dati su disco (post-merge VPS): candele → rv_pred (stesso modello/path
-#     parity di 04b), atm_30h.parquet → var_iv (staleness ≤30 min come live),
-#     chain/*.parquet → premio al mark dello snapshot ≤ t, delivery price
-#     pubblico Deribit → settlement. Regola/costanti IMPORTATE da 04b
-#     (nessuna copia: EDGE_THRESHOLD, TENOR_HOURS, fee_btc, ... restano
-#     single-source-of-truth).
-#     ⚠ SOLO ANALISI: output separati in results/vol_paper/replay/
-#     (forecasts_replay.parquet, trades_replay.jsonl) — i trade replayati NON
-#     entrano MAI nel gate v1 (campione pre-registrato = trade del processo
-#     live). Attivazione come gap-filler ufficiale: SOLO post-chiusura gate v1
-#     (STATUS.md 2026-07-14). Ogni run rigenera l'intera griglia richiesta
-#     (idempotente, nessuno stato persistente).
-#     Approssimazioni dichiarate vs live: (a) premio dal mark dello snapshot
-#     chain a griglia 10 min invece di hh:00+90s (Δt ≤10 min); (b) macro E
-#     funding as-of-t (il processo live li congela AL PROPRIO AVVIO: 04b non
-#     refresha il funding per tick → le sue feature funding diventano stale con
-#     l'uptime; verificato 2026-07-14 con A/B bit-identico sul path troncato —
-#     il replay è il PIÙ causale dei due); (c) niente exec_diag/greeks (il
-#     replay non può raccoglierli → la v2 hedged NON è replayabile, vedi
-#     STATUS). Il check di parità integrato confronta mu_z/rv_pred/segnale con
-#     i tick live sovrapposti e quantifica il residuo (a)+(b).
-# EN: OFFLINE REPLAY OF THE VOL-PAPER FORWARD TEST (04b) — simulates the hourly
-#     ticks the live process would have executed while the PC was off, using
-#     ONLY on-disk data (post VPS merge): candles → rv_pred (same model/parity
-#     path as 04b), atm_30h.parquet → var_iv (≤30 min staleness like live),
-#     chain/*.parquet → mark premium from the snapshot ≤ t, public Deribit
-#     delivery price → settlement. Rule/constants IMPORTED from 04b (no copy:
-#     EDGE_THRESHOLD, TENOR_HOURS, fee_btc, ... stay single-source-of-truth).
-#     ⚠ ANALYSIS ONLY: separate outputs in results/vol_paper/replay/
-#     (forecasts_replay.parquet, trades_replay.jsonl) — replayed trades NEVER
-#     enter the v1 gate (pre-registered sample = live-process trades). Official
-#     gap-filler activation: ONLY after the v1 gate closes (STATUS.md
-#     2026-07-14). Each run regenerates the whole requested grid (idempotent,
-#     no persistent state).
-#     Declared approximations vs live: (a) premium from the 10-min-grid chain
-#     snapshot mark instead of hh:00+90s (Δt ≤10 min); (b) macro AND funding
-#     as-of-t (the live process freezes them AT ITS OWN START: 04b does not
-#     refresh funding per tick → its funding features go stale with uptime;
-#     verified 2026-07-14 via bit-identical A/B on the truncated path — the
-#     replay is the MORE causal of the two); (c) no exec_diag/greeks (the
-#     replay cannot collect them → the hedged v2 is NOT replayable, see
-#     STATUS). The built-in parity check compares mu_z/rv_pred/signal with
-#     overlapping live ticks and quantifies (a)+(b).
+# OFFLINE REPLAY OF THE VOL-PAPER FORWARD TEST (04b) — simulates the hourly
+# ticks the live process would have executed while the PC was off, using
+# ONLY on-disk data (post VPS merge): candles → rv_pred (same model/parity
+# path as 04b), atm_30h.parquet → var_iv (≤30 min staleness like live),
+# chain/*.parquet → mark premium from the snapshot ≤ t, public Deribit
+# delivery price → settlement. Rule/constants IMPORTED from 04b (no copy:
+# EDGE_THRESHOLD, TENOR_HOURS, fee_btc, ... stay single-source-of-truth).
+# ⚠ ANALYSIS ONLY: separate outputs in results/vol_paper/replay/
+# (forecasts_replay.parquet, trades_replay.jsonl) — replayed trades NEVER
+# enter the v1 gate (pre-registered sample = live-process trades). Official
+# gap-filler activation: ONLY after the v1 gate closes (STATUS.md
+# 2026-07-14). Each run regenerates the whole requested grid (idempotent,
+# no persistent state).
+# Declared approximations vs live: (a) premium from the 10-min-grid chain
+# snapshot mark instead of hh:00+90s (Δt ≤10 min); (b) macro AND funding
+# as-of-t (the live process freezes them AT ITS OWN START: 04b does not
+# refresh funding per tick → its funding features go stale with uptime;
+# verified 2026-07-14 via bit-identical A/B on the truncated path — the
+# replay is the MORE causal of the two); (c) no exec_diag/greeks (the
+# replay cannot collect them → the hedged v2 is NOT replayable, see
+# STATUS). The built-in parity check compares mu_z/rv_pred/signal with
+# overlapping live ticks and quantifies (a)+(b).
 import argparse
 import importlib.util
 import json
@@ -64,10 +41,8 @@ from quantsys.data.deribit import delivery_price_cached as _delivery_cached  # n
 setup_logging()
 log = logging.getLogger("quantsys.script.vol_replay")
 
-# IT: import di 04b come modulo (nome con cifra iniziale → importlib): costanti
-#     pre-registrate, fee e VolForecaster restano definiti in UN posto solo.
-# EN: import 04b as a module (digit-leading name → importlib): pre-registered
-#     constants, fee and VolForecaster stay defined in ONE place only.
+# import 04b as a module (digit-leading name → importlib): pre-registered
+# constants, fee and VolForecaster stay defined in ONE place only.
 _spec = importlib.util.spec_from_file_location("vol_paper_04b",
                                                ROOT / "scripts" / "04b_vol_paper.py")
 M = importlib.util.module_from_spec(_spec)
@@ -80,19 +55,15 @@ DELIVERY_CACHE = OUT_DIR / "delivery_cache.json"
 LIVE_FORECASTS = ROOT / "results" / "vol_paper" / "forecasts.parquet"
 IV_PATH = ROOT / "data" / "iv" / "atm_30h.parquet"
 CHAIN_DIR = ROOT / "data" / "iv" / "chain"
-# IT: default di --start = primo tick con collector VPS attivi (deploy 2026-07-14).
-# EN: --start default = first tick with VPS collectors up (2026-07-14 deploy).
+# --start default = first tick with VPS collectors up (2026-07-14 deploy).
 DEFAULT_START = "2026-07-14T14:00:00+00:00"
-# IT: staleness max dello snapshot chain per prezzare l'entry (griglia poller 10').
-# EN: max chain-snapshot staleness to price the entry (10' poller grid).
+# max chain-snapshot staleness to price the entry (10' poller grid).
 CHAIN_MAX_AGE_MIN = 30.0
 
 
 def read_iv_asof(iv_df: pd.DataFrame, t: pd.Timestamp) -> dict | None:
-    # IT: ultimo tick IV ≤ t con età ≤ IV_MAX_AGE_MIN — stessa regola di read_iv
-    #     live, valutata "as of" t invece che "now".
-    # EN: latest IV tick ≤ t aged ≤ IV_MAX_AGE_MIN — same rule as the live
-    #     read_iv, evaluated "as of" t instead of "now".
+    # latest IV tick ≤ t aged ≤ IV_MAX_AGE_MIN — same rule as the live
+    # read_iv, evaluated "as of" t instead of "now".
     sub = iv_df[iv_df["timestamp"] <= t]
     if sub.empty:
         return None
@@ -107,12 +78,9 @@ def read_iv_asof(iv_df: pd.DataFrame, t: pd.Timestamp) -> dict | None:
 
 
 def pick_straddle_asof(t: pd.Timestamp) -> dict | None:
-    # IT: replica offline di DeribitTestnet.pick_straddle: snapshot chain più
-    #     recente ≤ t (età ≤ CHAIN_MAX_AGE_MIN), expiry più vicina al tenor,
-    #     strike ATM sull'underlying, premio = mark_price call+put (BTC/contr.).
-    # EN: offline replica of DeribitTestnet.pick_straddle: latest chain snapshot
-    #     ≤ t (age ≤ CHAIN_MAX_AGE_MIN), expiry closest to tenor, ATM strike on
-    #     the underlying, premium = call+put mark_price (BTC/contract).
+    # offline replica of DeribitTestnet.pick_straddle: latest chain snapshot
+    # ≤ t (age ≤ CHAIN_MAX_AGE_MIN), expiry closest to tenor, ATM strike on
+    # the underlying, premium = call+put mark_price (BTC/contract).
     day_files = [CHAIN_DIR / f"btc_options_{d.strftime('%Y%m%d')}.parquet"
                  for d in (t.normalize(), (t - pd.Timedelta(days=1)).normalize())]
     frames = [pd.read_parquet(p) for p in day_files if p.exists()]
@@ -128,18 +96,15 @@ def pick_straddle_asof(t: pd.Timestamp) -> dict | None:
         return None
     snap = ch[ch["snapshot_ts"] == snap_ts].copy()
     snap["expiry"] = pd.to_datetime(snap["expiry"], utc=True)
-    # IT: expiry più vicina al tenor 30h da t (stesso criterio del venue-pick).
-    # EN: expiry closest to the 30h tenor from t (same criterion as venue-pick).
+    # expiry closest to the 30h tenor from t (same criterion as venue-pick).
     exps = snap["expiry"].unique()
     exp = min(exps, key=lambda e: abs((e - t).total_seconds() / 3600 - M.TENOR_HOURS))
     sub = snap[snap["expiry"] == exp]
     und = float(sub["underlying_price"].median())
     strikes = sorted(sub["strike"].unique())
     k = min(strikes, key=lambda s: abs(s - und))
-    # IT: 01c salva option_type come 'C'/'P' — matcha sull'iniziale (robusto a
-    #     entrambe le convenzioni 'C'/'call').
-    # EN: 01c stores option_type as 'C'/'P' — match on the initial (robust to
-    #     both 'C'/'call' conventions).
+    # 01c stores option_type as 'C'/'P' — match on the initial (robust to
+    # both 'C'/'call' conventions).
     ot_up = sub["option_type"].astype(str).str.upper().str[0]
     call = sub[(sub["strike"] == k) & (ot_up == "C")]
     put = sub[(sub["strike"] == k) & (ot_up == "P")]
@@ -157,22 +122,16 @@ def pick_straddle_asof(t: pd.Timestamp) -> dict | None:
 
 
 def delivery_price_cached(expiry_ts: pd.Timestamp) -> float | None:
-    # IT: delivery price production (dato di mercato) — helper condiviso C2 2ter
-    #     (quantsys.data.deribit): cache DDMMMYY + paging; le vecchie chiavi
-    #     YYYY-MM-DD in cache restano ignorate (refetch innocuo, valori identici).
-    # EN: production delivery price (market data) — shared C2 2ter helper
-    #     (quantsys.data.deribit): DDMMMYY cache + paging; old YYYY-MM-DD cache
-    #     keys are ignored (harmless refetch, identical values).
+    # production delivery price (market data) — shared C2 2ter helper
+    # (quantsys.data.deribit): DDMMMYY cache + paging; old YYYY-MM-DD cache
+    # keys are ignored (harmless refetch, identical values).
     return _delivery_cached(expiry_ts, DELIVERY_CACHE)
 
 
 def macro_asof(fc, t: pd.Timestamp, device):
-    # IT: snapshot macro as-of t: ultima riga daily ≤ t, normalizer rifittato
-    #     SOLO su righe ≤ t (niente lookahead nei parametri di scala — il live
-    #     fitta sul parquet com'era a inizio processo, che finiva ~t).
-    # EN: as-of-t macro snapshot: last daily row ≤ t, normalizer refit ONLY on
-    #     rows ≤ t (no lookahead in the scale params — live fits on the parquet
-    #     as it existed at process start, which ended ~t).
+    # as-of-t macro snapshot: last daily row ≤ t, normalizer refit ONLY on
+    # rows ≤ t (no lookahead in the scale params — live fits on the parquet
+    # as it existed at process start, which ended ~t).
     if fc.n_macro_expected == 0:
         return None
     from quantsys.macro.regime import MacroNormalizer
@@ -192,8 +151,7 @@ def macro_asof(fc, t: pd.Timestamp, device):
 
 
 def main() -> int:
-    # IT: boilerplate UTF-8 console Windows (checklist nuovo script — bug cp1252).
-    # EN: Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
+    # Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -204,15 +162,10 @@ def main() -> int:
     ap.add_argument("--end", default=None,
                     help="fine griglia (default: ultima candela chiusa) / grid end (default: last closed candle)")
     ap.add_argument("--arch", default="itransformer", help="dir modelli / model dir")
-    # IT: stesso flag di 04b, stesso default legacy. Il replay DEVE poterlo
-    #     scegliere: se il live passa al normalizer pinnato, riprodurre una
-    #     decisione ANTECEDENTE al pin richiede il vecchio path, e riprodurne una
-    #     successiva richiede il pin. Il regime va scelto in base alla DATA della
-    #     decisione che si sta riproducendo, non lasciato all'ambiente.
-    # EN: same flag as 04b, same legacy default. The replay MUST be able to pick:
-    #     if the live switches to the pinned normalizer, reproducing a decision
-    #     PREDATING the pin needs the old path, and reproducing a later one needs
-    #     the pin. Pick the regime by the DATE of the decision being reproduced.
+    # same flag as 04b, same legacy default. The replay MUST be able to pick:
+    # if the live switches to the pinned normalizer, reproducing a decision
+    # PREDATING the pin needs the old path, and reproducing a later one needs
+    # the pin. Pick the regime by the DATE of the decision being reproduced.
     ap.add_argument("--macro-norm", default=None, metavar="PATH",
                     help="pickle del MacroNormalizer pinnato (default: ri-stima "
                          "whole-df, comportamento storico) / pinned MacroNormalizer "
@@ -223,8 +176,7 @@ def main() -> int:
 
     cfg = load_config()
     device = torch.device(args.device)
-    # IT: riuso del wiring parity-blessed di 04b (modello+scaler+builder+candele).
-    # EN: reuse of 04b's parity-blessed wiring (model+scaler+builder+candles).
+    # reuse of 04b's parity-blessed wiring (model+scaler+builder+candles).
     fc = M.VolForecaster(cfg, device, arch=args.arch,
                          macro_norm=(args.macro_norm or M.MACRO_NORM_REFIT))
     fc._refresh_candles()
@@ -234,42 +186,30 @@ def main() -> int:
     start = start.tz_localize("UTC") if start.tz is None else start.tz_convert("UTC")
     last_closed = pd.Timestamp(candles["open_time"].iloc[-1]) + pd.Timedelta(hours=1)
     end = pd.Timestamp(args.end).tz_convert("UTC") if args.end else last_closed
-    # IT: griglia inclusiva: start == end = un singolo tick (valido: usa candele < t).
-    # EN: inclusive grid: start == end = a single tick (valid: it uses candles < t).
+    # inclusive grid: start == end = a single tick (valid: it uses candles < t).
     if start > end:
         log.error(f"griglia vuota/empty grid: start={start} > end={end}")
         return 1
-    # IT: coverage candele: il delta REST copre 48h; oltre serve 01_update_data.
-    # EN: candle coverage: the REST delta spans 48h; beyond that run 01_update_data.
+    # candle coverage: the REST delta spans 48h; beyond that run 01_update_data.
     if candles["open_time"].iloc[-1] < end - pd.Timedelta(hours=2):
         raise RuntimeError("candele non coprono la griglia: lancia scripts/01_update_data.py "
                            "/ candles do not cover the grid: run scripts/01_update_data.py")
 
-    # IT: feature UNA volta su tutta la storia (builder causale, equivalenza
-    #     batch↔buffer parity-blessed da 99_replay) + filtro canonico di 04b.
-    # EN: features ONCE over full history (causal builder, batch↔buffer
-    #     equivalence parity-blessed by 99_replay) + 04b's canonical filter.
+    # features ONCE over full history (causal builder, batch↔buffer
+    # equivalence parity-blessed by 99_replay) + 04b's canonical filter.
     log.info("build feature su storia completa / building features over full history...")
     feat = fc.fb.build(candles, fit=False, normalize=True, funding_df=fc.funding)
-    # IT: derivazione canonica condivisa (C2 2ter) — identica a 04b per costruzione.
-    # EN: shared canonical derivation (C2 2ter) — identical to 04b by construction.
+    # shared canonical derivation (C2 2ter) — identical to 04b by construction.
     cols = canonical_feature_columns(fc.fb.feature_cols, feat)
     if len(cols) != fc.n_feat_expected:
         raise RuntimeError(f"canonico: {len(cols)} feature vs {fc.n_feat_expected} attese/expected")
-    # IT: allineamento feature↔candele PER CODA (contratto del live: feat.tail(T)
-    #     = ultime T candele). Il builder scarta SOLO warmup in testa e resetta
-    #     l'indice → .loc[feat.index] sarebbe sfasato di quel warmup (bug visto
-    #     al primo smoke: finestre stale di 30h). NIENTE dropna globale: i NaN
-    #     sporadici storici (ammessi dal filtro ≤50%) romperebbero l'alignment;
-    #     la validazione NaN avviene per-finestra al tick (come il live, che
-    #     consuma solo la coda).
-    # EN: TAIL-based feature↔candle alignment (live contract: feat.tail(T) = the
-    #     last T candles). The builder drops leading warmup ONLY and resets the
-    #     index → .loc[feat.index] would be off by that warmup (bug caught in
-    #     the first smoke: 30h-stale windows). NO global dropna: historical
-    #     sporadic NaN (allowed by the ≤50% filter) would break the alignment;
-    #     NaN validation happens per-window at tick time (like live, which only
-    #     consumes the tail).
+    # TAIL-based feature↔candle alignment (live contract: feat.tail(T) = the
+    # last T candles). The builder drops leading warmup ONLY and resets the
+    # index → .loc[feat.index] would be off by that warmup (bug caught in
+    # the first smoke: 30h-stale windows). NO global dropna: historical
+    # sporadic NaN (allowed by the ≤50% filter) would break the alignment;
+    # NaN validation happens per-window at tick time (like live, which only
+    # consumes the tail).
     fm = feat[cols].reset_index(drop=True)
     warmup_dropped = len(candles) - len(fm)
     assert 0 <= warmup_dropped <= 500, \
@@ -287,8 +227,7 @@ def main() -> int:
     lr2_full = np.log(candles["close"] / candles["close"].shift(1)) ** 2
 
     for t in grid:
-        # IT: settlement PRIMA del segnale (stesso ordine del tick live).
-        # EN: settlement BEFORE the signal (same order as the live tick).
+        # settlement BEFORE the signal (same order as the live tick).
         if pos is not None and t >= pos["expiry_ts"]:
             dp = delivery_price_cached(pos["expiry_ts"])
             if dp is not None:
@@ -300,29 +239,23 @@ def main() -> int:
                                "delivery_price": dp, "payoff_btc": payoff,
                                "pnl_btc": pnl, "settled_ts": str(t), "replay": True})
                 pos = None
-            # IT: dp mancante (expiry troppo recente) → posizione resta aperta.
-            # EN: missing dp (too-recent expiry) → position stays open.
+            # missing dp (too-recent expiry) → position stays open.
 
-        # IT: finestra (T,104) con solo candele CHIUSE prima di t (open_time < t
-        #     implica close ≤ t sulla griglia oraria) — identica al tick live.
-        # EN: (T,104) window with only candles CLOSED before t (open_time < t
-        #     implies close ≤ t on the hourly grid) — identical to the live tick.
+        # (T,104) window with only candles CLOSED before t (open_time < t
+        # implies close ≤ t on the hourly grid) — identical to the live tick.
         mask_n = int((ot < t).sum())
         if mask_n < fc.window_size:
             continue
         window = fm.iloc[mask_n - fc.window_size:mask_n].values.astype(np.float32)
-        # IT: validazione NaN per-finestra (il dropna globale è vietato: rompe
-        #     l'alignment per coda). Tick non valutabile → SKIP esplicito.
-        # EN: per-window NaN validation (global dropna is forbidden: it breaks
-        #     tail alignment). Non-evaluable tick → explicit SKIP.
+        # per-window NaN validation (global dropna is forbidden: it breaks
+        # tail alignment). Non-evaluable tick → explicit SKIP.
         if np.isnan(window).any():
             rows.append({"candle_ts": pd.Timestamp(ot.iloc[mask_n - 1]), "tick_ts": t,
                          "mu_z": np.nan, "log_rv": np.nan, "rv_pred": np.nan,
                          "rv_trail": np.nan, "iv_30h": np.nan, "var_iv": np.nan,
                          "edge": np.nan, "action": "SKIP_NAN_WINDOW", "replay": True})
             continue
-        # IT: macro as-of-t, ricalcolata solo al cambio di giorno (dato daily).
-        # EN: as-of-t macro, recomputed only on day change (daily data).
+        # as-of-t macro, recomputed only on day change (daily data).
         if xm_cache_day != t.date():
             xm = macro_asof(fc, t, device)
             xm_cache_day = t.date()
@@ -370,8 +303,7 @@ def main() -> int:
                        "chain_snapshot_ts": pick["snapshot_ts"]}
         rows.append(row)
 
-    # IT: output idempotenti (overwrite: il replay rigenera tutta la griglia).
-    # EN: idempotent outputs (overwrite: the replay regenerates the whole grid).
+    # idempotent outputs (overwrite: the replay regenerates the whole grid).
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows)
     atomic_save_parquet(df, FORECASTS_OUT, index=False)
@@ -383,10 +315,8 @@ def main() -> int:
     log.info(f"replay: {len(df)} tick → azioni {va} | {len(trades)} settlement "
              f"(+{n_open} aperta/open) → {TRADES_OUT}")
 
-    # IT: check di parità sulle ore coperte ANCHE dal live: quantifica il residuo
-    #     delle approssimazioni dichiarate (macro as-of, griglia chain).
-    # EN: parity check on hours ALSO covered live: quantifies the residual of
-    #     the declared approximations (as-of macro, chain grid).
+    # parity check on hours ALSO covered live: quantifies the residual of
+    # the declared approximations (as-of macro, chain grid).
     if LIVE_FORECASTS.exists():
         live = pd.read_parquet(LIVE_FORECASTS)
         live["candle_ts"] = pd.to_datetime(live["candle_ts"], utc=True)
@@ -395,16 +325,11 @@ def main() -> int:
             dmu = (j["mu_z_rep"] - j["mu_z_live"]).abs().max()
             drv = (j["rv_pred_rep"] / j["rv_pred_live"] - 1).abs().max()
             agree = (j["action_rep"] == j["action_live"]).mean()
-            # IT: parità sul SEGNALE puro (classificazione dell'edge, ignora lo
-            #     stato posizione): l'azione diverge strutturalmente al bordo
-            #     griglia (replay parte flat, il live può avere posizione aperta).
-            #     Il Δmu residuo = snapshot macro del live congelato all'avvio
-            #     del processo (approssimazione dichiarata nell'header).
-            # EN: pure-SIGNAL parity (edge classification, ignores position
-            #     state): the action structurally diverges at the grid boundary
-            #     (replay starts flat, live may hold a position). The residual
-            #     Δmu = live's macro snapshot frozen at process start (declared
-            #     approximation in the header).
+            # pure-SIGNAL parity (edge classification, ignores position
+            # state): the action structurally diverges at the grid boundary
+            # (replay starts flat, live may hold a position). The residual
+            # Δmu = live's macro snapshot frozen at process start (declared
+            # approximation in the header).
             def _sig(e):
                 if not np.isfinite(e):
                     return "NO_IV"

@@ -1,12 +1,12 @@
-"""Script 07 — Verifica quale architettura dovrebbe fare da teacher.
+"""Script 07 — Check which architecture should act as teacher.
 
-Analizza le 3 architetture (iTransformer, LSTM, TCNMamba) confrontando:
-  1. Numero di parametri (capacità del modello)
-  2. Complessità computazionale (tempo forward pass)
-  3. Metriche di backtest (se disponibili da checkpoint esistenti)
-  4. Ricchezza delle rappresentazioni interne
+Analyzes the 3 architectures (iTransformer, LSTM, TCNMamba) comparing:
+  1. Number of parameters (model capacity)
+  2. Computational complexity (forward-pass time)
+  3. Backtest metrics (if available from existing checkpoints)
+  4. Richness of the internal representations
 
-Raccomanda l'architettura migliore come teacher per knowledge distillation.
+Recommends the best architecture as teacher for knowledge distillation.
 
 Usage:
   python scripts/07_verify_teacher.py
@@ -23,16 +23,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from quantsys.utils import load_config, setup_device
 
 
-# IT: conteggio parametri totali e trainable (capacita' del modello)
-# EN: count total and trainable parameters (model capacity)
+# count total and trainable parameters (model capacity)
 def count_parameters(model):
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total, trainable
 
 
-# IT: timing forward pass medio (warm-up + N run, ms) con sync CUDA per accuratezza
-# EN: average forward-pass timing (warm-up + N runs, ms) with CUDA sync for accuracy
+# average forward-pass timing (warm-up + N runs, ms) with CUDA sync for accuracy
 def measure_forward_time(model, x_dummy, device, n_warmup=3, n_runs=10):
     model.eval()
     x = x_dummy.to(device)
@@ -48,16 +46,15 @@ def measure_forward_time(model, x_dummy, device, n_warmup=3, n_runs=10):
     if device.type == "cuda":
         torch.cuda.synchronize()
     elapsed = (time.perf_counter() - t0) / n_runs
-    return elapsed * 1000  # IT: secondi -> ms | EN: seconds -> ms
+    return elapsed * 1000  # seconds -> ms
 
 
-# IT: parametri output heads (trasferibili allo student via distillation)
-# EN: output-head parameters (transferable to student via distillation)
+# output-head parameters (transferable to student via distillation)
 def count_output_head_params(model):
-    """Conta i parametri delle output heads (mu, sigma, nu) — quelli trasferiti al student."""
+    """Count the output-head parameters (mu, sigma, nu) — the ones transferred to the student."""
     head_names = {
-        "out_mu", "out_logsig2", "out_lognu",  # IT: LSTM, iTransformer | EN: LSTM, iTransformer
-        "mu_head", "ls2_head", "lnu_head",      # IT: TCNMamba | EN: TCNMamba
+        "out_mu", "out_logsig2", "out_lognu",  # LSTM, iTransformer
+        "mu_head", "ls2_head", "lnu_head",      # TCNMamba
     }
     total = 0
     for name, param in model.named_parameters():
@@ -68,8 +65,7 @@ def count_output_head_params(model):
     return total
 
 
-# IT: helper — carica metrics.json di backtest se presente
-# EN: helper — load backtest metrics.json if present
+# helper — load backtest metrics.json if present
 def load_backtest_metrics(arch_dir):
     metrics_path = Path(arch_dir) / "metrics.json"
     if metrics_path.exists():
@@ -78,8 +74,7 @@ def load_backtest_metrics(arch_dir):
     return None
 
 
-# IT: helper — carica predizioni di test salvate da 03_backtest
-# EN: helper — load test predictions saved by 03_backtest
+# helper — load test predictions saved by 03_backtest
 def load_test_predictions(arch_dir):
     pred_path = Path(arch_dir) / "test_predictions.npz"
     if pred_path.exists():
@@ -88,13 +83,10 @@ def load_test_predictions(arch_dir):
     return None
 
 
-# IT: benchmark 3 architetture (params/latenza/backtest) -> raccomanda il teacher
-# EN: benchmark 3 architectures (params/latency/backtest) -> recommend the teacher
+# benchmark 3 architectures (params/latency/backtest) -> recommend the teacher
 def main():
-    # IT: console Windows default cp1252 — qualsiasi unicode nei banner/report crasha
-    #     il print con UnicodeEncodeError. Reconfigure UTF-8 come 01/02/04.
-    # EN: Windows console defaults to cp1252 — any unicode in banners/reports crashes
-    #     the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
+    # Windows console defaults to cp1252 — any unicode in banners/reports crashes
+    # the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
     import sys as _sys
     for _stream in (_sys.stdout, _sys.stderr):
         try:
@@ -105,8 +97,7 @@ def main():
     device = setup_device(cfg)
     mcfg = cfg["model"]
 
-    # IT: legge dimensioni reali dal dataset (mmap per non caricare X_train in RAM)
-    # EN: read real dimensions from dataset (mmap to avoid loading X_train in RAM)
+    # read real dimensions from dataset (mmap to avoid loading X_train in RAM)
     dataset_path = Path("data/lstm_dataset.npz")
     if dataset_path.exists():
         _ds = np.load(dataset_path, mmap_mode='r', allow_pickle=True)
@@ -114,10 +105,8 @@ def main():
         n_dynamic = int(_ds["n_dynamic_features"][0]) if "n_dynamic_features" in _ds.files else n_feat
         del _ds
     else:
-        # IT: senza dataset il feature space reale non è noto (cambia col set C-funding,
-        #     vedi LIVE_DROP_FEATURES) → niente magic number stale, errore esplicito e azionabile.
-        # EN: without the dataset the real feature space is unknown (it changes with the
-        #     C-funding set, see LIVE_DROP_FEATURES) → no stale magic number, explicit actionable error.
+        # without the dataset the real feature space is unknown (it changes with the
+        # C-funding set, see LIVE_DROP_FEATURES) → no stale magic number, explicit actionable error.
         raise FileNotFoundError(
             f"Dataset non trovato: {dataset_path}. Esegui prima la pipeline dati "
             "(es. `python run_all.py --arch nhits` o `python scripts/01_download_data.py`) "
@@ -140,8 +129,7 @@ def main():
 
     results = {}
 
-    # IT: 1) iTransformer — attention O(F^2) sulle feature
-    # EN: 1) iTransformer — O(F^2) attention over features
+    # 1) iTransformer — O(F^2) attention over features
     from quantsys.model import QuantiTransformer
     itrans = QuantiTransformer(
         n_features=n_feat, T=T, n_dynamic=n_dynamic, n_macro=0,
@@ -162,13 +150,11 @@ def main():
         "total_params": total_p, "trainable_params": train_p,
         "head_params": head_p, "forward_ms": fwd_ms,
     }
-    # IT: libera VRAM prima del prossimo modello (test secventiale)
-    # EN: free VRAM before next model (sequential benchmark)
+    # free VRAM before next model (sequential benchmark)
     del itrans
     torch.cuda.empty_cache() if device.type == "cuda" else None
 
-    # IT: 2) LSTM+GRU — baseline ricorrente veloce
-    # EN: 2) LSTM+GRU — fast recurrent baseline
+    # 2) LSTM+GRU — fast recurrent baseline
     from quantsys.model import QuantLSTM
     lstm = QuantLSTM(
         n_features=n_feat,
@@ -192,8 +178,7 @@ def main():
     del lstm
     torch.cuda.empty_cache() if device.type == "cuda" else None
 
-    # IT: 3) TCN+Mamba — pattern locali TCN + contesto lungo via SSM
-    # EN: 3) TCN+Mamba — local TCN patterns + long context via SSM
+    # 3) TCN+Mamba — local TCN patterns + long context via SSM
     from quantsys.model import QuantTCNMamba
     tcnmamba = QuantTCNMamba(
         n_features=n_feat,
@@ -218,15 +203,13 @@ def main():
     del tcnmamba
     torch.cuda.empty_cache() if device.type == "cuda" else None
 
-    # IT: tabella comparativa parametri vs latenza forward
-    # EN: comparative table — parameters vs forward latency
+    # comparative table — parameters vs forward latency
     print(f"  {'Architettura':<18} {'Parametri':>12} {'Head params':>12} {'Forward (ms)':>14}")
     print(f"  {'─'*18} {'─'*12} {'─'*12} {'─'*14}")
     for arch, r in results.items():
         print(f"  {arch:<18} {r['trainable_params']:>12,} {r['head_params']:>12,} {r['forward_ms']:>13.2f}")
 
-    # IT: aggancia metriche backtest se i checkpoint sono gia' stati valutati
-    # EN: attach backtest metrics if checkpoints have already been evaluated
+    # attach backtest metrics if checkpoints have already been evaluated
     print(f"\n  {'─'*58}")
     print("  Metriche backtest da checkpoint esistenti:")
     print(f"  {'─'*58}")
@@ -250,8 +233,7 @@ def main():
         if not metrics and not pred_path.exists():
             print(f"\n  {arch}: nessun checkpoint/metrica trovata")
 
-    # IT: scoring composito — performance domina su capacita' (~75/25)
-    # EN: composite scoring — performance dominates over capacity (~75/25)
+    # composite scoring — performance dominates over capacity (~75/25)
     print(f"\n{'═'*70}")
     print("  ANALISI E RACCOMANDAZIONE")
     print(f"{'═'*70}")
@@ -260,19 +242,15 @@ def main():
     for arch, r in results.items():
         score = 0
         bt = r.get("backtest", {})
-        # IT: Sharpe dominante (max 100 pts), saturazione a 50 per evitare outlier
-        # EN: Sharpe dominant (max 100 pts), capped at 50 to avoid outliers
+        # Sharpe dominant (max 100 pts), capped at 50 to avoid outliers
         if bt.get("sharpe", 0) > 0:
             score += min(bt["sharpe"], 50) * 2.0
-        # IT: bonus solo oltre soglia minima WR 40% (sotto e' rumore)
-        # EN: bonus only above 40% WR threshold (below is noise)
+        # bonus only above 40% WR threshold (below is noise)
         if bt.get("win_rate", 0) > 0.40:
             score += (bt["win_rate"] - 0.40) * 200
-        # IT: capacita' come segnale secondario (2 pts per M params)
-        # EN: capacity as secondary signal (2 pts per M params)
+        # capacity as secondary signal (2 pts per M params)
         score += r["trainable_params"] / 1_000_000 * 2
-        # IT: piccola penalita' per modelli lenti (no game della latenza pura)
-        # EN: small penalty for slow models (no pure-latency gaming)
+        # small penalty for slow models (no pure-latency gaming)
         score -= r["forward_ms"] * 0.1
         scores[arch] = score
 
@@ -308,8 +286,7 @@ def main():
     print(f"    3. {r['head_params']:,} parametri nelle output heads (trasferibili agli student)")
     print(f"    4. Forward pass: {r['forward_ms']:.2f} ms (usato solo per generare soft labels)")
 
-    # IT: serializza analisi -> consumata dalla tab Ensemble della dashboard
-    # EN: serialize analysis -> consumed by the dashboard Ensemble tab
+    # serialize analysis -> consumed by the dashboard Ensemble tab
     out_path = Path("models") / "teacher_analysis.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"results": results, "scores": scores, "recommended_teacher": best_arch},

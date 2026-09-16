@@ -1,22 +1,22 @@
 """
 scripts/vol/estimate_gjr_1h.py
 ==============================
-Ri-stima dei parametri GJR-GARCH(1,1) del Monte Carlo su rendimenti 1h
-(TODO chiuso 2026-07-15 — parametri 1h ora in config/default.yaml → montecarlo,
-i 1m-era in config/interval/1m.yaml; ω ha unità [varianza/passo] e NON è
-trasferibile tra timeframe).
+Re-estimation of the Monte Carlo GJR-GARCH(1,1) parameters on 1h returns
+(TODO closed 2026-07-15 — 1h parameters now in config/default.yaml → montecarlo,
+the 1m-era ones in config/interval/1m.yaml; ω has units [variance/step] and is
+NOT transferable across timeframes).
 
-Metodo: QMLE gaussiano con variance targeting — riusa `fit_gjr` di
-`scripts/vol/short_vol_hist_backtest.py` (single source of truth del fitter,
-già validato dal backtest FHS). Stima FULL-SAMPLE: i parametri alimentano un
-simulatore forward (monte_carlo_forecast), non una strategia giudicata OOS —
-stesso status dei parametri 1m che sostituiscono.
+Method: Gaussian QMLE with variance targeting — reuses `fit_gjr` from
+`scripts/vol/short_vol_hist_backtest.py` (single source of truth for the fitter,
+already validated by the FHS backtest). FULL-SAMPLE estimate: the parameters feed
+a forward simulator (monte_carlo_forecast), not a strategy judged OOS — same
+status as the 1m parameters they replace.
 
-Output: stampa + `results/vols/gjr_params_1h.json` (parametri, persistence,
-half-life, σ incondizionata, percentili della σ condizionata, suggerimento
-per il cap di σ del MC — il clip 1m-era 0.01/barra satura a 1h).
+Output: printout + `results/vols/gjr_params_1h.json` (parameters, persistence,
+half-life, unconditional σ, conditional-σ percentiles, suggested MC σ cap —
+the 1m-era clip of 0.01/bar saturates at 1h).
 
-Lanciare dalla root di progetto:
+Run from the project root:
   python scripts/vol/estimate_gjr_1h.py
 """
 import json
@@ -27,8 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# IT: root progetto (scripts/vol/ → 2 livelli sopra) + import del fitter condiviso.
-# EN: project root (scripts/vol/ → 2 levels up) + shared fitter import.
+# project root (scripts/vol/ → 2 levels up) + shared fitter import.
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -44,8 +43,7 @@ OUT     = ROOT / "results" / "vols" / "gjr_params_1h.json"
 
 
 def main():
-    # IT: reconfigure UTF-8 (checklist repo: il bug cp1252 è ricorso 5 volte).
-    # EN: UTF-8 reconfigure (repo checklist: the cp1252 bug recurred 5 times).
+    # UTF-8 reconfigure (repo checklist: the cp1252 bug recurred 5 times).
     for _stream in (sys.stdout, sys.stderr):
         try:
             _stream.reconfigure(encoding="utf-8", errors="replace")
@@ -54,8 +52,7 @@ def main():
 
     cfg = load_config("config/default.yaml")
     interval_min = interval_minutes_from_cfg(cfg)
-    # IT: la stima è specifica del timeframe: fail-fast se la config non è a 1h.
-    # EN: the estimate is timeframe-specific: fail fast if config is not 1h.
+    # the estimate is timeframe-specific: fail fast if config is not 1h.
     if interval_min != 60:
         raise RuntimeError(
             f"data.interval={cfg['data']['interval']} (≠1h): questa stima è per "
@@ -72,10 +69,8 @@ def main():
     if fit is None:
         raise RuntimeError("fit_gjr ha ritornato None (varianza degenere?)")
 
-    # IT: diagnostiche — σ incondizionata per barra, annualizzata, half-life,
-    #     percentili della σ condizionata (per dimensionare il cap del MC).
-    # EN: diagnostics — per-bar unconditional σ, annualized, half-life,
-    #     conditional-σ percentiles (to size the MC cap).
+    # diagnostics — per-bar unconditional σ, annualized, half-life,
+    # conditional-σ percentiles (to size the MC cap).
     sigma_bar   = float(np.sqrt(fit["uncond"]))
     bars_year   = 24 * 365
     sigma_ann   = sigma_bar * np.sqrt(bars_year)

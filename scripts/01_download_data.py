@@ -1,10 +1,10 @@
 """
-Script 01 — Download dati da Binance e costruzione features.
-Esegui da PyCharm o da terminale nella root del progetto.
+Script 01 — Download data from Binance and build features.
+Run from PyCharm or from a terminal in the project root.
 
-Run configuration PyCharm:
+PyCharm run configuration:
   Script: scripts/01_download_data.py
-  Working dir: <root del progetto>
+  Working dir: <project root>
 """
 import logging
 import os
@@ -22,13 +22,10 @@ setup_logging()
 log = logging.getLogger("quantsys.script.01")
 
 
-# IT: pipeline completa: download → feature → split → windows → PipelineState.
-# EN: full pipeline: download → features → split → windows → PipelineState.
+# full pipeline: download → features → split → windows → PipelineState.
 def main():
-    # IT: Console Windows default cp1252 — i caratteri unicode del banner finale
-    #     crashano il print (5ª occorrenza del bug). Reconfigure UTF-8 come 02/04.
-    # EN: Windows console defaults to cp1252 — unicode chars in the final banner
-    #     crash the print (5th occurrence of this bug). Reconfigure UTF-8 like 02/04.
+    # Windows console defaults to cp1252 — unicode chars in the final banner
+    # crash the print (5th occurrence of this bug). Reconfigure UTF-8 like 02/04.
     import sys as _sys
     for _stream in (_sys.stdout, _sys.stderr):
         try:
@@ -43,8 +40,7 @@ def main():
     ensure_dirs(dcfg["output_dir"])
     out = Path(dcfg["output_dir"])
 
-    # IT: 1. download candele OHLCV da Binance (REST klines)
-    # EN: 1. download OHLCV candles from Binance (REST klines)
+    # 1. download OHLCV candles from Binance (REST klines)
     t0 = time.time()
     log.info("Fase 1: download candele ...")
     start_time = dcfg.get("start_time", None)
@@ -58,8 +54,7 @@ def main():
         f"[{df_raw['open_time'].iloc[0].date()} → {df_raw['open_time'].iloc[-1].date()}]"
     )
 
-    # IT: 1b. funding rate dei futures perpetui (best-effort, non bloccante)
-    # EN: 1b. perpetual futures funding rate (best-effort, non-blocking)
+    # 1b. perpetual futures funding rate (best-effort, non-blocking)
     try:
         funding_df = fetch_funding_rate(
             symbol     = dcfg["symbol"],
@@ -71,8 +66,7 @@ def main():
         log.warning(f"Download funding rate fallito ({_e}) — continuo senza.")
         funding_df = None
 
-    # IT: holdout - tronca i dati dopo holdout_start; il set resta intatto fino al test finale
-    # EN: holdout - drop data after holdout_start; keep this set untouched until final test
+    # holdout - drop data after holdout_start; keep this set untouched until final test
     holdout_start = cfg.get("training", {}).get("holdout_start", None)
     if holdout_start:
         import pandas as pd
@@ -85,27 +79,21 @@ def main():
             f"Questi dati sono bloccati per il test finale."
         )
 
-    # IT: salva OHLCV raw (no features) per gli aggiornamenti incrementali futuri
-    # EN: persist raw OHLCV (no features) for later incremental updates
+    # persist raw OHLCV (no features) for later incremental updates
     raw_path = out / "raw_candles.parquet"
     raw_cols = ["open_time","close_time","open","high","low","close","volume",
                 "quote_vol","trades","taker_buy_vol","taker_buy_quote_vol"]
     atomic_save_parquet(df_raw[raw_cols], raw_path, index=False)
     log.info(f"Raw candles → {raw_path}  ({len(df_raw):,} candele, {raw_path.stat().st_size//1024//1024} MB)")
 
-    # IT: 2. feature engineering raw (la normalizzazione e' fatta dopo lo split)
-    # EN: 2. raw feature engineering (normalization happens after the split)
+    # 2. raw feature engineering (normalization happens after the split)
     t0 = time.time()
     log.info(f"Fase 2: feature engineering su {len(df_raw):,} candele ...")
-    # IT: con use_revin=True le colonne return raw sono escluse dal RobustScaler
-    #     globale cosi' RevIN normalizza feature raw e mu/log_var restano allineati al target
-    # EN: with use_revin=True raw return columns are excluded from the global RobustScaler
-    #     so RevIN normalizes raw features and mu/log_var stay aligned with the target
+    # with use_revin=True raw return columns are excluded from the global RobustScaler
+    # so RevIN normalizes raw features and mu/log_var stay aligned with the target
     _use_revin = bool(mcfg.get("use_revin", False))
-    # IT: interval_minutes da data.interval — le finestre TIME-semantic del
-    #     FeatureBuilder vengono convertite in barre (identità a 1m).
-    # EN: interval_minutes from data.interval — the FeatureBuilder's TIME-semantic
-    #     windows are converted to bars (identity at 1m).
+    # interval_minutes from data.interval — the FeatureBuilder's TIME-semantic
+    # windows are converted to bars (identity at 1m).
     builder = FeatureBuilder(
         vp_bins          = fcfg["vp_bins"],
         vp_lookback      = fcfg["vp_lookback"],
@@ -116,18 +104,15 @@ def main():
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         use_revin        = _use_revin,
         interval_minutes = interval_minutes_from_cfg(cfg),
-        # IT: target_type da config (default "ret" = direzionale legacy; "log_rv" = vol-S).
-        # EN: target_type from config (default "ret" = legacy directional; "log_rv" = vol-S).
+        # target_type from config (default "ret" = legacy directional; "log_rv" = vol-S).
         target_type      = fcfg.get("target_type", "ret"),
-        # IT: A4 HAR-CJ — lever inerte (default false = 104 feature bit-invariate).
-        # EN: A4 HAR-CJ — inert lever (default false = 104 features bit-invariant).
+        # A4 HAR-CJ — inert lever (default false = 104 features bit-invariant).
         use_har_cj       = bool(fcfg.get("har_cj", False)),
     )
     df_feat = builder.build(df_raw, normalize=False, fit=False, funding_df=funding_df)
     log.info(f"Fase 2 completata in {time.time()-t0:.1f}s — {len(df_feat):,} righe valide")
 
-    # IT: 3. determina il confine training PRIMA del fit dello scaler (anti-leakage)
-    # EN: 3. compute the training cutoff BEFORE fitting the scaler (leakage guard)
+    # 3. compute the training cutoff BEFORE fitting the scaler (leakage guard)
     n_total   = len(df_feat)
     val_frac  = cfg["training"]["val_fraction"]
     test_frac = cfg["training"]["test_fraction"]
@@ -139,19 +124,16 @@ def main():
         f"({train_end/n_total:.0%} training)"
     )
 
-    # IT: 4. fit dello scaler solo su train, poi transform sull'intero dataset
-    # EN: 4. fit the scaler on train only, then transform the whole dataset
+    # 4. fit the scaler on train only, then transform the whole dataset
     if fcfg["normalize"]:
         t0 = time.time()
         log.info("Fase 3: scaler fit+transform ...")
-        builder.fit_scaler_only(df_feat.iloc[:train_end])   # IT: fit solo su train | EN: fit on train only
-        df_feat = builder._normalize(df_feat, fit=False)    # IT: transform su tutto | EN: transform on all
+        builder.fit_scaler_only(df_feat.iloc[:train_end])   # fit on train only
+        df_feat = builder._normalize(df_feat, fit=False)    # transform on all
         log.info(f"Fase 3 completata in {time.time()-t0:.1f}s")
 
-        # IT: sanity-check RevIN: log_ret deve restare in scala raw (~[-0.05,+0.05] per BTC 1m).
-        #     Se appare in [-3,+3] e' stato scalato per errore e RevIN sarebbe rotto.
-        # EN: RevIN sanity-check: log_ret must stay raw (~[-0.05,+0.05] for BTC 1m).
-        #     If it lands in [-3,+3] it was scaled by mistake and RevIN would be broken.
+        # RevIN sanity-check: log_ret must stay raw (~[-0.05,+0.05] for BTC 1m).
+        # If it lands in [-3,+3] it was scaled by mistake and RevIN would be broken.
         if _use_revin and "log_ret" in df_feat.columns:
             _lr = df_feat["log_ret"].dropna()
             if len(_lr) > 0:
@@ -173,18 +155,14 @@ def main():
                         f"return 1m raw — controlla la pipeline di feature engineering."
                     )
 
-    # IT: salva il parquet delle feature in modo atomico (crash-safe)
-    # EN: persist the feature parquet atomically (crash-safe)
+    # persist the feature parquet atomically (crash-safe)
     feat_path = out / "features.parquet"
     atomic_save_parquet(df_feat, feat_path, index=False)
     log.info(f"Features → {feat_path}  ({feat_path.stat().st_size//1024} KB)")
 
-    # IT: 5. lista feature canonica condivisa (C2 2ter): exclude non-feature →
-    #     dtype float → C-funding → NaN>50% → Inf, in quantsys.features.
-    #     `diag` preserva il logging storico di questo script.
-    # EN: 5. shared canonical feature list (C2 2ter): non-feature exclude →
-    #     float dtype → C-funding → NaN>50% → Inf, in quantsys.features.
-    #     `diag` preserves this script's historical logging.
+    # 5. shared canonical feature list (C2 2ter): non-feature exclude →
+    # float dtype → C-funding → NaN>50% → Inf, in quantsys.features.
+    # `diag` preserves this script's historical logging.
     nan_thresh = 0.5
     diag: dict = {}
     feat_cols = canonical_feature_columns(builder.feature_cols, df_feat,
@@ -198,8 +176,7 @@ def main():
         log.warning(f"Escluse {len(diag['dropped_inf'])} colonne con valori Inf: "
                     f"{diag['dropped_inf']}")
 
-    # IT: ricalcola n_dynamic dopo NaN/Inf filter per evitare mismatch TFT dual-stream
-    # EN: recompute n_dynamic after the NaN/Inf filter to avoid TFT dual-stream mismatch
+    # recompute n_dynamic after the NaN/Inf filter to avoid TFT dual-stream mismatch
     _struct_names = set(builder.feature_cols[builder.n_dynamic_features:])
     n_dynamic_final = sum(1 for c in feat_cols if c not in _struct_names)
     if n_dynamic_final != builder.n_dynamic_features:
@@ -240,8 +217,7 @@ def main():
         f"{len(feat_cols)-builder.n_dynamic_features} struct features)"
     )
 
-    # IT: 6. salva PipelineState unificato (scaler + colonne + config) per inference
-    # EN: 6. persist unified PipelineState (scaler + columns + config) for inference
+    # 6. persist unified PipelineState (scaler + columns + config) for inference
     ensure_dirs("models")
     state = (
         PipelineState()
@@ -253,8 +229,7 @@ def main():
         "n_dynamic_features":  builder.n_dynamic_features,
         "window_size":         mcfg["window_size"],
     }
-    # IT: registra metadati dataset (timeframe, n campioni, frequenza) per la diagnostica
-    # EN: record dataset metadata (timeframe, sample count, frequency) for diagnostics
+    # record dataset metadata (timeframe, sample count, frequency) for diagnostics
     state.set_dataset_info(df_feat, n_train=len(splits["X_train"]))
     _ps_arch = os.environ.get("QUANTSYS_ARCH", "lstm")
     _ps_dir  = Path("models") / _ps_arch
@@ -262,14 +237,10 @@ def main():
     _ps_file = str(_ps_dir / "pipeline_state.pkl")
     state.save(_ps_file)
     log.info(f"PipelineState salvato → {_ps_file}")
-    # IT: copia CANONICA in models/pipeline_state.pkl — il dataset (scaler/feature/interval)
-    #     è arch-independent; senza questa copia un 02_train con QUANTSYS_ARCH diversa
-    #     troverebbe solo il pkl stale della sua arch dir (bug 2026-06-10: state 1m
-    #     ri-salvato sotto dataset 1h → guard interval scattato in backtest).
-    # EN: CANONICAL copy at models/pipeline_state.pkl — the dataset (scaler/features/interval)
-    #     is arch-independent; without it a 02_train run with a different QUANTSYS_ARCH
-    #     would only find its arch dir's stale pkl (2026-06-10 bug: 1m state re-saved
-    #     under a 1h dataset → interval guard tripped in backtest).
+    # CANONICAL copy at models/pipeline_state.pkl — the dataset (scaler/features/interval)
+    # is arch-independent; without it a 02_train run with a different QUANTSYS_ARCH
+    # would only find its arch dir's stale pkl (2026-06-10 bug: 1m state re-saved
+    # under a 1h dataset → interval guard tripped in backtest).
     _ps_canon = str(Path("models") / "pipeline_state.pkl")
     state.save(_ps_canon)
     log.info(f"PipelineState canonico → {_ps_canon}")

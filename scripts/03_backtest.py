@@ -1,9 +1,9 @@
 """
-Script 03 — Backtest + export risultati per la dashboard React.
+Script 03 — Backtest + results export for the React dashboard.
 
-Run configuration PyCharm:
+PyCharm run configuration:
   Script: scripts/03_backtest.py
-  Working dir: <root del progetto>
+  Working dir: <project root>
 """
 import json
 import logging
@@ -13,8 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-# IT: Forza UTF-8 su stdout/stderr — Windows cp1252 crasha sui box-drawing.
-# EN: Force UTF-8 on stdout/stderr — Windows cp1252 crashes on box-drawing chars.
+# Force UTF-8 on stdout/stderr — Windows cp1252 crashes on box-drawing chars.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -44,41 +43,34 @@ setup_logging()
 log = logging.getLogger("quantsys.script.03")
 
 
-# IT: Sottocampiona un array a max n punti (per payload dashboard leggero).
-# EN: Downsample an array to at most n points (keeps the dashboard payload light).
+# Downsample an array to at most n points (keeps the dashboard payload light).
 def _downsample(arr, n=500):
     if len(arr) <= n: return arr
     idx = np.linspace(0, len(arr)-1, n, dtype=int)
     return [arr[i] for i in idx]
 
 
-# IT: bootstrap_sharpe_ci + mdd_stats estratti VERBATIM in quantsys/utils/stats.py
-#     (step 2 refactor 2026-07-16): golden test bloccano l'equivalenza numerica.
-# EN: bootstrap_sharpe_ci + mdd_stats extracted VERBATIM into quantsys/utils/stats.py
-#     (refactor step 2, 2026-07-16): golden tests lock the numerical equivalence.
+# bootstrap_sharpe_ci + mdd_stats extracted VERBATIM into quantsys/utils/stats.py
+# (refactor step 2, 2026-07-16): golden tests lock the numerical equivalence.
 from quantsys.utils.stats import bootstrap_sharpe_ci, mdd_stats  # noqa: E402
 
 
-# IT: Riesegue il backtest con fee/slippage stressati su segnali pre-calcolati.
-# EN: Re-runs the backtest with stressed fee/slippage on pre-computed signals.
+# Re-runs the backtest with stressed fee/slippage on pre-computed signals.
 def run_stress_scenario(scenario_name, fee_mult, slip_mult, cfg_backtest, cfg_risk,
                         ohlcv, atr, pre_signals, adv_1m=None, seed_rm=None,
                         bars_per_year=525_600):
-    """Replica il backtest con parametri di stress usando segnali pre-calcolati.
+    """Replays the backtest with stress parameters using pre-computed signals.
 
-    pre_signals: lista di (side, dist) gia' calcolati dal loop principale.
-    adv_1m: array del volume USD medio per barra (MA20, timeframe corrente) per lo
-      slippage sqrt — nome legacy mantenuto per l'API RiskManager. | per-bar USD
-      volume MA20 (current timeframe); legacy name kept for the RiskManager API.
-    seed_rm: RiskManager principale di cui ereditare lo storico (fix #16). Senza
-      questo, autocorr_kelly_factor parte da 1.0 sottostimando rischio direzionale.
-    bars_per_year: barre/anno per annualizzare Sharpe/Sortino (525_600 a 1m = identità,
-      8_760 a 1h). | bars/year for Sharpe/Sortino annualization.
+    pre_signals: list of (side, dist) already computed by the main loop.
+    adv_1m: array of per-bar mean USD volume (MA20, current timeframe) for the
+      sqrt slippage — legacy name kept for the RiskManager API.
+    seed_rm: main RiskManager whose history is inherited (fix #16). Without
+      it, autocorr_kelly_factor starts at 1.0, underestimating directional risk.
+    bars_per_year: bars/year for Sharpe/Sortino annualization (525_600 at 1m = identity,
+      8_760 at 1h).
     """
-    # IT: Stress scenario riusa i segnali già emessi dal loop principale; cambia
-    #     solo fee/slippage e si reinizializza un RiskManager dedicato.
-    # EN: Stress scenarios reuse signals emitted by the main loop and only swap
-    #     fee/slippage on a fresh RiskManager.
+    # Stress scenarios reuse signals emitted by the main loop and only swap
+    # fee/slippage on a fresh RiskManager.
     rm_s = RiskManager(
         initial_capital    = cfg_risk["initial_capital"],
         max_risk_per_trade = cfg_risk["max_risk_per_trade"],
@@ -94,14 +86,11 @@ def run_stress_scenario(scenario_name, fee_mult, slip_mult, cfg_backtest, cfg_ri
         slippage_model     = cfg_backtest.get("slippage_model", "fixed"),
         correlation_window = cfg_risk.get("correlation_window", 10),
         max_directional_exposure = cfg_risk.get("max_directional_exposure", 0.6),
-        # IT: barre/anno coerenti col backtest principale (annualizzazione Sharpe).
-        # EN: bars/year consistent with the main backtest (Sharpe annualization).
+        # bars/year consistent with the main backtest (Sharpe annualization).
         bars_per_year      = bars_per_year,
     )
-    # IT: Fix #16 — eredita storico direzionale/return dal RM principale, altrimenti
-    #     autocorr_kelly_factor parte a 1.0 e sottostima il rischio direzionale.
-    # EN: Fix #16 — inherit directional/return history from the main RM, otherwise
-    #     autocorr_kelly_factor resets to 1.0 and underestimates directional risk.
+    # Fix #16 — inherit directional/return history from the main RM, otherwise
+    # autocorr_kelly_factor resets to 1.0 and underestimates directional risk.
     if seed_rm is not None:
         import copy
         rm_s._recent_sides         = copy.deepcopy(seed_rm._recent_sides)
@@ -126,7 +115,7 @@ def run_stress_scenario(scenario_name, fee_mult, slip_mult, cfg_backtest, cfg_ri
     if rm_s.position: rm_s.close_position(CloseReason.END_OF_DATA, ohlcv[-1][3], n-1)
     ms = rm_s.metrics()
 
-    # IT: NaN/inf → None così il JSON resta valido. | EN: NaN/inf → None to keep valid JSON.
+    # NaN/inf → None to keep valid JSON.
     def _clean(v): return None if isinstance(v, float) and (math.isnan(v) or math.isinf(v)) else v
 
     return {
@@ -140,21 +129,17 @@ def run_stress_scenario(scenario_name, fee_mult, slip_mult, cfg_backtest, cfg_ri
     }
 
 
-# IT: Entry point — inferenza batch, loop backtest, stress test ed export dashboard.
-# EN: Entry point — batch inference, backtest loop, stress tests and dashboard export.
+# Entry point — batch inference, backtest loop, stress tests and dashboard export.
 def main():
     cfg  = load_config("config/default.yaml")
     bcfg = cfg["backtest"]
     rcfg = cfg["risk"]
     mcfg = cfg["model"]
-    # IT: Timeframe → minuti per barra e barre/anno per le annualizzazioni (Sharpe/Sortino,
-    #     bootstrap CI). A 1m: 525600 (identità col comportamento storico); a 1h: 8760.
-    # EN: Timeframe → minutes per bar and bars/year for annualizations (Sharpe/Sortino,
-    #     bootstrap CI). At 1m: 525600 (identical to historical behaviour); at 1h: 8760.
+    # Timeframe → minutes per bar and bars/year for annualizations (Sharpe/Sortino,
+    # bootstrap CI). At 1m: 525600 (identical to historical behaviour); at 1h: 8760.
     interval_minutes = interval_minutes_from_cfg(cfg)
     bars_per_year    = 525_600 // interval_minutes
-    # IT: La policy Spectral Norm deve matchare il training per caricare i checkpoint.
-    # EN: Spectral-norm policy must match training to load checkpoints correctly.
+    # Spectral-norm policy must match training to load checkpoints correctly.
     from quantsys.model import set_sn_on_mu_only
     set_sn_on_mu_only(bool(cfg.get("training", {}).get("sn_on_mu_only", False)))
 
@@ -165,27 +150,21 @@ def main():
     ensure_dirs(bcfg["output_dir"])
     results_out.mkdir(parents=True, exist_ok=True)
 
-    # IT: Split di valutazione — QUANTSYS_BACKTEST_SPLIT=val|test (default test).
-    #     'val' valida una config (es. Quiet rank-entry) su un periodo HELD-OUT senza
-    #     tararla sul test set; 'test' è lo stato production. Tutti i tensori (X/y/t e
-    #     macro) e l'allineamento OHLCV/regimi seguono lo split scelto.
-    # EN: Evaluation split — QUANTSYS_BACKTEST_SPLIT=val|test (default test).
-    #     'val' validates a config (e.g. Quiet rank-entry) on a HELD-OUT period without
-    #     tuning on the test set; 'test' is the production state. All tensors (X/y/t and
-    #     macro) and the OHLCV/regime alignment follow the chosen split.
+    # Evaluation split — QUANTSYS_BACKTEST_SPLIT=val|test (default test).
+    # 'val' validates a config (e.g. Quiet rank-entry) on a HELD-OUT period without
+    # tuning on the test set; 'test' is the production state. All tensors (X/y/t and
+    # macro) and the OHLCV/regime alignment follow the chosen split.
     _split = os.environ.get("QUANTSYS_BACKTEST_SPLIT", "test").strip().lower()
     if _split not in ("val", "test"):
         raise ValueError(
             f"QUANTSYS_BACKTEST_SPLIT='{_split}' non valido — usa 'val' o 'test'."
         )
-    # IT: Suffisso output — solo 'test' scrive i file production-clean
-    #     (metrics.json/dashboard_results.json); 'val' va su *_val per non clobberarli.
-    # EN: Output suffix — only 'test' writes the production-clean files; 'val' goes to
-    #     *_val so a validation run never clobbers the production state.
+    # Output suffix — only 'test' writes the production-clean files
+    # (metrics.json/dashboard_results.json); 'val' goes to *_val so a validation
+    # run never clobbers the production state.
     _out_suffix = "" if _split == "test" else f"_{_split}"
 
-    # IT: Dataset serializzato (split scelto) — input al backtest e all'inferenza batch.
-    # EN: Serialized dataset (chosen split) — feeds both backtest loop and batch inference.
+    # Serialized dataset (chosen split) — feeds both backtest loop and batch inference.
     data = np.load("data/lstm_dataset.npz", allow_pickle=True)
     X, y = data[f"X_{_split}"], data[f"y_{_split}"]
     if _split != "test":
@@ -194,8 +173,7 @@ def main():
             "I file metrics.json/dashboard_results.json riflettono il VAL, non il test."
         )
 
-    # IT: ETA pessimistica per-sample; il batch reale è ~10-20x più veloce.
-    # EN: Pessimistic per-sample ETA; actual batch path is ~10-20x faster.
+    # Pessimistic per-sample ETA; actual batch path is ~10-20x faster.
     n_samples = len(X)
     dev_name   = str(device)
     ms_per_sam = 0.15 if device.type == "cuda" else 2.0
@@ -206,12 +184,10 @@ def main():
         f"({'GPU batch' if device.type == 'cuda' else 'CPU batch'})"
     )
 
-    # IT: OHLCV reali da raw_candles.parquet (USD raw). Mai usare features.parquet:
-    #     contiene OHLCV scalati dal RobustScaler e SL/TP scatterebbero su prezzi inventati.
-    # EN: Use raw_candles.parquet (raw USD) for OHLCV. Never features.parquet: those
-    #     prices are RobustScaler-scaled and SL/TP would trigger on fictional bars.
+    # Use raw_candles.parquet (raw USD) for OHLCV. Never features.parquet: those
+    # prices are RobustScaler-scaled and SL/TP would trigger on fictional bars.
     parquet_path = Path("data/raw_candles.parquet")
-    t_eval       = pd.to_datetime(data[f"t_{_split}"])   # IT: timestamp split | EN: split timestamps
+    t_eval       = pd.to_datetime(data[f"t_{_split}"])   # split timestamps
 
     if parquet_path.exists():
         log.info("Caricamento OHLCV reali da raw_candles.parquet ...")
@@ -219,31 +195,27 @@ def main():
                                    columns=["open_time","open","high","low","close","volume"])
         df_feat["open_time"] = pd.to_datetime(df_feat["open_time"], utc=True)
 
-        # IT: merge_asof tollera piccoli scarti (tz, arrotondamenti) entro 2 min.
-        # EN: merge_asof absorbs small skew (tz, rounding) up to a 2-min tolerance.
+        # merge_asof absorbs small skew (tz, rounding) up to a 2-min tolerance.
         t_eval_df = pd.DataFrame({"open_time": pd.to_datetime(t_eval, utc=True)})
         t_eval_df = t_eval_df.sort_values("open_time")
-        n_eval_orig = len(t_eval_df)   # IT: lunghezza split PRIMA del merge | EN: split length BEFORE the merge
+        n_eval_orig = len(t_eval_df)   # split length BEFORE the merge
         merged    = pd.merge_asof(
             t_eval_df,
             df_feat.sort_values("open_time"),
             on="open_time",
             direction="nearest",
-            tolerance=pd.Timedelta("2min"),   # IT: scarto max | EN: max skew
+            tolerance=pd.Timedelta("2min"),   # max skew
         )
 
-        # IT: Fix #1 — i gap Binance possono far duplicare/saltare righe in merge_asof
-        #     e disallineare gli indici posizionali del loop. RuntimeError (no assert).
-        # EN: Fix #1 — Binance gaps can dupe/skip rows in merge_asof and break the
-        #     positional indexing of the main loop. RuntimeError (not assert).
+        # Fix #1 — Binance gaps can dupe/skip rows in merge_asof and break the
+        # positional indexing of the main loop. RuntimeError (not assert).
         if len(merged) != n_eval_orig:
             raise RuntimeError(
                 f"merge_asof ha alterato il numero di righe ({len(merged)} != {n_eval_orig}). "
                 f"Possibile gap Binance nello split '{_split}' — verifica raw_candles.parquet."
             )
 
-        # IT: Verifica copertura — sotto 80% fallback su prezzi ricostruiti.
-        # EN: Coverage check — below 80% fall back to reconstructed prices.
+        # Coverage check — below 80% fall back to reconstructed prices.
         n_matched = merged[["open","high","low","close"]].notna().all(axis=1).sum()
         n_total   = len(merged)
         coverage  = n_matched / n_total
@@ -256,8 +228,7 @@ def main():
                 "Fallback: prezzi ricostruiti dai log-return."
             )
 
-        # IT: Reimposta l'indice posizionale per allinearsi al test set originale.
-        # EN: Reset positional index to align with the original test set ordering.
+        # Reset positional index to align with the original test set ordering.
         merged = merged.set_index(pd.RangeIndex(n_total))
 
         opens   = merged["open"].ffill().values
@@ -275,8 +246,7 @@ def main():
             "data/raw_candles.parquet non trovato — uso prezzi ricostruiti dai log-return. "
             "Esegui prima 01_download_data.py per avere prezzi reali."
         )
-        # IT: Fallback meno accurato — prezzi ricostruiti dai log-return.
-        # EN: Less accurate fallback — prices reconstructed from log-returns.
+        # Less accurate fallback — prices reconstructed from log-returns.
         start_price = 67_000.0
         closes_list = [start_price]
         for r in y:
@@ -287,12 +257,11 @@ def main():
         highs  = closes * (1 + noise)
         lows   = closes * (1 - noise)
         opens  = np.roll(closes, 1); opens[0] = start_price
-        volumes = np.zeros(len(closes))  # IT: no volume nel fallback | EN: no volume in fallback
+        volumes = np.zeros(len(closes))  # no volume in fallback
 
     ohlcv = np.stack([opens, highs, lows, closes], axis=1)
 
-    # IT: ATR(14) tramite True Range standard (Wilder).
-    # EN: ATR(14) computed from the standard Wilder True Range.
+    # ATR(14) computed from the standard Wilder True Range.
     c_prev = np.roll(closes, 1); c_prev[0] = closes[0]
     tr  = np.maximum(
         highs - lows,
@@ -300,18 +269,14 @@ def main():
     )
     atr = pd.Series(tr).rolling(14, min_periods=1).mean().values
 
-    # IT: ADV — MA20 (in BARRE del timeframe corrente) del volume USD per barra;
-    #     input al modello di slippage Almgren-Chriss. Il nome `adv_1m` resta per
-    #     compatibilità con l'API di RiskManager (kwarg condiviso col path live).
-    # EN: ADV — 20-bar MA (bars of the current timeframe) of per-bar USD volume;
-    #     feeds the Almgren-Chriss slippage model. The `adv_1m` name is kept for
-    #     RiskManager API compatibility (kwarg shared with the live path).
+    # ADV — 20-bar MA (bars of the current timeframe) of per-bar USD volume;
+    # feeds the Almgren-Chriss slippage model. The `adv_1m` name is kept for
+    # RiskManager API compatibility (kwarg shared with the live path).
     vol_usd = volumes * closes
     adv_1m  = pd.Series(vol_usd).rolling(20, min_periods=1).mean().values
 
-    # ── Modello / Model ───────────────────────────────────────────────────────
-    # IT: Carica ensemble (eterogeneo o omogeneo) + config; fallback EWM se assente.
-    # EN: Load ensemble (heterogeneous or homogeneous) + config; EWM fallback if absent.
+    # ── Model ───────────────────────────────────────────────────────────────
+    # Load ensemble (heterogeneous or homogeneous) + config; EWM fallback if absent.
     model_cfg  = {}
     has_macro  = False
     use_model  = False
@@ -319,16 +284,11 @@ def main():
 
     models_dir = Path(cfg["training"]["output_dir"])
     try:
-        # IT: Preferisci ensemble eterogeneo (≥2 archs in distillation.archs);
-        #     fallback su ensemble omogeneo se i checkpoint mancano.
-        #     L'env var QUANTSYS_BACKTEST_SINGLE_ARCH=1 forza il path omogeneo
-        #     anche se più archs sono disponibili — usato da run_all.py per
-        #     produrre backtest per-arch comparabili dopo distillation.
-        # EN: Prefer heterogeneous ensemble (>=2 archs in distillation.archs);
-        #     fall back to homogeneous ensemble when checkpoints are missing.
-        #     QUANTSYS_BACKTEST_SINGLE_ARCH=1 env var forces the homogeneous
-        #     path even when multiple archs exist — used by run_all.py to
-        #     produce per-arch comparable backtests after distillation.
+        # Prefer heterogeneous ensemble (>=2 archs in distillation.archs);
+        # fall back to homogeneous ensemble when checkpoints are missing.
+        # QUANTSYS_BACKTEST_SINGLE_ARCH=1 env var forces the homogeneous
+        # path even when multiple archs exist — used by run_all.py to
+        # produce per-arch comparable backtests after distillation.
         from quantsys.model.ensemble import get_distillation_archs
         _archs = get_distillation_archs(cfg)
         _het_available = sum(1 for a in _archs
@@ -350,8 +310,7 @@ def main():
         use_model = True
         log.info(f"Modello caricato: {model_cfg.get('model_type','?')}  has_macro={has_macro}")
 
-        # IT: Carica X_macro_{split} se il modello ha branch macro; altrimenti zeros.
-        # EN: Load X_macro_{split} when the model has a macro branch; zeros otherwise.
+        # Load X_macro_{split} when the model has a macro branch; zeros otherwise.
         if has_macro and f"X_macro_{_split}" in data.files:
             Xm_test = torch.tensor(data[f"X_macro_{_split}"], dtype=torch.float32)
             log.info(f"X_macro_{_split} caricato: {tuple(Xm_test.shape)}")
@@ -364,23 +323,19 @@ def main():
     except Exception as e:
         log.warning(f"Modello non trovato ({e}) — uso SimpleSignalModel (rolling EWM).")
 
-    # IT: Senza modello, precalcoliamo rolling stats una sola volta (fallback EWM).
-    # EN: Without a model, precompute rolling stats once (EWM fallback path).
+    # Without a model, precompute rolling stats once (EWM fallback path).
     if not use_model:
-        # IT: feature 0 = log_ret (ordine definito da feature_engineering.py).
-        # EN: feature 0 = log_ret (ordering fixed by feature_engineering.py).
+        # feature 0 = log_ret (ordering fixed by feature_engineering.py).
         all_rets = X[:, :, 0]
 
         rets_last = all_rets[:, -1]
 
-        # IT: EWM span 5 (fast) / 20 (slow) sull'ultimo log-return — proxy di trend.
-        # EN: EWM span 5 (fast) / 20 (slow) on the latest log-return — trend proxy.
+        # EWM span 5 (fast) / 20 (slow) on the latest log-return — trend proxy.
         s = pd.Series(rets_last)
         fast_ema = s.ewm(span=5,  adjust=False, min_periods=1).mean().values
         slow_ema = s.ewm(span=20, adjust=False, min_periods=1).mean().values
 
-        # IT: σ stimata dalla coda 20-bar di ciascuna finestra (vettorizzato).
-        # EN: σ estimated from the trailing 20-bar tail of every window (vectorised).
+        # σ estimated from the trailing 20-bar tail of every window (vectorised).
         _tail = all_rets[:, -20:]
         rolling_std = np.maximum(_tail.std(axis=1, ddof=1), 1e-5)
 
@@ -388,21 +343,15 @@ def main():
                  f"fast_ema range [{fast_ema.min():.5f}, {fast_ema.max():.5f}]  "
                  f"vol medio={rolling_std.mean():.5f}")
 
-    # ── Batch inference (Fix 1 — 200k campioni) ──────────────────────────────
-    # IT: Pre-calcola TUTTE le predizioni in batch (poi lookup O(1) nel loop):
-    #     200k forward pass sample-per-sample sono lenti anche su GPU per
-    #     l'overhead di scheduling dei kernel CUDA.
-    # EN: Pre-compute ALL predictions in batches (then O(1) lookup in the loop):
-    #     200k per-sample forward passes are slow even on GPU due to CUDA kernel
-    #     scheduling overhead.
+    # ── Batch inference (Fix 1 — 200k samples) ───────────────────────────────
+    # Pre-compute ALL predictions in batches (then O(1) lookup in the loop):
+    # 200k per-sample forward passes are slow even on GPU due to CUDA kernel
+    # scheduling overhead.
     #
     if use_model:
-        # IT: 2026-05-16: ridotto da 4096 a 256 per OOM su tcnmamba (Mamba SSM alloca
-        #     tensori (B,T,d_inner,d_state) ~17MB/sample → 4096 = 70GB working set);
-        #     256 mantiene la VRAM <3 GiB anche col branch Mamba attivo.
-        # EN: 2026-05-16: lowered 4096→256 to avoid tcnmamba OOM (Mamba SSM allocates
-        #     (B,T,d_inner,d_state) ~17MB/sample → 4096 = 70GB working set); 256 keeps
-        #     VRAM <3 GiB even with the Mamba branch on.
+        # 2026-05-16: lowered 4096→256 to avoid tcnmamba OOM (Mamba SSM allocates
+        # (B,T,d_inner,d_state) ~17MB/sample → 4096 = 70GB working set); 256 keeps
+        # VRAM <3 GiB even with the Mamba branch on.
         BATCH_SIZE = 256
         all_mu    = np.zeros(n_samples, dtype=np.float32)
         all_sigma = np.zeros(n_samples, dtype=np.float32)
@@ -432,24 +381,18 @@ def main():
 
         log.info("Batch inference completata — predizioni pre-calcolate per tutti i campioni")
 
-        # ── Denormalizzazione μ/σ via PipelineState (fix bug z-score 2026-05-23) ──
-        # IT: Il modello predice in spazio z-score; il trading layer opera in raw.
-        #     La conversione centralizzata in PipelineState.denormalize_predictions
-        #     previene drift tra script (vedi anche 04_live_signals.py).
-        # EN: The model predicts in z-score space; the trading layer works in raw.
-        #     Centralising the conversion in PipelineState.denormalize_predictions
-        #     prevents drift across scripts (see also 04_live_signals.py).
+        # ── μ/σ denormalization via PipelineState (z-score bug fix 2026-05-23) ──
+        # The model predicts in z-score space; the trading layer works in raw.
+        # Centralising the conversion in PipelineState.denormalize_predictions
+        # prevents drift across scripts (see also 04_live_signals.py).
         _ps_path = Path("models") / os.environ.get("QUANTSYS_ARCH", "lstm") / "pipeline_state.pkl"
         if not _ps_path.exists():
             _ps_path = Path("models/lstm/pipeline_state.pkl")
         if _ps_path.exists():
             _state = PipelineState.load(str(_ps_path))
-            # IT: Fix #22 — blocca l'errore utente se forecast_horizon è cambiato tra
-            #     training e backtest. La chiave è features.forecast_horizon (non data.)
-            #     — fallback su data. per i pipeline state legacy.
-            # EN: Fix #22 — guard against user error if forecast_horizon changed between
-            #     training and backtest. Key is features.forecast_horizon (not data.)
-            #     — fall back to data. for legacy pipeline states.
+            # Fix #22 — guard against user error if forecast_horizon changed between
+            # training and backtest. Key is features.forecast_horizon (not data.)
+            # — fall back to data. for legacy pipeline states.
             _cfg_h = cfg.get("features", {}).get("forecast_horizon",
                        cfg.get("data", {}).get("forecast_horizon", 15))
             _state_h = _state.forecast_horizon
@@ -459,12 +402,9 @@ def main():
                     f"Il modello è stato addestrato per orizzonte {_state_h}; backtest a {_cfg_h} "
                     f"produce metriche invalide. Allinea config/default.yaml o rigenera il modello."
                 )
-            # IT: Pivot 1m→1h — blocca la combinazione invalida modello-X-minuti ↔
-            #     config-Y-minuti: dataset, scaler e finestre TIME-semantic divergono
-            #     (stesso pattern del guard forecast_horizon). Legacy pkl → 1 (=1m).
-            # EN: 1m→1h pivot — block the invalid combo model-at-X-minutes ↔
-            #     config-at-Y-minutes: dataset, scalers and TIME-semantic windows
-            #     diverge (same pattern as the forecast_horizon guard). Legacy pkl → 1 (=1m).
+            # 1m→1h pivot — block the invalid combo model-at-X-minutes ↔
+            # config-at-Y-minutes: dataset, scalers and TIME-semantic windows
+            # diverge (same pattern as the forecast_horizon guard). Legacy pkl → 1 (=1m).
             _state_im = getattr(_state, "interval_minutes", 1)
             if _state_im != interval_minutes:
                 raise RuntimeError(
@@ -472,8 +412,7 @@ def main():
                     f"Il modello è stato addestrato su candele {_state_im}m; backtest a {interval_minutes}m "
                     f"produce metriche invalide. Allinea config/default.yaml o ri-addestra."
                 )
-            # IT: max_hold_candles ≥ forecast_horizon (non chiudere prima dell'orizzonte).
-            # EN: max_hold_candles ≥ forecast_horizon (don't close before the horizon is covered).
+            # max_hold_candles ≥ forecast_horizon (don't close before the horizon is covered).
             _max_hold = rcfg.get("max_hold_candles", 0)
             if _max_hold < _state_h:
                 log.warning(
@@ -481,13 +420,11 @@ def main():
                     f"Il TP/SL potrebbe non avere tempo di triggerare prima del MAX_HOLD."
                 )
             all_mu, all_sigma = _state.denormalize_predictions(all_mu, all_sigma)
-            # IT: Step 0.5 — ricalibrazione σ sperimentale (env, default 1.0 = INERTE). Lo Step 0
-            #     (scripts/archive/dev_step0_regime_sigma.py) ha mostrato σ ~3× troppo grande (std(z)≈0.4)
-            #     → SL/TP (σ·price·1.5) ~3× troppo larghi. Scala σ post-denorm per misurare l'impatto
-            #     su SL/TP, Kelly (f*=μ/σ²) e gate SNR (|μ|/σ). Reversibile; se promosso va bakato in
-            #     PipelineState.denormalize_predictions (parity-safe: identico backtest↔live).
-            # EN: Step 0.5 — experimental σ recalibration (env, default 1.0 = INERT). Step 0 showed
-            #     σ is ~3× too large → SL/TP too wide. Scales σ post-denorm to measure trading impact.
+            # Step 0.5 — experimental σ recalibration (env, default 1.0 = INERT). Step 0
+            # (scripts/archive/dev_step0_regime_sigma.py) showed σ is ~3× too large (std(z)≈0.4)
+            # → SL/TP (σ·price·1.5) ~3× too wide. Scales σ post-denorm to measure the impact
+            # on SL/TP, Kelly (f*=μ/σ²) and the SNR gate (|μ|/σ). Reversible; if promoted it must
+            # be baked into PipelineState.denormalize_predictions (parity-safe: identical backtest↔live).
             _sigma_scale = float(os.environ.get("QUANTSYS_SIGMA_SCALE", "1") or "1")
             if _sigma_scale != 1.0:
                 all_sigma = all_sigma * _sigma_scale
@@ -497,16 +434,11 @@ def main():
                 f"μ range [{all_mu.min():.5f}, {all_mu.max():.5f}], "
                 f"σ range [{all_sigma.min():.5f}, {all_sigma.max():.5f}]"
             )
-            # IT: Safety check — il safety net cattura il bug di denormalizzazione z→raw
-            #     (σ gonfiata ~30-100×), NON la crescita legittima ~√60 della σ a orizzonte
-            #     30 barre orarie — la soglia scala con √interval per preservare l'intento
-            #     (0.05 a 1m, ≈0.387 a 1h). RuntimeError (non assert) perché `python -O`
-            #     rimuove gli assert anche in produzione.
-            # EN: Safety check — the safety net catches the z→raw denormalization bug
-            #     (σ inflated ~30-100×), NOT the legitimate ~√60 growth of σ over a
-            #     30-hourly-bar horizon — the threshold scales with √interval to preserve
-            #     the intent (0.05 at 1m, ≈0.387 at 1h). RuntimeError (not assert) since
-            #     `python -O` strips asserts even in production builds.
+            # Safety check — the safety net catches the z→raw denormalization bug
+            # (σ inflated ~30-100×), NOT the legitimate ~√60 growth of σ over a
+            # 30-hourly-bar horizon — the threshold scales with √interval to preserve
+            # the intent (0.05 at 1m, ≈0.387 at 1h). RuntimeError (not assert) since
+            # `python -O` strips asserts even in production builds.
             _sigma_cap = 0.05 * math.sqrt(interval_minutes)
             if all_sigma.max() >= _sigma_cap:
                 raise RuntimeError(
@@ -518,22 +450,18 @@ def main():
         else:
             log.warning(f"pipeline_state.pkl non trovato in {_ps_path} — μ/σ in spazio z-score!")
     else:
-        # IT: Array placeholder per lo stress test quando non c'è modello (use_model=False).
-        # EN: Placeholder arrays for the stress test when no model is loaded (use_model=False).
+        # Placeholder arrays for the stress test when no model is loaded (use_model=False).
         all_mu    = np.zeros(n_samples, dtype=np.float32)
         all_sigma = np.full(n_samples, 0.001, dtype=np.float32)
         all_nu    = np.full(n_samples, 5.0,   dtype=np.float32)
 
-    # IT: Restituisce (mu, sigma, nu) per il sample step_idx: lookup o fallback EWM.
-    # EN: Returns (mu, sigma, nu) for sample step_idx: array lookup or EWM fallback.
+    # Returns (mu, sigma, nu) for sample step_idx: array lookup or EWM fallback.
     def predict(window: np.ndarray, step_idx: int):
         if use_model:
-            # IT: Lookup O(1) negli array pre-calcolati — forward pass già fatto.
-            # EN: O(1) lookup into the pre-computed arrays — forward pass already done.
+            # O(1) lookup into the pre-computed arrays — forward pass already done.
             return float(all_mu[step_idx]), float(all_sigma[step_idx]), float(all_nu[step_idx])
 
-        # IT: Fallback — usa le rolling stats EWM pre-calcolate.
-        # EN: Fallback — use the pre-computed EWM rolling stats.
+        # Fallback — use the pre-computed EWM rolling stats.
         mu  = float(fast_ema[step_idx] * 0.6 + slow_ema[step_idx] * 0.4)
         sig = float(rolling_std[step_idx])
         nu  = float(np.clip(5.0 + (0.002 - sig) / 0.0005, 3.0, 12.0))
@@ -555,16 +483,12 @@ def main():
         slippage_model     = bcfg.get("slippage_model", "fixed"),
         correlation_window       = rcfg.get("correlation_window", 10),
         max_directional_exposure  = rcfg.get("max_directional_exposure", 0.6),
-        # IT: barre/anno dal timeframe (annualizzazione Sharpe/Sortino in metrics()).
-        # EN: bars/year from the timeframe (Sharpe/Sortino annualization in metrics()).
+        # bars/year from the timeframe (Sharpe/Sortino annualization in metrics()).
         bars_per_year      = bars_per_year,
     )
-    # IT: QUANTSYS_MIN_EXPECTED_RET — override env del gate |μ| (inerte se assente).
-    #     Serve allo sweep cost-aware pre-registrato (es. 13 vs 23 bps) senza toccare
-    #     la config production. Pattern standard dei flag sperimentali.
-    # EN: QUANTSYS_MIN_EXPECTED_RET — env override of the |μ| gate (inert if unset).
-    #     Enables the pre-registered cost-aware sweep (e.g. 13 vs 23 bps) without
-    #     touching the production config. Standard experimental-flag pattern.
+    # QUANTSYS_MIN_EXPECTED_RET — env override of the |μ| gate (inert if unset).
+    # Enables the pre-registered cost-aware sweep (e.g. 13 vs 23 bps) without
+    # touching the production config. Standard experimental-flag pattern.
     _min_exp_ret = float(os.environ.get("QUANTSYS_MIN_EXPECTED_RET",
                                         bcfg["min_expected_ret"]))
     if _min_exp_ret != bcfg["min_expected_ret"]:
@@ -574,8 +498,7 @@ def main():
         min_expected_ret = _min_exp_ret,
         max_sigma        = bcfg["max_sigma"],
         conviction_alpha = bcfg.get("conviction_alpha", 0.5),
-        # IT: SNR gate da config (default 0.0 = disattivato) — quick-win #2
-        # EN: SNR gate from config (default 0.0 = disabled) — quick-win #2
+        # SNR gate from config (default 0.0 = disabled) — quick-win #2
         min_snr          = bcfg.get("min_snr", 0.0),
     )
 
@@ -585,28 +508,22 @@ def main():
     peak = rcfg["initial_capital"]
     pre_signals = []
 
-    # IT: Tracking per regime — separa le metriche per alta/bassa volatilità;
-    #     "alta vol" = ATR > mediana ATR del test set (proxy di regime difficile).
-    # EN: Regime-conditioned tracking — split metrics by high/low volatility;
-    #     "high vol" = ATR > test-set median ATR (proxy for a hard regime).
+    # Regime-conditioned tracking — split metrics by high/low volatility;
+    # "high vol" = ATR > test-set median ATR (proxy for a hard regime).
     atr_median = np.median(atr)
     regime_trades = {"high_vol": [], "low_vol": []}
     log.info(f"ATR mediana split '{_split}': {atr_median:.0f}  (soglia high/low vol)")
 
-    # IT: Carica i regimi BTC `RegimeMarkovBTC` (Quiet/Trending/Stress) allineati a t_eval.
-    #     Sostituisce il vecchio proxy ATR-based usato nel loop per `rm.set_regime(...)`.
-    #     Se il file non esiste o l'allineamento fallisce, fallback al proxy ATR storico.
-    # EN: Loads BTC `RegimeMarkovBTC` regimes (Quiet/Trending/Stress) aligned to t_eval.
-    #     Replaces the previous ATR-proxy used in the loop for `rm.set_regime(...)`.
-    #     Falls back to the historical ATR proxy if the file is missing or alignment fails.
+    # Loads BTC `RegimeMarkovBTC` regimes (Quiet/Trending/Stress) aligned to t_eval.
+    # Replaces the previous ATR-proxy used in the loop for `rm.set_regime(...)`.
+    # Falls back to the historical ATR proxy if the file is missing or alignment fails.
     btc_regime_per_step: "np.ndarray | None" = None
     try:
         reg_path = Path("data") / "regime_probs.parquet"
         if reg_path.exists():
             df_reg = pd.read_parquet(reg_path)
             if "regime_dominant" in df_reg.columns:
-                # IT: normalizza indice/timestamp a UTC ns-naive per merge_asof.
-                # EN: normalize index/timestamp to UTC ns-naive for merge_asof.
+                # normalize index/timestamp to UTC ns-naive for merge_asof.
                 if not isinstance(df_reg.index, pd.DatetimeIndex):
                     tcol = next((c for c in ("open_time", "timestamp", "date")
                                  if c in df_reg.columns), None)
@@ -638,13 +555,10 @@ def main():
         log.warning(f"RegimeMarkovBTC alignment fallito ({_e}) — fallback proxy ATR")
         btc_regime_per_step = None
 
-    # IT: Regime-gating sperimentale (2026-06-04) — env-controlled, reversibile.
-    #     QUANTSYS_REGIME_ALLOW="0,2"  → entra SOLO in questi regimi (altrove side=NONE).
-    #     QUANTSYS_REGIME_INVERT="1"   → inverte il side in questi regimi (anti-edge → edge).
-    #     Basato su edge per-regime: Quiet(0)=+0.13, Trending(1)=-0.13, Stress(2)=+0.04.
-    # EN: Experimental regime-gating (2026-06-04) — env-controlled, reversible.
-    #     QUANTSYS_REGIME_ALLOW="0,2"  → enter ONLY in these regimes (NONE elsewhere).
-    #     QUANTSYS_REGIME_INVERT="1"   → flip the side in these regimes (anti-edge → edge).
+    # Experimental regime-gating (2026-06-04) — env-controlled, reversible.
+    # QUANTSYS_REGIME_ALLOW="0,2"  → enter ONLY in these regimes (NONE elsewhere).
+    # QUANTSYS_REGIME_INVERT="1"   → flip the side in these regimes (anti-edge → edge).
+    # Based on per-regime edge: Quiet(0)=+0.13, Trending(1)=-0.13, Stress(2)=+0.04.
     _rg_allow  = os.environ.get("QUANTSYS_REGIME_ALLOW")
     _rg_invert = os.environ.get("QUANTSYS_REGIME_INVERT")
     _regime_allow  = {int(x) for x in _rg_allow.split(",")  if x.strip() != ""} if _rg_allow  else None
@@ -652,24 +566,19 @@ def main():
     if (_regime_allow is not None or _regime_invert) and btc_regime_per_step is not None:
         log.info(f"Regime-gating ATTIVO: allow={_regime_allow}, invert={_regime_invert}")
 
-    # IT: Entry RANK-based per regime Quiet (2026-06-04) — sfrutta l'edge di RANGO
-    #     (Spearman +0.13÷0.19, stabile in tutti i sotto-periodi OOS) che l'entry a
-    #     soglia |μ| non cattura (in Quiet μ piccole → 0 trade). Gate a quantile
-    #     causale: LONG se μ nel top-q / SHORT se bottom-q della distribuzione recente
-    #     di μ osservata in Quiet; NONE negli altri regimi (isola l'edge robusto).
-    # EN: RANK-based entry for the Quiet regime — harvests the RANK edge (Spearman
-    #     +0.13÷0.19, stable across all OOS sub-periods) that |μ|-threshold entry misses.
-    #     Causal rolling-quantile gate; trades only the Quiet regime.
+    # RANK-based entry for the Quiet regime — harvests the RANK edge (Spearman
+    # +0.13÷0.19, stable across all OOS sub-periods) that |μ|-threshold entry misses
+    # (in Quiet μ is small → 0 trades). Causal quantile gate: LONG if μ is in the top-q /
+    # SHORT if in the bottom-q of the recent μ distribution observed in Quiet; NONE in the
+    # other regimes (isolates the robust edge).
     _quiet_q       = float(os.environ.get("QUANTSYS_QUIET_RANK_Q", "0") or "0")
     _quiet_reg     = int(os.environ.get("QUANTSYS_QUIET_REGIME", "0"))
     _quiet_conv    = float(os.environ.get("QUANTSYS_QUIET_CONVICTION", "0.5") or "0.5")
-    # IT: Floor di σ (raw) — salta i trade Quiet con movimento atteso troppo piccolo per
-    #     coprire le fee (~26bps round-trip). 0 = off. Cost-derived, NON tuned sul test.
-    # EN: σ floor (raw) — skips Quiet trades whose expected move is too small to cover
-    #     fees (~26bps round-trip). 0 = off. Cost-derived, NOT tuned on test.
+    # σ floor (raw) — skips Quiet trades whose expected move is too small to cover
+    # fees (~26bps round-trip). 0 = off. Cost-derived, NOT tuned on test.
     _quiet_min_sig = float(os.environ.get("QUANTSYS_QUIET_MIN_SIGMA", "0") or "0")
-    _quiet_buf_max = 1000   # IT: finestra causale μ-Quiet | EN: causal Quiet-μ window
-    _quiet_min_buf = 200    # IT: min sample prima di tradare | EN: min samples before trading
+    _quiet_buf_max = 1000   # causal Quiet-μ window
+    _quiet_min_buf = 200    # min samples before trading
     _quiet_mu_buf: "list[float]" = []
     _quiet_active  = _quiet_q > 0 and btc_regime_per_step is not None
     if _quiet_active:
@@ -677,64 +586,47 @@ def main():
                  f"(LONG top-{_quiet_q:.0%} / SHORT bottom-{_quiet_q:.0%}), "
                  f"buffer={_quiet_buf_max}, conviction={_quiet_conv}")
 
-    # IT: ── Fix ① — CADENZA DECISIONALE = ORIZZONTE (sperimentale, reversibile, default off) ──
-    #     Un segnale a orizzonte h tradato ogni candela genera h bet sovrapposti e
-    #     autocorrelati: stesso costo fee, informazione incrementale ≈0 (breadth effettiva
-    #     ≪ nominale, legge fondamentale IR≈IC·√breadth). Gate causale: una NUOVA entry apre
-    #     solo se sono passate ≥cadence candele dall'ultima → bet quasi-indipendenti, fee drag
-    #     tagliato. Gli EXIT (SL/TP/trailing/circuit-breaker) restano ogni candela.
-    #     0=off (ogni candela); "h"=usa forecast_horizon (cadenza allineata all'orizzonte).
-    # EN: Fix ① — decision cadence = horizon (experimental, reversible, default off). A horizon-h
-    #     signal traded every candle yields h overlapping, autocorrelated bets: same fee cost,
-    #     ~0 incremental info (effective breadth ≪ nominal). Causal gate: a NEW entry opens only
-    #     if ≥cadence candles passed since the last one. Exits run every candle. 0=off; "h"=horizon.
+    # Fix ① — decision cadence = horizon (experimental, reversible, default off). A horizon-h
+    # signal traded every candle yields h overlapping, autocorrelated bets: same fee cost,
+    # ~0 incremental info (effective breadth ≪ nominal, fundamental law IR≈IC·√breadth). Causal
+    # gate: a NEW entry opens only if ≥cadence candles passed since the last one → quasi-independent
+    # bets, fee drag cut. Exits (SL/TP/trailing/circuit-breaker) run every candle.
+    # 0=off (every candle); "h"=use forecast_horizon (cadence aligned with the horizon).
     _cad_raw = os.environ.get("QUANTSYS_DECISION_CADENCE", "0").strip().lower()
     _fh = int(cfg.get("features", {}).get("forecast_horizon",
               cfg.get("data", {}).get("forecast_horizon", 30)))
     _decision_cadence = _fh if _cad_raw == "h" else int(float(_cad_raw or "0"))
-    _last_entry_i = -10**9   # IT: indice ultima entry (causale) | EN: last-entry index (causal)
+    _last_entry_i = -10**9   # last-entry index (causal)
     if _decision_cadence > 0:
         log.info(f"Decision-cadence ATTIVA: nuove entry ogni ≥{_decision_cadence} candele (h={_fh})")
 
-    # IT: ── Fix ② — ESPOSIZIONE CONTINUA RANK-BASED, REGIME-GATED (sperimentale, reversibile) ──
-    #     L'edge reale è ordinale (Spearman Quiet +0.13÷0.19), non μ calibrato: l'entry a soglia
-    #     |μ| e il rank-entry DISCRETO (QUANTSYS_QUIET_RANK_Q) lo distruggono. Qui il segnale è
-    #     CONTINUO: r = percentile causale di μ nel buffer ∈[0,1]; s = 2r−1 ∈[−1,+1] (segno=
-    #     direzione, |s|=forza). No-trade band |s|<band = deadzone/isteresi (niente flip su rank
-    #     debole → throttling naturale dei flip-flop). conviction = (|s|−band)/(1−band) ∈(0,1]
-    #     scala il Kelly con continuità (dist.conviction → RiskManager._size). Attivo SOLO nel
-    #     regime target (Quiet di default), NONE altrove → isola l'unico edge stabile OOS.
-    # EN: Fix ② — continuous rank-proportional, regime-gated exposure (experimental, reversible).
-    #     The real edge is ordinal (Quiet Spearman), not calibrated μ: |μ|-threshold and DISCRETE
-    #     rank-entry destroy it. Continuous signal: r=causal percentile of μ ∈[0,1]; s=2r−1
-    #     ∈[−1,+1] (sign=direction, |s|=strength). No-trade band |s|<band = deadzone/hysteresis.
-    #     conviction=(|s|−band)/(1−band) scales Kelly continuously. Active ONLY in target regime.
+    # Fix ② — continuous rank-proportional, regime-gated exposure (experimental, reversible).
+    # The real edge is ordinal (Quiet Spearman +0.13÷0.19), not calibrated μ: |μ|-threshold and
+    # DISCRETE rank-entry (QUANTSYS_QUIET_RANK_Q) destroy it. Continuous signal: r=causal
+    # percentile of μ in the buffer ∈[0,1]; s=2r−1 ∈[−1,+1] (sign=direction, |s|=strength).
+    # No-trade band |s|<band = deadzone/hysteresis (no flip on weak rank → natural flip-flop
+    # throttling). conviction=(|s|−band)/(1−band) ∈(0,1] scales Kelly continuously
+    # (dist.conviction → RiskManager._size). Active ONLY in the target regime (Quiet by
+    # default), NONE elsewhere → isolates the only OOS-stable edge.
     _rank_active  = os.environ.get("QUANTSYS_RANK_EXPOSURE", "0").strip() == "1" and btc_regime_per_step is not None
     _rank_reg     = int(os.environ.get("QUANTSYS_RANK_REGIME", "0"))
     _rank_band    = float(os.environ.get("QUANTSYS_RANK_BAND", "0.5") or "0.5")
-    # IT: Floor di σ (raw) — salta i trade con movimento atteso < fee (~26bps round-trip). 0=off.
-    # EN: σ floor (raw) — skips trades whose expected move can't cover fees. 0=off.
+    # σ floor (raw) — skips trades whose expected move < fees (~26bps round-trip). 0=off.
     _rank_min_sig = float(os.environ.get("QUANTSYS_RANK_MIN_SIGMA", "0") or "0")
     _rank_buf_max = int(os.environ.get("QUANTSYS_RANK_WIN", "1000") or "1000")
-    _rank_min_buf = 200      # IT: min sample prima di tradare | EN: min samples before trading
+    _rank_min_buf = 200      # min samples before trading
     _rank_mu_buf: "list[float]" = []
     if _rank_active:
         log.info(f"Rank-exposure ATTIVO: regime={_rank_reg}, band={_rank_band} "
                  f"(trade solo |percentile−0.5|≥{_rank_band/2:.2f}), σ_floor={_rank_min_sig}, "
                  f"buffer={_rank_buf_max}")
 
-    # IT: ── EXIT ORIZZONTE-LOCKED (test di isolamento, sperimentale, reversibile, default off) ──
-    #     Chiusura puramente TEMPORALE a esattamente h candele, bypassando SL/TP/SIGNAL/trailing.
-    #     Scopo: isolare l'edge di RANGO dal path di realizzazione del trade — così la PnL del
-    #     trade coincide col rendimento cumulato a orizzonte-h su cui è misurato lo Spearman
-    #     (altrimenti SL/TP/flip dominano la PnL e mascherano l'edge ordinale, cfr. esito 2026-06-05).
-    #     0=off (exit normale SL/TP/SIGNAL); "h"=usa forecast_horizon. Il circuit-breaker resta
-    #     attivo (DD realizzato in close_position). Diagnostico, NON una regola di produzione.
-    # EN: ── HORIZON-LOCKED EXIT (isolation test, experimental, reversible, default off) ──
-    #     Pure TIME close at exactly h candles, bypassing SL/TP/SIGNAL/trailing, so a trade's PnL
-    #     equals the horizon-h cumulative return the Spearman is measured on (otherwise SL/TP/flip
-    #     dominate PnL and mask the ordinal edge). 0=off; "h"=forecast_horizon. Circuit-breaker
-    #     stays active. Diagnostic, NOT a production rule.
+    # ── HORIZON-LOCKED EXIT (isolation test, experimental, reversible, default off) ──
+    # Pure TIME close at exactly h candles, bypassing SL/TP/SIGNAL/trailing, so a trade's PnL
+    # equals the horizon-h cumulative return the Spearman is measured on (otherwise SL/TP/flip
+    # dominate PnL and mask the ordinal edge, cf. the 2026-06-05 outcome). 0=off (normal
+    # SL/TP/SIGNAL exit); "h"=forecast_horizon. Circuit-breaker stays active (realized DD in
+    # close_position). Diagnostic, NOT a production rule.
     _hx_raw = os.environ.get("QUANTSYS_HORIZON_EXIT", "0").strip().lower()
     _horizon_exit = _fh if _hx_raw == "h" else int(float(_hx_raw or "0"))
     if _horizon_exit > 0:
@@ -750,14 +642,11 @@ def main():
         atr_i = max(atr[i], c_c*0.0005)
 
         mu, sigma, nu    = predict(X[i], i)
-        # IT: Rischio condizionato al regime — preferisce RegimeMarkovBTC se disponibile,
-        #     fallback al proxy ATR storico (alta/media/bassa vol).
-        # EN: Regime-conditioned risk — prefers RegimeMarkovBTC when available, falls back
-        #     to the historical ATR proxy (high/mid/low vol).
+        # Regime-conditioned risk — prefers RegimeMarkovBTC when available, falls back
+        # to the historical ATR proxy (high/mid/low vol).
         if btc_regime_per_step is not None:
             rm.set_regime(int(btc_regime_per_step[i]))
-            # IT: regime threshold rimosso 2026-06-03 — calibrazione da rifare post-paper-trading
-            # EN: removed — re-calibrate post paper-trading
+            # regime threshold removed 2026-06-03 — re-calibrate post paper-trading
         elif atr_i > atr_median * 1.5:
             rm.set_regime("stagflation")
         elif atr_i > atr_median:
@@ -765,29 +654,25 @@ def main():
         else:
             rm.set_regime("expansion")
         side, dist       = sig_gen.generate(mu, sigma, nu)
-        # IT: Fix ② — esposizione continua rank-based (priorità) — direzione+conviction dal
-        #     percentile causale di μ; no-trade band = deadzone/isteresi; NONE fuori regime.
-        # EN: Fix ② — continuous rank exposure (priority) — direction+conviction from the causal
-        #     μ-percentile; no-trade band = deadzone/hysteresis; NONE outside the target regime.
+        # Fix ② — continuous rank exposure (priority) — direction+conviction from the causal
+        # μ-percentile; no-trade band = deadzone/hysteresis; NONE outside the target regime.
         if _rank_active:
             _reg = int(btc_regime_per_step[i])
             _new_side = Side.NONE
             if _reg == _rank_reg:
                 if len(_rank_mu_buf) >= _rank_min_buf and sigma <= sig_gen.max_sigma and sigma >= _rank_min_sig:
                     _arr = np.asarray(_rank_mu_buf)
-                    _r   = float(np.mean(_arr < mu))        # IT: percentile causale di μ ∈[0,1]
-                    _s   = 2.0 * _r - 1.0                    # IT: rango centrato ∈[−1,+1]
-                    if abs(_s) > _rank_band:                 # IT: fuori dalla deadzone (= isteresi)
+                    _r   = float(np.mean(_arr < mu))        # causal percentile of μ ∈[0,1]
+                    _s   = 2.0 * _r - 1.0                    # centred rank ∈[−1,+1]
+                    if abs(_s) > _rank_band:                 # outside the deadzone (= hysteresis)
                         _new_side = Side.LONG if _s > 0 else Side.SHORT
-                        # IT: conviction continua → scala il Kelly proporzionalmente al rango
-                        # EN: continuous conviction → scales Kelly proportionally to rank distance
+                        # continuous conviction → scales Kelly proportionally to rank distance
                         dist.conviction = float(np.clip((abs(_s) - _rank_band) / (1.0 - _rank_band), 0.0, 1.0))
-                _rank_mu_buf.append(float(mu))               # IT: update DOPO la decisione (causale)
+                _rank_mu_buf.append(float(mu))               # update AFTER the decision (causal)
                 if len(_rank_mu_buf) > _rank_buf_max:
                     _rank_mu_buf.pop(0)
-            side = _new_side                                 # IT: NONE fuori regime → isola l'edge
-        # IT: Quiet rank-entry (priorità) — override il side via quantile causale di μ.
-        # EN: Quiet rank-entry (priority) — override side via causal μ-quantile.
+            side = _new_side                                 # NONE outside regime → isolates the edge
+        # Quiet rank-entry (priority) — override side via causal μ-quantile.
         elif _quiet_active:
             _reg = int(btc_regime_per_step[i])
             if _reg == _quiet_reg:
@@ -798,16 +683,15 @@ def main():
                     _lo  = float(np.quantile(_arr, _quiet_q))
                     if   mu >= _hi: _new_side = Side.LONG
                     elif mu <= _lo: _new_side = Side.SHORT
-                _quiet_mu_buf.append(float(mu))             # IT: update DOPO la decisione (causale)
+                _quiet_mu_buf.append(float(mu))             # update AFTER the decision (causal)
                 if len(_quiet_mu_buf) > _quiet_buf_max:
                     _quiet_mu_buf.pop(0)
                 if _new_side != Side.NONE:
-                    dist.conviction = _quiet_conv           # IT: size fissa (prob_up non affidabile in Quiet)
+                    dist.conviction = _quiet_conv           # fixed size (prob_up unreliable in Quiet)
                 side = _new_side
             else:
-                side = Side.NONE                            # IT: isola l'edge Quiet — niente trade fuori regime
-        # IT: Regime-gating sperimentale — inverte o azzera il side per regime.
-        # EN: Experimental regime-gating — invert or null the side per regime.
+                side = Side.NONE                            # isolates the Quiet edge — no trades outside regime
+        # Experimental regime-gating — invert or null the side per regime.
         elif side != Side.NONE and btc_regime_per_step is not None and (_regime_allow is not None or _regime_invert):
             _reg = int(btc_regime_per_step[i])
             if _reg in _regime_invert:
@@ -821,8 +705,7 @@ def main():
 
         if rm.position:
             if _horizon_exit > 0:
-                # IT: exit orizzonte-locked — chiusura TEMPORALE pura al close, bypassa SL/TP/SIGNAL.
-                # EN: horizon-locked exit — pure TIME close at the close price, bypasses SL/TP/SIGNAL.
+                # horizon-locked exit — pure TIME close at the close price, bypasses SL/TP/SIGNAL.
                 trade = None
                 if (i + 1) - rm.position.entry_candle >= _horizon_exit:
                     trade = rm.close_position(CloseReason.MAX_HOLD, c_n, i+1, adv_1m=adv_1m[i])
@@ -834,14 +717,12 @@ def main():
                          rm.position.take_profit if reason==CloseReason.TAKE_PROFIT else c_n
                     trade = rm.close_position(reason, ep, i+1, adv_1m=adv_1m[i])
             if trade:
-                # IT: Assegna il trade al regime corrente. | EN: Assign the trade to the current regime.
+                # Assign the trade to the current regime.
                 regime_key = "high_vol" if atr_i > atr_median else "low_vol"
                 regime_trades[regime_key].append(trade.net_pnl)
 
-        # IT: Fix ① — gate cadenza: la NUOVA entry apre solo se sono passate ≥cadence candele
-        #     dall'ultima (bet quasi-indipendenti). cadence=0 → condizione sempre vera (baseline).
-        # EN: Fix ① — cadence gate: a NEW entry opens only if ≥cadence candles passed since the
-        #     last one (quasi-independent bets). cadence=0 → always true (baseline, inert).
+        # Fix ① — cadence gate: a NEW entry opens only if ≥cadence candles passed since the
+        # last one (quasi-independent bets). cadence=0 → always true (baseline, inert).
         if side != Side.NONE and not rm.position and (i - _last_entry_i) >= _decision_cadence:
             rm.open_position(side, o_n, i+1, atr_i, dist, adv_1m=adv_1m[i])
             _last_entry_i = i
@@ -859,10 +740,9 @@ def main():
     # ── MDD stats ────────────────────────────────────────────────────────────
     mdd_info = mdd_stats(equity_ts)
 
-    # ── Bootstrap CI su Sharpe e Sortino ─────────────────────────────────────
+    # ── Bootstrap CI on Sharpe and Sortino ───────────────────────────────────
     pnl_arr = [t.net_pnl for t in rm.trades]
-    # IT: annualize = barre/anno del timeframe corrente (525600 a 1m, 8760 a 1h).
-    # EN: annualize = bars/year of the current timeframe (525600 at 1m, 8760 at 1h).
+    # annualize = bars/year of the current timeframe (525600 at 1m, 8760 at 1h).
     boot_ci = bootstrap_sharpe_ci(pnl_arr, annualize=bars_per_year)
 
     # ── Stress testing ────────────────────────────────────────────────────────
@@ -890,14 +770,12 @@ def main():
         log.info(f"    Sharpe={sr['sharpe']}  MDD={sr['max_drawdown']}  "
                  f"Return={sr['total_return']}  N={sr['n_trades']}")
 
-    # ── Salva risultati / Save results ─────────────────────────────────────────
-    # IT: metrics JSON — scarta le liste lunghe (vanno in file separati).
-    # EN: metrics JSON — drop long lists (they go to separate files).
+    # ── Save results ───────────────────────────────────────────────────────────
+    # metrics JSON — drop long lists (they go to separate files).
     m_save = {k: v for k,v in m.items() if not isinstance(v, list)}
     m_save["close_reasons"] = m.get("close_reasons", {})
 
-    # IT: Breakdown per motivo di chiusura con P&L dettagliato.
-    # EN: Close-reason breakdown with detailed P&L.
+    # Close-reason breakdown with detailed P&L.
     close_reason_breakdown = {}
     for reason_str, count in m.get("close_reasons", {}).items():
         trades_for_reason = [t for t in rm.trades if t.close_reason.value == reason_str]
@@ -911,8 +789,7 @@ def main():
             }
     m_save["close_reason_breakdown"] = close_reason_breakdown
 
-    # IT: Analisi condizionata al regime (high/low vol).
-    # EN: Regime-conditioned analysis (high/low vol).
+    # Regime-conditioned analysis (high/low vol).
     regime_report = {}
     for regime, pnls in regime_trades.items():
         if pnls:
@@ -926,13 +803,13 @@ def main():
             }
     m_save["regime_analysis"] = regime_report
 
-    # IT: Bootstrap CI. | EN: Bootstrap CI.
+    # Bootstrap CI.
     m_save["bootstrap_ci"] = boot_ci
 
-    # IT: Statistiche MDD. | EN: MDD stats.
+    # MDD stats.
     m_save["mdd_stats"] = mdd_info
 
-    # IT: Risultati stress test. | EN: Stress-test results.
+    # Stress-test results.
     m_save["stress_scenarios"] = stress_results
 
     with open(out/f"metrics{_out_suffix}.json","w", encoding="utf-8") as f: json.dump(m_save,f,indent=2)
@@ -940,16 +817,15 @@ def main():
     np.savez_compressed(out/f"equity_curve{_out_suffix}.npz",
                         equity=np.array(equity_ts), drawdown=np.array(dd_ts))
 
-    # IT: CSV dei trade. | EN: trades CSV.
+    # trades CSV.
     rows = [{"side":t.side.value,"entry_price":t.entry_price,"exit_price":t.exit_price,
              "size_usd":t.size_usd,"hold_candles":t.hold_candles,
              "close_reason":t.close_reason.value,"gross_pnl":t.gross_pnl,
              "fees":t.fees,"net_pnl":t.net_pnl,"pnl_pct":t.pnl_pct} for t in rm.trades]
     pd.DataFrame(rows).to_csv(out/f"trades{_out_suffix}.csv",index=False)
 
-    # IT: JSON dashboard (pronto per la React app).
-    # EN: dashboard JSON (ready for the React app).
-    # IT: NaN/inf → None per un JSON valido. | EN: NaN/inf → None for valid JSON.
+    # dashboard JSON (ready for the React app).
+    # NaN/inf → None for valid JSON.
     def clean(v): return None if isinstance(v,float) and (math.isnan(v) or math.isinf(v)) else v
     cum_pnl = list(np.cumsum(pnl_arr)) if pnl_arr else []
     dashboard = {
@@ -973,9 +849,8 @@ def main():
     with open(results_out/f"dashboard_results{_out_suffix}.json","w", encoding="utf-8") as f:
         json.dump(dashboard, f, separators=(",",":"))
 
-    # ── Print finale / Final print ─────────────────────────────────────────────
-    # IT: Riepilogo a console di metriche, regime, stress test, CI e MDD.
-    # EN: Console summary of metrics, regime, stress tests, CI and MDD.
+    # ── Final print ────────────────────────────────────────────────────────────
+    # Console summary of metrics, regime, stress tests, CI and MDD.
     print(f"""
 ═══════════════════════════════════════════
   03 · BACKTEST · COMPLETATO  ({elapsed:.1f}s)
@@ -1007,11 +882,11 @@ def main():
                 print(f"\n  Forte dipendenza dal regime: WR migliore in {regime_label} "
                       f"(Delta={diff:+.1%}) -> generalizzazione limitata.")
 
-    # IT: Print degli scenari di stress. | EN: Stress-test print.
+    # Stress-test print.
     pess = next((s for s in stress_results if s["scenario"] == "pessimistic_fee"), {})
     flash = next((s for s in stress_results if s["scenario"] == "flash_crash_vol"), {})
 
-    # IT: Formatter None-safe per %, return e Sharpe. | EN: None-safe formatters for %, return, Sharpe.
+    # None-safe formatters for %, return, Sharpe.
     def _fmt_pct(v): return f"{v:.1%}" if v is not None else "N/A"
     def _fmt_ret(v): return f"{v:.2%}" if v is not None else "N/A"
     def _fmt_sh(v):  return f"{v:.2f}" if v is not None else "N/A"
@@ -1023,7 +898,7 @@ def main():
   Flash Crash (fee×1.5, slip×5):
     Sharpe={_fmt_sh(flash.get('sharpe'))}  MDD={_fmt_pct(flash.get('max_drawdown'))}  Return={_fmt_ret(flash.get('total_return'))}""")
 
-    # IT: Print del bootstrap CI. | EN: Bootstrap CI print.
+    # Bootstrap CI print.
     sh_ci_low  = boot_ci.get("sharpe_ci_low")
     sh_ci_high = boot_ci.get("sharpe_ci_high")
     so_ci_low  = boot_ci.get("sortino_ci_low")
@@ -1041,7 +916,7 @@ def main():
   ── Bootstrap CI (95%, 5000 campioni) ────────────
   Trade insufficienti per bootstrap CI (< 30 trade)""")
 
-    # IT: Print delle statistiche MDD. | EN: MDD stats print.
+    # MDD stats print.
     mdd_dur  = mdd_info.get("mdd_duration_candles", 0)
     mdd_rec  = mdd_info.get("mdd_recovery_candles")
     mdd_recov = mdd_info.get("mdd_recovered", False)
@@ -1062,6 +937,6 @@ def main():
 """)
 
 
-# IT: Esecuzione diretta dello script. | EN: Direct script execution.
+# Direct script execution.
 if __name__ == "__main__":
     main()

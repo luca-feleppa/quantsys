@@ -1,18 +1,14 @@
 """
-Probe temporanea (PERF AUDIT) — profilo di ~20 step di training iTransformer.
 Temporary probe (PERF AUDIT) — profile of ~20 iTransformer training steps.
 
-Replica il path production di scripts/02_train.py (loss_type=quantile +
-multitask, AMP on, grad_accum=2, batch 64, DataLoader num_workers=0 su Windows)
-riusando `run_train` importato dallo script reale — nessuna copia della loss.
-Replicates the production path of scripts/02_train.py (quantile loss +
+Replicates the production path of scripts/02_train.py (loss_type=quantile +
 multitask, AMP on, grad_accum=2, batch 64, DataLoader num_workers=0 on Windows)
 by importing the real `run_train` — no copy of the loss.
 
-Output: tempo/step, breakdown CPU vs CUDA da torch.profiler, occupazione GPU.
-NON scrive in models/ (usa QUANTSYS_MODELS_ROOT su scratch se serve).
+Output: time/step, CPU vs CUDA breakdown from torch.profiler, GPU memory usage.
+Does NOT write into models/ (use QUANTSYS_MODELS_ROOT on scratch if needed).
 
-Uso / Usage:
+Usage:
   python scripts/archive/perf_probe/bench_train_profile.py [--steps 20] [--compile]
 """
 import argparse
@@ -28,14 +24,12 @@ from torch.utils.data import DataLoader, TensorDataset
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
-# IT: dir temporanea di sistema — la probe non scrive mai in models/ o data/.
-# EN: system temp dir — this probe never writes into models/ or data/.
+# system temp dir — this probe never writes into models/ or data/.
 import tempfile  # noqa: E402
 SCRATCH = Path(tempfile.gettempdir())
 
 
-# IT: importa 02_train.py per nome-file (il modulo inizia con una cifra).
-# EN: import 02_train.py by file path (module name starts with a digit).
+# import 02_train.py by file path (module name starts with a digit).
 def _load_train_module():
     spec = importlib.util.spec_from_file_location(
         "qs_train02", str(ROOT / "scripts" / "02_train.py"))
@@ -64,8 +58,7 @@ def main():
     t02 = _load_train_module()
 
     cfg = load_config(str(ROOT / "config/default.yaml"))
-    # IT: overlay arch itransformer (come fa run_all/02 con --arch).
-    # EN: itransformer arch overlay (as run_all/02 do with --arch).
+    # itransformer arch overlay (as run_all/02 do with --arch).
     import yaml
     with open(ROOT / "config/arch/itransformer.yaml", encoding="utf-8") as f:
         arch = yaml.safe_load(f)
@@ -77,7 +70,7 @@ def main():
     bs = args.batch or tcfg["batch_size"]
     use_amp = (not args.no_amp) and tcfg.get("use_amp", True)
 
-    # ── dati reali dal npz di produzione ────────────────────────────────────
+    # ── real data from the production npz ───────────────────────────────────
     t0 = time.perf_counter()
     d = np.load(str(ROOT / "data/lstm_dataset.npz"), allow_pickle=True)
     n_need = (args.warmup + args.steps + 5) * bs * tcfg.get("gradient_accumulation_steps", 1)
@@ -152,8 +145,7 @@ def main():
     print(f"\nSTEADY: {args.steps} step in {t_meas:.3f}s → {ms:.2f} ms/step "
           f"({bs/ (t_meas/args.steps):,.0f} sample/s)")
 
-    # IT: proiezione a epoca intera (n_train reale dal npz).
-    # EN: full-epoch projection (real n_train from the npz).
+    # full-epoch projection (real n_train from the npz).
     n_train = int(d["X_train"].shape[0])
     print(f"proiezione epoca: {n_train:,} sample / bs {bs} = {n_train//bs:,} step "
           f"→ {n_train//bs * ms/1000/60:.2f} min/epoca (solo train, no eval)")

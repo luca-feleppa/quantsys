@@ -1,10 +1,10 @@
 """
-Script 00 — Verifica setup hardware e dipendenze.
-Eseguilo PRIMA di tutto il resto per assicurarti che l'ambiente sia corretto.
+Script 00 — Hardware setup and dependency check.
+Run it BEFORE everything else to make sure the environment is correct.
 
-Run configuration PyCharm:
+PyCharm run configuration:
   Script: scripts/00_check_setup.py
-  Working dir: <root del progetto>
+  Working dir: <project root>
 """
 import importlib
 import logging
@@ -13,12 +13,9 @@ import sys
 import time
 from pathlib import Path
 
-# IT: questo script non ha main() — il codice gira a livello di modulo, quindi il
-#     reconfigure va qui, prima di qualunque print. Console Windows default cp1252:
-#     i glyph ✓/△/✗ e i box-drawing delle sezioni crashano il print (bug ricorrente).
-# EN: this script has no main() — code runs at module level, so the reconfigure goes
-#     here, before any print. Windows console defaults to cp1252: the ✓/△/✗ glyphs and
-#     the section box-drawing chars crash the print (recurring bug).
+# this script has no main() — code runs at module level, so the reconfigure goes
+# here, before any print. Windows console defaults to cp1252: the ✓/△/✗ glyphs and
+# the section box-drawing chars crash the print (recurring bug).
 import sys as _sys
 for _stream in (_sys.stdout, _sys.stderr):
     try:
@@ -26,16 +23,14 @@ for _stream in (_sys.stdout, _sys.stderr):
     except Exception:
         pass
 
-# IT: usa basicConfig perche' setup_logging potrebbe non essere disponibile
-# EN: use basicConfig since setup_logging may not yet be importable
+# use basicConfig since setup_logging may not yet be importable
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
     datefmt="%H:%M:%S",
 )
 
-# IT: codici colore ANSI per output console leggibile
-# EN: ANSI color codes for readable console output
+# ANSI color codes for readable console output
 OK   = "\033[92m✓\033[0m"
 WARN = "\033[93m△\033[0m"
 ERR  = "\033[91m✗\033[0m"
@@ -43,16 +38,14 @@ HEAD = "\033[1;96m"
 RST  = "\033[0m"
 
 
-# IT: stampa un'intestazione di sezione colorata
-# EN: prints a colored section header
+# prints a colored section header
 def section(title: str):
     print(f"\n{HEAD}{'─'*52}{RST}")
     print(f"{HEAD}  {title}{RST}")
     print(f"{HEAD}{'─'*52}{RST}")
 
 
-# IT: stampa una riga di check (✓/△/✗) e ritorna l'esito booleano
-# EN: prints a single check line (✓/△/✗) and returns the boolean outcome
+# prints a single check line (✓/△/✗) and returns the boolean outcome
 def check(label: str, ok: bool, detail: str = "", warn_only: bool = False):
     icon  = OK if ok else (WARN if warn_only else ERR)
     color = "\033[92m" if ok else ("\033[93m" if warn_only else "\033[91m")
@@ -60,8 +53,7 @@ def check(label: str, ok: bool, detail: str = "", warn_only: bool = False):
     return ok
 
 
-# IT: 1. verifica versione Python e working directory
-# EN: 1. check Python version and working directory
+# 1. check Python version and working directory
 section("1 · PYTHON")
 py = sys.version_info
 check("Python version", py >= (3, 11),
@@ -71,8 +63,7 @@ check("Working directory", Path("config/default.yaml").exists(),
       str(Path.cwd()),
       warn_only=not Path("config/default.yaml").exists())
 
-# IT: 2. verifica presenza e versione minima delle dipendenze critiche
-# EN: 2. check critical dependencies are installed at minimum versions
+# 2. check critical dependencies are installed at minimum versions
 section("2 · DIPENDENZE")
 deps = [
     ("torch",        "2.2.0",  False),
@@ -84,7 +75,7 @@ deps = [
     ("tqdm",         "4.66.0", False),
     ("yaml",         "6.0.0",  False),
     ("pyarrow",      "14.0.0", False),
-    ("websockets",   "12.0",   True),   # IT: opzionale (solo live) | EN: optional (live only)
+    ("websockets",   "12.0",   True),   # optional (live only)
 ]
 all_ok = True
 for pkg, min_ver, warn in deps:
@@ -97,8 +88,7 @@ for pkg, min_ver, warn in deps:
     if not ok and not warn:
         all_ok = False
 
-# IT: 3. verifica CUDA/GPU e supporto Tensor Cores per AMP fp16
-# EN: 3. check CUDA/GPU availability and Tensor Cores for fp16 AMP
+# 3. check CUDA/GPU availability and Tensor Cores for fp16 AMP
 section("3 · GPU / CUDA  (RTX 2070 Super)")
 try:
     import torch
@@ -117,8 +107,7 @@ try:
             check("  Tensor Cores (Turing+)",   p.major >= 7,
                   "✓ float16 AMP supportato" if p.major >= 7 else "AMP meno efficace")
 
-        # IT: micro-benchmark matmul fp16 per validare throughput GPU
-        # EN: quick fp16 matmul benchmark to validate GPU throughput
+        # quick fp16 matmul benchmark to validate GPU throughput
         check("cuDNN disponibile",  torch.backends.cudnn.is_available(), "")
         check("cuDNN benchmark",    True, "verrà abilitato in training")
 
@@ -130,7 +119,7 @@ try:
         for _ in range(10):
             _ = A @ B
         torch.cuda.synchronize()
-        ms = (time.perf_counter() - t0) * 100  # IT: ms medi per matmul (10 iter) | EN: avg ms per matmul (10 iters)
+        ms = (time.perf_counter() - t0) * 100  # avg ms per matmul (10 iters)
         check("matmul FP16 2048×2048 (×10)", True, f"{ms:.1f} ms  →  {'rapido ✓' if ms < 500 else 'lento, controlla driver'}")
 
     else:
@@ -140,16 +129,14 @@ except ImportError:
     check("PyTorch", False, "NON INSTALLATO — pip install torch ...")
     all_ok = False
 
-# IT: 4. verifica CPU e parametri DataLoader (num_workers, pin_memory)
-# EN: 4. check CPU and DataLoader settings (num_workers, pin_memory)
+# 4. check CPU and DataLoader settings (num_workers, pin_memory)
 section("4 · CPU  (i7-9700K)")
 try:
     import os
     n_cpu = os.cpu_count()
     check("Core logici", True, f"{n_cpu}  (DataLoader num_workers consigliato: {n_cpu-2})")
 
-    # IT: num_workers deve lasciare almeno 2 core liberi per il main process
-    # EN: num_workers should leave at least 2 cores free for the main process
+    # num_workers should leave at least 2 cores free for the main process
     import yaml
     with open("config/default.yaml", "rb") as f:
         cfg = yaml.safe_load(f)
@@ -163,8 +150,7 @@ try:
 except Exception as e:
     check("CPU check", False, str(e), warn_only=True)
 
-# IT: 5. verifica connettivita' REST Binance e latenza
-# EN: 5. check Binance REST connectivity and latency
+# 5. check Binance REST connectivity and latency
 section("5 · CONNESSIONE BINANCE API")
 try:
     import requests
@@ -181,8 +167,7 @@ try:
 except Exception as e:
     check("Connessione Binance", False, str(e))
 
-# IT: 6. verifica struttura cartelle/file del progetto
-# EN: 6. check project directory and file structure
+# 6. check project directory and file structure
 section("6 · STRUTTURA PROGETTO")
 expected = [
     "config/default.yaml",
@@ -216,19 +201,16 @@ expected = [
 for f in expected:
     check(f, Path(f).exists(), "✓" if Path(f).exists() else "MANCANTE")
 
-# IT: cartelle create automaticamente dagli script di pipeline
-# EN: directories auto-created by pipeline scripts
+# directories auto-created by pipeline scripts
 for d in ["data", "models", "results", "logs"]:
     exists = Path(d).exists()
     check(f"{d}/", exists,
           "✓ presente" if exists else "verrà creata automaticamente",
           warn_only=not exists)
 
-# IT: 7. verifica stato della pipeline (artefatti generati per arch attiva)
-# EN: 7. check pipeline state (generated artifacts for active architecture)
+# 7. check pipeline state (generated artifacts for active architecture)
 section("7 · STATO PIPELINE")
-# IT: risolve l'architettura attiva: env var, poi config, poi default lstm
-# EN: resolve active architecture: env var, then config, then lstm default
+# resolve active architecture: env var, then config, then lstm default
 import re as _re, os as _os
 _arch = _os.environ.get("QUANTSYS_ARCH")
 if not _arch:
@@ -248,16 +230,11 @@ steps = [
     (f"models/{_arch}/history.json",                   "02_train.py",           False),
     (f"results/{_arch}/dashboard_results.json",        "03_backtest.py",        False),
 ]
-# IT: questi artefatti sono PRODOTTI dalla pipeline: su un clone fresco non esiste
-#     nessuno di essi, ed e' lo stato corretto. Non concorrono infatti ad `all_ok`
-#     (il ritorno di check() e' deliberatamente ignorato qui) — ma finche' l'assenza
-#     stampava un ✗ rosso, l'icona diceva "errore" e il verdetto finale diceva
-#     "setup verificato": una delle due mentiva, e a mentire era l'icona. Warning.
-# EN: these artifacts are PRODUCED by the pipeline: on a fresh clone none of them
-#     exists, and that is the correct state. Indeed they do not feed `all_ok`
-#     (check()'s return value is deliberately ignored here) — but as long as absence
-#     printed a red ✗, the icon said "error" while the final verdict said "setup
-#     verified": one of the two was lying, and it was the icon. Warning instead.
+# these artifacts are PRODUCED by the pipeline: on a fresh clone none of them
+# exists, and that is the correct state. Indeed they do not feed `all_ok`
+# (check()'s return value is deliberately ignored here) — but as long as absence
+# printed a red ✗, the icon said "error" while the final verdict said "setup
+# verified": one of the two was lying, and it was the icon. Warning instead.
 for path, script, optional in steps:
     exists = Path(path).exists()
     sz     = f"  ({Path(path).stat().st_size//1024} KB)" if exists else ""
@@ -266,8 +243,7 @@ for path, script, optional in steps:
           f"✓{sz}" if exists else f"→ esegui scripts/{script}",
           warn_only=not exists)
 
-# IT: riepilogo finale con device, AMP, batch size e stima training
-# EN: final summary with device, AMP, batch size and training estimate
+# final summary with device, AMP, batch size and training estimate
 section("RIEPILOGO")
 try:
     import torch

@@ -1,8 +1,8 @@
 """
-Script 02c — Ricerca bayesiana degli iperparametri con Optuna.
-Ogni trial allena QuantLSTM per max 20 epoche (patience=5) e restituisce
-la validation NLL. Lo studio persiste su SQLite — può essere ripreso in qualunque
-momento con gli stessi argomenti.
+Script 02c — Bayesian hyperparameter search with Optuna.
+Each trial trains QuantLSTM for at most 20 epochs (patience=5) and returns
+the validation NLL. The study persists to SQLite — it can be resumed at any
+time with the same arguments.
 
 Run:
   python scripts/02c_optuna_search.py [--n-trials 50] [--study-name quantsys] [--timeout 3600]
@@ -18,8 +18,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-# IT: cap thread BLAS/OMP prima di numpy/torch (cpu_fraction da config)
-# EN: cap BLAS/OMP threads before numpy/torch (cpu_fraction from config)
+# cap BLAS/OMP threads before numpy/torch (cpu_fraction from config)
 import yaml as _yaml
 with open(Path(__file__).resolve().parent.parent / "config" / "default.yaml", encoding="utf-8") as _f:
     _cpu_frac = _yaml.safe_load(_f).get("hardware", {}).get("cpu_fraction", 0.5)
@@ -39,26 +38,22 @@ import optuna
 from quantsys.utils import load_config, setup_device, setup_logging, ensure_dirs
 from quantsys.model import QuantLSTM, student_t_nll
 
-# IT: silenzia Optuna verbose — usiamo i nostri log applicativi
-# EN: silence verbose Optuna logs — we use our own application logs
+# silence verbose Optuna logs — we use our own application logs
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 setup_logging()
 log = logging.getLogger("quantsys.script.02c")
 
 
-# IT: scheduler identico a 02_train.py per coerenza HPO/training
-# EN: same scheduler as 02_train.py for HPO/training consistency
+# same scheduler as 02_train.py for HPO/training consistency
 
 class CosineWarmup(torch.optim.lr_scheduler.LambdaLR):
-    # IT: salva i parametri warmup/total/min_frac e registra il lambda LR
-    # EN: store warmup/total/min_frac params and register the LR lambda
+    # store warmup/total/min_frac params and register the LR lambda
     def __init__(self, opt, warmup, total, min_frac=0.05):
         self.w, self.t, self.m = warmup, total, min_frac
         super().__init__(opt, self._lr)
 
-    # IT: moltiplicatore LR per step: warmup lineare poi decay cosine
-    # EN: per-step LR multiplier: linear warmup then cosine decay
+    # per-step LR multiplier: linear warmup then cosine decay
     def _lr(self, step):
         if step < self.w:
             return step / max(self.w, 1)
@@ -66,8 +61,7 @@ class CosineWarmup(torch.optim.lr_scheduler.LambdaLR):
         return self.m + (1 - self.m) * 0.5 * (1 + math.cos(math.pi * p))
 
 
-# IT: epoche train/val ridotte per HPO (fedeli alle equivalenti di 02_train)
-# EN: lightweight train/val epochs for HPO (mirror 02_train counterparts)
+# lightweight train/val epochs for HPO (mirror 02_train counterparts)
 
 def _run_epoch_train(model, loader, opt, scaler_amp, sched, device, use_amp):
     model.train()
@@ -77,8 +71,7 @@ def _run_epoch_train(model, loader, opt, scaler_amp, sched, device, use_amp):
         opt.zero_grad(set_to_none=True)
         with torch.amp.autocast(device_type=device.type, enabled=use_amp):
             mu, ls2, lnu = model(Xb)
-            # IT: NLL simmetrica in HPO — i pesi asimmetrici restano fissi
-            # EN: symmetric NLL during HPO — asymmetric weights stay fixed
+            # symmetric NLL during HPO — asymmetric weights stay fixed
             loss = student_t_nll(yb, mu, ls2, lnu)
         scaler_amp.scale(loss).backward()
         scaler_amp.unscale_(opt)
@@ -90,8 +83,7 @@ def _run_epoch_train(model, loader, opt, scaler_amp, sched, device, use_amp):
     return total / len(loader)
 
 
-# IT: epoca di validation (no grad, NLL simmetrica) per il trial HPO
-# EN: validation epoch (no grad, symmetric NLL) for the HPO trial
+# validation epoch (no grad, symmetric NLL) for the HPO trial
 
 def _run_epoch_val(model, loader, device):
     model.eval()
@@ -104,18 +96,16 @@ def _run_epoch_val(model, loader, device):
     return total / len(loader)
 
 
-# IT: objective Optuna (un trial = un training breve)
-# EN: Optuna objective (one trial = one short training run)
+# Optuna objective (one trial = one short training run)
 
-MAX_EPOCHS = 20   # IT: budget per trial | EN: per-trial budget
-PATIENCE   = 5    # IT: early stop trial | EN: per-trial early stop
+MAX_EPOCHS = 20   # per-trial budget
+PATIENCE   = 5    # per-trial early stop
 
 
 def objective(trial, base_cfg, device,
               X_train, y_train, X_val, y_val,
               n_feat, n_dynamic):
-    # IT: 1) campiona iperparametri dallo spazio di ricerca
-    # EN: 1) sample hyperparameters from search space
+    # 1) sample hyperparameters from search space
     lstm_hidden      = trial.suggest_categorical("lstm_hidden",      [128, 256, 512])
     gru_hidden       = trial.suggest_categorical("gru_hidden",       [64, 128, 256])
     dropout          = trial.suggest_float("dropout",          0.1, 0.4)
@@ -123,8 +113,7 @@ def objective(trial, base_cfg, device,
     batch_size       = trial.suggest_categorical("batch_size",       [64, 128, 256])
     forecast_horizon = trial.suggest_categorical("forecast_horizon", [10, 15, 20])
 
-    # IT: n_heads deve dividere lstm_hidden — scegli il massimo divisore valido
-    # EN: n_heads must divide lstm_hidden — pick the largest valid divisor
+    # n_heads must divide lstm_hidden — pick the largest valid divisor
     head_candidates = [h for h in [4, 8, 16] if lstm_hidden % h == 0]
     n_attention_heads = max(head_candidates)
 
@@ -140,8 +129,7 @@ def objective(trial, base_cfg, device,
     tcfg  = cfg["training"]
     hwcfg = cfg["hardware"]
 
-    # IT: 2) DataLoader trial — num_workers=0 evita deadlock Win con trial paralleli
-    # EN: 2) per-trial DataLoader — num_workers=0 avoids Win deadlocks under parallelism
+    # 2) per-trial DataLoader — num_workers=0 avoids Win deadlocks under parallelism
     kw = dict(pin_memory=(hwcfg["pin_memory"] and device.type == "cuda"),
               num_workers=0)
     train_dl = DataLoader(TensorDataset(X_train, y_train),
@@ -149,8 +137,7 @@ def objective(trial, base_cfg, device,
     val_dl   = DataLoader(TensorDataset(X_val, y_val),
                           batch_size=batch_size, shuffle=False, **kw)
 
-    # IT: 3) costruisci modello con gli HP campionati
-    # EN: 3) build model with sampled hyperparameters
+    # 3) build model with sampled hyperparameters
     model = QuantLSTM(
         n_features        = n_feat,
         lstm_hidden       = lstm_hidden,
@@ -172,13 +159,11 @@ def objective(trial, base_cfg, device,
     use_amp   = tcfg["use_amp"] and device.type == "cuda"
     amp_sc    = torch.amp.GradScaler(device=device.type, enabled=use_amp)
 
-    # IT: 4) training con early stop locale + pruning Optuna (MedianPruner)
-    # EN: 4) training with local early stop + Optuna pruning (MedianPruner)
+    # 4) training with local early stop + Optuna pruning (MedianPruner)
     best_val   = float("inf")
     no_improve = 0
 
-    # IT: checkpoint trial in tempfile — evita di sporcare models/ con centinaia di .pt
-    # EN: per-trial checkpoint in tempfile — keeps models/ clean across many trials
+    # per-trial checkpoint in tempfile — keeps models/ clean across many trials
     with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tf:
         ckpt_path = tf.name
 
@@ -187,12 +172,10 @@ def objective(trial, base_cfg, device,
             _run_epoch_train(model, train_dl, opt, amp_sc, sched, device, use_amp)
             val_loss = _run_epoch_val(model, val_dl, device)
 
-            # IT: report a Optuna -> input per il pruner mediano
-            # EN: report to Optuna -> feeds the median pruner
+            # report to Optuna -> feeds the median pruner
             trial.report(val_loss, epoch)
 
-            # IT: il pruner taglia trial sotto la mediana storica
-            # EN: pruner kills trials below the running median
+            # pruner kills trials below the running median
             if trial.should_prune():
                 raise optuna.TrialPruned()
 
@@ -210,14 +193,11 @@ def objective(trial, base_cfg, device,
     return best_val
 
 
-# IT: main — carica dati, crea studio Optuna persistente, scrive best_params.json
-# EN: main — load data, create persistent Optuna study, write best_params.json
+# main — load data, create persistent Optuna study, write best_params.json
 
 def main():
-    # IT: console Windows default cp1252 — qualsiasi unicode nei banner/report crasha
-    #     il print con UnicodeEncodeError. Reconfigure UTF-8 come 01/02/04.
-    # EN: Windows console defaults to cp1252 — any unicode in banners/reports crashes
-    #     the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
+    # Windows console defaults to cp1252 — any unicode in banners/reports crashes
+    # the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
     import sys as _sys
     for _stream in (_sys.stdout, _sys.stderr):
         try:
@@ -232,8 +212,7 @@ def main():
     parser.add_argument("--timeout",     type=float, default=3600,      help="Timeout in secondi (default: 3600)")
     args = parser.parse_args()
 
-    # IT: carica il dataset pre-processato (richiede 01_download_data.py)
-    # EN: load the preprocessed dataset (requires 01_download_data.py)
+    # load the preprocessed dataset (requires 01_download_data.py)
     dataset_path = Path("data/lstm_dataset.npz")
     if not dataset_path.exists():
         print(
@@ -263,8 +242,7 @@ def main():
         f"n_feat={n_feat}  n_dynamic={n_dynamic}"
     )
 
-    # IT: studio persistente su SQLite — riprendibile in run successivi
-    # EN: persistent SQLite study — resumable across runs
+    # persistent SQLite study — resumable across runs
     import os as _os_opt
     _opt_arch = _os_opt.environ.get("QUANTSYS_ARCH", "lstm")
     _opt_dir  = Path("models") / _opt_arch
@@ -288,8 +266,7 @@ def main():
         f"(trial completati precedentemente: {completed_before})"
     )
 
-    # IT: chiusura che inietta dati/config nell'objective Optuna
-    # EN: closure injecting data/config into the Optuna objective
+    # closure injecting data/config into the Optuna objective
     def _objective_wrapper(trial):
         return objective(
             trial, cfg, device,
@@ -301,13 +278,11 @@ def main():
         _objective_wrapper,
         n_trials  = args.n_trials,
         timeout   = args.timeout,
-        # IT: trial in errore -> FAIL, lo studio prosegue con i successivi
-        # EN: failing trials -> FAIL, study continues with the next ones
+        # failing trials -> FAIL, study continues with the next ones
         catch     = (Exception,),
     )
 
-    # IT: estrae best trial e serializza i parametri per 02_train.py
-    # EN: extract best trial and serialize params for 02_train.py
+    # extract best trial and serialize params for 02_train.py
     completed = [t for t in study.trials
                  if t.state == optuna.trial.TrialState.COMPLETE]
     if not completed:

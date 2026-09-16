@@ -1,11 +1,7 @@
 """
-IT: Replay storico — alimenta LiveCandleBuffer + FeatureAssembler con candele storiche
-    e verifica che il vettore feature prodotto sia identico a FeatureBuilder diretto.
-    BLOCKER #1 Stage 4 (2026-06-02): nuovo engine vs training → atteso 0 mismatch.
-
-EN: Historical replay — feeds LiveCandleBuffer + FeatureAssembler with historical candles
-    and verifies the produced feature vector is identical to direct FeatureBuilder output.
-    BLOCKER #1 Stage 4 (2026-06-02): new engine vs training → expected 0 mismatches.
+Historical replay — feeds LiveCandleBuffer + FeatureAssembler with historical candles
+and verifies the produced feature vector is identical to direct FeatureBuilder output.
+BLOCKER #1 Stage 4 (2026-06-02): new engine vs training → expected 0 mismatches.
 """
 from __future__ import annotations
 
@@ -16,14 +12,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# IT: Forza UTF-8 su stdout per evitare crash con cp1252 su Windows.
-# EN: Force UTF-8 on stdout to avoid cp1252 crash on Windows.
+# Force UTF-8 on stdout to avoid cp1252 crash on Windows.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-# IT: import dal nuovo live engine | EN: import from the new live engine
+# import from the new live engine
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -34,8 +29,7 @@ LiveCandleBuffer = live_mod.LiveCandleBuffer
 FeatureAssembler = live_mod.FeatureAssembler
 
 
-# IT: Esegue il replay e stampa un report di verifica.
-# EN: Runs the replay and prints a verification report.
+# Runs the replay and prints a verification report.
 def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
     print("=" * 70)
     print("REPLAY LIVE ENGINE (Stage 4) vs TRAINING FEATURE BUILDER")
@@ -44,25 +38,25 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
     from quantsys.features import FeatureBuilder, get_canonical_feature_names
     from quantsys.utils import PipelineState, load_config
 
-    # IT: 1. carica feature canoniche dal NPZ | EN: load canonical features from NPZ
+    # 1. load canonical features from NPZ
     canonical = get_canonical_feature_names(str(data_dir / "lstm_dataset.npz"))
     print(f"\n[TRAINING] feature_names canoniche: {len(canonical)}")
     print(f"           prime 5: {list(canonical[:5])}")
     print(f"           ultime 5: {list(canonical[-5:])}")
 
-    # IT: 2. alimenta LiveCandleBuffer dal parquet | EN: feed LiveCandleBuffer from parquet
+    # 2. feed LiveCandleBuffer from parquet
     buf = LiveCandleBuffer(maxlen=n_candles)
     n_loaded = buf.bootstrap_from_parquet(str(data_dir / "raw_candles.parquet"))
     print(f"\n[BUFFER] LiveCandleBuffer alimentato: {n_loaded} candele")
     print(f"         intervallo: {buf.to_dataframe(2).index[0]} -> {buf.latest['open_time']}")
 
-    # IT: 3. carica PipelineState + funding | EN: load PipelineState + funding
+    # 3. load PipelineState + funding
     ps = PipelineState.load(str(ROOT / "models" / "itransformer" / "pipeline_state.pkl"))
     funding_df = pd.read_parquet(data_dir / "funding_rate.parquet")
     print(f"\n[STATE] PipelineState.scaler.n_features_in_={ps.scaler.n_features_in_}")
     print(f"        funding rate obs disponibili: {len(funding_df)}")
 
-    # IT: 4. compute window via FeatureAssembler (path live) | EN: compute window via FeatureAssembler (live path)
+    # 4. compute window via FeatureAssembler (live path)
     asm = FeatureAssembler(buf, ps)
     win_live = asm.compute_window(window_size=120, funding_df=funding_df)
     print(f"\n[LIVE] FeatureAssembler.compute_window(120) → shape={win_live.shape} dtype={win_live.dtype}")
@@ -70,17 +64,13 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
     print(f"       stats: mean={win_live.mean():+.4f} std={win_live.std():.4f} "
           f"range=[{win_live.min():.2f}, {win_live.max():.2f}]")
 
-    # IT: 5. compute window via FeatureBuilder diretto (training equivalent)
-    # EN: compute window via direct FeatureBuilder (training equivalent)
+    # 5. compute window via direct FeatureBuilder (training equivalent)
     cfg = load_config()
     fcfg = cfg.get("features", {})
     mcfg = cfg.get("model", {})
-    # IT: interval_minutes dal PIPELINE STATE (contratto train↔inference), come fa
-    #     il FeatureAssembler live — il replay deve replicare il TRAINING del modello
-    #     caricato, non la config corrente (che può essere già pivotata a 1h).
-    # EN: interval_minutes from the PIPELINE STATE (train↔inference contract), as the
-    #     live FeatureAssembler does — the replay must replicate the loaded model's
-    #     TRAINING, not the current config (which may already be pivoted to 1h).
+    # interval_minutes from the PIPELINE STATE (train↔inference contract), as the
+    # live FeatureAssembler does — the replay must replicate the loaded model's
+    # TRAINING, not the current config (which may already be pivoted to 1h).
     fb = FeatureBuilder(
         vp_bins          = fcfg.get("vp_bins", 30),
         vp_lookback      = fcfg.get("vp_lookback", 240),
@@ -91,8 +81,7 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         use_revin        = bool(mcfg.get("use_revin", False)),
         interval_minutes = getattr(ps, "interval_minutes", 1),
-        # IT: A4 HAR-CJ — stessa config del training (parity replay↔training).
-        # EN: A4 HAR-CJ — same config as training (replay↔training parity).
+        # A4 HAR-CJ — same config as training (replay↔training parity).
         use_har_cj       = bool(fcfg.get("har_cj", False)),
     )
     fb.scaler             = ps.scaler
@@ -119,7 +108,7 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
     feat_df = feat_df[list(canonical)].dropna()
     win_train = feat_df.iloc[-120:].values.astype(np.float32)
 
-    # IT: 6. confronto parity | EN: parity comparison
+    # 6. parity comparison
     print("\n" + "-" * 70)
     print("ANALISI PARITY")
     print("-" * 70)
@@ -148,13 +137,10 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
         for idx in cols_over_threshold[:10]:
             print(f"       - {canonical[idx]}: max_diff={per_col_max[idx]:.3e}")
 
-    # IT: ── GATE 2 (Stage 5) — PARITY DEL SEGNALE: i due percorsi feature (assembler live vs
-    #     FeatureBuilder diretto) devono produrre lo STESSO (μ,σ,side) attraverso il nucleo di
-    #     inferenza deterministico di produzione + SignalGenutore. Se le feature sono bit-identiche
-    #     ma una micro-differenza < tol flippa il side su soglia → la parity feature non basta.
-    # EN: ── GATE 2 (Stage 5) — SIGNAL PARITY: the two feature routes (live assembler vs direct
-    #     FeatureBuilder) must yield the SAME (μ,σ,side) through the production deterministic
-    #     inference core + SignalGenerator. Catches threshold-flips that feature parity alone misses.
+    # ── GATE 2 (Stage 5) — SIGNAL PARITY: the two feature routes (live assembler vs direct
+    # FeatureBuilder) must yield the SAME (μ,σ,side) through the production deterministic
+    # inference core + SignalGenerator. If features are bit-identical but a micro-difference < tol
+    # flips the side at a threshold, feature parity alone is not enough.
     print("\n" + "-" * 70)
     print("GATE 2 — PARITY SEGNALE (Stage 5: live↔offline)")
     print("-" * 70)
@@ -165,7 +151,7 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
     LiveEngine = live_mod.LiveEngine
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = EnsembleModel.load_heterogeneous(device, cfg=cfg)   # IT: stesso modello di backtest+live
+    model = EnsembleModel.load_heterogeneous(device, cfg=cfg)   # same model as backtest+live
     model.eval()
     bcfg = cfg["backtest"]
     sig_gen = SignalGenerator(
@@ -175,8 +161,7 @@ def main(n_candles: int = 50000, data_dir: Path = ROOT / "data") -> int:
         conviction_alpha = bcfg.get("conviction_alpha", 0.5),
         min_snr          = bcfg.get("min_snr", 0.0),
     )
-    # IT: nucleo deterministico CONDIVISO col live engine (no MC dropout: l'ensemble non lo espone).
-    # EN: deterministic core SHARED with the live engine (no MC dropout: the ensemble lacks it).
+    # deterministic core SHARED with the live engine (no MC dropout: the ensemble lacks it).
     mu_l, sig_l, nu_l = LiveEngine._deterministic_predict(model, win_live,  None, ps, device)
     mu_t, sig_t, nu_t = LiveEngine._deterministic_predict(model, win_train, None, ps, device)
     side_l, _ = sig_gen.generate(mu_l, sig_l, nu_l)

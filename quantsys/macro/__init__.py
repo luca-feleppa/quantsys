@@ -1,21 +1,21 @@
 """
 quantsys/macro/__init__.py
 ==========================
-Fase 1b — Dati Macroeconomici USA + Aspettative di Mercato
+Phase 1b — US Macroeconomic Data + Market Expectations
 
-Fonti:
-  · FRED (Federal Reserve St. Louis) — API gratuita, key opzionale
+Sources:
+  · FRED (Federal Reserve St. Louis) — free API, optional key
   · yfinance                         — DXY, VIX, Gold, Oil, SPY
-  · Atlanta Fed GDPNow               — stima PIL in tempo reale (web scrape)
+  · Atlanta Fed GDPNow               — real-time GDP estimate (web scrape)
 
-Per ogni indicatore includiamo sia il dato REALIZZATO che le ASPETTATIVE
-di mercato (forward-looking), dove disponibili.
+For each indicator we include both the REALIZED value and the market
+EXPECTATIONS (forward-looking), where available.
 
-Logica del forward fill:
-  I dati macro sono mensili/trimestrali; le candele BTC sono a 1 minuto.
-  Dopo il merge, ogni candela eredita il dato macro più recente disponibile
-  (forward fill) — nessun look-ahead bias perché usiamo il dato
-  pubblicato, non quello del periodo corrente non ancora rilasciato.
+Forward-fill logic:
+  Macro data are monthly/quarterly; BTC candles are 1-minute.
+  After the merge, each candle inherits the most recent available macro value
+  (forward fill) — no look-ahead bias because we use the published value,
+  not the not-yet-released value of the current period.
 """
 
 import logging
@@ -29,26 +29,24 @@ import requests
 
 log = logging.getLogger("quantsys.macro")
 
-# IT: Lag conservativi per frequenza (evita look-ahead nel ffill).
-# EN: Conservative per-frequency lags (prevents look-ahead in ffill).
+# Conservative per-frequency lags (prevents look-ahead in ffill).
 RELEASE_LAG_DAYS: dict[str, int] = {
-    "D": 1,    # IT: T+1 | EN: T+1
-    "W": 4,    # IT: pubb. giovedì sett. succ. | EN: pub. Thu of next week
-    "M": 35,   # IT: ~5 settimane | EN: ~5 weeks
-    "Q": 35,   # IT: advance estimate ~30gg | EN: advance estimate ~30d
+    "D": 1,    # T+1
+    "W": 4,    # pub. Thu of next week
+    "M": 35,   # ~5 weeks
+    "Q": 35,   # advance estimate ~30d
 }
 
-# IT: Override per serie con lag noti (es. NFP primo venerdì).
-# EN: Overrides for series with known lags (e.g. NFP first Friday).
+# Overrides for series with known lags (e.g. NFP first Friday).
 SERIES_LAG_OVERRIDE: dict[str, int] = {
-    "nfp_level":       10,   # IT: primo venerdì | EN: first Friday
-    "initial_claims":   5,   # IT: giovedì sett. succ. | EN: Thu of next week
+    "nfp_level":       10,   # first Friday
+    "initial_claims":   5,   # Thu of next week
     "continued_claims": 5,
-    "jolts_openings":  42,   # IT: ~6 settimane di ritardo | EN: ~6-week lag
+    "jolts_openings":  42,   # ~6-week lag
     "jolts_quits":     42,
-    "fed_funds_upper":  1,   # IT: annunciato immediatamente | EN: announced immediately
+    "fed_funds_upper":  1,   # announced immediately
     "fed_funds_lower":  1,
-    "infl_exp_5y":      1,   # IT: breakeven daily market data | EN: daily breakeven market data
+    "infl_exp_5y":      1,   # daily breakeven market data
     "infl_exp_10y":     1,
     "tips_5y5y":        1,
     "yield_curve_2_10": 1,
@@ -64,30 +62,29 @@ SERIES_LAG_OVERRIDE: dict[str, int] = {
     "treasury_30y":     1,
 }
 
-# IT: Catalogo serie FRED: {nome: (FRED_ID, desc, freq)}.
-# EN: FRED series catalog: {name: (FRED_ID, desc, freq)}.
+# FRED series catalog: {name: (FRED_ID, desc, freq)}.
 FRED_SERIES = {
 
-    # ── INFLAZIONE ─────────────────────────────────────────────────────────
-    # Realizzato
+    # ── INFLATION ──────────────────────────────────────────────────────────
+    # Realized
     "cpi_yoy":          ("CPIAUCSL",   "CPI YoY",                 "M"),
     "core_cpi_yoy":     ("CPILFESL",   "Core CPI YoY (ex F&E)",   "M"),
     "pce_yoy":          ("PCEPI",      "PCE deflator YoY",        "M"),
     "core_pce_yoy":     ("PCEPILFE",   "Core PCE YoY (target Fed)","M"),
 
-    # Aspettative inflazione
+    # Inflation expectations
     "infl_exp_1y":      ("MICH",       "Michigan Infl Exp 1Y (survey)", "M"),
     "infl_exp_5y":      ("T5YIE",      "Breakeven Infl 5Y (market)",    "D"),
     "infl_exp_10y":     ("T10YIE",     "Breakeven Infl 10Y (market)",   "D"),
     "tips_5y5y":        ("T5YIFR",     "Breakeven Infl 5Y5Y Forward",   "D"),
 
-    # ── POLITICA MONETARIA (Fed) ────────────────────────────────────────────
-    # Realizzato
+    # ── MONETARY POLICY (Fed) ───────────────────────────────────────────────
+    # Realized
     "fed_funds":        ("FEDFUNDS",   "Fed Funds Rate effettivo",  "M"),
     "fed_funds_upper":  ("DFEDTARU",   "Fed Funds Target Upper",    "D"),
     "fed_funds_lower":  ("DFEDTARL",   "Fed Funds Target Lower",    "D"),
 
-    # Aspettative tasso (mercato obbligazionario)
+    # Rate expectations (bond market)
     "treasury_2y":      ("GS2",        "Treasury 2Y (proxy exp Fed)","M"),
     "treasury_5y":      ("GS5",        "Treasury 5Y",               "M"),
     "treasury_10y":     ("GS10",       "Treasury 10Y",              "M"),
@@ -96,45 +93,44 @@ FRED_SERIES = {
     "yield_curve_3m_10":("T10Y3M",     "Spread 3M-10Y",             "D"),
     "real_rate_10y":    ("DFII10",     "Real Rate 10Y (TIPS)",       "D"),
 
-    # ── PIL / CRESCITA ──────────────────────────────────────────────────────
-    # Realizzato
+    # ── GDP / GROWTH ────────────────────────────────────────────────────────
+    # Realized
     "gdp_growth":       ("A191RL1Q225SBEA", "GDP QoQ annualizzato",  "Q"),
     "gdp_level":        ("GDP",             "GDP nominale (miliardi)","Q"),
 
-    # Aspettative crescita (leading indicators)
+    # Growth expectations (leading indicators)
     "lei":              ("USSLIND",    "Leading Economic Index (CB)","M"),
     "indpro":           ("INDPRO",     "Industrial Production Index","M"),
     "gdpnow":           ("GDPNOW",    "Atlanta Fed GDPNow",        "D"),
-    # NAPM e NMFCI (ISM PMI) rimossi da FRED nel 2016 — INDPRO è il proxy migliore
+    # NAPM and NMFCI (ISM PMI) removed from FRED in 2016 — INDPRO is the best proxy
 
-    # ── MERCATO DEL LAVORO ──────────────────────────────────────────────────
-    # Realizzato
+    # ── LABOR MARKET ────────────────────────────────────────────────────────
+    # Realized
     "unemployment":     ("UNRATE",     "Tasso disoccupazione",      "M"),
     "nfp_level":        ("PAYEMS",     "Non-Farm Payroll (livello)", "M"),
     "avg_hourly_earn":  ("CES0500000003","Salari orari medi",        "M"),
     "participation":    ("CIVPART",    "Tasso partecipazione",       "M"),
 
-    # Aspettative / leading lavoro
+    # Labor expectations / leading
     "initial_claims":   ("ICSA",       "Initial Jobless Claims (sett.)","W"),
     "continued_claims": ("CCSA",       "Continued Claims",           "W"),
     "jolts_openings":   ("JTSJOL",     "JOLTS Job Openings",         "M"),
     "jolts_quits":      ("JTSJOR",     "JOLTS Quit Rate",            "M"),
 
-    # ── SENTIMENT / CONDIZIONI FINANZIARIE ─────────────────────────────────
+    # ── SENTIMENT / FINANCIAL CONDITIONS ───────────────────────────────────
     "nfci":             ("NFCI",       "Chicago Fed Conditions Index","W"),
     "consumer_conf":    ("UMCSENT",    "Michigan Consumer Sentiment", "M"),
     "credit_spread_hy": ("BAA10Y",     "Moody's BAA-10Y Spread (HY proxy)","D"),
     "credit_spread_ig": ("AAA10Y",     "Moody's AAA-10Y Spread (IG proxy)","D"),
 
-    # ── LIQUIDITÀ / BILANCIO FED ────────────────────────────────────────────
+    # ── LIQUIDITY / FED BALANCE SHEET ───────────────────────────────────────
     "fed_balance":      ("WALCL",      "Fed Balance Sheet (assets)", "W"),
     "m2":               ("M2SL",       "M2 Money Supply",            "M"),
     "repo_rate":        ("RRPONTSYD",  "Reverse Repo (overnight)",   "D"),
 
 }
 
-# IT: Serie yfinance giornaliere {ticker_yahoo: nome_interno}.
-# EN: Daily yfinance series {yahoo_ticker: internal_name}.
+# Daily yfinance series {yahoo_ticker: internal_name}.
 YFINANCE_TICKERS = {
     "DX-Y.NYB":  "dxy",
     "^VIX":      "vix",
@@ -143,40 +139,37 @@ YFINANCE_TICKERS = {
     "^GSPC":     "sp500",
     "^TNX":      "treasury_10y_yf",
     "BTC-USD":   "btc_daily",
-    "ETH-USD":   "eth_daily",     # IT: anticipa BTC in bull/bear | EN: leads BTC in bull/bear
-    "ETH-BTC":   "eth_btc_ratio", # IT: rotazione interna crypto | EN: internal crypto rotation
+    "ETH-USD":   "eth_daily",     # leads BTC in bull/bear
+    "ETH-BTC":   "eth_btc_ratio", # internal crypto rotation
 }
 
 
-# IT: FRED downloader con retry su 429 (rate limit) e api_key opzionale.
-# EN: FRED downloader with 429 (rate-limit) retries and optional api_key.
+# FRED downloader with 429 (rate-limit) retries and optional api_key.
 
 class FREDDownloader:
     """
-    Scarica serie storiche da FRED.
+    Download historical series from FRED.
 
-    La API key è gratuita (registrazione su fred.stlouisfed.org).
-    Senza key funziona comunque per la maggior parte delle serie
-    tramite il endpoint pubblico, con rate limit più stretto.
+    The API key is free (registration at fred.stlouisfed.org).
+    Without a key it still works for most series
+    through the public endpoint, with a tighter rate limit.
     """
 
     BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 
-    # IT: Memorizza l'api_key (opzionale) e avvisa se assente.
-    # EN: Stores the (optional) api_key and warns if missing.
+    # Stores the (optional) api_key and warns if missing.
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
         if not api_key:
             log.warning("FRED api_key non fornita — alcune serie potrebbero non essere accessibili.")
 
-    # IT: Scarica una singola serie FRED come pd.Series (retry su 429).
-    # EN: Downloads a single FRED series as a pd.Series (retries on 429).
+    # Downloads a single FRED series as a pd.Series (retries on 429).
     def fetch(self, series_id: str, start: str = "2018-01-01",
               max_retries: int = 3, retry_wait: float = 15.0) -> pd.Series:
         """
-        Scarica una serie FRED e la restituisce come pd.Series con indice DatetimeIndex.
-        I valori '.' (missing) vengono convertiti in NaN.
-        Su errore 429 (rate limit) aspetta retry_wait secondi e riprova.
+        Download one FRED series and return it as a pd.Series with a DatetimeIndex.
+        '.' (missing) values are converted to NaN.
+        On a 429 error (rate limit) waits retry_wait seconds and retries.
         """
         params = {
             "series_id":        series_id,
@@ -187,12 +180,10 @@ class FREDDownloader:
         if self.api_key:
             params["api_key"] = self.api_key
         else:
-            # IT: Dummy key per soddisfare il format check (endpoint pubblico).
-            # EN: Dummy key to satisfy format check (public endpoint).
+            # Dummy key to satisfy format check (public endpoint).
             params["api_key"] = "abcdefghijklmnopqrstuvwxyz123456"
 
-        # IT: Retry policy: backoff fisso retry_wait su 429 e HTTPError.
-        # EN: Retry policy: fixed retry_wait backoff on 429 and HTTPError.
+        # Retry policy: fixed retry_wait backoff on 429 and HTTPError.
         for attempt in range(1, max_retries + 1):
             try:
                 r = requests.get(self.BASE_URL, params=params, timeout=15)
@@ -229,31 +220,29 @@ class FREDDownloader:
         s = s.replace(".", np.nan).dropna()
         return s
 
-    # IT: Scarica tutte le serie, applica release-lag e allinea su indice daily.
-    # EN: Downloads all series, applies release-lag and aligns on a daily index.
+    # Downloads all series, applies release-lag and aligns on a daily index.
     def fetch_all(self, series_dict: dict, start: str = "2018-01-01",
                   sleep: float = 2.0) -> pd.DataFrame:
         """
-        Scarica tutte le serie e le allinea su un indice giornaliero.
+        Download all series and align them on a daily index.
 
-        CORREZIONE LOOK-AHEAD BIAS:
-          Ogni dato viene reso disponibile solo dopo il suo release lag tipico.
-          Es: CPI di gennaio (obs_date=2024-01-31) → disponibile da 2024-03-06
-              (35 giorni dopo), non da 2024-02-01.
+        LOOK-AHEAD BIAS CORRECTION:
+          Each value becomes available only after its typical release lag.
+          E.g.: January CPI (obs_date=2024-01-31) → available from 2024-03-06
+                (35 days later), not from 2024-02-01.
 
-          In pratica: shiftiamo l'indice di ogni osservazione in avanti di
-          `lag` giorni prima di fare il reindex sul calendario giornaliero.
-          Il ffill propaga poi solo dati già "pubblicati" a quella data.
+          In practice: we shift each observation's index forward by
+          `lag` days before reindexing on the daily calendar.
+          The ffill then only propagates data already "published" at that date.
         """
         frames = {}
         total  = len(series_dict)
-        skipped_series: list[str] = []  # IT: log serie saltate | EN: log of skipped series
+        skipped_series: list[str] = []  # log of skipped series
         for i, (name, (fred_id, desc, freq)) in enumerate(series_dict.items(), 1):
             log.info(f"  [{i:2d}/{total}] {fred_id:<22} {desc}")
             s = self.fetch(fred_id, start=start)
             if s.empty:
-                # IT: Logga esplicitamente (non skip silenzioso).
-                # EN: Logs explicitly (no silent skip).
+                # Logs explicitly (no silent skip).
                 log.warning(
                     f"  FRED {fred_id} ({name}): nessun dato da {start} — "
                     f"la serie potrebbe non esistere per questo periodo. "
@@ -263,8 +252,7 @@ class FREDDownloader:
                 time.sleep(sleep)
                 continue
 
-            # IT: Verifica copertura effettiva del periodo richiesto.
-            # EN: Verifies effective coverage of the requested period.
+            # Verifies effective coverage of the requested period.
             series_start = s.index.min().date()
             requested    = pd.to_datetime(start).date()
             if series_start > requested:
@@ -275,15 +263,13 @@ class FREDDownloader:
                     f"Le prime {gap} giorni di dati macro avranno bfill nel merge."
                 )
 
-            # IT: Lag per questa serie (override > default per freq).
-            # EN: Lag for this series (override > default for freq).
+            # Lag for this series (override > default for freq).
             lag_days = SERIES_LAG_OVERRIDE.get(name, RELEASE_LAG_DAYS.get(freq, 35))
 
-            # IT: Shift in avanti delle date di osservazione = data di disponibilità.
-            # EN: Forward-shifts observation dates = availability date.
+            # Forward-shifts observation dates = availability date.
             s.index = s.index + pd.Timedelta(days=lag_days)
             frames[name] = s
-            time.sleep(sleep)  # IT: rate-limit safety | EN: rate-limit safety
+            time.sleep(sleep)  # rate-limit safety
 
         if skipped_series:
             log.warning(
@@ -296,8 +282,7 @@ class FREDDownloader:
         if not frames:
             raise ValueError("Nessuna serie FRED scaricata — controlla connessione e api_key.")
 
-        # IT: Reindex daily + ffill propaga solo dati già pubblicati (no look-ahead).
-        # EN: Daily reindex + ffill only propagates already-published data (no look-ahead).
+        # Daily reindex + ffill only propagates already-published data (no look-ahead).
         idx = pd.date_range(start=start, end=datetime.now().date(), freq="D")
         df  = pd.DataFrame(index=idx)
         for name, s in frames.items():
@@ -306,12 +291,11 @@ class FREDDownloader:
         return df
 
 
-# IT: yfinance downloader: prezzi daily auto-adjusted.
-# EN: yfinance downloader: auto-adjusted daily prices.
+# yfinance downloader: auto-adjusted daily prices.
 def fetch_yfinance(tickers: dict, start: str = "2018-01-01") -> pd.DataFrame:
     """
-    Scarica prezzi giornalieri da yfinance.
-    Tickers: {yahoo_ticker: nome_colonna}
+    Download daily prices from yfinance.
+    Tickers: {yahoo_ticker: column_name}
     """
     try:
         import yfinance as yf
@@ -347,65 +331,58 @@ def fetch_yfinance(tickers: dict, start: str = "2018-01-01") -> pd.DataFrame:
 
 
 
-# IT: Trasforma serie grezze in feature stazionarie (YoY, MoM, diff, z-score).
-# EN: Transforms raw series into stationary features (YoY, MoM, diff, z-score).
+# Transforms raw series into stationary features (YoY, MoM, diff, z-score).
 
 class MacroFeatureBuilder:
     """
-    Trasforma le serie FRED grezze in features stazionarie e normalizzate,
-    pronte per essere passate all'HMM e al MacroEncoder.
+    Transform raw FRED series into stationary, normalized features,
+    ready to be passed to the HMM and the MacroEncoder.
 
-    Principio: le serie di livello (es. CPI = 312) non sono stazionarie.
-    Usiamo variazioni percentuali YoY o MoM a seconda della serie.
-    Per le serie già in % (tassi, spread), usiamo variazioni assolute.
+    Principle: level series (e.g. CPI = 312) are not stationary.
+    We use YoY or MoM percentage changes depending on the series.
+    For series already in % (rates, spreads), we use absolute changes.
     """
 
-    # IT: Costruisce le macro feature stazionarie da serie FRED + yfinance.
-    # EN: Builds stationary macro features from FRED + yfinance series.
+    # Builds stationary macro features from FRED + yfinance series.
     def build(self, df_fred: pd.DataFrame,
               df_yf: pd.DataFrame) -> pd.DataFrame:
         """
-        Input:  df_fred (giornaliero, forward-filled), df_yf (giornaliero)
-        Output: DataFrame con tutte le macro features pronte per HMM
+        Input:  df_fred (daily, forward-filled), df_yf (daily)
+        Output: DataFrame with all macro features ready for the HMM
         """
         f = pd.DataFrame(index=df_fred.index)
 
-        # IT: Inflazione realizzata: YoY + momentum MoM.
-        # EN: Realized inflation: YoY + MoM momentum.
+        # Realized inflation: YoY + MoM momentum.
         for col in ["cpi_yoy", "core_cpi_yoy", "pce_yoy", "core_pce_yoy"]:
             if col in df_fred.columns:
                 raw = df_fred[col]
-                # YoY%: (t - t-12mesi) / t-12mesi * 100
+                # YoY%: (t - t-12months) / t-12months * 100
                 f[col + "_yoy"] = raw.pct_change(252) * 100
-                # Momentum: sta accelerando o decelerando?
+                # Momentum: accelerating or decelerating?
                 f[col + "_mom"] = raw.pct_change(21) * 100
 
-        # IT: Aspettative inflazione (livello + variazione 1M).
-        # EN: Inflation expectations (level + 1M change).
+        # Inflation expectations (level + 1M change).
         for col in ["infl_exp_1y", "infl_exp_5y", "infl_exp_10y", "tips_5y5y"]:
             if col in df_fred.columns:
                 f[col] = df_fred[col]
                 f[col + "_chg"] = df_fred[col].diff(21)
 
-        # IT: Inflation surprise proxy: aspettative - realizzato.
-        # EN: Inflation surprise proxy: expectations - realized.
+        # Inflation surprise proxy: expectations - realized.
         if "infl_exp_1y" in df_fred.columns and "cpi_yoy" in df_fred.columns:
             f["infl_surprise"] = df_fred["infl_exp_1y"] - df_fred["cpi_yoy"].pct_change(252) * 100
 
-        # IT: Politica Fed: tasso effettivo, target, gap di credibilità.
-        # EN: Fed policy: effective rate, target, credibility gap.
+        # Fed policy: effective rate, target, credibility gap.
         if "fed_funds" in df_fred.columns:
             f["fed_funds"]      = df_fred["fed_funds"]
-            f["fed_funds_chg"]  = df_fred["fed_funds"].diff(21)    # variazione 1M
+            f["fed_funds_chg"]  = df_fred["fed_funds"].diff(21)    # 1M change
 
         if "fed_funds_upper" in df_fred.columns:
             f["fed_target"]     = df_fred["fed_funds_upper"]
-            # Differenziale: mercato vs target → misura credibilità Fed
+            # Spread: market vs target → measures Fed credibility
             if "fed_funds" in df_fred.columns:
                 f["fed_gap"]    = df_fred["fed_funds"] - df_fred["fed_funds_upper"]
 
-        # IT: Curva dei tassi: livelli Treasury + spread/inversione.
-        # EN: Yield curve: Treasury levels + spreads/inversion.
+        # Yield curve: Treasury levels + spreads/inversion.
         for col in ["treasury_2y", "treasury_5y", "treasury_10y", "treasury_30y"]:
             if col in df_fred.columns:
                 f[col]          = df_fred[col]
@@ -416,15 +393,14 @@ class MacroFeatureBuilder:
                 f[col]          = df_fred[col]
                 f[col + "_chg"] = df_fred[col].diff(21)
 
-        # Inversione yield curve (segnale recessione)
+        # Yield curve inversion (recession signal)
         if "yield_curve_2_10" in df_fred.columns:
             f["yield_inverted"] = (df_fred["yield_curve_2_10"] < 0).astype(float)
 
-        # IT: PIL e leading indicators di crescita (LEI, INDPRO, GDPNow).
-        # EN: GDP and growth leading indicators (LEI, INDPRO, GDPNow).
+        # GDP and growth leading indicators (LEI, INDPRO, GDPNow).
         if "gdp_growth" in df_fred.columns:
             f["gdp_growth"]     = df_fred["gdp_growth"]
-            f["gdp_growth_chg"] = df_fred["gdp_growth"].diff(63)   # variazione 1Q
+            f["gdp_growth_chg"] = df_fred["gdp_growth"].diff(63)   # 1Q change
 
         if "lei" in df_fred.columns:
             f["lei"]            = df_fred["lei"].pct_change(21) * 100  # MoM%
@@ -439,24 +415,23 @@ class MacroFeatureBuilder:
             if "gdp_growth" in df_fred.columns:
                 f["gdpnow_surprise"] = df_fred["gdpnow"] - df_fred["gdp_growth"]
 
-        # IT: Mercato del lavoro: disoccupazione, NFP, salari, Sahm proxy.
-        # EN: Labor market: unemployment, NFP, wages, Sahm proxy.
+        # Labor market: unemployment, NFP, wages, Sahm proxy.
         if "unemployment" in df_fred.columns:
             f["unemployment"]   = df_fred["unemployment"]
             f["unemployment_chg"]= df_fred["unemployment"].diff(21)
-            # Sahm Rule proxy: recessione se +0.5% dal minimo 12M
+            # Sahm Rule proxy: recession if +0.5% above the 12M minimum
             roll_min = df_fred["unemployment"].rolling(252).min()
             f["sahm_proxy"]     = df_fred["unemployment"] - roll_min
 
         if "nfp_level" in df_fred.columns:
-            # NFP MoM change (migliaia di posti)
+            # NFP MoM change (thousands of jobs)
             f["nfp_mom"]        = df_fred["nfp_level"].diff(21)
             f["nfp_3m_avg"]     = f["nfp_mom"].rolling(63).mean()
 
         if "avg_hourly_earn" in df_fred.columns:
             f["wages_yoy"]      = df_fred["avg_hourly_earn"].pct_change(252) * 100
 
-        # Leading lavoro
+        # Labor leading indicators
         if "initial_claims" in df_fred.columns:
             f["claims"]         = np.log(df_fred["initial_claims"])
             f["claims_chg"]     = df_fred["initial_claims"].pct_change(21) * 100
@@ -466,10 +441,9 @@ class MacroFeatureBuilder:
         if "jolts_openings" in df_fred.columns:
             f["jolts_openings_yoy"] = df_fred["jolts_openings"].pct_change(252) * 100
 
-        # IT: Condizioni finanziarie: NFCI, sentiment, credit spread.
-        # EN: Financial conditions: NFCI, sentiment, credit spreads.
+        # Financial conditions: NFCI, sentiment, credit spreads.
         if "nfci" in df_fred.columns:
-            f["nfci"]           = df_fred["nfci"]    # già normalizzato (media=0)
+            f["nfci"]           = df_fred["nfci"]    # already normalized (mean=0)
             f["nfci_trend"]     = df_fred["nfci"].rolling(21).mean()
 
         if "consumer_conf" in df_fred.columns:
@@ -481,8 +455,7 @@ class MacroFeatureBuilder:
                 f[col]          = df_fred[col]
                 f[col + "_chg"] = df_fred[col].diff(21)
 
-        # IT: Liquidità: bilancio Fed, M2, reverse repo.
-        # EN: Liquidity: Fed balance sheet, M2, reverse repo.
+        # Liquidity: Fed balance sheet, M2, reverse repo.
         if "fed_balance" in df_fred.columns:
             f["fed_balance_yoy"] = df_fred["fed_balance"].pct_change(252) * 100
             f["fed_balance_chg"] = df_fred["fed_balance"].diff(21)
@@ -495,13 +468,12 @@ class MacroFeatureBuilder:
             f["repo_rate"]      = df_fred["repo_rate"]
             f["repo_rate_chg"]  = df_fred["repo_rate"].diff(21)
 
-        # IT: Mercati finanziari (yfinance): VIX, DXY, gold, oil, SP500, crypto.
-        # EN: Financial markets (yfinance): VIX, DXY, gold, oil, SP500, crypto.
+        # Financial markets (yfinance): VIX, DXY, gold, oil, SP500, crypto.
         if not df_yf.empty:
             if "vix" in df_yf.columns:
                 f["vix"]        = df_yf["vix"]
                 f["vix_chg"]    = df_yf["vix"].diff(5)
-                f["vix_high"]   = (df_yf["vix"] > 25).astype(float)  # regime paura
+                f["vix_high"]   = (df_yf["vix"] > 25).astype(float)  # fear regime
 
             if "dxy" in df_yf.columns:
                 f["dxy_yoy"]    = df_yf["dxy"].pct_change(252) * 100
@@ -520,8 +492,7 @@ class MacroFeatureBuilder:
                 f["sp500_mom"]  = df_yf["sp500"].pct_change(21)  * 100
                 f["sp500_trend"]= (df_yf["sp500"] > df_yf["sp500"].rolling(200).mean()).astype(float)
 
-            # IT: Correlazioni crypto: ETH come leading di BTC, corr rolling.
-            # EN: Crypto correlations: ETH as BTC leading signal, rolling corr.
+            # Crypto correlations: ETH as BTC leading signal, rolling corr.
             if "eth_daily" in df_yf.columns:
                 f["eth_yoy"]    = df_yf["eth_daily"].pct_change(252) * 100
                 f["eth_mom"]    = df_yf["eth_daily"].pct_change(21)  * 100
@@ -543,12 +514,11 @@ class MacroFeatureBuilder:
                     df_yf["eth_btc_ratio"] > df_yf["eth_btc_ratio"].rolling(90).mean()
                 ).astype(float)
 
-        # IT: Pulizia finale: ffill/bfill, rimuove inf e colonne troppo sparse.
-        # EN: Final cleanup: ffill/bfill, drop inf and overly-sparse columns.
+        # Final cleanup: ffill/bfill, drop inf and overly-sparse columns.
         f = f.ffill().bfill()
         f = f.replace([np.inf, -np.inf], np.nan)
 
-        # Rimuovi colonne con troppi NaN (>50%)
+        # Drop columns with too many NaN (>50%)
         thresh = len(f) * 0.5
         f = f.dropna(axis=1, thresh=thresh)
 
@@ -556,41 +526,40 @@ class MacroFeatureBuilder:
         return f
 
 
-# ─── MERGE CON CANDELE BTC ───────────────────────────────────────────────────
+# ─── MERGE WITH BTC CANDLES ──────────────────────────────────────────────────
 
-# IT: Allinea le macro (daily) alle candele BTC via merge_asof (no look-ahead).
-# EN: Aligns daily macro to BTC candles via merge_asof (no look-ahead).
+# Aligns daily macro to BTC candles via merge_asof (no look-ahead).
 def merge_macro_with_candles(
     df_candles: pd.DataFrame,
     df_macro:   pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Allinea le macro features (giornaliere) con le candele BTC (minutali).
+    Align the (daily) macro features with the (minute) BTC candles.
 
-    Il release lag è già stato applicato in `fetch_all` — l'indice di df_macro
-    riflette già le date di *disponibilità effettiva* (non di osservazione).
-    Qui usiamo semplicemente `pd.merge_asof` che fa un forward-fill ordinato
-    per timestamp, garantendo zero look-ahead bias.
+    The release lag has already been applied in `fetch_all` — the df_macro index
+    already reflects the *effective availability* dates (not observation dates).
+    Here we simply use `pd.merge_asof`, which performs a timestamp-ordered
+    forward fill, guaranteeing zero look-ahead bias.
 
-    `pd.merge_asof` sceglie per ogni candela BTC il dato macro con l'indice
-    più recente ≤ al timestamp della candela — mai un dato futuro.
+    For each BTC candle `pd.merge_asof` picks the macro value with the most
+    recent index ≤ the candle timestamp — never a future value.
 
-    Note sulla memoria con 2M+ candele:
-      · merge_asof è implementato in Cython — non espande il DataFrame macro
-        in una matrice N×M. L'unico overhead è il DataFrame risultante che ha
-        le stesse righe del df_candles (N) + n_macro_cols colonne in più.
-      · Con 2M righe × 80 colonne float32 → ~640 MB di RAM aggiuntivi.
-        Accettabile su macchine con ≥8 GB RAM; se la RAM è limitata,
-        considera di salvare le macro features separatamente e fare il join
-        solo al momento della creazione delle windows (TODO ottimizzazione futura).
+    Memory notes with 2M+ candles:
+      · merge_asof is implemented in Cython — it does not expand the macro
+        DataFrame into an N×M matrix. The only overhead is the resulting
+        DataFrame, with the same rows as df_candles (N) + n_macro_cols extra columns.
+      · With 2M rows × 80 float32 columns → ~640 MB of additional RAM.
+        Acceptable on machines with ≥8 GB RAM; if RAM is limited,
+        consider saving the macro features separately and joining only
+        when the windows are created (TODO future optimization).
     """
     if df_macro.empty:
         log.warning("DataFrame macro vuoto — merge saltato.")
         return df_candles
 
-    # ── Log copertura temporale macro vs price ───────────────────────────────
-    # Fix 4: mostra esplicitamente i range temporali dei due dataset
-    # per diagnosticare serie con inizio più tardi del history_start configurato.
+    # ── Log macro vs price time coverage ─────────────────────────────────────
+    # Fix 4: explicitly show the time ranges of both datasets
+    # to diagnose series starting later than the configured history_start.
     price_start = df_candles["open_time"].min() if "open_time" in df_candles.columns else None
     price_end   = df_candles["open_time"].max() if "open_time" in df_candles.columns else None
     macro_start = pd.to_datetime(df_macro.index.min(), utc=True)
@@ -604,15 +573,12 @@ def merge_macro_with_candles(
             f"\n  Macro (giornaliero): {macro_start.date()} → {macro_end.date()}"
             f"  ({len(df_macro)} giorni, {len(df_macro.columns)} serie)"
         )
-        # Avvisa se il macro non copre l'intero periodo price
+        # Warn if macro does not cover the whole price period
         if macro_start > price_start:
             gap_days = (macro_start - price_start).days
-            # IT: barre/giorno inferite dal passo MEDIANO dei dati (interval-agnostic,
-            #     nessuna config richiesta): 1m → 1440, 1h → 24. Fallback 1440 (= legacy 1m)
-            #     se il passo è NaN/non-positivo (es. <2 candele o timestamp degeneri).
-            # EN: bars/day inferred from the MEDIAN data step (interval-agnostic, no config
-            #     needed): 1m → 1440, 1h → 24. Fallback 1440 (= legacy 1m) if the step is
-            #     NaN/non-positive (e.g. <2 candles or degenerate timestamps).
+            # bars/day inferred from the MEDIAN data step (interval-agnostic, no config
+            # needed): 1m → 1440, 1h → 24. Fallback 1440 (= legacy 1m) if the step is
+            # NaN/non-positive (e.g. <2 candles or degenerate timestamps).
             _step_med = df_candles["open_time"].diff().median()
             _step_sec = _step_med.total_seconds() if pd.notna(_step_med) else 0.0
             bars_per_day = max(1, round(86400 / _step_sec)) if _step_sec > 0 else 1440
@@ -632,39 +598,39 @@ def merge_macro_with_candles(
                 f"Le ultime candele useranno l'ultimo dato macro disponibile (ffill)."
             )
 
-    # Prepara indice macro: timezone-aware UTC, ordinato
+    # Prepare macro index: timezone-aware UTC, sorted
     macro_utc = df_macro.copy()
     macro_utc.index = pd.to_datetime(macro_utc.index, utc=True).normalize()
     macro_utc = macro_utc[~macro_utc.index.duplicated(keep="last")].sort_index()
     macro_utc = macro_utc.reset_index().rename(columns={"index": "date"})
 
-    # Normalizza l'open_time delle candele a mezzanotte UTC per il join
+    # Normalize candle open_time to UTC midnight for the join
     candles_work = df_candles.copy()
     candles_work["_merge_date"] = candles_work["open_time"].dt.normalize()
 
-    # merge_asof: per ogni candela prende il macro più recente disponibile
-    # direction="backward" garantisce zero look-ahead bias
+    # merge_asof: for each candle takes the most recent available macro value
+    # direction="backward" guarantees zero look-ahead bias
     merged = pd.merge_asof(
         candles_work.sort_values("_merge_date"),
         macro_utc.rename(columns={"date": "_merge_date"}),
         on="_merge_date",
-        direction="backward",   # ← solo dati passati, mai futuri
+        direction="backward",   # ← past data only, never future
         suffixes=("", "_macro"),
     )
     merged = merged.drop(columns=["_merge_date"])
 
-    # Rinomina le colonne macro aggiungendo il prefisso "macro_"
+    # Rename macro columns adding the "macro_" prefix
     macro_cols = [c for c in macro_utc.columns if c != "_merge_date"]
     rename_map = {c: f"macro_{c}" for c in macro_cols if c in merged.columns}
     merged = merged.rename(columns=rename_map)
 
-    # Ripristina l'ordine originale per open_time
+    # Restore the original open_time order
     merged = merged.sort_values("open_time").reset_index(drop=True)
 
-    # Fix 4: colma eventuali NaN iniziali con bfill (serie che iniziano dopo history_start)
-    # Questo può accadere se una serie FRED non ha dati prima del 2018-01-01
-    # ma le candele price iniziano da quella data.
-    # Il bfill usa il primo valore disponibile per le righe precedenti → conservativo.
+    # Fix 4: fill any leading NaN with bfill (series starting after history_start)
+    # This can happen if a FRED series has no data before 2018-01-01
+    # but the price candles start from that date.
+    # The bfill uses the first available value for the earlier rows → conservative.
     new_macro_cols = [c for c in merged.columns if c.startswith("macro_")]
     nan_before = merged[new_macro_cols].isna().sum().sum() if new_macro_cols else 0
     if nan_before > 0:

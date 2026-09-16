@@ -1,19 +1,19 @@
 """
 Script 04 — Live Signals Engine.
-Connette il modello LSTM addestrato al feed WebSocket di Binance,
-genera segnali BUY/SELL/HOLD in tempo reale e logga tutto su file.
+Connects the trained LSTM model to the Binance WebSocket feed,
+generates BUY/SELL/HOLD signals in real time and logs everything to file.
 
-Run configuration PyCharm:
+PyCharm run configuration:
   Script: scripts/04_live_signals.py
-  Working dir: <root del progetto>
+  Working dir: <project root>
   Environment: CUDA_VISIBLE_DEVICES=0
 
-NOTA: questo script NON esegue ordini reali. Genera segnali e li
-      logga in results/live_signals.jsonl per analisi successive.
-      Per il trading reale è necessaria una API key Binance con permessi
-      di trading — non inclusa in questo progetto per sicurezza.
+NOTE: this script does NOT place real orders. It generates signals and
+      logs them to results/live_signals.jsonl for later analysis.
+      Real trading requires a Binance API key with trading
+      permissions — not included in this project for security.
 
-Interrompi con: Ctrl+C
+Stop with: Ctrl+C
 """
 import asyncio
 import json
@@ -26,8 +26,7 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-# IT: cap thread BLAS/OMP prima di importare numpy/torch
-# EN: cap BLAS/OMP threads before importing numpy/torch
+# cap BLAS/OMP threads before importing numpy/torch
 import yaml as _yaml
 with open(Path(__file__).resolve().parent.parent / "config" / "default.yaml", encoding="utf-8") as _f:
     _cpu_frac = _yaml.safe_load(_f).get("hardware", {}).get("cpu_fraction", 0.5)
@@ -53,93 +52,77 @@ setup_logging(logging.INFO)
 log = logging.getLogger("quantsys.live")
 
 
-# IT: codici colore ANSI per output console leggibile
-# EN: ANSI color codes for readable console output
+# ANSI color codes for readable console output
 GRN  = "\033[92m"; RED  = "\033[91m"; YEL = "\033[93m"
 CYN  = "\033[96m"; DIM  = "\033[2m";  RST = "\033[0m"; BOLD = "\033[1m"
 
-# IT: formatta BUY/SELL/HOLD con badge colorato
-# EN: format BUY/SELL/HOLD with colored badge
+# format BUY/SELL/HOLD with colored badge
 def colored_signal(sig: str) -> str:
     if sig == "BUY":  return f"{GRN}{BOLD}▲ BUY {RST}"
     if sig == "SELL": return f"{RED}{BOLD}▼ SELL{RST}"
     return f"{YEL}◆ HOLD{RST}"
 
 
-# IT: sanity check candela WS — scarta dati corrotti (high<low, prezzi<=0, spike/drop)
-# EN: WS candle sanity check — drops corrupt data (high<low, prices<=0, spike/drop)
+# WS candle sanity check — drops corrupt data (high<low, prices<=0, spike/drop)
 def _is_valid_candle(c: dict) -> bool:
     """
-    Sanity check su una candela dal WebSocket Binance.
-    Scarta candele con dati palesemente corrotti:
-      · high < low (impossibile fisicamente)
-      · prezzi zero o negativi (feed error o halt)
-      · spike > 10x o drop > 90% rispetto al close (errore di feed)
-      · volume negativo
+    Sanity check on a candle from the Binance WebSocket.
+    Drops candles with plainly corrupted data:
+      · high < low (physically impossible)
+      · zero or negative prices (feed error or halt)
+      · spike > 10x or drop > 90% relative to close (feed error)
+      · negative volume
 
-    Nota: non scarta candele con volume = 0 (esistono nei mercati poco liquidi).
+    Note: candles with volume = 0 are not dropped (they occur in illiquid markets).
     """
     try:
         o = c["open"]; h = c["high"]; lo = c["low"]; cl = c["close"]
         v = c["volume"]
 
         if any(x <= 0 for x in [o, h, lo, cl]):   return False
-        if h < lo:                                  return False   # IT: high < low | EN: high < low
-        if v < 0:                                   return False   # IT: volume negativo | EN: negative volume
-        if h > cl * 10:                             return False   # IT: spike >10x feed error | EN: spike >10x feed error
-        if lo < cl * 0.1:                           return False   # IT: drop >90% | EN: drop >90%
-        if not all(map(lambda x: x == x, [o, h, lo, cl, v])):  # IT: check NaN (x!=x) | EN: NaN check (x!=x)
+        if h < lo:                                  return False   # high < low
+        if v < 0:                                   return False   # negative volume
+        if h > cl * 10:                             return False   # spike >10x feed error
+        if lo < cl * 0.1:                           return False   # drop >90%
+        if not all(map(lambda x: x == x, [o, h, lo, cl, v])):  # NaN check (x!=x)
             return False
         return True
     except (KeyError, TypeError):
         return False
 
 
-# IT: feature builder leggero per inferenza live (sottoinsieme di 01_*)
-# EN: lightweight feature builder for live inference (subset of 01_*)
-# IT: Buffer ring di candele OHLCV grezze per il nuovo live engine (BLOCKER #1 Stage 4).
-#     Sostituisce LiveFeatureBuffer come buffer raw, delegando l'intero feature engineering
-#     a quantsys.features.FeatureBuilder (single source of truth condivisa col training).
-# EN: Ring buffer of raw OHLCV candles for the new live engine (BLOCKER #1 Stage 4).
-#     Replaces LiveFeatureBuffer as the raw buffer, delegating all feature engineering
-#     to quantsys.features.FeatureBuilder (single source of truth shared with training).
+# lightweight feature builder for live inference (subset of 01_*)
+# Ring buffer of raw OHLCV candles for the new live engine (BLOCKER #1 Stage 4).
+# Replaces LiveFeatureBuffer as the raw buffer, delegating all feature engineering
+# to quantsys.features.FeatureBuilder (single source of truth shared with training).
 class LiveCandleBuffer:
-    """Buffer raw OHLCV per il live engine — feature engineering delegato a FeatureBuilder.
+    """Raw OHLCV buffer for the live engine — feature engineering delegated to FeatureBuilder.
 
-    Diversamente da LiveFeatureBuffer (legacy, calcolava 39 feature a mano), questo
-    componente mantiene solo le candele grezze. FeatureAssembler (step 4.5) le
-    consumerà chiamando FeatureBuilder.build() — garantisce parity esatta col training.
+    Unlike LiveFeatureBuffer (legacy, computed 39 features by hand), this
+    component keeps only the raw candles. FeatureAssembler (step 4.5) consumes
+    them by calling FeatureBuilder.build() — guarantees exact parity with training.
 
-    Capacità: il default 50000 equivale a ≈35 giorni SOLO a intervallo 1m; il chiamante
-    (LiveEngine) calcola la capacity interval-aware da config: 35 giorni × barre/giorno
-    + margine (a 1m ≈ 51900, a 1h = 2340) — sufficiente per warmup completo di tutte le
-    feature 30d (dist_ath_30d, momentum_30d, price_vs_ma200m).
-    Memoria: ~5 MB con dict-of-floats a 1m, trascurabile.
-
-    EN — Capacity: the 50000 default equals ≈35 days ONLY at 1m interval; the caller
+    Capacity: the 50000 default equals ≈35 days ONLY at 1m interval; the caller
     (LiveEngine) computes an interval-aware capacity from config: 35 days × bars/day
-    + margin (≈51900 at 1m, 2340 at 1h) — enough for full warmup of all 30d features.
+    + margin (≈51900 at 1m, 2340 at 1h) — enough for full warmup of all 30d
+    features (dist_ath_30d, momentum_30d, price_vs_ma200m).
+    Memory: ~5 MB with dict-of-floats at 1m, negligible.
     """
 
-    # IT: Campi richiesti per essere compatibili col FeatureBuilder (training schema).
-    # EN: Required fields for FeatureBuilder compatibility (training schema).
+    # Required fields for FeatureBuilder compatibility (training schema).
     REQUIRED_FIELDS = (
         "open", "high", "low", "close", "volume",
         "quote_vol", "trades", "taker_buy_vol", "taker_buy_quote_vol",
         "open_time",
     )
 
-    # IT: Inizializza il deque a capacita' fissa (FIFO automatico su overflow).
-    # EN: Initializes the deque with fixed capacity (auto-FIFO on overflow).
+    # Initializes the deque with fixed capacity (auto-FIFO on overflow).
     def __init__(self, maxlen: int = 50000):
         self._candles: deque = deque(maxlen=maxlen)
 
-    # IT: Pre-carica le ultime n_last candele da raw_candles.parquet (warmup boot).
-    # IT: open_time → Timestamp tz-naive UTC. Uniforma le sorgenti: parquet (Timestamp, spesso
-    #     tz-AWARE) e WS/REST (`ts`=epoch-ms int). Senza uniformazione il buffer mischia tz-aware
-    #     e tz-naive → ValueError "Cannot mix tz-aware with tz-naive" nel build (bug smoke 2026-06-05).
-    # EN: open_time → tz-naive UTC Timestamp. Uniforms sources: parquet (Timestamp, often tz-AWARE)
-    #     and WS/REST (`ts`=epoch-ms int). Otherwise the buffer mixes tz-aware/naive → ValueError.
+    # open_time → tz-naive UTC Timestamp. Uniforms sources: parquet (Timestamp, often tz-AWARE)
+    # and WS/REST (`ts`=epoch-ms int). Otherwise the buffer mixes tz-aware/naive → ValueError
+    # "Cannot mix tz-aware with tz-naive" in build (smoke-test bug 2026-06-05).
     @staticmethod
     def _norm_ts(ot) -> "pd.Timestamp":
         if isinstance(ot, (int, float)):
@@ -147,12 +130,12 @@ class LiveCandleBuffer:
         t = pd.Timestamp(ot)
         return t.tz_convert("UTC").tz_localize(None) if t.tz is not None else t
 
-    # EN: Pre-loads the last n_last candles from raw_candles.parquet (warmup boot).
+    # Pre-loads the last n_last candles from raw_candles.parquet (warmup boot).
     def bootstrap_from_parquet(self, path: str, n_last: int | None = None) -> int:
-        """Carica le ultime n_last candele da disco. Ritorna n caricate.
+        """Loads the last n_last candles from disk. Returns the number loaded.
 
-        Se path non esiste: warning + ritorna 0 (buffer parte vuoto, dovrà ricostruirsi
-        via REST/WS, ma molte feature 30d saranno NaN finché il buffer non si riempie).
+        If path does not exist: warning + returns 0 (buffer starts empty and must be rebuilt
+        via REST/WS, but many 30d features will be NaN until the buffer fills up).
         """
         p = Path(path)
         if not p.exists():
@@ -177,20 +160,16 @@ class LiveCandleBuffer:
         log.info(f"LiveCandleBuffer: bootstrap {len(self._candles)} candele da {path}")
         return len(self._candles)
 
-    # IT: Aggiunge una candela (normalizza schema, default 0 per campi assenti).
-    # EN: Appends a candle (normalizes schema, defaults to 0 for missing fields).
+    # Appends a candle (normalizes schema, defaults to 0 for missing fields).
     def append(self, candle: dict) -> None:
-        """Append una candela. Campi mancanti → default 0 (quote_vol/trades/taker_buy_quote_vol).
+        """Appends a candle. Missing fields → default 0 (quote_vol/trades/taker_buy_quote_vol).
 
-        Il WS Binance kline (intervallo da config) ritorna tutti i campi richiesti; il caller deve solo
-        estrarli dai k[] del payload (vedi WS handler in LiveEngine).
+        The Binance kline WS (interval from config) returns all required fields; the caller only has to
+        extract them from the payload's k[] (see the WS handler in LiveEngine).
         """
-        # IT: Normalizza open_time a Timestamp tz-naive UTC. WS/REST passano `ts`=epoch-ms (int);
-        #     il bootstrap da parquet passa già Timestamp. Senza coercizione il buffer mischia
-        #     int e Timestamp → index `object` → `.dt` crasha nel FeatureBuilder (bug smoke 2026-06-05).
-        # EN: Normalize open_time to a tz-naive UTC Timestamp. WS/REST pass `ts`=epoch-ms (int); the
-        #     parquet bootstrap passes Timestamps. Without coercion the buffer mixes int and Timestamp
-        #     → object index → `.dt` accessor crashes in FeatureBuilder (smoke-test bug 2026-06-05).
+        # Normalize open_time to a tz-naive UTC Timestamp. WS/REST pass `ts`=epoch-ms (int); the
+        # parquet bootstrap passes Timestamps. Without coercion the buffer mixes int and Timestamp
+        # → object index → `.dt` accessor crashes in FeatureBuilder (smoke-test bug 2026-06-05).
         _raw_ot = candle.get("open_time")
         if _raw_ot is None:
             _raw_ot = candle.get("ts")
@@ -208,71 +187,63 @@ class LiveCandleBuffer:
         }
         self._candles.append(normalized)
 
-    # IT: Numero di candele attualmente in buffer | EN: Number of candles currently buffered
+    # Number of candles currently buffered
     def __len__(self) -> int:
         return len(self._candles)
 
-    # IT: Ritorna le ultime n_last candele come DataFrame (index=open_time tz-naive).
-    # EN: Returns the last n_last candles as a DataFrame (index=open_time tz-naive).
+    # Returns the last n_last candles as a DataFrame (index=open_time tz-naive).
     def to_dataframe(self, n_last: int | None = None) -> pd.DataFrame:
-        """Ritorna le candele come DataFrame compatibile con FeatureBuilder.build().
+        """Returns the candles as a DataFrame compatible with FeatureBuilder.build().
 
-        Schema output: index=open_time (datetime tz-naive),
-        colonne = open/high/low/close/volume/quote_vol/trades/taker_buy_vol/taker_buy_quote_vol.
+        Output schema: index=open_time (tz-naive datetime),
+        columns = open/high/low/close/volume/quote_vol/trades/taker_buy_vol/taker_buy_quote_vol.
         """
         if not self._candles:
             return pd.DataFrame()
         items = list(self._candles)[-n_last:] if n_last else list(self._candles)
         df = pd.DataFrame(items)
-        # IT: FeatureBuilder vuole open_time come colonna o index; lo mettiamo come index.
-        # EN: FeatureBuilder expects open_time as column or index; we set it as index.
+        # FeatureBuilder expects open_time as column or index; we set it as index.
         if "open_time" in df.columns:
             df = df.set_index("open_time")
-            # IT: garantisce un DatetimeIndex anche se l'index arriva object (difesa: append
-            #     coercizza già a Timestamp, ma questo protegge ogni altra fonte).
-            # EN: guarantee a DatetimeIndex even if the index arrives as object (append already
-            #     coerces to Timestamp; this protects any other source).
+            # guarantee a DatetimeIndex even if the index arrives as object (append already
+            # coerces to Timestamp; this protects any other source).
             if not isinstance(df.index, pd.DatetimeIndex):
                 df.index = pd.to_datetime(df.index)
-            # IT: tz-naive UTC per evitare mismatch con merge_asof di FeatureBuilder.
-            # EN: tz-naive UTC to avoid merge_asof mismatch in FeatureBuilder.
+            # tz-naive UTC to avoid merge_asof mismatch in FeatureBuilder.
             if getattr(df.index, "tz", None) is not None:
                 df.index = df.index.tz_convert("UTC").tz_localize(None)
         return df
 
-    # IT: Ultima candela in buffer (None se vuoto) | EN: Last candle in buffer (None if empty)
+    # Last candle in buffer (None if empty)
     @property
     def latest(self) -> dict | None:
         return self._candles[-1] if self._candles else None
 
 
-# IT: Assembla il vettore feature (120, 104) live usando FeatureBuilder come single source of truth.
-#     Garantisce parity con training: stesso codice, stessi parametri, stesso scaler.
-# EN: Assembles the live feature vector (120, 104) using FeatureBuilder as single source of truth.
-#     Guarantees training parity: same code, same parameters, same scaler.
+# Assembles the live feature vector (120, 104) using FeatureBuilder as single source of truth.
+# Guarantees training parity: same code, same parameters, same scaler.
 class FeatureAssembler:
-    """Produce il tensore feature pronto per il modello (BLOCKER #1 Stage 4).
+    """Produces the model-ready feature tensor (BLOCKER #1 Stage 4).
 
-    Pipeline interna:
-      1. df = LiveCandleBuffer.to_dataframe() — tutto il buffer (~50k candele)
+    Internal pipeline:
+      1. df = LiveCandleBuffer.to_dataframe() — the whole buffer (~50k candles)
       2. FeatureBuilder.build(df, fit=False, normalize=True, funding_df=funding)
-         usa lo scaler caricato da PipelineState → parity esatta col training
-      3. Verifica canonical_names ⊆ feat_df.columns (HARD-FAIL su mancanze)
-      4. Riordina + filtra solo le 104 colonne canoniche
-      5. Drop NaN warmup
-      6. Estrai ultime `window_size` righe → np.ndarray (window_size, 104)
+         uses the scaler loaded from PipelineState → exact parity with training
+      3. Checks canonical_names ⊆ feat_df.columns (HARD-FAIL on missing ones)
+      4. Reorders + keeps only the 104 canonical columns
+      5. Drops warmup NaNs
+      6. Extracts the last `window_size` rows → np.ndarray (window_size, 104)
 
-    Sostituisce il _compute_features di LiveFeatureBuffer (legacy 39-feature).
+    Replaces LiveFeatureBuffer's _compute_features (legacy 39-feature).
     """
 
-    # IT: Configura FeatureBuilder con parametri da config + scaler da PipelineState.
-    # EN: Configures FeatureBuilder with config params + scaler from PipelineState.
+    # Configures FeatureBuilder with config params + scaler from PipelineState.
     def __init__(self, buffer: "LiveCandleBuffer", pipeline_state,
                  config: dict | None = None):
         """Args:
-            buffer: LiveCandleBuffer già popolato (bootstrap + append da WS)
-            pipeline_state: PipelineState caricato (deve avere scaler fittato)
-            config: dict completo (da load_config). Se None → carica da default.yaml.
+            buffer: already populated LiveCandleBuffer (bootstrap + WS appends)
+            pipeline_state: loaded PipelineState (must have a fitted scaler)
+            config: full dict (from load_config). If None → loads default.yaml.
         """
         from quantsys.features import FeatureBuilder, get_canonical_feature_names
         from quantsys.utils import load_config
@@ -285,14 +256,10 @@ class FeatureAssembler:
         fcfg = config.get("features", {})
         mcfg = config.get("model", {})
 
-        # IT: FeatureBuilder con stessi parametri usati in training (da config).
-        #     interval_minutes dal PIPELINE STATE (contratto train↔inference), NON dalla
-        #     config corrente: le finestre TIME-semantic devono replicare il training.
-        #     Mismatch config↔state viene bloccato a monte (guard in LiveEngine/main).
-        # EN: FeatureBuilder with same params used at training (from config).
-        #     interval_minutes from the PIPELINE STATE (train↔inference contract), NOT
-        #     from the current config: TIME-semantic windows must replicate training.
-        #     Config↔state mismatch is blocked upstream (guard in LiveEngine/main).
+        # FeatureBuilder with same params used at training (from config).
+        # interval_minutes from the PIPELINE STATE (train↔inference contract), NOT
+        # from the current config: TIME-semantic windows must replicate training.
+        # Config↔state mismatch is blocked upstream (guard in LiveEngine/main).
         self.fb = FeatureBuilder(
             vp_bins          = fcfg.get("vp_bins", 30),
             vp_lookback      = fcfg.get("vp_lookback", 240),
@@ -303,12 +270,10 @@ class FeatureAssembler:
             frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
             use_revin        = bool(mcfg.get("use_revin", False)),
             interval_minutes = getattr(pipeline_state, "interval_minutes", 1),
-            # IT: A4 HAR-CJ — stessa config del training (parity live↔training).
-            # EN: A4 HAR-CJ — same config as training (live↔training parity).
+            # A4 HAR-CJ — same config as training (live↔training parity).
             use_har_cj       = bool(fcfg.get("har_cj", False)),
         )
-        # IT: Inietta stato scaler pre-fittato → build(fit=False) lo riusa senza re-fittare.
-        # EN: Inject pre-fitted scaler state → build(fit=False) reuses it without re-fitting.
+        # Inject pre-fitted scaler state → build(fit=False) reuses it without re-fitting.
         self.fb.scaler             = pipeline_state.scaler
         self.fb._scale_cols        = list(pipeline_state.scale_cols)
         self.fb.scalers            = dict(pipeline_state.price_scaler_state)
@@ -317,25 +282,23 @@ class FeatureAssembler:
         self.fb.feature_cols       = list(pipeline_state.feature_cols)
         self.fb.n_dynamic_features = pipeline_state.n_dynamic_features
 
-        # IT: Lista canonica delle 104 feature attese dal modello (single source of truth).
-        # EN: Canonical list of the 104 features expected by the model (single source of truth).
+        # Canonical list of the 104 features expected by the model (single source of truth).
         self.canonical_names: tuple[str, ...] = get_canonical_feature_names()
         log.info(f"FeatureAssembler: pronto per {len(self.canonical_names)} feature canoniche")
 
-    # IT: Costruisce il window (window_size, 104) chiamando FeatureBuilder sul buffer corrente.
-    # EN: Builds the (window_size, 104) window by calling FeatureBuilder on the current buffer.
+    # Builds the (window_size, 104) window by calling FeatureBuilder on the current buffer.
     def compute_window(self, window_size: int = 120,
                        funding_df: pd.DataFrame | None = None) -> np.ndarray:
-        """Ritorna il tensore (window_size, 104) pronto per il modello.
+        """Returns the model-ready (window_size, 104) tensor.
 
         Args:
-            window_size: numero di candele finali da restituire (default 120, matches training)
-            funding_df: DataFrame funding rate da FundingRatePoller (opzionale; senza, le 3
-                        feature funding_rate* saranno NaN → mancheranno dal canonical → HARD-FAIL)
+            window_size: number of trailing candles to return (default 120, matches training)
+            funding_df: funding-rate DataFrame from FundingRatePoller (optional; without it the 3
+                        funding_rate* features are NaN → missing from the canonical set → HARD-FAIL)
 
         Raises:
-            RuntimeError: se buffer insufficiente, se feature canoniche mancanti, o se
-                          dopo drop NaN restano meno di window_size righe valide.
+            RuntimeError: if the buffer is insufficient, canonical features are missing, or
+                          fewer than window_size valid rows remain after dropping NaNs.
         """
         if len(self.buffer) < window_size + 60:
             raise RuntimeError(
@@ -344,15 +307,12 @@ class FeatureAssembler:
             )
 
         df = self.buffer.to_dataframe()
-        # IT: FeatureBuilder.build vuole open_time come colonna (non solo index).
-        # EN: FeatureBuilder.build wants open_time as a column (not just index).
+        # FeatureBuilder.build wants open_time as a column (not just index).
         if df.index.name == "open_time":
             df = df.reset_index()
 
-        # IT: Normalizza funding_df a tz-naive per coerenza con buffer (FeatureBuilder
-        #     fa reindex su open_time e crasha su dtype mismatch tz-aware vs tz-naive).
-        # EN: Normalize funding_df to tz-naive for buffer coherence (FeatureBuilder
-        #     reindexes on open_time and fails on dtype mismatch tz-aware vs tz-naive).
+        # Normalize funding_df to tz-naive for buffer coherence (FeatureBuilder
+        # reindexes on open_time and fails on dtype mismatch tz-aware vs tz-naive).
         if funding_df is not None and len(funding_df) > 0:
             funding_df = funding_df.copy()
             if "open_time" in funding_df.columns:
@@ -365,8 +325,7 @@ class FeatureAssembler:
 
         feat_df = self.fb.build(df, normalize=True, fit=False, funding_df=funding_df)
 
-        # IT: Verifica hard-fail che tutte le 104 feature canoniche siano presenti.
-        # EN: Hard-fail check that all 104 canonical features are present.
+        # Hard-fail check that all 104 canonical features are present.
         missing = set(self.canonical_names) - set(feat_df.columns)
         if missing:
             sample = sorted(missing)[:10]
@@ -376,12 +335,10 @@ class FeatureAssembler:
                 f"Verifica funding_df (3 feature) e warmup buffer (>43200 candele per 30d)."
             )
 
-        # IT: Riordina nell'ordine canonico (no pad/truncate posizionale).
-        # EN: Reorder in canonical order (no positional pad/truncate).
+        # Reorder in canonical order (no positional pad/truncate).
         feat_df = feat_df[list(self.canonical_names)]
 
-        # IT: Drop righe con NaN (warmup iniziale).
-        # EN: Drop rows with NaN (initial warmup).
+        # Drop rows with NaN (initial warmup).
         feat_df = feat_df.dropna()
 
         if len(feat_df) < window_size:
@@ -396,67 +353,58 @@ class FeatureAssembler:
 
 class LiveFeatureBuffer:
     """
-    Buffer circolare che mantiene le ultime `window` candele e costruisce
-    le features necessarie per l'inferenza della LSTM in tempo reale.
+    Circular buffer that keeps the last `window` candles and builds
+    the features needed for real-time LSTM inference.
 
-    DEPRECATED 2026-06-02 (Stage 4 BLOCKER #1): produce solo 39 feature disallineate
-    vs le 104 attese dal training. Sostituito da LiveCandleBuffer + FeatureAssembler.
-    Mantenuto temporaneamente come fallback durante la migrazione.
+    DEPRECATED 2026-06-02 (Stage 4 BLOCKER #1): produces only 39 features, misaligned
+    vs the 104 expected by training. Replaced by LiveCandleBuffer + FeatureAssembler.
+    Kept temporarily as a fallback during the migration.
 
-    CORREZIONE — Volume Profile incrementale:
-      La versione precedente ricalcolava il VP da zero ad ogni candela
-      iterando su tutto il buffer (O(N) per ogni tick).
-      Ora usiamo un aggiornamento incrementale O(1):
-        · Quando arriva una nuova candela → aggiungi il suo contributo al bin
-        · Quando una candela esce dal buffer → sottrai il suo contributo
-      Il VP è sempre aggiornato senza riscansionare tutto lo storico.
+    FIX — Incremental Volume Profile:
+      The previous version recomputed the VP from scratch on every candle
+      by iterating over the whole buffer (O(N) per tick).
+      Now we use an O(1) incremental update:
+        · When a new candle arrives → add its contribution to the bin
+        · When a candle leaves the buffer → subtract its contribution
+      The VP is always up to date without rescanning the whole history.
     """
 
-    VP_BINS = 30  # IT: bin Volume Profile | EN: Volume Profile bins
+    VP_BINS = 30  # Volume Profile bins
 
     def __init__(self, window: int = 60, interval_minutes: int = 1):
         self.window      = window
-        # IT: barre/giorno derivate dall'interval — rende interval-agnostiche le finestre
-        #     "1 giorno" (ATH/ATL); default 1 = legacy 1m (1440 barre/giorno).
-        # EN: bars/day derived from the interval — makes the "1 day" windows (ATH/ATL)
-        #     interval-agnostic; default 1 = legacy 1m (1440 bars/day).
+        # bars/day derived from the interval — makes the "1 day" windows (ATH/ATL)
+        # interval-agnostic; default 1 = legacy 1m (1440 bars/day).
         self.bars_per_day = max(1, 1440 // max(1, int(interval_minutes)))
-        # IT: n_features rilevato dinamicamente al primo compute (no hardcoding)
-        # EN: n_features detected dynamically on first compute (no hardcoding)
+        # n_features detected dynamically on first compute (no hardcoding)
         self.n_features  = 0
 
-        # IT: lookback >= max rolling usato (ma200m -> 200) + window + margine
-        # EN: lookback >= max rolling used (ma200m -> 200) + window + margin
+        # lookback >= max rolling used (ma200m -> 200) + window + margin
         self._lookback   = max(window + 60, 260)
         self.candles: deque = deque(maxlen=self._lookback)
 
-        # IT: stato incrementale Volume Profile (O(1) per push invece di O(N))
-        # EN: incremental Volume Profile state (O(1) per push instead of O(N))
+        # incremental Volume Profile state (O(1) per push instead of O(N))
         self._vp_bins:   np.ndarray   = np.zeros(self.VP_BINS)
-        # IT: deque (bin_idx, volume) per sottrarre contributi quando escono
-        # EN: deque (bin_idx, volume) to subtract contributions on eviction
+        # deque (bin_idx, volume) to subtract contributions on eviction
         self._vp_contribs: deque      = deque(maxlen=self._lookback)
         self._vp_price_min: float     = 0.0
         self._vp_price_max: float     = 0.0
-        # IT: full-reset periodico per evitare drift accumulato di float
-        # EN: periodic full-reset to avoid accumulated float drift
+        # periodic full-reset to avoid accumulated float drift
         self._vp_reset_every: int     = 60
         self._vp_since_reset: int     = 0
 
         self._feat_names: list[str] = []
 
-    # IT: legge feature_names dal dataset di training per matching live/training
-    # EN: read feature_names from training dataset for live/training alignment
+    # read feature_names from training dataset for live/training alignment
     def load_scalers(self, data_dir: str = "data"):
         npz = np.load(f"{data_dir}/lstm_dataset.npz", allow_pickle=True)
         self._feat_names = list(npz["feature_names"])
         self.n_features  = len(self._feat_names)
         log.info(f"Features attese: {self.n_features}")
 
-    # IT: full-reset VP (boot iniziale o periodicamente per evitare drift)
-    # EN: VP full-reset (initial boot or periodic to avoid drift)
+    # VP full-reset (initial boot or periodic to avoid drift)
     def _vp_full_reset(self):
-        """Ricalcola il VP da zero. Chiamato solo all'avvio o ogni ~60 candele."""
+        """Recomputes the VP from scratch. Called only at startup or every ~60 candles."""
         c_arr = list(self.candles)
         if len(c_arr) < 2:
             return
@@ -480,20 +428,19 @@ class LiveFeatureBuffer:
 
         self._vp_since_reset = 0
 
-    # IT: espande range VP rimappando i bin (O(BINS), non O(N))
-    # EN: expand VP range by remapping bins (O(BINS), not O(N))
+    # expand VP range by remapping bins (O(BINS), not O(N))
     def _vp_expand_range(self, direction: str) -> bool:
         """
-        Espande il range del VP del 10% nella direzione indicata
-        rimappando i bin esistenti senza riscansionare il buffer (O(BINS)).
-        Ritorna True se l'espansione ha avuto successo.
+        Expands the VP range by 10% in the given direction
+        by remapping the existing bins without rescanning the buffer (O(BINS)).
+        Returns True if the expansion succeeded.
         """
         price_range = self._vp_price_max - self._vp_price_min
         if price_range <= 0:
             return False
 
         old_step = price_range / self.VP_BINS
-        expand   = price_range * 0.10   # IT: +10% range per espansione | EN: +10% range per expansion
+        expand   = price_range * 0.10   # +10% range per expansion
 
         if direction == "down":
             new_min  = self._vp_price_min - expand
@@ -528,17 +475,16 @@ class LiveFeatureBuffer:
 
         return True
 
-    # IT: aggiorna VP incrementale O(1) + espansione preventiva range (T11)
-    # EN: incremental O(1) VP update + preemptive range expansion (T11)
+    # incremental O(1) VP update + preemptive range expansion (T11)
     def _vp_update(self, candle: dict):
         """
-        Aggiorna il VP con la nuova candela senza riscansionare tutto il buffer.
+        Updates the VP with the new candle without rescanning the whole buffer.
 
-        T11 — Espansione preventiva del range:
-          Invece di fare un full reset O(N) ogni volta che il prezzo esce dal range,
-          espande preventivamente il range del 10% quando il prezzo è entro il 2%
-          dal bordo. Il remapping dei bin è O(BINS)=O(30) invece di O(N_candele).
-          Su mercati con trend forte riduce i reset da ogni candela a pochi all'ora.
+        T11 — Preemptive range expansion:
+          Instead of an O(N) full reset every time the price leaves the range,
+          it preemptively expands the range by 10% when the price is within 2%
+          of the edge. Bin remapping is O(BINS)=O(30) instead of O(N_candles).
+          In strongly trending markets it cuts resets from every candle to a few per hour.
         """
         tp  = (candle["high"] + candle["low"] + candle["close"]) / 3
         vol = candle["volume"]
@@ -548,20 +494,17 @@ class LiveFeatureBuffer:
             return
 
         price_range = self._vp_price_max - self._vp_price_min
-        margin      = price_range * 0.02   # IT: 2% bordo -> espansione preventiva | EN: 2% edge -> preemptive expand
+        margin      = price_range * 0.02   # 2% edge -> preemptive expand
 
-        # IT: prezzo vicino al fondo del range -> espandi giu'
-        # EN: price near range floor -> expand downward
+        # price near range floor -> expand downward
         if tp < self._vp_price_min + margin:
             self._vp_expand_range("down")
 
-        # IT: prezzo vicino al top del range -> espandi su
-        # EN: price near range ceiling -> expand upward
+        # price near range ceiling -> expand upward
         elif tp > self._vp_price_max - margin:
             self._vp_expand_range("up")
 
-        # IT: ancora fuori range dopo espansione (gap forte) -> full reset
-        # EN: still out of range after expand (large gap) -> full reset
+        # still out of range after expand (large gap) -> full reset
         if tp < self._vp_price_min or tp > self._vp_price_max:
             self._vp_full_reset()
             return
@@ -570,8 +513,7 @@ class LiveFeatureBuffer:
         new_idx = min(int((tp - self._vp_price_min) / step), self.VP_BINS - 1)
         new_idx = max(new_idx, 0)
 
-        # IT: ORDINE CRITICO — sottrai vecchio prima di aggiungere nuovo
-        # EN: CRITICAL ORDER — subtract old before adding new
+        # CRITICAL ORDER — subtract old before adding new
         if len(self._vp_contribs) == self._vp_contribs.maxlen:
             old_idx, old_vol = self._vp_contribs[0]
             self._vp_bins[old_idx] = max(0.0, self._vp_bins[old_idx] - old_vol)
@@ -583,22 +525,20 @@ class LiveFeatureBuffer:
         if self._vp_since_reset >= self._vp_reset_every:
             self._vp_full_reset()
 
-    # IT: API pubblica — aggiunge candela e mantiene VP coerente
-    # EN: public API — appends candle and keeps VP consistent
+    # public API — appends candle and keeps VP consistent
     def push(self, candle: dict):
-        """Aggiunge una nuova candela al buffer e aggiorna il VP incrementalmente."""
+        """Adds a new candle to the buffer and updates the VP incrementally."""
         self.candles.append(candle)
         self._vp_update(candle)
 
-    # IT: estrae 4 scalari dal VP (POC, VAH, VAL distance + concentration)
-    # EN: extract 4 scalars from VP (POC, VAH, VAL distance + concentration)
+    # extract 4 scalars from VP (POC, VAH, VAL distance + concentration)
     def _vp_features(self, current_price: float) -> tuple[float, float, float, float]:
         """
-        Estrae le 4 feature scalari dal Volume Profile corrente:
-          poc_dist      = distanza % dal Point of Control
-          vah_dist      = distanza % dalla Value Area High  (70% del volume)
-          val_dist      = distanza % dalla Value Area Low
-          concentration = % del volume nel bin POC (misura di liquidità)
+        Extracts the 4 scalar features from the current Volume Profile:
+          poc_dist      = % distance from the Point of Control
+          vah_dist      = % distance from the Value Area High  (70% of volume)
+          val_dist      = % distance from the Value Area Low
+          concentration = % of volume in the POC bin (liquidity measure)
         """
         total = self._vp_bins.sum()
         if total < 1e-9 or self._vp_price_max <= self._vp_price_min:
@@ -608,12 +548,11 @@ class LiveFeatureBuffer:
         step      = (self._vp_price_max - self._vp_price_min) / self.VP_BINS
         poc_price = self._vp_price_min + (poc_idx + 0.5) * step
 
-        # IT: Value Area = bin che coprono 70% del volume attorno al POC
-        # EN: Value Area = bins covering 70% of volume around POC
+        # Value Area = bins covering 70% of volume around POC
         sorted_idx = np.argsort(self._vp_bins)[::-1]
         cum, va_bins = 0.0, []
         for idx in sorted_idx:
-            if cum / total >= 0.70:   # IT: soglia 70% standard VP | EN: 70% standard VP threshold
+            if cum / total >= 0.70:   # 70% standard VP threshold
                 break
             va_bins.append(idx); cum += self._vp_bins[idx]
         va_lo = self._vp_price_min + min(va_bins) * step
@@ -621,19 +560,18 @@ class LiveFeatureBuffer:
 
         safe_price = max(current_price, 1e-9)
         return (
-            (current_price - poc_price) / safe_price,   # IT: distanza % dal POC | EN: % distance from POC
-            (current_price - va_hi)     / safe_price,   # IT: distanza % da VAH | EN: % distance from VAH
-            (current_price - va_lo)     / safe_price,   # IT: distanza % da VAL | EN: % distance from VAL
-            float(self._vp_bins[poc_idx] / total),       # IT: concentrazione volume al POC | EN: volume concentration at POC
+            (current_price - poc_price) / safe_price,   # % distance from POC
+            (current_price - va_hi)     / safe_price,   # % distance from VAH
+            (current_price - va_lo)     / safe_price,   # % distance from VAL
+            float(self._vp_bins[poc_idx] / total),       # volume concentration at POC
         )
 
-    # IT: costruisce la finestra (window, n_features) per l'inferenza
-    # EN: builds the (window, n_features) tensor for inference
+    # builds the (window, n_features) tensor for inference
     def _compute_features(self) -> np.ndarray | None:
         """
-        Costruisce una finestra (window, n_features) dalle candele in buffer.
-        Tutte le rolling statistics sono calcolate con pandas (no convolve),
-        il VP usa lo stato incrementale già mantenuto in _vp_bins.
+        Builds a (window, n_features) window from the buffered candles.
+        All rolling statistics are computed with pandas (no convolve),
+        the VP uses the incremental state already kept in _vp_bins.
         """
         if len(self.candles) < self.window + 20:
             return None
@@ -643,8 +581,7 @@ class LiveFeatureBuffer:
         highs  = np.array([c["high"]    for c in c_arr])
         lows   = np.array([c["low"]     for c in c_arr])
         vols   = np.array([c["volume"]  for c in c_arr])
-        # IT: taker_buy_vol calcolato una volta, riusato per taker ratio + CVD
-        # EN: taker_buy_vol computed once, reused for taker ratio + CVD
+        # taker_buy_vol computed once, reused for taker ratio + CVD
         taker_buy = np.array([
             c.get("taker_buy_vol", c["volume"] * 0.5) for c in c_arr
         ])
@@ -653,38 +590,32 @@ class LiveFeatureBuffer:
         s_closes = pd.Series(closes)
         s_vols   = pd.Series(vols)
 
-        # IT: log-returns con prepend per allineare la lunghezza
-        # EN: log-returns with prepend to keep array length aligned
+        # log-returns with prepend to keep array length aligned
         log_ret  = np.log(np.maximum(closes, 1e-9))
         log_ret  = np.diff(log_ret, prepend=log_ret[0])
         s_rets   = pd.Series(log_ret)
 
-        # IT: deviazione dal VWAP cumulativo (proxy di mean reversion)
-        # EN: deviation from cumulative VWAP (mean-reversion proxy)
+        # deviation from cumulative VWAP (mean-reversion proxy)
         tp       = (highs + lows + closes) / 3
         vwap     = np.cumsum(tp * vols) / np.maximum(np.cumsum(vols), 1e-9)
         vwap_dev = (closes - vwap) / np.maximum(vwap, 1e-9)
 
-        # IT: z-score volume su 20 candele
-        # EN: 20-bar volume z-score
+        # 20-bar volume z-score
         vol_mu  = s_vols.rolling(20, min_periods=1).mean()
         vol_std = s_vols.rolling(20, min_periods=1).std().fillna(1)
         vol_z   = ((s_vols - vol_mu) / vol_std.replace(0, 1)).values
 
-        # IT: vol short/long ratio (regime breakout)
-        # EN: short/long vol ratio (regime breakout)
+        # short/long vol ratio (regime breakout)
         vol_std5  = s_rets.rolling(5,  min_periods=1).std().fillna(0).values
         vol_std20 = s_rets.rolling(20, min_periods=1).std().fillna(1).values
         vol_ratio = vol_std5 / np.maximum(vol_std20, 1e-9)
 
-        # IT: orario del giorno via encoding ciclico (sin/cos)
-        # EN: time-of-day via cyclic encoding (sin/cos)
+        # time-of-day via cyclic encoding (sin/cos)
         hours = np.array([c.get("hour", 12) + c.get("minute", 0) / 60 for c in c_arr])
         h_sin = np.sin(2 * np.pi * hours / 24)
         h_cos = np.cos(2 * np.pi * hours / 24)
 
-        # IT: lag returns + momentum a 5/60 candele
-        # EN: lag returns + 5/60-bar momentum
+        # lag returns + 5/60-bar momentum
         lag1 = s_rets.shift(1).fillna(0).values
         lag2 = s_rets.shift(2).fillna(0).values
         lag3 = s_rets.shift(3).fillna(0).values
@@ -693,8 +624,7 @@ class LiveFeatureBuffer:
         mom5 = s_closes.pct_change(5).fillna(0).values
         mom60= s_closes.pct_change(min(60, len(c_arr)-1)).fillna(0).values
 
-        # IT: CVD = Cumulative Volume Delta (pressione buy vs sell)
-        # EN: CVD = Cumulative Volume Delta (buy vs sell pressure)
+        # CVD = Cumulative Volume Delta (buy vs sell pressure)
         delta_cvd   = taker_buy - (vols - taker_buy)
         cvd_norm    = delta_cvd / np.maximum(vols, 1e-9)
         s_delta     = pd.Series(delta_cvd)
@@ -707,8 +637,7 @@ class LiveFeatureBuffer:
         cvd_div     = ((cvd_trend / cvd_std) - (price_trend / p_std)).fillna(0).values
         delta_accel = (s_delta.diff(5).fillna(0) / s_vols.rolling(5, min_periods=1).sum().replace(0, np.nan)).fillna(0).values
 
-        # IT: microstruttura candela (sostituisce indicatori classici RSI/MACD/...)
-        # EN: candle microstructure (replaces classic RSI/MACD/... indicators)
+        # candle microstructure (replaces classic RSI/MACD/... indicators)
         hl_arr    = highs - lows
         hl_safe   = np.where(hl_arr > 1e-9, hl_arr, 1.0)
         opens_arr = np.array([c["open"] for c in c_arr])
@@ -734,8 +663,7 @@ class LiveFeatureBuffer:
 
         spread_proxy = np.where(vols > 0, hl_arr / vols, 0.0)
 
-        # IT: session_pos in [-0.5, +0.5] = posizione vs range 4h (240 candele)
-        # EN: session_pos in [-0.5, +0.5] = position vs 4h range (240 bars)
+        # session_pos in [-0.5, +0.5] = position vs 4h range (240 bars)
         h4 = pd.Series(highs).rolling(240, min_periods=1).max().values
         l4 = pd.Series(lows).rolling(240, min_periods=1).min().values
         r4 = h4 - l4
@@ -752,23 +680,19 @@ class LiveFeatureBuffer:
                 if wvar > 1e-12:
                     vwap_skew[i] = ((dev**3) * v).sum() / (vs * wvar**1.5)
 
-        # IT: feature strutturali (ATH/ATL su finestra giornaliera = bars_per_day barre,
-        #     interval-agnostico: 1440 a 1m, 24 a 1h)
-        # EN: structural features (ATH/ATL on a daily window = bars_per_day bars,
-        #     interval-agnostic: 1440 at 1m, 24 at 1h)
+        # structural features (ATH/ATL on a daily window = bars_per_day bars,
+        # interval-agnostic: 1440 at 1m, 24 at 1h)
         ath_buf     = pd.Series(highs).rolling(min(len(c_arr), self.bars_per_day), min_periods=1).max().values
         atl_buf     = pd.Series(lows).rolling(min(len(c_arr), self.bars_per_day),  min_periods=1).min().values
         pr_range    = np.maximum(ath_buf - atl_buf, 1e-9)
         dist_ath    = (closes - ath_buf) / np.maximum(ath_buf, 1e-9)
         dist_atl    = (closes - atl_buf) / np.maximum(atl_buf, 1e-9)
         price_pos   = (closes - atl_buf) / pr_range
-        # IT: distanza % dal numero tondo piu' vicino (multipli di 1000$)
-        # EN: % distance from nearest round number (multiples of $1000)
+        # % distance from nearest round number (multiples of $1000)
         round_level = (pd.Series(closes) / 1000).round() * 1000
         round_dist  = ((pd.Series(closes) - round_level) / pd.Series(closes).replace(0, np.nan)).fillna(0).values
 
-        # IT: feature Volume Profile (broadcast scalari sull'intera finestra)
-        # EN: Volume Profile features (broadcast scalars across the window)
+        # Volume Profile features (broadcast scalars across the window)
         current_price = closes[-1]
         poc_d, vah_d, val_d, conc = self._vp_features(current_price)
         vp_poc = np.full(len(c_arr), poc_d)
@@ -776,10 +700,9 @@ class LiveFeatureBuffer:
         vp_val = np.full(len(c_arr), val_d)
         vp_conc= np.full(len(c_arr), conc)
 
-        # IT: assembla — Stream A (dinamiche tempo-varianti) | Stream B (strutturali)
-        # EN: assemble — Stream A (time-varying dynamics) | Stream B (structural)
+        # assemble — Stream A (time-varying dynamics) | Stream B (structural)
         feat_mat = np.stack([
-            # IT: Stream A — feature dinamiche | EN: Stream A — dynamic features
+            # Stream A — dynamic features
             log_ret, vwap_dev, vol_z, vol_ratio, h_sin, h_cos, taker,
             lag1, lag2, lag3, lag4, lag5, mom5, mom60,
             cvd_norm, cvd_pct20, cvd_div, delta_accel,
@@ -787,7 +710,7 @@ class LiveFeatureBuffer:
             body_ratio, upper_shadow, lower_shadow, close_vs_open,
             price_vel, price_accel, vwap_slope, spread_proxy, vwap_skew,
             intraday_pos,
-            # IT: Stream B — feature strutturali | EN: Stream B — structural features
+            # Stream B — structural features
             vp_poc, vp_vah, vp_val, vp_conc,
             dist_ath, dist_atl, price_pos, round_dist,
             session_pos,
@@ -797,31 +720,26 @@ class LiveFeatureBuffer:
         if win.shape[0] < self.window:
             return None
 
-        # IT: aggiorna n_features al primo compute o se cambia
-        # EN: update n_features on first compute or on change
+        # update n_features on first compute or on change
         if self.n_features != win.shape[1]:
             self.n_features = win.shape[1]
             log.debug(f"LiveFeatureBuffer: {self.n_features} feature rilevate automaticamente")
 
-        # IT: normalizzazione robusta vettorizzata (mediana + IQR per colonna)
-        # EN: vectorized robust normalization (per-column median + IQR)
+        # vectorized robust normalization (per-column median + IQR)
         med = np.median(win, axis=0)
         q1_q3 = np.percentile(win, [25, 75], axis=0)
         iqr = q1_q3[1] - q1_q3[0]
         mask = iqr > 1e-9
         win[:, mask] = (win[:, mask] - med[mask]) / iqr[mask]
 
-        # IT: clip ±5σ — robusto agli outlier in inferenza live
-        # EN: clip at ±5σ — robust to live-time outliers
+        # clip at ±5σ — robust to live-time outliers
         return np.clip(win, -5, 5).astype(np.float32)
 
-    # IT: accessor pubblico — restituisce la finestra feature pronta per l'inferenza
-    # EN: public accessor — returns the inference-ready feature window
+    # public accessor — returns the inference-ready feature window
     def get_window(self) -> np.ndarray | None:
         return self._compute_features()
 
-    # IT: ATR semplificato sulle ultime 15 candele (TR ≈ high-low)
-    # EN: simplified ATR over the last 15 candles (TR ≈ high-low)
+    # simplified ATR over the last 15 candles (TR ≈ high-low)
     @property
     def atr(self) -> float:
         if len(self.candles) < 2:
@@ -831,30 +749,28 @@ class LiveFeatureBuffer:
         return float(np.mean(hl))
 
 
-# IT: motore live — WS Binance + inferenza + paper trading + persistenza stato
-# EN: live engine — Binance WS + inference + paper trading + state persistence
-STATE_MAX_AGE_SEC = 300   # IT: 5 min — oltre lo stato salvato e' stale | EN: 5 min — stale state threshold
+# live engine — Binance WS + inference + paper trading + state persistence
+STATE_MAX_AGE_SEC = 300   # 5 min — stale state threshold
 
 
 class LiveEngine:
     """
-    Orchestratore principale del motore live:
-      1. Mantiene il buffer delle candele aggiornato via WebSocket
-      2. Ad ogni candela chiusa → inferenza LSTM → segnale
-      3. Logga tutto su JSONL + stampa a schermo
-      4. Paper trading: traccia P&L simulato senza ordini reali
+    Main orchestrator of the live engine:
+      1. Keeps the candle buffer up to date via WebSocket
+      2. On every closed candle → LSTM inference → signal
+      3. Logs everything to JSONL + prints to screen
+      4. Paper trading: tracks simulated P&L without real orders
 
-    CORREZIONE — Persistenza stato:
-      Lo stato critico (buffer candele, portfolio, posizione aperta, candle_idx)
-      viene serializzato su disco ad ogni candela chiusa.
-      Al riavvio (o dopo un crash del WS), lo stato viene ripristinato
-      automaticamente se abbastanza recente (< STATE_MAX_AGE_SEC).
-      In questo modo le posizioni aperte e il P&L paper sopravvivono
-      a disconnessioni di rete, riavvii del processo, crash del sistema.
+    FIX — State persistence:
+      The critical state (candle buffer, portfolio, open position, candle_idx)
+      is serialized to disk on every closed candle.
+      On restart (or after a WS crash), the state is restored
+      automatically if recent enough (< STATE_MAX_AGE_SEC).
+      This way open positions and paper P&L survive
+      network disconnects, process restarts and system crashes.
     """
 
-    # IT: setup engine — carica PipelineState/modello, avvia thread funding+macro, init RM/sig_gen
-    # EN: engine setup — load PipelineState/model, start funding+macro threads, init RM/sig_gen
+    # engine setup — load PipelineState/model, start funding+macro threads, init RM/sig_gen
     def __init__(self, cfg: dict, device: torch.device):
         self.cfg    = cfg
         self.device = device
@@ -863,13 +779,11 @@ class LiveEngine:
         self.symbol   = dcfg["symbol"]
         self.interval = dcfg["interval"]
 
-        # IT: directory arch-specifiche (models/<arch>, results/<arch>)
-        # EN: arch-specific directories (models/<arch>, results/<arch>)
+        # arch-specific directories (models/<arch>, results/<arch>)
         self._models_dir  = Path(cfg["training"]["output_dir"])
         self._state_file  = Path(bcfg["output_dir"]) / "live_engine_state.json"
 
-        # IT: PipelineState = scaler + colonne + config training (per coerenza live/training)
-        # EN: PipelineState = scaler + columns + training config (live/training parity)
+        # PipelineState = scaler + columns + training config (live/training parity)
         self.pipeline_state = None
         _ps_candidates = [
             self._models_dir / "pipeline_state.pkl",
@@ -881,8 +795,7 @@ class LiveEngine:
                     from quantsys.utils import PipelineState
                     self.pipeline_state = PipelineState.load(str(_ps_candidate))
                     log.info(f"PipelineState caricato da {_ps_candidate}: {self.pipeline_state}")
-                    # IT: copia in dir arch per accelerare prossimi avvii
-                    # EN: cache in arch dir to speed up next startups
+                    # cache in arch dir to speed up next startups
                     _arch_ps = self._models_dir / "pipeline_state.pkl"
                     if _ps_candidate != _arch_ps and not _arch_ps.exists():
                         import shutil as _sh_ps
@@ -893,8 +806,7 @@ class LiveEngine:
         if self.pipeline_state is None:
             log.warning(f"pipeline_state.pkl non trovato in nessun path — scaler non disponibili.")
         else:
-            # IT: hard-fail se forecast_horizon config != training (segnali invalidi)
-            # EN: hard-fail if forecast_horizon config != training (invalid signals)
+            # hard-fail if forecast_horizon config != training (invalid signals)
             _cfg_h = cfg.get("features", {}).get("forecast_horizon",
                        dcfg.get("forecast_horizon", 15))
             _state_h = self.pipeline_state.forecast_horizon
@@ -904,12 +816,9 @@ class LiveEngine:
                     f"Il modello è stato addestrato per orizzonte {_state_h}; live signals a {_cfg_h} "
                     f"produce segnali invalidi. Allinea config/default.yaml o rigenera il modello."
                 )
-            # IT: hard-fail se intervallo candela config != training (pivot 1m→1h):
-            #     il WS streamma candele a cfg.interval ma scaler/finestre TIME-semantic
-            #     sono del training → feature fuori distribuzione, segnali invalidi.
-            # EN: hard-fail if candle interval config != training (1m→1h pivot):
-            #     the WS streams candles at cfg.interval but scalers/TIME-semantic
-            #     windows belong to training → out-of-distribution features, invalid signals.
+            # hard-fail if candle interval config != training (1m→1h pivot):
+            # the WS streams candles at cfg.interval but scalers/TIME-semantic
+            # windows belong to training → out-of-distribution features, invalid signals.
             _cfg_im = interval_minutes_from_cfg(cfg)
             _state_im = getattr(self.pipeline_state, "interval_minutes", 1)
             if _cfg_im != _state_im:
@@ -918,8 +827,7 @@ class LiveEngine:
                     f"Il modello è stato addestrato su candele {_state_im}m; il live a {_cfg_im}m "
                     f"è una combinazione invalida. Allinea config/default.yaml o ri-addestra."
                 )
-            # IT: max_hold_candles deve >= forecast_horizon (altrimenti TP/SL e' rumore)
-            # EN: max_hold_candles must >= forecast_horizon (otherwise TP/SL is noise)
+            # max_hold_candles must >= forecast_horizon (otherwise TP/SL is noise)
             _max_hold = rcfg.get("max_hold_candles", 0)
             if _max_hold < _state_h:
                 log.warning(
@@ -927,10 +835,9 @@ class LiveEngine:
                     f"Il TP/SL potrebbe non avere tempo di triggerare prima del MAX_HOLD."
                 )
 
-        # IT: funding rate — load iniziale + refresh ogni 8h via thread daemon
-        # EN: funding rate — initial load + 8h refresh via daemon thread
-        self._funding_df = [None]   # IT: lista mutabile per scrittura cross-thread | EN: mutable list for cross-thread write
-        self._funding_lock = threading.Lock()  # IT: protegge accesso cross-thread | EN: guards cross-thread access
+        # funding rate — initial load + 8h refresh via daemon thread
+        self._funding_df = [None]   # mutable list for cross-thread write
+        self._funding_lock = threading.Lock()  # guards cross-thread access
         _funding_path = Path("data/funding_rate.parquet")
         if _funding_path.exists():
             _initial_df = pd.read_parquet(_funding_path)
@@ -940,13 +847,12 @@ class LiveEngine:
         else:
             log.warning("data/funding_rate.parquet non trovato — funding rate feature disabilitata")
 
-        # IT: thread daemon — aggiorna SUBITO al primo giro, poi sleep 8h
-        # EN: daemon thread — refresh IMMEDIATELY on first iter, then sleep 8h
+        # daemon thread — refresh IMMEDIATELY on first iter, then sleep 8h
         def _funding_rate_updater():
             _first = True
             while True:
                 if not _first:
-                    time.sleep(28800)  # IT: 8 ore = intervallo funding Binance | EN: 8h = Binance funding interval
+                    time.sleep(28800)  # 8h = Binance funding interval
                 _first = False
                 try:
                     from quantsys.data import fetch_funding_rate
@@ -964,8 +870,7 @@ class LiveEngine:
         t_fr = threading.Thread(target=_funding_rate_updater, daemon=True)
         t_fr.start()
 
-        # IT: refresh orario snapshot macro (yfinance + FRED) per il MacroEncoder
-        # EN: hourly macro snapshot refresh (yfinance + FRED) for MacroEncoder
+        # hourly macro snapshot refresh (yfinance + FRED) for MacroEncoder
         self.macro_updater = None
         has_macro_cols = (
             self.pipeline_state is not None and
@@ -989,8 +894,7 @@ class LiveEngine:
         else:
             log.info("Modello senza macro branch — MacroSnapshotUpdater non necessario")
 
-        # IT: preferenza ensemble eterogeneo (>=2 arch presenti), fallback a omogeneo
-        # EN: prefer heterogeneous ensemble (>=2 archs present), fallback to homogeneous
+        # prefer heterogeneous ensemble (>=2 archs present), fallback to homogeneous
         try:
             from quantsys.model.ensemble import get_distillation_archs
             _archs = get_distillation_archs(cfg)
@@ -1009,18 +913,9 @@ class LiveEngine:
             self.model     = None
             self.use_model = False
 
-        # IT: interval del run — dal PipelineState se disponibile (contratto train↔inference,
-        #     convenzione inference-side), fallback alla config; i due sono già stati
-        #     validati identici sopra (hard-fail su mismatch).
-        # EN: run interval — from PipelineState when available (train↔inference contract,
-        #     inference-side convention), config fallback; the two were already
-        #     validated identical above (hard-fail on mismatch).
-        # IT: interval del run — dal PipelineState se disponibile (contratto train↔inference,
-        #     convenzione inference-side), fallback alla config; i due sono già stati
-        #     validati identici sopra (hard-fail su mismatch).
-        # EN: run interval — from PipelineState when available (train↔inference contract,
-        #     inference-side convention), config fallback; the two were already
-        #     validated identical above (hard-fail on mismatch).
+        # run interval — from PipelineState when available (train↔inference contract,
+        # inference-side convention), config fallback; the two were already
+        # validated identical above (hard-fail on mismatch).
         _interval_minutes = (
             getattr(self.pipeline_state, "interval_minutes", 1)
             if self.pipeline_state is not None
@@ -1028,41 +923,29 @@ class LiveEngine:
         )
         _bars_per_day = 1440 // _interval_minutes
 
-        # IT: BLOCKER #1 Stage 4.6 — buffer DEPRECATED solo per ATR + state persistence + sanity di candles
-        #     (interval_minutes wired: finestre ATH/ATL "1 giorno" interval-agnostiche).
-        # EN: BLOCKER #1 Stage 4.6 — DEPRECATED buffer kept only for ATR + state persistence + candle sanity
-        #     (interval_minutes wired: "1 day" ATH/ATL windows are interval-agnostic).
+        # BLOCKER #1 Stage 4.6 — DEPRECATED buffer kept only for ATR + state persistence + candle sanity
+        # (interval_minutes wired: "1 day" ATH/ATL windows are interval-agnostic).
         self.buf = LiveFeatureBuffer(window=mcfg["window_size"], interval_minutes=_interval_minutes)
 
-        # IT: BLOCKER #1 Stage 4.6 — nuovo buffer raw + assembler che usa FeatureBuilder
-        #     come single source of truth. Produce le 104 feature canoniche col medesimo
-        #     scaler del training (parity garantita da tests/test_live_training_parity.py).
-        # EN: BLOCKER #1 Stage 4.6 — new raw buffer + assembler relying on FeatureBuilder
-        #     as single source of truth. Produces the 104 canonical features with the same
-        #     training scaler (parity guaranteed by tests/test_live_training_parity.py).
-        # IT: capacity interval-aware (pivot 1m→1h): 35 giorni di barre + margine 1500.
-        #     A 1m → 35×1440+1500 = 51900 (≈ equivalente al legacy 50000); a 1h → 2340.
-        #     È solo CAPACITY, non semantica: l'identità a 1m è preservata.
-        # EN: interval-aware capacity (1m→1h pivot): 35 days of bars + 1500 margin.
-        #     At 1m → 35×1440+1500 = 51900 (≈ legacy 50000 equivalent); at 1h → 2340.
-        #     CAPACITY only, not semantics: 1m identity is preserved.
-        #     (_interval_minutes/_bars_per_day calcolati sopra, PipelineState-first
-        #      | computed above, PipelineState-first.)
+        # BLOCKER #1 Stage 4.6 — new raw buffer + assembler relying on FeatureBuilder
+        # as single source of truth. Produces the 104 canonical features with the same
+        # training scaler (parity guaranteed by tests/test_live_training_parity.py).
+        # interval-aware capacity (1m→1h pivot): 35 days of bars + 1500 margin.
+        # At 1m → 35×1440+1500 = 51900 (≈ legacy 50000 equivalent); at 1h → 2340.
+        # CAPACITY only, not semantics: 1m identity is preserved.
+        # (_interval_minutes/_bars_per_day computed above, PipelineState-first.)
         _cb_maxlen = 35 * _bars_per_day + 1500
         self.candle_buffer = LiveCandleBuffer(maxlen=_cb_maxlen)
-        # IT: bootstrap da raw_candles.parquet (~35d storia) per warmup feature 30d-lookback.
-        # EN: bootstrap from raw_candles.parquet (~35d history) for 30d-lookback feature warmup.
+        # bootstrap from raw_candles.parquet (~35d history) for 30d-lookback feature warmup.
         _raw_path = Path("data/raw_candles.parquet")
         if _raw_path.exists():
             self.candle_buffer.bootstrap_from_parquet(str(_raw_path), n_last=_cb_maxlen)
         else:
             log.warning("data/raw_candles.parquet non trovato — LiveCandleBuffer parte vuoto.")
-        # IT: funding_df letto una volta al boot (workaround Stage 4.4: niente Poller).
-        # EN: funding_df read once at boot (Stage 4.4 workaround: no Poller).
+        # funding_df read once at boot (Stage 4.4 workaround: no Poller).
         with self._funding_lock:
             self.funding_df = self._funding_df[0]
-        # IT: instanzia l'assembler solo se PipelineState disponibile (richiede scaler).
-        # EN: instantiate assembler only if PipelineState is available (requires scaler).
+        # instantiate assembler only if PipelineState is available (requires scaler).
         if self.pipeline_state is not None:
             self.feature_assembler = FeatureAssembler(
                 self.candle_buffer, self.pipeline_state, config=cfg
@@ -1099,31 +982,27 @@ class LiveEngine:
         self.candle_idx      = 0
         self.last_signal:    dict = {}
         self.last_forecast:  dict | None = None
-        # IT: cadenza Monte Carlo forecast (ogni N candele chiuse)
-        # EN: Monte Carlo forecast cadence (every N closed candles)
+        # Monte Carlo forecast cadence (every N closed candles)
         self._forecast_every = cfg.get("montecarlo", {}).get("live_forecast_every", 10)
         self._forecast_tick  = 0
         self.session_start   = time.time()
 
-        # IT: candela parziale (k.x=False) tenuta separata — scartata al reconnect WS
-        # EN: partial candle (k.x=False) kept aside — dropped on WS reconnect
+        # partial candle (k.x=False) kept aside — dropped on WS reconnect
         self._pending_candle: dict | None = None
 
-    # IT: persistenza stato — sopravvive a crash/disconnessioni brevi
-    # EN: state persistence — survives crashes/brief disconnects
+    # state persistence — survives crashes/brief disconnects
 
-    # IT: serializza buffer+portfolio+posizione su disco (write atomico temp+rename)
-    # EN: serialize buffer+portfolio+position to disk (atomic temp+rename write)
+    # serialize buffer+portfolio+position to disk (atomic temp+rename write)
     def _save_state(self):
         """
-        Serializza su disco:
-          · ultime 200 candele del buffer (sufficiente per il warm-up)
-          · stato del portfolio (cash, equity, peak, drawdown)
-          · posizione aperta (se esiste)
-          · candle_idx corrente
+        Serializes to disk:
+          · last 200 buffer candles (enough for warm-up)
+          · portfolio state (cash, equity, peak, drawdown)
+          · open position (if any)
+          · current candle_idx
 
-        Il file viene scritto in modo atomico (write temp + rename)
-        per evitare di lasciare un JSON corrotto in caso di crash.
+        The file is written atomically (write temp + rename)
+        to avoid leaving a corrupted JSON behind on a crash.
         """
         pos_data = None
         if self.rm.position:
@@ -1144,7 +1023,7 @@ class LiveEngine:
         state = {
             "saved_at":   time.time(),
             "candle_idx": self.candle_idx,
-            "candles":    list(self.buf.candles)[-200:],  # IT: ultimi 200 per warm-up rapido | EN: last 200 for fast warm-up
+            "candles":    list(self.buf.candles)[-200:],  # last 200 for fast warm-up
             "portfolio": {
                 "equity":        port.equity,
                 "cash":          port.cash,
@@ -1160,19 +1039,17 @@ class LiveEngine:
             "trades_count": len(self.rm.trades),
         }
 
-        # IT: write temp + rename = scrittura atomica (no JSON corrotti su crash)
-        # EN: write temp + rename = atomic write (no corrupt JSON on crash)
+        # write temp + rename = atomic write (no corrupt JSON on crash)
         tmp = self._state_file.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f)
         tmp.replace(self._state_file)
 
-    # IT: ripristina stato da disco se fresco (< STATE_MAX_AGE_SEC), altrimenti warm-up fresco
-    # EN: restore state from disk if fresh (< STATE_MAX_AGE_SEC), else fresh warm-up
+    # restore state from disk if fresh (< STATE_MAX_AGE_SEC), else fresh warm-up
     def _load_state(self) -> bool:
         """
-        Ripristina lo stato da disco se esiste ed è recente.
-        Ritorna True se il ripristino è riuscito, False altrimenti.
+        Restores the state from disk if it exists and is recent.
+        Returns True if the restore succeeded, False otherwise.
         """
         if not self._state_file.exists():
             return False
@@ -1191,14 +1068,12 @@ class LiveEngine:
 
         log.info(f"Ripristino stato da disco (età {age:.0f}s) ...")
 
-        # IT: ripopola il buffer candele (riattiva anche il VP incrementale)
-        # EN: repopulate the candle buffer (also rebuilds incremental VP)
+        # repopulate the candle buffer (also rebuilds incremental VP)
         for c in state.get("candles", []):
             self.buf.push(c)
         self.candle_idx = state.get("candle_idx", 0)
 
-        # IT: ripristina cash/equity/drawdown del paper portfolio
-        # EN: restore paper portfolio cash/equity/drawdown
+        # restore paper portfolio cash/equity/drawdown
         pdata = state.get("portfolio", {})
         port  = self.rm.portfolio
         port.equity       = pdata.get("equity",       self.rm.icap)
@@ -1211,8 +1086,7 @@ class LiveEngine:
         port.gross_profit = pdata.get("gross_profit", 0.0)
         port.gross_loss   = pdata.get("gross_loss",   0.0)
 
-        # IT: ripristina posizione aperta (mantiene SL/TP/trailing originali)
-        # EN: restore open position (keeps original SL/TP/trailing)
+        # restore open position (keeps original SL/TP/trailing)
         pos_data = state.get("position")
         if pos_data:
             from quantsys.trading import Position, Side as _Side
@@ -1236,38 +1110,33 @@ class LiveEngine:
                  f"equity=${port.equity:,.2f}")
         return True
 
-    # IT: warm-up — riempie il buffer prima di abilitare le inferenze live
-    # EN: warm-up — fills the buffer before enabling live inferences
+    # warm-up — fills the buffer before enabling live inferences
     def warmup(self):
         """
-        Riempie il buffer prima di avviare lo stream live.
+        Fills the buffer before starting the live stream.
 
-        Strategia a due passi:
-          1. Tenta di ripristinare lo stato da disco (riavvio rapido dopo crash
-             o riconnessione entro STATE_MAX_AGE_SEC=5 min). Se il file è fresco,
-             recuperiamo buffer + portfolio + posizione aperta senza toccare la REST API.
-          2. Scarica dalla REST API le candele mancanti per portare il buffer
-             a window_size + lookback (≥ 120 candele) prima che il WS inizi.
+        Two-step strategy:
+          1. Try to restore the state from disk (fast restart after a crash
+             or reconnect within STATE_MAX_AGE_SEC=5 min). If the file is fresh,
+             we recover buffer + portfolio + open position without touching the REST API.
+          2. Download the missing candles from the REST API to bring the buffer
+             to window_size + lookback (≥ 120 candles) before the WS starts.
 
-        Il numero di candele da scaricare è derivato da window_size della config
-        (non hardcoded) con un overhead di +60 per rolling features stabili.
-        Con window_size=60 → necessarie 120 candele minimo.
-        La REST API Binance restituisce al massimo 1000 candele per chiamata.
+        The number of candles to download is derived from the config's window_size
+        (not hardcoded) with a +60 overhead for stable rolling features.
+        With window_size=60 → at least 120 candles are needed.
+        The Binance REST API returns at most 1000 candles per call.
         """
-        # IT: min candele = window + 60 + 10. Le quantità sono in BARRE (bar-semantic),
-        #     NON in minuti: 60 = max finestra rolling delle feature (windows=[5,10,20,60]
-        #     in barre), 10 = margine scarti. Invariante rispetto all'intervallo (1m o 1h).
-        # EN: min candles = window + 60 + 10. Quantities are in BARS (bar-semantic),
-        #     NOT minutes: 60 = max rolling feature window (windows=[5,10,20,60] in bars),
-        #     10 = discard margin. Interval-invariant (1m or 1h).
+        # min candles = window + 60 + 10. Quantities are in BARS (bar-semantic),
+        # NOT minutes: 60 = max rolling feature window (windows=[5,10,20,60] in bars),
+        # 10 = discard margin. Interval-invariant (1m or 1h).
         window_size  = self.cfg["model"]["window_size"]
         min_candles  = window_size + 60 + 10
 
         restored = self._load_state()
 
         if restored:
-            # IT: riavvio rapido — scarica solo il gap dallo snapshot su disco
-            # EN: fast restart — only fetch the gap since on-disk snapshot
+            # fast restart — only fetch the gap since on-disk snapshot
             n_in_buf = len(self.buf.candles)
             needed   = max(10, min_candles - n_in_buf)
             log.info(
@@ -1276,25 +1145,19 @@ class LiveEngine:
                 f"Richiesta REST per colmare il gap ({needed} candele recenti) ..."
             )
         else:
-            # IT: cold start — buffer pieno da REST
-            # EN: cold start — full buffer via REST
+            # cold start — full buffer via REST
             needed = min_candles
             log.info(
                 f"Warm-up: avvio freddo — scaricamento {needed} candele storiche "
                 f"(window_size={window_size} + lookback=60 + margine=10) ..."
             )
 
-        # IT: ── A1 — CATCH-UP CONTIGUO del candle_buffer (sorgente del FeatureAssembler) ──
-        #     Il bootstrap da raw_candles.parquet può essere vecchio di giorni; senza colmare
-        #     il gap fino a "ora" le feature a lookback lungo (ma200m, vp, 30d) attraversano un
-        #     buco temporale (bug osservato nello smoke test 2026-06-05). Scarica via REST le
-        #     candele mancanti dall'ultima del buffer fino a ora (paginazione in fetch_klines) e
-        #     le appende in modo CONTIGUO. Dedup su open_time. Best-effort: se fallisce, il WS
-        #     colmerà gradualmente (col mirror dedup-safe sotto come fallback).
-        # EN: A1 — CONTIGUOUS catch-up of candle_buffer (the FeatureAssembler source). The parquet
-        #     bootstrap can be days old; without bridging the gap to "now", long-lookback features
-        #     span a temporal hole (smoke-test bug 2026-06-05). Fetch the missing range via REST
-        #     and append contiguously. Dedup on open_time. Best-effort.
+        # A1 — CONTIGUOUS catch-up of candle_buffer (the FeatureAssembler source). The parquet
+        # bootstrap can be days old; without bridging the gap to "now", long-lookback features
+        # (ma200m, vp, 30d) span a temporal hole (smoke-test bug 2026-06-05). Fetch the missing
+        # candles via REST from the buffer's last one up to now (pagination in fetch_klines)
+        # and append contiguously. Dedup on open_time. Best-effort: on failure the WS fills
+        # the gap gradually (with the dedup-safe mirror below as fallback).
         try:
             from quantsys.data import fetch_klines
             _cb_last = self.candle_buffer.latest
@@ -1309,7 +1172,7 @@ class LiveEngine:
             for _, _row in _df_cb.iterrows():
                 _ot = self.candle_buffer._norm_ts(_row["open_time"])
                 if _last_ts is not None and _ot <= _last_ts:
-                    continue                                   # IT: dedup — già in buffer
+                    continue                                   # dedup — already in buffer
                 self.candle_buffer.append({
                     "open_time":           _ot,
                     "open":                float(_row["open"]),
@@ -1337,7 +1200,7 @@ class LiveEngine:
                 params={
                     "symbol":   self.symbol,
                     "interval": self.interval,
-                    "limit":    min(needed, 1000),   # IT: limite REST Binance | EN: Binance REST cap
+                    "limit":    min(needed, 1000),   # Binance REST cap
                 },
                 timeout=10,
             )
@@ -1354,10 +1217,8 @@ class LiveEngine:
                 }
                 if _is_valid_candle(candle):
                     self.buf.push(candle)
-                    # IT: mirror nel candle_buffer SOLO se più recente dell'ultima — evita
-                    #     duplicati col catch-up A1 sopra; resta fallback se il catch-up è fallito.
-                    # EN: mirror into candle_buffer ONLY if newer than the last one — avoids dupes
-                    #     with the A1 catch-up above; stays a fallback if the catch-up failed.
+                    # mirror into candle_buffer ONLY if newer than the last one — avoids dupes
+                    # with the A1 catch-up above; stays a fallback if the catch-up failed.
                     _cb_last = self.candle_buffer.latest
                     if (_cb_last is None or
                             self.candle_buffer._norm_ts(k[0]) >
@@ -1382,12 +1243,10 @@ class LiveEngine:
         except Exception as e:
             log.error(f"Warm-up REST fallito: {e}")
             if not restored:
-                # IT: no stato + no REST -> impossibile inizializzare buffer
-                # EN: no state + no REST -> cannot initialize buffer
+                # no state + no REST -> cannot initialize buffer
                 raise
 
-        # IT: hard check — buffer minimo per emettere il primo segnale
-        # EN: hard check — minimum buffer to emit the first signal
+        # hard check — minimum buffer to emit the first signal
         n_buf = len(self.buf.candles)
         if n_buf < window_size + 20:
             log.warning(
@@ -1403,26 +1262,22 @@ class LiveEngine:
                 f"equity=${self.rm.portfolio.equity:,.2f}"
             )
 
-    # IT: inferenza modello — restituisce (mu, sigma, nu) in spazio raw
-    # EN: model inference — returns (mu, sigma, nu) in raw space
+    # model inference — returns (mu, sigma, nu) in raw space
     def _predict(self, window: np.ndarray) -> tuple[float, float, float]:
         """
-        Predice (μ, σ, ν) dalla finestra corrente.
-        Usa il vero snapshot macro (aggiornato ogni ora) invece di zeros.
+        Predicts (μ, σ, ν) from the current window.
+        Uses the real macro snapshot (refreshed hourly) instead of zeros.
         """
         if self.use_model and self.model is not None:
-            # IT: Stage 4.7 — strict assertion sostituisce il vecchio _pad_or_truncate.
-            #     FeatureAssembler garantisce 104 feature canoniche o solleva.
-            # EN: Stage 4.7 — strict assertion replaces the old _pad_or_truncate shim.
-            #     FeatureAssembler guarantees 104 canonical features or raises.
+            # Stage 4.7 — strict assertion replaces the old _pad_or_truncate shim.
+            # FeatureAssembler guarantees 104 canonical features or raises.
             assert window.shape[-1] == 104, (
                 f"feature mismatch: window has {window.shape[-1]} features, expected 104"
             )
 
             xb = torch.tensor(window[None], dtype=torch.float32).to(self.device)
 
-            # IT: snapshot macro reale se aggiornato, altrimenti zeros (no crash)
-            # EN: real macro snapshot if fresh, otherwise zeros (no crash)
+            # real macro snapshot if fresh, otherwise zeros (no crash)
             xm = None
             has_macro = (self.pipeline_state is not None and
                          len(self.pipeline_state.macro_feature_cols) > 0)
@@ -1432,58 +1287,44 @@ class LiveEngine:
                     if not self.macro_updater.is_fresh:
                         log.debug("Snapshot macro non aggiornato di recente — potrebbe essere datato")
                 else:
-                    # IT: fallback zeros — branch macro neutro
-                    # EN: fallback zeros — neutral macro branch
+                    # fallback zeros — neutral macro branch
                     n_macro = len(self.pipeline_state.macro_feature_cols)
                     xm = torch.zeros(1, n_macro, dtype=torch.float32).to(self.device)
 
-            # IT: MC Dropout n=10 — uncertainty epistemica, SOLO per modelli singoli che la
-            #     espongono. NB: l'EnsembleModel di produzione NON ha predict_with_uncertainty
-            #     → il path live cade sempre sul ramo DETERMINISTICO sotto, bit-identico al
-            #     backtest offline (questa è la base della parity Stage 5).
-            # EN: MC Dropout n=10 — epistemic uncertainty, ONLY for single models exposing it.
-            #     The production EnsembleModel lacks predict_with_uncertainty → the live path
-            #     always takes the DETERMINISTIC branch below, bit-identical to the offline
-            #     backtest (this is what the Stage-5 parity relies on).
+            # MC Dropout n=10 — epistemic uncertainty, ONLY for single models exposing it.
+            # The production EnsembleModel lacks predict_with_uncertainty → the live path
+            # always takes the DETERMINISTIC branch below, bit-identical to the offline
+            # backtest (this is what the Stage-5 parity relies on).
             if hasattr(self.model, "predict_with_uncertainty"):
                 result = self.model.predict_with_uncertainty(xb, xm, n_samples=10)
-                # IT: atleast_1d protegge da scalar 0-dim quando batch=1
-                # EN: atleast_1d guards against 0-dim scalars when batch=1
+                # atleast_1d guards against 0-dim scalars when batch=1
                 mu     = float(np.atleast_1d(result["mu"])[0])
                 sigma  = float(np.atleast_1d(result["sigma"])[0])
                 nu     = float(np.atleast_1d(result["nu"])[0])
                 conf   = float(np.atleast_1d(result["confidence_score"])[0])
-                # IT: boost sigma se confidence bassa — penalizza segnali incerti
-                # EN: boost sigma when confidence is low — penalises uncertain signals
+                # boost sigma when confidence is low — penalises uncertain signals
                 if conf < 0.3:
                     sigma *= (1.0 + (0.3 - conf) * 2)
-                # IT: denormalizza z-score -> spazio raw (centralizzato in PipelineState)
-                # EN: denormalize z-score -> raw space (centralized in PipelineState)
+                # denormalize z-score -> raw space (centralized in PipelineState)
                 if self.pipeline_state is not None:
                     mu, sigma = self.pipeline_state.denormalize_predictions(mu, sigma)
                 return mu, sigma, nu
 
-            # IT: Path DETERMINISTICO (ensemble di produzione) — nucleo condiviso col parity
-            #     test Stage 5 (vedi _deterministic_predict) → il test esercita il path reale.
-            # EN: DETERMINISTIC path (production ensemble) — shared core with the Stage-5 parity
-            #     test (see _deterministic_predict) → the test exercises the real path.
+            # DETERMINISTIC path (production ensemble) — shared core with the Stage-5 parity
+            # test (see _deterministic_predict) → the test exercises the real path.
             return self._deterministic_predict(self.model, window, xm,
                                                self.pipeline_state, self.device)
 
-        # IT: fallback senza modello — usa rolling stats sui returns
-        # EN: no-model fallback — use rolling stats on returns
+        # no-model fallback — use rolling stats on returns
         rets  = window[:, 0]
         mu    = float(rets[-5:].mean() * 0.5 + rets[-20:].mean() * 0.5)
         sigma = float(max(rets[-20:].std(), 1e-5))
         return mu, sigma, 5.0
 
-    # IT: Nucleo di inferenza DETERMINISTICO (no MC Dropout) + denormalizzazione z→raw.
-    #     Condiviso da _predict (ramo ensemble) e dal parity test Stage 5: garantisce che il
-    #     test eserciti ESATTAMENTE il path di produzione, senza re-implementarlo (zero drift).
-    #     window: (T,104) np.ndarray → ritorna (μ,σ,ν) in spazio RAW.
-    # EN: DETERMINISTIC inference core (no MC dropout) + z→raw denorm. Shared by _predict
-    #     (ensemble branch) and the Stage-5 parity test so the test exercises the exact
-    #     production path without re-implementing it. Returns raw (μ,σ,ν).
+    # DETERMINISTIC inference core (no MC dropout) + z→raw denorm. Shared by _predict
+    # (ensemble branch) and the Stage-5 parity test so the test exercises the exact
+    # production path without re-implementing it (zero drift).
+    # window: (T,104) np.ndarray → returns (μ,σ,ν) in RAW space.
     @staticmethod
     def _deterministic_predict(model, window: np.ndarray, xm,
                                pipeline_state, device) -> tuple[float, float, float]:
@@ -1495,13 +1336,12 @@ class LiveEngine:
             mu, sigma = pipeline_state.denormalize_predictions(mu, sigma)
         return mu, sigma, nu
 
-    # IT: Monte Carlo forecast con dinamica GJR-GARCH (chiamato ogni N candele)
-    # EN: Monte Carlo forecast with GJR-GARCH dynamics (called every N candles)
+    # Monte Carlo forecast with GJR-GARCH dynamics (called every N candles)
     def _run_forecast(self, window: np.ndarray, price: float) -> dict | None:
         """
-        Esegue monte_carlo_forecast con i parametri LSTM reali.
-        Chiamato ogni `_forecast_every` candele — non ad ogni tick.
-        Risultato salvato in self.last_forecast per il log e la dashboard.
+        Runs monte_carlo_forecast with the real LSTM parameters.
+        Called every `_forecast_every` candles — not on every tick.
+        Result stored in self.last_forecast for the log and the dashboard.
         """
         if not self.use_model:
             return None
@@ -1517,8 +1357,7 @@ class LiveEngine:
             elif win.shape[1] > n_model:
                 win = win[:, :n_model]
 
-            # IT: feature_idx_map per aggiornare multi-feature dentro i percorsi MC
-            # EN: feature_idx_map for multi-feature updates inside MC paths
+            # feature_idx_map for multi-feature updates inside MC paths
             feat_names = list(self.pipeline_state.feature_cols) if self.pipeline_state else []
             idx_map    = build_feature_idx_map(feat_names) if feat_names else None
 
@@ -1528,15 +1367,14 @@ class LiveEngine:
                 x_price_seed       = win[np.newaxis],
                 last_price         = price,
                 n_steps            = mc["n_steps"],
-                n_paths            = min(500, mc["n_paths"]),   # IT: cap a 500 paths in live per latenza | EN: cap at 500 paths live for latency
+                n_paths            = min(500, mc["n_paths"]),   # cap at 500 paths live for latency
                 device             = self.device,
                 feature_idx_map    = idx_map,
                 gjr_omega          = mc.get("gjr_omega", 1.2e-5),
                 gjr_alpha          = mc.get("gjr_alpha", 0.05),
                 gjr_gamma          = mc.get("gjr_gamma", 0.065),
                 gjr_beta           = mc.get("gjr_beta",  0.875),
-                # IT: cap σ/barra da config (2026-07-15: parametrico, 1h=0.13).
-                # EN: per-bar σ cap from config (2026-07-15: parametric, 1h=0.13).
+                # per-bar σ cap from config (2026-07-15: parametric, 1h=0.13).
                 gjr_sigma_cap      = mc.get("gjr_sigma_cap", 0.01),
             )
             summary = summarize_forecast(result, price, self.cfg["montecarlo"]["n_steps"])
@@ -1546,28 +1384,22 @@ class LiveEngine:
             log.debug(f"Forecast fallito (non critico): {e}")
             return None
 
-    # IT: callback principale — eseguito ad ogni candela chiusa (intervallo da config)
-    # EN: main callback — runs on every closed candle (interval from config)
+    # main callback — runs on every closed candle (interval from config)
     def on_closed_candle(self, k: dict):
-        """Chiamato ogni volta che una candela (intervallo da config) si chiude."""
+        """Called every time a candle (interval from config) closes."""
         self.candle_idx += 1
         price = k["close"]
-        # IT: ATR floor a 5 bps per evitare SL troppo stretto in mercati calmi
-        # EN: ATR floor at 5bps to avoid too-tight SL in quiet markets
+        # ATR floor at 5bps to avoid too-tight SL in quiet markets
         atr   = max(self.buf.atr, price * 0.0005)
 
-        # IT: aggiorna trailing stop SE in posizione (prima del check_exit)
-        # EN: update trailing stop IF in position (before check_exit)
+        # update trailing stop IF in position (before check_exit)
         if self.rm.position:
             self.rm.update_trailing(price, atr)
 
-        # IT: Stage 4.6 — calcola finestra via FeatureAssembler (parity col training).
-        #     funding_df letto dallo stato cross-thread (aggiornato ogni 8h dal daemon).
-        # EN: Stage 4.6 — compute window via FeatureAssembler (training parity).
-        #     funding_df read from the cross-thread state (refreshed every 8h by daemon).
+        # Stage 4.6 — compute window via FeatureAssembler (training parity).
+        # funding_df read from the cross-thread state (refreshed every 8h by daemon).
         if self.feature_assembler is None:
-            # IT: fallback rolling stats (no PipelineState/modello) -> path legacy.
-            # EN: fallback rolling stats (no PipelineState/model) -> legacy path.
+            # fallback rolling stats (no PipelineState/model) -> legacy path.
             window = self.buf.get_window()
             if window is None:
                 log.debug(f"Buffer insufficiente ({len(self.buf.candles)} candele)")
@@ -1581,25 +1413,21 @@ class LiveEngine:
                     funding_df=_fd,
                 )
             except RuntimeError as e:
-                # IT: warmup ancora incompleto (buffer/feature 30d) -> skip silenzioso.
-                # EN: warmup still incomplete (buffer/30d features) -> silent skip.
+                # warmup still incomplete (buffer/30d features) -> silent skip.
                 log.debug(f"FeatureAssembler non pronto: {e}")
                 return
 
-        # IT: inferenza modello + generazione segnale BUY/SELL/HOLD
-        # EN: model inference + BUY/SELL/HOLD signal generation
+        # model inference + BUY/SELL/HOLD signal generation
         mu, sigma, nu = self._predict(window)
         side, dist    = self.sig_gen.generate(mu, sigma, nu)
 
-        # IT: Monte Carlo forecast a cadenza ridotta (costoso)
-        # EN: Monte Carlo forecast at lower cadence (expensive)
+        # Monte Carlo forecast at lower cadence (expensive)
         self._forecast_tick += 1
         if self._forecast_tick >= self._forecast_every:
             self._forecast_tick  = 0
             self.last_forecast   = self._run_forecast(window, price)
 
-        # IT: check uscita — SL/TP/MAX_HOLD/reverse signal
-        # EN: exit check — SL/TP/MAX_HOLD/reverse signal
+        # exit check — SL/TP/MAX_HOLD/reverse signal
         if self.rm.position:
             reason = self.rm.check_exit(k["high"], k["low"], price, self.candle_idx, side)
             if reason:
@@ -1612,20 +1440,17 @@ class LiveEngine:
                           f"exit={ep:,.1f}  P&L={trade.net_pnl:+.2f}$  "
                           f"({trade.pnl_pct:+.2%}){RST}")
 
-        # IT: apre nuova posizione solo se flat (no piramidazione)
-        # EN: open a new position only when flat (no pyramiding)
+        # open a new position only when flat (no pyramiding)
         if side != Side.NONE and not self.rm.position:
             self.rm.open_position(side, price, self.candle_idx, atr, dist)
 
-        # IT: equity mark-to-market = cash + uPnL + size_usd posizione aperta
-        # EN: mark-to-market equity = cash + uPnL + open position size_usd
+        # mark-to-market equity = cash + uPnL + open position size_usd
         mtm = self.rm.portfolio.cash
         if self.rm.position:
             mtm += self.rm.position.unrealized_pnl(price) + self.rm.position.size_usd
         pnl_tot = mtm - self.rm.icap
 
-        # IT: log riga colorata sulla console
-        # EN: colored console log line
+        # colored console log line
         pos_str = ""
         if self.rm.position:
             upnl = self.rm.position.unrealized_pnl(price)
@@ -1647,8 +1472,7 @@ class LiveEngine:
             f"{pos_str}"
         )
 
-        # IT: persiste segnale su JSONL (consumato da 05_analyze + dashboard)
-        # EN: persist signal to JSONL (consumed by 05_analyze + dashboard)
+        # persist signal to JSONL (consumed by 05_analyze + dashboard)
         record = {
             "ts":        datetime.now(timezone.utc).isoformat(),
             "price":     price,
@@ -1661,8 +1485,7 @@ class LiveEngine:
             "n_trades":  self.rm.portfolio.n_trades,
             "in_position": self.rm.position is not None,
         }
-        # IT: rotazione log a 50MB (try/except per file lock Windows)
-        # EN: 50MB log rotation (try/except for Windows file locks)
+        # 50MB log rotation (try/except for Windows file locks)
         if self.log_path.exists() and self.log_path.stat().st_size > 50 * 1024 * 1024:
             ts_str    = datetime.now().strftime("%Y%m%d_%H%M%S")
             archive   = self.log_path.with_name(f"live_signals_{ts_str}.jsonl")
@@ -1676,23 +1499,20 @@ class LiveEngine:
 
         self.last_signal = record
 
-        # IT: snapshot stato su disco -> ripristino rapido al riavvio
-        # EN: state snapshot on disk -> fast recovery on restart
+        # state snapshot on disk -> fast recovery on restart
         try:
             self._save_state()
         except Exception as e:
             log.warning(f"_save_state fallito (non critico): {e}")
 
-    # IT: handler WebSocket Binance con reconnect exponential backoff
-    # EN: Binance WebSocket handler with exponential-backoff reconnect
+    # Binance WebSocket handler with exponential-backoff reconnect
     async def _ws_handler(self):
         import websockets
 
         url = f"wss://stream.binance.com:9443/ws/{self.symbol.lower()}@kline_{self.interval}"
         log.info(f"WebSocket: {url}")
 
-        # IT: una sessione WS — consuma kline finché la connessione regge
-        # EN: a single WS session — consumes klines until the connection drops
+        # a single WS session — consumes klines until the connection drops
         async def connect():
             async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                 log.info("WebSocket connesso. In attesa di candele ...")
@@ -1700,8 +1520,7 @@ class LiveEngine:
                     data = json.loads(raw)
                     k    = data.get("k", {})
 
-                    # IT: parse messaggio Binance kline (sempre UTC)
-                    # EN: parse Binance kline message (always UTC)
+                    # parse Binance kline message (always UTC)
                     ts = datetime.fromtimestamp(k["t"]/1000, tz=timezone.utc)
                     candle = {
                         "open": float(k["o"]), "high": float(k["h"]),
@@ -1710,8 +1529,7 @@ class LiveEngine:
                         "hour": ts.hour, "minute": ts.minute, "ts": k["t"],
                     }
 
-                    # IT: scarta candele corrotte (sanity check pre-buffer)
-                    # EN: drop corrupted candles (sanity check before buffer)
+                    # drop corrupted candles (sanity check before buffer)
                     if not _is_valid_candle(candle):
                         log.warning(
                             f"Candela corrotta scartata: "
@@ -1722,33 +1540,28 @@ class LiveEngine:
                         continue
 
                     if k.get("x", False):
-                        # IT: candela CHIUSA -> push buffer + segnale
-                        # EN: CLOSED candle -> push buffer + emit signal
+                        # CLOSED candle -> push buffer + emit signal
                         self._pending_candle = None
                         self.buf.push(candle)
-                        # IT: Stage 4.6 — mirror append nel nuovo LiveCandleBuffer (raw OHLCV).
-                        # EN: Stage 4.6 — mirror append to the new LiveCandleBuffer (raw OHLCV).
+                        # Stage 4.6 — mirror append to the new LiveCandleBuffer (raw OHLCV).
                         self.candle_buffer.append(candle)
                         self.on_closed_candle(candle)
                     else:
-                        # IT: candela in formazione -> tenuta separata dal buffer chiuse
-                        # EN: forming candle -> kept aside from the closed buffer
+                        # forming candle -> kept aside from the closed buffer
                         self._pending_candle = candle
 
-        # IT: reconnect loop con exponential backoff (5s -> 5min)
-        # EN: reconnect loop with exponential backoff (5s -> 5min)
+        # reconnect loop with exponential backoff (5s -> 5min)
         _backoff = 5.0
         while True:
             try:
                 await connect()
-                _backoff = 5.0  # IT: reset backoff al successo | EN: reset backoff on success
+                _backoff = 5.0  # reset backoff on success
             except Exception as e:
                 log.warning(
                     f"WS disconnesso ({e.__class__.__name__}: {e}) "
                     f"— riconnessione in {_backoff:.0f}s ..."
                 )
-                # IT: scarta candela parziale — il nuovo feed potrebbe saltarla
-                # EN: drop partial candle — new feed may skip it on resume
+                # drop partial candle — new feed may skip it on resume
                 if self._pending_candle is not None:
                     log.info(
                         f"Reconnect: scarto candela parziale "
@@ -1756,14 +1569,13 @@ class LiveEngine:
                     )
                     self._pending_candle = None
                 await asyncio.sleep(_backoff)
-                _backoff = min(_backoff * 2, 300.0)  # IT: cap 5 minuti | EN: cap at 5 minutes
+                _backoff = min(_backoff * 2, 300.0)  # cap at 5 minutes
 
-    # IT: status loop — riepilogo ogni 10 minuti su console
-    # EN: status loop — console summary every 10 minutes
+    # status loop — console summary every 10 minutes
     async def _status_loop(self):
-        """Stampa un riepilogo ogni 10 minuti."""
+        """Prints a summary every 10 minutes."""
         while True:
-            await asyncio.sleep(600)   # IT: 600s = 10 minuti | EN: 600s = 10 minutes
+            await asyncio.sleep(600)   # 600s = 10 minutes
             m = self.rm.metrics() if self.rm.trades else {}
             elapsed = (time.time() - self.session_start) / 60
             macro_status = self.macro_updater.status if self.macro_updater else "non attivo"
@@ -1775,8 +1587,7 @@ class LiveEngine:
             print(f"  Segnali → {self.log_path}")
             print(f"{'═'*60}\n")
 
-    # IT: orchestrazione async — warm-up + WS handler + status loop
-    # EN: async orchestration — warm-up + WS handler + status loop
+    # async orchestration — warm-up + WS handler + status loop
     async def run(self):
         self.warmup()
 
@@ -1799,22 +1610,19 @@ class LiveEngine:
             self._status_loop(),
         )
 
-    # IT: shutdown ordinato — chiude posizione aperta + stampa riepilogo
-    # EN: graceful shutdown — closes open position + prints summary
+    # graceful shutdown — closes open position + prints summary
     def shutdown(self):
-        """Chiamato a Ctrl+C — chiude la posizione aperta e stampa riepilogo finale."""
+        """Called on Ctrl+C — closes the open position and prints the final summary."""
         print(f"\n\n{'═'*60}  SHUTDOWN  {'═'*60}")
 
-        # IT: prima ferma il thread macro per evitare race
-        # EN: stop macro thread first to avoid races
+        # stop macro thread first to avoid races
         if self.macro_updater is not None:
             self.macro_updater.stop()
             log.info(f"MacroSnapshotUpdater fermato. {self.macro_updater.status}")
         if self.rm.position:
             log.info("Chiusura posizione aperta ...")
             try:
-                # IT: prezzo spot reale via REST, fallback a entry_price se REST giu'
-                # EN: real spot price via REST, fallback to entry_price if REST down
+                # real spot price via REST, fallback to entry_price if REST down
                 r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={self.symbol}", timeout=3)
                 last = float(r.json()["price"])
             except Exception:
@@ -1832,8 +1640,7 @@ class LiveEngine:
   Max drawdown    : {self.rm.portfolio.max_drawdown:.1%}
   Segnali salvati : {self.log_path}
 """)
-        # IT: snapshot di sessione (metriche + capitale) per audit storico
-        # EN: session snapshot (metrics + capital) for historical audit
+        # session snapshot (metrics + capital) for historical audit
         summary_path = self.log_path.parent / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump({**m, "initial_capital": self.rm.icap,
@@ -1841,22 +1648,18 @@ class LiveEngine:
         log.info(f"Riepilogo → {summary_path}")
 
 
-# IT: entry point — config + SN policy + event loop dedicato
-# EN: entry point — config + SN policy + dedicated event loop
+# entry point — config + SN policy + dedicated event loop
 def main():
-    # IT: Forza UTF-8 su stdout/stderr — evita UnicodeEncodeError (cp1252 di Windows) sui banner
-    #     con box-drawing/emoji quando l'output è rediretto su file/pipe. Bug trovato dallo smoke
-    #     test 2026-06-05 (crash in run() riga ~1628). Stesso pattern di 99_replay_live_vs_training.
-    # EN: Force UTF-8 on stdout/stderr — avoids Windows cp1252 UnicodeEncodeError on Unicode
-    #     banners when output is redirected (found by the 2026-06-05 smoke test).
+    # Force UTF-8 on stdout/stderr — avoids Windows cp1252 UnicodeEncodeError on Unicode
+    # box-drawing/emoji banners when output is redirected to file/pipe (found by the
+    # 2026-06-05 smoke test: crash in run() line ~1628). Same pattern as 99_replay_live_vs_training.
     for _stream in (sys.stdout, sys.stderr):
         try:
             _stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
     cfg    = load_config("config/default.yaml")
-    # IT: SN-policy deve matchare quella di training (coerenza load_model)
-    # EN: SN policy must match the training one (load_model consistency)
+    # SN policy must match the training one (load_model consistency)
     from quantsys.model import set_sn_on_mu_only
     set_sn_on_mu_only(bool(cfg.get("training", {}).get("sn_on_mu_only", False)))
     device = setup_device(cfg)

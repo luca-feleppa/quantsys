@@ -1,26 +1,17 @@
 """
-QUANTSYS — Deribit BTC Options Risk Terminal (server HTTP single-file).
-Esegui / Run:  python scripts/06_dashboard.py
-Apri / Open:   http://localhost:8050
+QUANTSYS — Deribit BTC Options Risk Terminal (single-file HTTP server).
+Run:  python scripts/06_dashboard.py
+Open: http://localhost:8050
 
-IT: Terminale istituzionale per l'analisi delle opzioni crypto. Si connette ai
-    dati pubblici Deribit (REST, no-auth) per spot BTC + chain opzioni completa
-    (mark/bid/ask, mark_iv, open interest, volume, forward per-expiry), calcola
-    le Greche in tempo reale (Black-Scholes forward-measure) sull'intera option
-    chain e visualizza la Superficie di Volatilità (3D), gli smile per scadenza,
-    la term structure ATM e la distribuzione del rischio (OI/Greche aggregate).
-    La tab Trades mostra il forward test vol di 04b: storico settled da
-    results/vol_paper/trades.jsonl + posizione APERTA da position.json.
-    NON usa i modelli ML del progetto: è un risk terminal di mercato, GPU-free.
-EN: Institutional crypto-options analytics terminal. Connects to Deribit public
-    data (REST, no-auth) for BTC spot + full option chain (mark/bid/ask, mark_iv,
-    open interest, volume, per-expiry forward), computes Greeks in real time
-    (Black-Scholes forward-measure) over the whole chain, and renders the
-    Volatility Surface (3D), per-expiry smiles, the ATM term structure and the
-    risk distribution (OI / aggregate Greeks). The Trades tab shows 04b's vol
-    forward test: settled history from results/vol_paper/trades.jsonl + the OPEN
-    position from position.json. Does NOT touch the project's ML models: it is
-    a market risk terminal, GPU-free.
+Institutional crypto-options analytics terminal. Connects to Deribit public
+data (REST, no-auth) for BTC spot + full option chain (mark/bid/ask, mark_iv,
+open interest, volume, per-expiry forward), computes Greeks in real time
+(Black-Scholes forward-measure) over the whole chain, and renders the
+Volatility Surface (3D), per-expiry smiles, the ATM term structure and the
+risk distribution (OI / aggregate Greeks). The Trades tab shows 04b's vol
+forward test: settled history from results/vol_paper/trades.jsonl + the OPEN
+position from position.json. Does NOT touch the project's ML models: it is
+a market risk terminal, GPU-free.
 """
 import gzip as _gzip
 import hmac
@@ -40,15 +31,13 @@ from urllib.parse import urlparse, parse_qs
 import numpy as np
 import requests
 
-# IT: scipy è già dipendenza del progetto (statsmodels/Markov) → norm vettoriale.
-#     Fallback a math.erf se assente (greche comunque corrette, solo più lente).
-# EN: scipy is already a project dependency (statsmodels/Markov) → vectorized
-#     normal. Fallback to math.erf if missing (greeks still correct, just slower).
+# scipy is already a project dependency (statsmodels/Markov) → vectorized
+# normal. Fallback to math.erf if missing (greeks still correct, just slower).
 try:
     from scipy.stats import norm as _scipy_norm
     _ndtr = _scipy_norm.cdf
     _npdf = _scipy_norm.pdf
-except Exception:  # pragma: no cover - scipy quasi sempre presente / almost always present
+except Exception:  # pragma: no cover - scipy almost always present
     def _ndtr(x):
         x = np.asarray(x, dtype=float)
         return 0.5 * (1.0 + np.vectorize(math.erf)(x / math.sqrt(2.0)))
@@ -74,29 +63,23 @@ AUTH_TOKEN  = str(_DCFG.get("auth_token", "") or "")
 ENABLE_GZIP = bool(_DCFG.get("enable_gzip", True))
 CURRENCY    = str(_DCFG.get("options_currency", "BTC")).upper()
 
-# IT: anno solare (in secondi) per l'annualizzazione del time-to-expiry.
-# EN: calendar year (seconds) for time-to-expiry annualization.
+# calendar year (seconds) for time-to-expiry annualization.
 YEAR_SECONDS = 365.0 * 24.0 * 3600.0
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IT: 1) DATA LAYER DERIBIT — REST pubblico con cache TTL in-memory.
-# EN: 1) DERIBIT DATA LAYER — public REST with in-memory TTL cache.
+# 1) DERIBIT DATA LAYER — public REST with in-memory TTL cache.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# IT: mainnet pubblica (solo dati di mercato in lettura, nessuna auth).
-# EN: public mainnet (read-only market data, no auth).
+# public mainnet (read-only market data, no auth).
 DERIBIT_BASE = "https://www.deribit.com/api/v2"
 _HTTP = requests.Session()
 _HTTP.headers.update({"User-Agent": "quantsys-risk-terminal/1.0"})
 
 
 class _TTLCache:
-    # IT: cache thread-safe con scadenza: protegge i public endpoint Deribit dal
-    #     polling concorrente del browser (1 fetch reale ogni `ttl` secondi).
-    #     Un lock per-chiave serializza i fetch concorrenti (no thundering herd).
-    # EN: thread-safe expiring cache: shields Deribit public endpoints from the
-    #     browser's concurrent polling (1 real fetch every `ttl` seconds).
-    #     A per-key lock serializes concurrent fetches (no thundering herd).
+    # thread-safe expiring cache: shields Deribit public endpoints from the
+    # browser's concurrent polling (1 real fetch every `ttl` seconds).
+    # A per-key lock serializes concurrent fetches (no thundering herd).
     def __init__(self):
         self._lock = threading.Lock()
         self._store = {}        # key -> (expires_at, value)
@@ -115,10 +98,8 @@ class _TTLCache:
             hit = self._store.get(key)
             if hit and hit[0] > now:
                 return hit[1]
-        # IT: fetch sotto lock-per-chiave → un solo thread va in rete, gli altri
-        #     attendono e poi leggono la cache appena popolata.
-        # EN: fetch under a per-key lock → only one thread hits the network, the
-        #     others wait and then read the freshly populated cache.
+        # fetch under a per-key lock → only one thread hits the network, the
+        # others wait and then read the freshly populated cache.
         with self._keylock(key):
             now = time.time()
             with self._lock:
@@ -135,8 +116,7 @@ _CACHE = _TTLCache()
 
 
 def _deribit_get(path: str, params: dict, timeout: int = 12) -> dict:
-    # IT: GET pubblica con raise sugli errori; il chiamante decide il fallback.
-    # EN: public GET that raises on errors; the caller decides the fallback.
+    # public GET that raises on errors; the caller decides the fallback.
     r = _HTTP.get(f"{DERIBIT_BASE}/{path}", params=params, timeout=timeout)
     r.raise_for_status()
     payload = r.json()
@@ -146,8 +126,7 @@ def _deribit_get(path: str, params: dict, timeout: int = 12) -> dict:
 
 
 def fetch_index_price(currency: str = CURRENCY) -> float:
-    # IT: prezzo indice spot (media multi-exchange Deribit), tenor-0 del forward.
-    # EN: spot index price (Deribit multi-exchange average), tenor-0 of the forward.
+    # spot index price (Deribit multi-exchange average), tenor-0 of the forward.
     def _f():
         res = _deribit_get("public/get_index_price",
                            {"index_name": f"{currency.lower()}_usd"})
@@ -156,8 +135,7 @@ def fetch_index_price(currency: str = CURRENCY) -> float:
 
 
 def fetch_dvol(currency: str = CURRENCY) -> float:
-    # IT: ultimo punto dell'indice DVOL (vol implicita 30d annualizzata, %).
-    # EN: latest DVOL index point (30d annualized implied vol, %).
+    # latest DVOL index point (30d annualized implied vol, %).
     def _f():
         now_ms = int(time.time() * 1000)
         res = _deribit_get("public/get_volatility_index_data",
@@ -173,21 +151,14 @@ def fetch_dvol(currency: str = CURRENCY) -> float:
 
 
 def fetch_option_chain(currency: str = CURRENCY) -> list:
-    # IT: 1 chiamata → riepilogo book di TUTTA la chain opzioni (mark_iv, mark,
-    #     bid/ask, open_interest, volume, underlying_price per-strumento). È la
-    #     sorgente unica da cui si derivano greche, surface, smile e term struct.
-    # EN: 1 call → book summary of the WHOLE option chain (mark_iv, mark, bid/ask,
-    #     open_interest, volume, per-instrument underlying_price). Single source
-    #     from which greeks, surface, smile and term structure are derived.
+    # 1 call → book summary of the WHOLE option chain (mark_iv, mark, bid/ask,
+    # open_interest, volume, per-instrument underlying_price). Single source
+    # from which greeks, surface, smile and term structure are derived.
     def _f():
-        # IT: una chain valida ha centinaia di strumenti; un risultato vuoto/parziale
-        #     (hiccup Deribit) NON va in cache, altrimenti svuoterebbe i grafici (barre
-        #     OI che spariscono) per tutto il TTL. Retry singolo, poi si solleva →
-        #     get_or_fetch NON cacha e il frontend tiene l'ultimo buono.
-        # EN: a valid chain has hundreds of instruments; an empty/partial result
-        #     (Deribit hiccup) must NOT be cached, else it blanks the charts (OI bars
-        #     vanishing) for the whole TTL. Single retry, then raise → get_or_fetch
-        #     does NOT cache and the frontend keeps the last good one.
+        # a valid chain has hundreds of instruments; an empty/partial result
+        # (Deribit hiccup) must NOT be cached, else it blanks the charts (OI bars
+        # vanishing) for the whole TTL. Single retry, then raise → get_or_fetch
+        # does NOT cache and the frontend keeps the last good one.
         for _attempt in range(2):
             res = _deribit_get("public/get_book_summary_by_currency",
                                {"currency": currency, "kind": "option"})
@@ -199,8 +170,7 @@ def fetch_option_chain(currency: str = CURRENCY) -> list:
     return _CACHE.get_or_fetch(f"chain:{currency}", 8.0, _f)
 
 
-# IT: nome strumento Deribit: BTC-27JUN25-100000-C → (expiry 08:00 UTC, K, tipo).
-# EN: Deribit instrument name: BTC-27JUN25-100000-C → (expiry 08:00 UTC, K, type).
+# Deribit instrument name: BTC-27JUN25-100000-C → (expiry 08:00 UTC, K, type).
 _INSTR_RE = _re.compile(r"^[A-Z]+-(\d{1,2})([A-Z]{3})(\d{2})-(\d+)-([CP])$")
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
@@ -219,31 +189,23 @@ def _parse_instrument(name: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IT: 2) MOTORE GRECHE — Black-Scholes forward-measure (r=0, opzioni sul forward).
-#        Deribit quota le opzioni in BTC (inverse, europee, cash-settled): le
-#        Greche qui sono in convenzione "USD" (prezzo in USD, sottostante = forward
-#        per-expiry), lo standard di un risk terminal di mercato. Vettorializzate.
-# EN: 2) GREEKS ENGINE — Black-Scholes forward-measure (r=0, options on forward).
-#        Deribit quotes options in BTC (inverse, European, cash-settled): greeks
-#        here use the "USD" convention (USD price, underlying = per-expiry
-#        forward), the market risk-terminal standard. Vectorized.
+# 2) GREEKS ENGINE — Black-Scholes forward-measure (r=0, options on forward).
+#    Deribit quotes options in BTC (inverse, European, cash-settled): greeks
+#    here use the "USD" convention (USD price, underlying = per-expiry
+#    forward), the market risk-terminal standard. Vectorized.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def bs_greeks(F, K, T, sigma, opt_type):
-    # IT: F=forward, K=strike, T=anni a scadenza, sigma=vol (frazione, 0.55=55%),
-    #     opt_type 'C'/'P' (array o scalare). Ritorna dict di array float.
-    #     Convenzioni display: vega per +1 vol-point (1%), theta per giorno.
-    # EN: F=forward, K=strike, T=years to expiry, sigma=vol (fraction, 0.55=55%),
-    #     opt_type 'C'/'P' (array or scalar). Returns dict of float arrays.
-    #     Display conventions: vega per +1 vol-point (1%), theta per day.
+    # F=forward, K=strike, T=years to expiry, sigma=vol (fraction, 0.55=55%),
+    # opt_type 'C'/'P' (array or scalar). Returns dict of float arrays.
+    # Display conventions: vega per +1 vol-point (1%), theta per day.
     F = np.asarray(F, dtype=float)
     K = np.asarray(K, dtype=float)
     T = np.asarray(T, dtype=float)
     sigma = np.asarray(sigma, dtype=float)
     is_call = np.asarray(opt_type) == "C"
 
-    # IT: guardia numerica: T e sigma minimi per evitare /0 nelle scadenze brevi.
-    # EN: numeric guard: floor T and sigma to avoid /0 on very short expiries.
+    # numeric guard: floor T and sigma to avoid /0 on very short expiries.
     Tg = np.maximum(T, 1e-6)
     sg = np.maximum(sigma, 1e-6)
     sqrtT = np.sqrt(Tg)
@@ -256,22 +218,18 @@ def bs_greeks(F, K, T, sigma, opt_type):
     Nd1 = _ndtr(d1)
     Nd2 = _ndtr(d2)
 
-    # IT: prezzo teorico USD (r=0 → forward measure, niente sconto): riferimento
-    #     accanto al mark Deribit (quotato in BTC).
-    # EN: theoretical USD price (r=0 → forward measure, no discount): a reference
-    #     alongside Deribit's mark (quoted in BTC).
+    # theoretical USD price (r=0 → forward measure, no discount): a reference
+    # alongside Deribit's mark (quoted in BTC).
     price = np.where(is_call, F * Nd1 - K * Nd2, K * (1.0 - Nd2) - F * (1.0 - Nd1))
 
     delta = np.where(is_call, Nd1, Nd1 - 1.0)
     gamma = nd1 / (F * vol_sqrtT)
     vega = F * nd1 * sqrtT / 100.0                      # per +1% vol
-    theta = (-(F * nd1 * sg) / (2.0 * sqrtT)) / 365.0   # per giorno / per day
-    # IT: rho ≈ 0 con r=0; riportato come sensibilità di forma (call/put).
-    # EN: rho ≈ 0 with r=0; reported as a shape sensitivity (call/put).
+    theta = (-(F * nd1 * sg) / (2.0 * sqrtT)) / 365.0   # per day
+    # rho ≈ 0 with r=0; reported as a shape sensitivity (call/put).
     rho = np.where(is_call, K * Tg * Nd2, -K * Tg * (1.0 - Nd2)) / 100.0
 
-    # IT: scadenze spirate / d1 non finiti → greche azzerate (no inf nel JSON).
-    # EN: expired contracts / non-finite d1 → zeroed greeks (no inf in JSON).
+    # expired contracts / non-finite d1 → zeroed greeks (no inf in JSON).
     dead = (T <= 0) | ~np.isfinite(d1)
     for arr in (price, delta, gamma, vega, theta, rho):
         arr[dead] = 0.0
@@ -280,13 +238,11 @@ def bs_greeks(F, K, T, sigma, opt_type):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IT: 3) ASSEMBLAGGIO — chain normalizzata con greche, surface, smile, risk.
-# EN: 3) ASSEMBLY — normalized chain with greeks, surface, smile, risk.
+# 3) ASSEMBLY — normalized chain with greeks, surface, smile, risk.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _safe(v, default=0.0):
-    # IT: None/NaN/inf → default (il JSON non serializza NaN/inf in modo robusto).
-    # EN: None/NaN/inf → default (JSON does not robustly serialize NaN/inf).
+    # None/NaN/inf → default (JSON does not robustly serialize NaN/inf).
     try:
         f = float(v)
         return f if math.isfinite(f) else default
@@ -295,14 +251,10 @@ def _safe(v, default=0.0):
 
 
 def _optf(v):
-    # IT: come _safe ma PRESERVA l'assenza: None/NaN/inf → None (JSON null).
-    #     Per i campi opzionali (delivery_price, DVOL, …) dove 0.0 è un valore
-    #     FUORVIANTE: il frontend mostra '—' su null, e un delivery_price=0.0
-    #     fantasma manderebbe il profilo payoff in divisione-per-zero.
-    # EN: like _safe but PRESERVES absence: None/NaN/inf → None (JSON null).
-    #     For optional fields (delivery_price, DVOL, …) where 0.0 is a MISLEADING
-    #     value: the frontend renders '—' on null, and a phantom delivery_price=0.0
-    #     would drive the payoff profile into a division-by-zero.
+    # like _safe but PRESERVES absence: None/NaN/inf → None (JSON null).
+    # For optional fields (delivery_price, DVOL, …) where 0.0 is a MISLEADING
+    # value: the frontend renders '—' on null, and a phantom delivery_price=0.0
+    # would drive the payoff profile into a division-by-zero.
     try:
         f = float(v)
         return f if math.isfinite(f) else None
@@ -311,10 +263,8 @@ def _optf(v):
 
 
 def build_market(currency: str = CURRENCY) -> dict:
-    # IT: stato di mercato completo da 1 snapshot chain + index: righe
-    #     per-strumento con greche calcolate, più la lista delle expiry vive.
-    # EN: full market state from 1 chain snapshot + index: per-instrument rows
-    #     with computed greeks, plus the list of live expiries.
+    # full market state from 1 chain snapshot + index: per-instrument rows
+    # with computed greeks, plus the list of live expiries.
     raw = fetch_option_chain(currency)
     spot = fetch_index_price(currency)
     now = datetime.now(timezone.utc)
@@ -339,8 +289,8 @@ def build_market(currency: str = CURRENCY) -> dict:
             "days": T * 365.0,
             "strike": strike,
             "type": opt,
-            "iv": _safe(iv) / 100.0,          # frazione / fraction
-            "iv_pct": _safe(iv),              # percento / percent
+            "iv": _safe(iv) / 100.0,          # fraction
+            "iv_pct": _safe(iv),              # percent
             "forward": fwd,
             "moneyness": (strike / fwd) if fwd > 0 else float("nan"),
             "mark": _safe(it.get("mark_price")),
@@ -354,8 +304,7 @@ def build_market(currency: str = CURRENCY) -> dict:
         return {"spot": spot, "expiries": [], "rows": [],
                 "ts": now.isoformat(), "currency": currency}
 
-    # IT: greche vettoriali su tutta la chain in un colpo solo.
-    # EN: vectorized greeks over the whole chain in one shot.
+    # vectorized greeks over the whole chain in one shot.
     F = np.array([r["forward"] for r in rows])
     K = np.array([r["strike"] for r in rows])
     T = np.array([r["T"] for r in rows])
@@ -378,8 +327,7 @@ def build_market(currency: str = CURRENCY) -> dict:
 
 
 def _atm_iv_for_expiry(rows_e: list) -> float:
-    # IT: ATM IV = media mark_iv dei contratti con strike più vicino al forward.
-    # EN: ATM IV = mean mark_iv of the contracts with strike closest to forward.
+    # ATM IV = mean mark_iv of the contracts with strike closest to forward.
     if not rows_e:
         return float("nan")
     fwd = np.median([r["forward"] for r in rows_e])
@@ -390,10 +338,8 @@ def _atm_iv_for_expiry(rows_e: list) -> float:
 
 
 def build_summary(market: dict) -> dict:
-    # IT: metriche di testata del risk terminal: spot, DVOL, ATM IV ~30g,
-    #     OI/volume totali, put/call ratio, conteggi.
-    # EN: risk-terminal header metrics: spot, DVOL, ~30d ATM IV, total OI/volume,
-    #     put/call ratio, counts.
+    # risk-terminal header metrics: spot, DVOL, ~30d ATM IV, total OI/volume,
+    # put/call ratio, counts.
     rows = market["rows"]
     total_oi = sum(r["oi"] for r in rows)
     total_vol = sum(r["volume"] for r in rows)
@@ -401,18 +347,15 @@ def build_summary(market: dict) -> dict:
     put_oi = sum(r["oi"] for r in rows if r["type"] == "P")
     pcr = (put_oi / call_oi) if call_oi > 0 else float("nan")
 
-    # IT: ATM IV alla scadenza più vicina a 30 giorni (proxy IV "1m").
-    # EN: ATM IV at the expiry nearest to 30 days (proxy for "1m" IV).
+    # ATM IV at the expiry nearest to 30 days (proxy for "1m" IV).
     atm30 = float("nan")
     if market["expiries"]:
         target = min(market["expiries"], key=lambda e: abs(e["days"] - 30.0))
         rows_e = [r for r in rows if r["expiry_ts"] == target["ts"]]
         atm30 = _atm_iv_for_expiry(rows_e)
 
-    # IT: dvol/atm/pcr sono opzionali (fetch fallito / chain vuota): null → '—' nel
-    #     frontend, non un fuorviante 0.0%.
-    # EN: dvol/atm/pcr are optional (failed fetch / empty chain): null → '—' in the
-    #     frontend, not a misleading 0.0%.
+    # dvol/atm/pcr are optional (failed fetch / empty chain): null → '—' in the
+    # frontend, not a misleading 0.0%.
     return {
         "spot": _safe(market["spot"]),
         "dvol": _optf(fetch_dvol(market.get("currency", CURRENCY))),
@@ -429,14 +372,10 @@ def build_summary(market: dict) -> dict:
 
 
 def build_surface(market: dict) -> dict:
-    # IT: superficie IV interpolata su griglia comune di moneyness (K/F) per ogni
-    #     expiry. Per scadenza: mediana mark_iv per strike (C/P collassati via
-    #     parità in IV), poi np.interp sul grid; fuori dal range osservato → NaN
-    #     (niente extrapolazione → buchi puliti nel rendering Plotly).
-    # EN: IV surface interpolated onto a common moneyness (K/F) grid per expiry.
-    #     Per expiry: median mark_iv per strike (C/P collapsed via IV parity),
-    #     then np.interp onto the grid; outside the observed range → NaN (no
-    #     extrapolation → clean gaps in the Plotly render).
+    # IV surface interpolated onto a common moneyness (K/F) grid per expiry.
+    # Per expiry: median mark_iv per strike (C/P collapsed via IV parity),
+    # then np.interp onto the grid; outside the observed range → NaN (no
+    # extrapolation → clean gaps in the Plotly render).
     rows = market["rows"]
     grid = np.round(np.linspace(0.6, 1.6, 41), 4)   # K/F, ATM=1.0
     exps = sorted(market["expiries"], key=lambda e: e["days"])
@@ -455,8 +394,7 @@ def build_surface(market: dict) -> dict:
         z.append([None if not math.isfinite(v) else round(float(v), 3) for v in row])
         days.append(round(e["days"], 2))
         labels.append(e["label"])
-        # IT: smile raw (per il grafico 2D) in strike reali + moneyness.
-        # EN: raw smile (for the 2D chart) in real strikes + moneyness.
+        # raw smile (for the 2D chart) in real strikes + moneyness.
         smiles.append({
             "label": e["label"], "days": round(e["days"], 2), "forward": _safe(fwd_e),
             "strikes": [round(float(k * fwd_e), 0) for k in m],
@@ -469,8 +407,7 @@ def build_surface(market: dict) -> dict:
 
 
 def build_term_structure(market: dict) -> dict:
-    # IT: term structure ATM IV (IV vs giorni a scadenza) + forward/OI per expiry.
-    # EN: ATM IV term structure (IV vs days to expiry) + forward/OI per expiry.
+    # ATM IV term structure (IV vs days to expiry) + forward/OI per expiry.
     rows = market["rows"]
     out = []
     for e in sorted(market["expiries"], key=lambda x: x["days"]):
@@ -483,12 +420,9 @@ def build_term_structure(market: dict) -> dict:
 
 
 def build_chain_table(market: dict, expiry_ts) -> dict:
-    # IT: chain a doppio lato (call|put per strike) per UNA scadenza, con greche.
-    #     Selezione expiry più vicina al ts richiesto (robusto agli arrotondamenti);
-    #     default = scadenza più vicina a 30 giorni.
-    # EN: two-sided chain (call|put per strike) for ONE expiry, with greeks.
-    #     Picks the expiry nearest the requested ts (robust to rounding);
-    #     default = expiry nearest 30 days.
+    # two-sided chain (call|put per strike) for ONE expiry, with greeks.
+    # Picks the expiry nearest the requested ts (robust to rounding);
+    # default = expiry nearest 30 days.
     if not market["expiries"]:
         return {"expiry": None, "rows": [], "forward": None, "spot": _safe(market["spot"])}
     if expiry_ts is None:
@@ -510,10 +444,8 @@ def build_chain_table(market: dict, expiry_ts) -> dict:
 
 
 def build_risk(market: dict) -> dict:
-    # IT: vista rischio: OI per strike (call vs put), max-pain, greche aggregate
-    #     pesate per OI (esposizione dealer-implied del book), DVOL.
-    # EN: risk view: OI by strike (call vs put), max-pain, OI-weighted aggregate
-    #     greeks (dealer-implied book exposure), DVOL.
+    # risk view: OI by strike (call vs put), max-pain, OI-weighted aggregate
+    # greeks (dealer-implied book exposure), DVOL.
     rows = market["rows"]
     spot = market["spot"]
     strikes = sorted({r["strike"] for r in rows})
@@ -522,25 +454,18 @@ def build_risk(market: dict) -> dict:
     for r in rows:
         (call_oi if r["type"] == "C" else put_oi)[r["strike"]] += r["oi"]
 
-    # IT: max-pain = strike che minimizza il payoff totale ai detentori a scadenza
-    #     (somma sui contratti aperti). Vettoriale O(n_strikes²): ~poche centinaia.
-    # EN: max-pain = strike minimizing total holder payoff at expiry (sum over open
-    #     contracts). Vectorized O(n_strikes²): a few hundred at most.
+    # max-pain = strike minimizing total holder payoff at expiry (sum over open
+    # contracts). Vectorized O(n_strikes²): a few hundred at most.
     max_pain = float("nan")
     if strikes:
-        ks = np.array(strikes, dtype=float)              # IT/EN: strike ordinati crescenti
+        ks = np.array(strikes, dtype=float)              # strikes sorted ascending
         call_arr = np.array([call_oi[k] for k in strikes])
         put_arr = np.array([put_oi[k] for k in strikes])
-        # IT: pain(p) = Σ_K (p−K)⁺·OI_call + Σ_K (K−p)⁺·OI_put, valutata su ogni strike.
-        #     Forma chiusa O(n) via prefix/suffix sum (gli strike sono già ordinati):
-        #       call (K≤p): p·Σ_{K≤p}OI_c − Σ_{K≤p}K·OI_c   → cumsum
-        #       put  (K≥p): Σ_{K≥p}K·OI_p − p·Σ_{K≥p}OI_p   → suffix-sum
-        #     La diagonale K=p contribuisce 0 in entrambi (esatto vs la vecchia O(n²)).
-        # EN: pain(p) = Σ_K (p−K)⁺·OI_call + Σ_K (K−p)⁺·OI_put, evaluated at each strike.
-        #     Closed-form O(n) via prefix/suffix sums (strikes already sorted):
-        #       call (K≤p): p·Σ_{K≤p}OI_c − Σ_{K≤p}K·OI_c   → cumsum
-        #       put  (K≥p): Σ_{K≥p}K·OI_p − p·Σ_{K≥p}OI_p   → suffix-sum
-        #     The K=p diagonal contributes 0 in both (exact vs the old O(n²)).
+        # pain(p) = Σ_K (p−K)⁺·OI_call + Σ_K (K−p)⁺·OI_put, evaluated at each strike.
+        # Closed-form O(n) via prefix/suffix sums (strikes already sorted):
+        #   call (K≤p): p·Σ_{K≤p}OI_c − Σ_{K≤p}K·OI_c   → cumsum
+        #   put  (K≥p): Σ_{K≥p}K·OI_p − p·Σ_{K≥p}OI_p   → suffix-sum
+        # The K=p diagonal contributes 0 in both (exact vs the old O(n²)).
         call_cum = np.cumsum(call_arr)
         wcall_cum = np.cumsum(ks * call_arr)
         put_suf = np.cumsum(put_arr[::-1])[::-1]
@@ -565,32 +490,24 @@ def build_risk(market: dict) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IT: 3b) FORWARD TEST — trade dello straddle vol (04b_vol_paper.py): storico settled
-#     da trades.jsonl (append-only al settlement) + posizione APERTA da position.json
-#     (04b la scrive all'open e la azzera al settle). Per ogni trade: lato (LONG/SHORT
-#     straddle = long/short vol), strike, spot di ingresso, premio, prezzo di
-#     settlement, payoff e PnL (BTC) + sintesi aggregata. I campi di settlement sono
-#     null finché il trade è aperto (_optf, MAI 0.0 fantasma).
-# EN: 3b) FORWARD TEST — vol straddle trades (04b_vol_paper.py): settled history from
-#     trades.jsonl (append-only at settlement) + OPEN position from position.json
-#     (04b writes it on open, clears it on settle). Per trade: side (LONG/SHORT
-#     straddle = long/short vol), strike, entry spot, premium, settlement price,
-#     payoff and PnL (BTC) + aggregated summary. Settlement fields stay null while
-#     the trade is open (_optf, NEVER a phantom 0.0).
+# 3b) FORWARD TEST — vol straddle trades (04b_vol_paper.py): settled history from
+# trades.jsonl (append-only at settlement) + OPEN position from position.json
+# (04b writes it on open, clears it on settle). Per trade: side (LONG/SHORT
+# straddle = long/short vol), strike, entry spot, premium, settlement price,
+# payoff and PnL (BTC) + aggregated summary. Settlement fields stay null while
+# the trade is open (_optf, NEVER a phantom 0.0).
 # ═══════════════════════════════════════════════════════════════════════════════
 TRADES_PATH = Path("results/vol_paper/trades.jsonl")
 POSITION_PATH = Path("results/vol_paper/position.json")
 
 
 def _trade_row(t: dict) -> dict:
-    # IT: normalizza un record 04b (riga trades.jsonl O position.json — stesso schema,
-    #     la posizione aperta è semplicemente senza campi di settlement).
-    # EN: normalize a 04b record (trades.jsonl line OR position.json — same schema,
-    #     the open position simply lacks the settlement fields).
+    # normalize a 04b record (trades.jsonl line OR position.json — same schema,
+    # the open position simply lacks the settlement fields).
     prem = float(t.get("prem_call", 0) or 0) + float(t.get("prem_put", 0) or 0)
     return {
         "entry_ts": t.get("entry_ts"), "settled_ts": t.get("settled_ts"),
-        "side": int(t.get("side", 1)),                 # IT/EN: 1 LONG straddle, -1 SHORT
+        "side": int(t.get("side", 1)),                 # 1 LONG straddle, -1 SHORT
         "executed": bool(t.get("executed", False)),
         "settled": t.get("settled_ts") is not None,
         "strike": _safe(t.get("strike")),
@@ -617,10 +534,8 @@ def build_trades() -> dict:
                 rows.append(_trade_row(json.loads(line)))
             except Exception:
                 continue
-    # IT: posizione aperta in coda (è sempre la più recente): status 'open' nel
-    #     frontend, profilo di rischio dal premio (nessun settlement da calibrare).
-    # EN: open position appended last (always the most recent): 'open' status in the
-    #     frontend, risk profile from the premium (no settlement to calibrate).
+    # open position appended last (always the most recent): 'open' status in the
+    # frontend, risk profile from the premium (no settlement to calibrate).
     n_open = 0
     if POSITION_PATH.exists():
         try:
@@ -651,8 +566,7 @@ def build_trades() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IT: 4) FRONTEND — SPA istituzionale (Plotly.js CDN per la superficie 3D).
-# EN: 4) FRONTEND — institutional SPA (Plotly.js CDN for the 3D surface).
+# 4) FRONTEND — institutional SPA (Plotly.js CDN for the 3D surface).
 # ═══════════════════════════════════════════════════════════════════════════════
 HTML = r"""<!DOCTYPE html>
 <html lang="en">
@@ -1377,17 +1291,15 @@ setInterval(refresh, 12000);
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IT: 5) SERVER HTTP — routing JSON, gzip, auth opzionale (pattern dashboard repo).
-# EN: 5) HTTP SERVER — JSON routing, gzip, optional auth (repo dashboard pattern).
+# 5) HTTP SERVER — JSON routing, gzip, optional auth (repo dashboard pattern).
 # ═══════════════════════════════════════════════════════════════════════════════
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, *args):  # IT: silenzia il logging per-request | EN: silence per-request logging
+    def log_message(self, *args):  # silence per-request logging
         pass
 
-    # IT: auth a token constant-time (se configurato in config.dashboard.auth_token).
-    # EN: constant-time token auth (if set in config.dashboard.auth_token).
+    # constant-time token auth (if set in config.dashboard.auth_token).
     def _authorized(self) -> bool:
         if not AUTH_TOKEN:
             return True
@@ -1403,14 +1315,10 @@ class Handler(BaseHTTPRequestHandler):
             enc = True
         else:
             enc = False
-        # IT: il client (browser) può chiudere la connessione a metà risposta quando
-        #     il refresh ~12s annulla i fetch ancora in volo → ConnectionAborted/Reset/
-        #     BrokenPipe. NON è un errore del server: ignora silenziosamente (prima
-        #     crashava e ri-crashava provando a scrivere il 500).
-        # EN: the client (browser) may drop the connection mid-response when the ~12s
-        #     refresh cancels in-flight fetches → ConnectionAborted/Reset/BrokenPipe.
-        #     NOT a server error: swallow it silently (it used to crash, then crash
-        #     again trying to write the 500).
+        # the client (browser) may drop the connection mid-response when the ~12s
+        # refresh cancels in-flight fetches → ConnectionAborted/Reset/BrokenPipe.
+        # NOT a server error: swallow it silently (it used to crash, then crash
+        # again trying to write the 500).
         try:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
@@ -1478,8 +1386,7 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script — bug cp1252 ricorrente).
-    # EN: UTF-8 boilerplate (new-script checklist — recurring cp1252 bug).
+    # UTF-8 boilerplate (new-script checklist — recurring cp1252 bug).
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")

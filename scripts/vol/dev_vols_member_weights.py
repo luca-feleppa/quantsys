@@ -1,22 +1,12 @@
-# IT: A5 — PESI MEMBRO PER-QLIKE (pre-registrato in STATUS.md 2026-07-08).
-#     I 5 seed dell'ensemble vol di produzione hanno pesi uniformi (0.2); per la
-#     linea vol il giudice canonico è QLIKE (robusto alla proxy RV, penalizza
-#     asimmetricamente l'under-prediction = l'errore costoso per lo short-vol).
-#     Protocollo anti val-selection: pesi FITTATI sulla PRIMA metà temporale
-#     dello split (w_i ∝ 1/QLIKE_i, UNICA formula primaria), VALUTATI sulla
-#     seconda metà. Diagnostiche loggate ma NON decisionali: softmax(−QLIKE/2),
-#     inverse-QLIKE².
-#     GATE A5 (2ª metà): QLIKE(pesato) ≤ 0.97·QLIKE(uniforme), n_eval ≥ 3000.
-#     Read-only sui checkpoint: NESSUNA promozione prima del gate live n≥20.
-# EN: A5 — QLIKE-BASED MEMBER WEIGHTS (pre-registered in STATUS.md 2026-07-08).
-#     The production vol ensemble's 5 seeds use uniform weights (0.2); for the
-#     vol line the canonical judge is QLIKE (RV-proxy-robust, asymmetric penalty
-#     on under-prediction = the costly error for short-vol).
-#     Anti val-selection protocol: weights FITTED on the FIRST temporal half of
-#     the split (w_i ∝ 1/QLIKE_i, the ONLY primary formula), EVALUATED on the
-#     second half. Logged-only diagnostics: softmax(−QLIKE/2), inverse-QLIKE².
-#     A5 GATE (2nd half): weighted QLIKE ≤ 0.97·uniform QLIKE, n_eval ≥ 3000.
-#     Checkpoint read-only: NO promotion before the live n≥20 gate closes.
+# A5 — QLIKE-BASED MEMBER WEIGHTS (pre-registered in STATUS.md 2026-07-08).
+# The production vol ensemble's 5 seeds use uniform weights (0.2); for the
+# vol line the canonical judge is QLIKE (RV-proxy-robust, asymmetric penalty
+# on under-prediction = the costly error for short-vol).
+# Anti val-selection protocol: weights FITTED on the FIRST temporal half of
+# the split (w_i ∝ 1/QLIKE_i, the ONLY primary formula), EVALUATED on the
+# second half. Logged-only diagnostics: softmax(−QLIKE/2), inverse-QLIKE².
+# A5 GATE (2nd half): weighted QLIKE ≤ 0.97·uniform QLIKE, n_eval ≥ 3000.
+# Checkpoint read-only: NO promotion before the live n≥20 gate closes.
 import argparse
 import json
 import logging
@@ -37,7 +27,7 @@ log = logging.getLogger("quantsys.script.vols_member_weights")
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
+    # UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -49,15 +39,13 @@ def main():
     ap.add_argument("--arch", default="itransformer",
                     choices=["itransformer", "nhits", "tcnmamba", "lstm"],
                     help="architettura del modello vol (models/{arch}) / vol model arch")
-    # IT: guard scaler modello<->dataset (2026-08-01) — via di fuga ESPLICITA,
-    #     flag e mai env: un run cross-vintage produce un numero non confrontabile.
-    # EN: model<->dataset scaler guard (2026-08-01) — EXPLICIT escape, flag never
-    #     env: a cross-vintage run produces a non-comparable number.
+    # model<->dataset scaler guard (2026-08-01) — EXPLICIT escape, flag never
+    # env: a cross-vintage run produces a non-comparable number.
     ap.add_argument("--allow-scaler-mismatch", action="store_true",
                     help="procedi anche se lo scaler del modello != scaler del dataset: "
                          "il numero NON e' confrontabile / proceed even if the model "
                          "scaler != dataset scaler: the number is NOT comparable")
-    # IT/EN: M1 — secondo asse di vintage (macro), via di fuga separata.
+    # M1 — second vintage axis (macro), separate escape hatch.
     ap.add_argument("--allow-macro-mismatch", action="store_true",
                     help="procedi anche se il vintage macro del modello != quello dell'npz "
                          "/ proceed even if the model macro vintage != the npz's")
@@ -73,10 +61,10 @@ def main():
     interval = cfg["data"]["interval"]
     split = os.environ.get("QUANTSYS_VOLS_SPLIT", "val")
     assert split in ("val", "test")
-    _ = interval_minutes_from_cfg(cfg)  # IT: fail-fast su interval ignoto | EN: fail-fast on unknown interval
+    _ = interval_minutes_from_cfg(cfg)  # fail-fast on unknown interval
     log.info(f"h={h} barre · interval={interval} · split={split}")
 
-    # ── Ground truth (STESSO data-path del giudice QLIKE) ───────────────────────
+    # ── Ground truth (SAME data path as the QLIKE judge) ────────────────────────
     raw = pd.read_parquet("data/raw_candles.parquet").sort_values("open_time").reset_index(drop=True)
     lr2 = np.log(raw["close"] / raw["close"].shift(1)) ** 2
     rv_fwd = lr2.rolling(h).sum().shift(-h)
@@ -89,7 +77,7 @@ def main():
     ev = gt.loc[gt.index.intersection(t_eval)]
     log.info(f"righe {split}: {len(ev)}/{len(t_eval)}")
 
-    # ── Forward per-membro: μ = q50 (o mu diretto per membri t-Student) ─────────
+    # ── Per-member forward: μ = q50 (or direct mu for t-Student members) ───────
     from quantsys.model.ensemble import EnsembleModel
     from quantsys.utils import PipelineState
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -99,13 +87,10 @@ def main():
     c, s = float(ps.scaler.center_[idx]), float(ps.scaler.scale_[idx])
     assert c < -3, "center ≈ 0 → PipelineState non log-RV (stale?)"
 
-    # IT: GUARD SCALER MODELLO<->DATASET — l'assert sopra cattura solo uno stato
-    #     grossolanamente sbagliato (center ~ 0), NON uno plausibile ma di un altro
-    #     vintage del dataset. Quel caso e' gia' successo e ha prodotto un numero
-    #     credibile e sbagliato: vedi TEORIA.md 12.2, provenienza del numeratore.
-    # EN: MODEL<->DATASET SCALER GUARD — the assert above only catches a grossly
-    #     wrong state (center ~ 0), NOT a plausible one from another dataset
-    #     vintage. That case already happened and produced a credible wrong number.
+    # MODEL<->DATASET SCALER GUARD — the assert above only catches a grossly
+    # wrong state (center ~ 0), NOT a plausible one from another dataset
+    # vintage. That case already happened and produced a credible wrong number:
+    # see THEORY.md 12.2, provenance of the numerator.
     from quantsys.utils import assert_model_dataset_scaler, dataset_npz_path
     assert_model_dataset_scaler(ps, model_dir=model_dir, arch=args.arch,
                                 npz=dataset_npz_path(),
@@ -127,7 +112,7 @@ def main():
                 out = m(xb, xmb) if xmb is not None else m(xb)
                 if lt == "quantile":
                     qp, _ = out[0].sort(dim=-1)
-                    mu = qp[:, 2]                 # IT: mediana q50 (pattern ensemble) | EN: q50 median
+                    mu = qp[:, 2]                 # q50 median
                 else:
                     mu = out[0]
                 outs.append(mu.detach().cpu().numpy().ravel())
@@ -141,7 +126,7 @@ def main():
     y = ev["y"].values
     rv_true = np.exp(y)
 
-    # ── Split temporale: fit pesi su 1ª metà, giudizio su 2ª metà ───────────────
+    # ── Temporal split: fit weights on the 1st half, judge on the 2nd half ─────
     n = len(y)
     mid = n // 2
     fit_sl, eval_sl = slice(0, mid), slice(mid, n)
@@ -149,18 +134,16 @@ def main():
 
     ql_fit = np.array([qlike(rv_true[fit_sl], np.exp(mu_all[i, fit_sl]))
                        for i in range(mu_all.shape[0])])
-    # IT: formula primaria PRE-REGISTRATA: w ∝ 1/QLIKE (normalizzati).
-    # EN: PRE-REGISTERED primary formula: w ∝ 1/QLIKE (normalized).
+    # PRE-REGISTERED primary formula: w ∝ 1/QLIKE (normalized).
     w_inv = (1.0 / ql_fit); w_inv /= w_inv.sum()
-    # IT: diagnostiche NON decisionali | EN: non-decisional diagnostics
+    # non-decisional diagnostics
     w_sm = np.exp(-ql_fit / 2.0); w_sm /= w_sm.sum()
     w_inv2 = (1.0 / ql_fit ** 2); w_inv2 /= w_inv2.sum()
     n_mem = len(ql_fit)
     w_unif = np.full(n_mem, 1.0 / n_mem)
 
     def ens_qlike(w: np.ndarray, sl: slice) -> float:
-        # IT: μ_ens = media pesata dei μ per-membro (come il blend production), poi exp.
-        # EN: ens μ = weighted per-member μ mean (as the production blend), then exp.
+        # ens μ = weighted per-member μ mean (as the production blend), then exp.
         mu_e = np.tensordot(w, mu_all[:, sl], axes=(0, 0))
         return qlike(rv_true[sl], np.exp(mu_e))
 

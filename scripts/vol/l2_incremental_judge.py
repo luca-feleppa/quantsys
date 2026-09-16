@@ -1,27 +1,15 @@
-# IT: B1 STADIO 1 — giudice pre-registrato (STATUS 2026-07-31): l'order-book L2 porta
-#     informazione incrementale sulla RV a 3 ore, oltre a quella gia' nei lag di RV?
-#     Due OLS ANNIDATE sugli stessi punti: baseline = HAR-C (la baseline di riferimento
-#     adottata da C3), candidato = HAR-C + tre feature L2 all'ora t. Il confronto e'
-#     appaiato in senso stretto: cambia solo il set di regressori.
-#     ⚠ COSTANTI HARDCODED DI PROPOSITO (stesso pattern di hedged_vs_unhedged_judge):
-#     sono pre-registrate, e leggerle da config le renderebbe modificabili a risultati
-#     visti. Qualunque variante = NUOVA pre-registrazione.
-#     ⚠ Perche' h=3 e non l'orizzonte di produzione (30): con un solo run L2 contiguo
-#     di 410 ore, a h=30 restano n_eff=12.7 osservazioni effettive. A h=3 sono 96.3.
-#     Questo stadio risponde a "L2 predice la RV a breve", NON a "L2 migliora la linea
-#     vol" — quella e' lo stadio 2 e richiede anni di raccolta.
-# EN: B1 STAGE 1 — pre-registered judge (STATUS 2026-07-31): does the L2 order book
-#     carry incremental information about 3-hour RV, beyond what RV's own lags hold?
-#     Two NESTED OLS on identical points: baseline = HAR-C (the reference baseline
-#     adopted by C3), candidate = HAR-C + three L2 features at hour t. The comparison
-#     is paired in the strict sense: only the regressor set changes.
-#     ⚠ CONSTANTS HARDCODED ON PURPOSE (same pattern as hedged_vs_unhedged_judge):
-#     they are pre-registered, and reading them from config would make them editable
-#     once results are seen. Any variant = NEW pre-registration.
-#     ⚠ Why h=3 and not the production horizon (30): with a single contiguous 410-hour
-#     L2 run, h=30 leaves n_eff=12.7 effective observations. h=3 gives 96.3. This stage
-#     answers "does L2 predict short-horizon RV", NOT "does L2 improve the vol line" —
-#     that is stage 2 and needs years of collection.
+# B1 STAGE 1 — pre-registered judge (STATUS 2026-07-31): does the L2 order book
+# carry incremental information about 3-hour RV, beyond what RV's own lags hold?
+# Two NESTED OLS on identical points: baseline = HAR-C (the reference baseline
+# adopted by C3), candidate = HAR-C + three L2 features at hour t. The comparison
+# is paired in the strict sense: only the regressor set changes.
+# ⚠ CONSTANTS HARDCODED ON PURPOSE (same pattern as hedged_vs_unhedged_judge):
+# they are pre-registered, and reading them from config would make them editable
+# once results are seen. Any variant = NEW pre-registration.
+# ⚠ Why h=3 and not the production horizon (30): with a single contiguous 410-hour
+# L2 run, h=30 leaves n_eff=12.7 effective observations. h=3 gives 96.3. This stage
+# answers "does L2 predict short-horizon RV", NOT "does L2 improve the vol line" —
+# that is stage 2 and needs years of collection.
 import argparse
 import glob
 import json
@@ -39,31 +27,26 @@ from quantsys.model.vol_metrics import qlike, qlike_series, diebold_mariano, EPS
 setup_logging()
 log = logging.getLogger("quantsys.script.l2_judge")
 
-# ── costanti PRE-REGISTRATE · PRE-REGISTERED constants ──────────────────────
-H = 3                      # IT/EN: orizzonte in ore / horizon in hours
-BURN = 120                 # IT/EN: burn-in della finestra espansiva / expanding-window burn-in
-ALPHA = 0.01               # IT/EN: soglia dei DM / DM threshold
-RATIO_MAX = 0.97           # IT/EN: materialita' (-3%) / materiality
-N_MIN = 240                # IT/EN: previsioni OOS minime / minimum OOS forecasts
+# ── PRE-REGISTERED constants ─────────────────────────────────────────────────
+H = 3                      # horizon in hours
+BURN = 120                 # expanding-window burn-in
+ALPHA = 0.01               # DM threshold
+RATIO_MAX = 0.97           # materiality (-3%)
+N_MIN = 240                # minimum OOS forecasts
 L2_COLS = ["ofi_abs", "log_depth", "dimb25_abs"]
 HAR_C_COLS = ["xc_h", "xc_w", "xc_m"]
-MIN_SNAP_PER_HOUR = 360    # IT/EN: soglia di copertura oraria L2 / L2 hourly coverage threshold
+MIN_SNAP_PER_HOUR = 360    # L2 hourly coverage threshold
 
 PX_PATH = "data/raw_candles_1m_l2.parquet"
 L2_GLOB = "data/orderbook/l2_features_*.parquet"
 OUT = Path("results/vols/l2_incremental_stage1.json")
 
 
-# IT: RV e componenti HAR-C da barre a 1 MINUTO. Il target somma H ore SUCCESSIVE:
-#     a 1m sono ~180 quadrati per osservazione contro i 3 che darebbero le barre
-#     orarie — e' la ragione per cui il target e' costruito qui e non riusato dal
-#     dataset di produzione. C = min(RV, BV) con BV = (pi/2)*sum|r_i||r_{i-1}|,
-#     stessa definizione di `build_har_cj_frame` (single source concettuale).
-# EN: RV and HAR-C components from 1-MINUTE bars. The target sums the NEXT H hours:
-#     at 1m that is ~180 squares per observation against the 3 hourly bars would give
-#     — the reason the target is built here rather than reused from the production
-#     dataset. C = min(RV, BV) with BV = (pi/2)*sum|r_i||r_{i-1}|, the same definition
-#     as `build_har_cj_frame` (conceptual single source).
+# RV and HAR-C components from 1-MINUTE bars. The target sums the NEXT H hours:
+# at 1m that is ~180 squares per observation against the 3 hourly bars would give
+# — the reason the target is built here rather than reused from the production
+# dataset. C = min(RV, BV) with BV = (pi/2)*sum|r_i||r_{i-1}|, the same definition
+# as `build_har_cj_frame` (conceptual single source).
 def build_price_frame(px_path: str = PX_PATH) -> pd.DataFrame:
     px = pd.read_parquet(px_path, columns=["open_time", "close"])
     px["open_time"] = pd.to_datetime(px["open_time"], utc=True)
@@ -72,32 +55,26 @@ def build_price_frame(px_path: str = PX_PATH) -> pd.DataFrame:
 
     rv = (lr ** 2).resample("1h").sum()
     bv = (lr.abs() * lr.abs().shift(1)).resample("1h").sum() * (np.pi / 2)
-    c = np.minimum(rv, bv)                       # IT/EN: componente continua jump-robust
+    c = np.minimum(rv, bv)                       # jump-robust continuous component
 
-    # IT: target = RV sulle H ore SUCCESSIVE all'ora t (nessuna sovrapposizione con t).
-    # EN: target = RV over the H hours AFTER hour t (no overlap with t itself).
+    # target = RV over the H hours AFTER hour t (no overlap with t itself).
     y = np.log(rv.shift(-1).rolling(H).sum().shift(-(H - 1)) + EPS)
-    k = H / 24.0                                  # IT/EN: riscalamento all'orizzonte h
+    k = H / 24.0                                  # rescaling to horizon h
     return pd.DataFrame({
         "y":     y,
         "xc_h":  np.log(c.rolling(H).sum() + EPS),
         "xc_w":  np.log(c.rolling(7 * 24).sum() / 7 * k + EPS),
         "xc_m":  np.log(c.rolling(30 * 24).sum() / 30 * k + EPS),
-        # IT/EN: naive persistence — RV trailing H ore, nota a fine ora t / trailing H-hour RV
+        # naive persistence — trailing H-hour RV, known at the end of hour t
         "naive": np.log(rv.rolling(H).sum() + EPS),
     })
 
 
-# IT: feature L2 orarie — MEDIA degli snapshot a 5s dentro l'ora, versioni NON FIRMATE
-#     (la varianza e' un momento pari). Le tre colonne sono pre-registrate e scelte da
-#     diagnostiche target-free: `spread_bps` fu scartato per SNR 0.0, `imbalance_L*` per
-#     collinearita' (rho 0.974). Si usa SOLO il run contiguo piu' lungo: le finestre a
-#     cavallo di un buco accoppierebbero un book vecchio con un target nuovo.
-# EN: hourly L2 features — MEAN of the 5s snapshots within the hour, UNSIGNED versions
-#     (variance is an even moment). The three columns are pre-registered and were chosen
-#     by target-free diagnostics: `spread_bps` was dropped for SNR 0.0, `imbalance_L*`
-#     for collinearity (rho 0.974). ONLY the longest contiguous run is used: windows
-#     straddling a gap would pair a stale book with a fresh target.
+# hourly L2 features — MEAN of the 5s snapshots within the hour, UNSIGNED versions
+# (variance is an even moment). The three columns are pre-registered and were chosen
+# by target-free diagnostics: `spread_bps` was dropped for SNR 0.0, `imbalance_L*`
+# for collinearity (rho 0.974). ONLY the longest contiguous run is used: windows
+# straddling a gap would pair a stale book with a fresh target.
 def build_l2_frame(pattern: str = L2_GLOB) -> tuple[pd.DataFrame, pd.DatetimeIndex]:
     cols = ["timestamp", "depth_imb_25bps", "ofi_best", "total_bid_qty", "total_ask_qty"]
     df = pd.concat([pd.read_parquet(f, columns=cols) for f in sorted(glob.glob(pattern))])
@@ -124,29 +101,21 @@ def build_l2_frame(pattern: str = L2_GLOB) -> tuple[pd.DataFrame, pd.DatetimeInd
     return out.loc[out.index.isin(run)], run
 
 
-# IT: PREVISIONI OOS A FINESTRA ESPANSIVA con EMBARGO — il punto delicato del giudice.
-#     Per prevedere l'osservazione i (fine dell'ora t_i) si puo' usare solo cio' che a
-#     quel momento e' NOTO. Il target dell'osservazione j copre le ore j+1..j+H, quindi
-#     e' osservabile solo a fine ora j+H: la condizione e' j + H <= i, cioe' il train
-#     arriva a i-H e le ultime H-1 osservazioni sono in EMBARGO. Senza questo taglio il
-#     modello verrebbe addestrato su target che al momento della previsione non sono
-#     ancora accaduti — leakage puro, e con finestre sovrapposte e' l'errore facile da
-#     commettere e difficile da vedere (il numero resta plausibile).
-# EN: EXPANDING-WINDOW OOS FORECASTS with EMBARGO — the judge's delicate point.
-#     To forecast observation i (end of hour t_i) only what is KNOWN by then may be
-#     used. Observation j's target covers hours j+1..j+H, so it is observable only at
-#     the end of hour j+H: the condition is j + H <= i, i.e. training stops at i-H and
-#     the last H-1 observations are EMBARGOED. Without this cut the model would be
-#     trained on targets that have not happened yet at forecast time — pure leakage,
-#     and with overlapping windows it is the easy mistake to make and the hard one to
-#     see (the number stays plausible).
+# EXPANDING-WINDOW OOS FORECASTS with EMBARGO — the judge's delicate point.
+# To forecast observation i (end of hour t_i) only what is KNOWN by then may be
+# used. Observation j's target covers hours j+1..j+H, so it is observable only at
+# the end of hour j+H: the condition is j + H <= i, i.e. training stops at i-H and
+# the last H-1 observations are EMBARGOED. Without this cut the model would be
+# trained on targets that have not happened yet at forecast time — pure leakage,
+# and with overlapping windows it is the easy mistake to make and the hard one to
+# see (the number stays plausible).
 def expanding_oos(frame: pd.DataFrame, cols: list[str],
                   burn: int = BURN, h: int = H) -> np.ndarray:
     y = frame["y"].values
     X = np.column_stack([np.ones(len(frame)), frame[cols].values])
     pred = np.full(len(frame), np.nan)
     for i in range(burn, len(frame)):
-        stop = i - h + 1                      # IT/EN: train = [0, stop) -> j <= i-h
+        stop = i - h + 1                      # train = [0, stop) -> j <= i-h
         Xtr, ytr = X[:stop], y[:stop]
         beta, *_ = np.linalg.lstsq(Xtr, ytr, rcond=None)
         pred[i] = X[i] @ beta
@@ -154,7 +123,7 @@ def expanding_oos(frame: pd.DataFrame, cols: list[str],
 
 
 def main() -> int:
-    # IT/EN: boilerplate UTF-8 (checklist nuovo script) / UTF-8 boilerplate
+    # UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -173,10 +142,8 @@ def main() -> int:
              f"{run[0]:%Y-%m-%d %H:%M} -> {run[-1]:%Y-%m-%d %H:%M} UTC")
 
     df = price.join(l2, how="inner").dropna()
-    # IT: guard sull'identita' del campione: i due modelli DEVONO vedere le stesse righe
-    #     nello stesso ordine, altrimenti il confronto appaiato non e' appaiato.
-    # EN: sample-identity guard: both models MUST see the same rows in the same order,
-    #     otherwise the paired comparison is not paired.
+    # sample-identity guard: both models MUST see the same rows in the same order,
+    # otherwise the paired comparison is not paired.
     if not (df.index.is_monotonic_increasing and df.index.is_unique):
         raise RuntimeError("indice non monotono o con duplicati / non-monotonic or duplicated index")
     if not np.isfinite(df.values).all():
@@ -210,19 +177,17 @@ def main() -> int:
     d1 = dm.get("cand_vs_base", {})
     d4 = dm.get("base_vs_naive", {})
     cond = {
-        # IT/EN: ① significativita' a favore del candidato / significance favouring the candidate
+        # ① significance favouring the candidate
         "cond1_significant": bool(d1.get("p_value", 1.0) < ALPHA and d1.get("better") == "a"),
-        # IT/EN: ② materialita' -3% / materiality
+        # ② materiality -3%
         "cond2_material": bool(ratio <= RATIO_MAX),
-        # IT/EN: ③ validita' campione / sample validity
+        # ③ sample validity
         "cond3_n_obs": bool(n_eval >= N_MIN),
-        # IT/EN: ④ CONTROLLO POSITIVO — la baseline batte la naive / POSITIVE CONTROL
+        # ④ POSITIVE CONTROL — the baseline beats the naive
         "cond4_positive_control": bool(d4.get("p_value", 1.0) < ALPHA and d4.get("better") == "a"),
     }
-    # IT: se ④ cade l'esito NON e' FAIL ma "nessuna conclusione": una baseline che non
-    #     batte la persistenza non e' un metro con cui misurare alcunche'.
-    # EN: if ④ fails the outcome is NOT a FAIL but "no conclusion": a baseline that does
-    #     not beat persistence is not a yardstick for anything.
+    # if ④ fails the outcome is NOT a FAIL but "no conclusion": a baseline that does
+    # not beat persistence is not a yardstick for anything.
     verdict = ("NESSUNA_CONCLUSIONE" if not cond["cond4_positive_control"]
                else "PASS" if all(cond.values()) else "FAIL")
 

@@ -1,13 +1,10 @@
 """
-Probe temporanea (PERF AUDIT) — cronometra FeatureBuilder.build() step per step.
 Temporary probe (PERF AUDIT) — times FeatureBuilder.build() step by step.
 
-Nessuna modifica al codice di produzione: gli step vengono avvolti a runtime
-sull'ISTANZA (monkeypatch locale), non sulla classe.
 No production code is modified: steps are wrapped at runtime on the INSTANCE
 (local monkeypatch), not on the class.
 
-Uso / Usage:  python scripts/archive/perf_probe/bench_featurebuilder.py
+Usage:  python scripts/archive/perf_probe/bench_featurebuilder.py
 """
 import sys
 import time
@@ -53,8 +50,7 @@ def main():
         use_har_cj=bool(fcfg.get("har_cj", False)),
     )
 
-    # IT: wrappa i metodi-step sull'istanza per misurare il wall-clock di ciascuno.
-    # EN: wrap step methods on the instance to measure each one's wall-clock.
+    # wrap step methods on the instance to measure each one's wall-clock.
     timings = {}
     step_names = [
         "_returns", "_vwap", "_technicals", "_volume_features", "_cvd_features",

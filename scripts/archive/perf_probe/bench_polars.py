@@ -1,22 +1,17 @@
 """
-Probe temporanea (PERF AUDIT) — lever (d): Polars vs pandas nel FeatureBuilder.
 Temporary probe (PERF AUDIT) — lever (d): Polars vs pandas in the FeatureBuilder.
 
-Porta 3 gruppi di feature RAPPRESENTATIVI dei pattern realmente usati e misura
-(1) lo speedup e (2) lo SCARTO NUMERICO rispetto a pandas sulle stesse colonne.
 Ports 3 feature groups REPRESENTATIVE of the patterns actually used and measures
 (1) speedup and (2) the NUMERIC DELTA vs pandas on the same columns.
 
-  A) rolling std/mean/var su log_ret        (riduzioni rolling)
+  A) rolling std/mean/var on log_ret        (rolling reductions)
   B) VWAP: groupby(day).cumsum + rolling sum (groupby + cumulative)
-  C) rolling skew/kurt su log_ret            (momenti superiori)
+  C) rolling skew/kurt on log_ret            (higher moments)
 
-NB: NON importa torch — su questa macchina torch+sklearn prima di pyarrow
-manda in access violation il caricamento parquet (vedi docs/PERF_AUDIT.md).
 NB: does NOT import torch — on this box torch+sklearn before pyarrow crashes
 the parquet load with an access violation (see docs/PERF_AUDIT.md).
 
-Uso / Usage: python scripts/archive/perf_probe/bench_polars.py
+Usage: python scripts/archive/perf_probe/bench_polars.py
 """
 import sys
 import time
@@ -37,7 +32,7 @@ def timeit(fn, n=7):
 
 
 def delta(a: np.ndarray, b: np.ndarray, name: str):
-    """Scarto numerico pandas vs polars, ignorando i NaN comuni."""
+    """Numeric delta pandas vs polars, ignoring shared NaNs."""
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
     m = ~(np.isnan(a) | np.isnan(b))
@@ -48,8 +43,7 @@ def delta(a: np.ndarray, b: np.ndarray, name: str):
     scale = np.maximum(np.abs(a[m]), 1e-300)
     rel = d / scale
     n_exact = int((d == 0).sum())
-    # IT: ULP = distanza in rappresentazioni float64 consecutive.
-    # EN: ULP = distance in consecutive float64 representations.
+    # ULP = distance in consecutive float64 representations.
     ulp = d / np.spacing(np.abs(a[m]))
     nan_mismatch = int((np.isnan(a) != np.isnan(b)).sum())
     print(f"    {name:<18} |Δ|max={d.max():.3e}  rel_max={rel.max():.3e}  "

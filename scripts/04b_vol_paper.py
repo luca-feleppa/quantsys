@@ -1,63 +1,33 @@
-# IT: FORWARD TEST VOL-PAPER (pre-registrato in STATUS.md 2026-06-12) — loop orario:
-#       1. forecast NN-RV a 30h col modello vol-1h PASS (inversione COMPLETA
-#          z→raw: μ_z·scale + centro dal RobustScaler persistito — pattern del
-#          giudice QLIKE; feature dal path parity-blessed: FeatureBuilder
-#          fit=False + scaler/colonne da PipelineState, macro via
-#          MacroSnapshotUpdater con fallback zeros);
-#       2. confronto con la forward variance implicita a tenor 30h dal poller
-#          IV (data/iv/atm_30h.parquet, staleness ≤30 min);
-#       3. regola pre-registrata: edge = log(RV_pred/var_iv); >+0.25 → LONG
-#          straddle ATM daily ~30h; <−0.25 → SHORT; altrimenti flat. Max 1
-#          posizione, hold a SCADENZA (cash settlement al delivery price).
-#     Esecuzione: default = SIMULATA (fill al mark price Deribit — zero rumore
-#     di fill); --execute piazza ordini market REALI sul testnet (OAuth2 da
-#     config/secrets.yaml, blocco deribit_testnet). NO mainnet: il base URL
-#     viene da secrets e DEVE contenere "test.deribit.com" (assert).
-#     Output: results/vol_paper/{forecasts.parquet, trades.jsonl, position.json,
-#     exec_diag.jsonl}. Il log forecasts è scritto ANCHE quando flat: serve alle
-#     baseline always-long/short-vol sull'intero calendario (gate pre-registrato).
-#     exec_diag.jsonl (A6, ROADMAP_VOL_BOOK) = bid/ask reali + greeks per tick,
-#     SOLO diagnostico: nessun input alla regola pre-registrata.
-#     V2 (B2/A1, ROADMAP_VOL_BOOK) — leg delta-hedge sul perp, dietro flag
-#     --hedge INERTE di default (senza flag: comportamento v1 bit-identico,
-#     nessun file hedge letto/scritto). Ribilanciamento SOLO oltre la no-trade
-#     band |delta_book| (dry-run 2026-07-10: churn ATM = drag puro); hedge ratio
-#     = delta teorico del venue (convenzione parametrica raw/adj, MAI stimato dai
-#     mark testnet — verdetto 2026-07-08); flatten automatico al settlement.
-#     Output v2: hedge_state.json + hedge_ledger.jsonl (fill esatti → il PnL
-#     perp inverse si ricostruisce offline: pnl = H_usd·(1/s0−1/s1)).
-#     ⚠ ATTIVARE SOLO post-gate n≥20 e SOLO dopo la pre-registrazione
-#     hedged-vs-unhedged (STATUS.md): il gate v1 chiude sul design congelato.
-# EN: VOL-PAPER FORWARD TEST (pre-registered in STATUS.md 2026-06-12) — hourly loop:
-#       1. NN-RV 30h forecast with the PASS vol-1h model (FULL z→raw inversion:
-#          μ_z·scale + center from the persisted RobustScaler — QLIKE-judge
-#          pattern; features from the parity-blessed path: FeatureBuilder
-#          fit=False + scaler/columns from PipelineState, macro via
-#          MacroSnapshotUpdater with zeros fallback);
-#       2. comparison vs the implied forward variance at 30h tenor from the IV
-#          poller (data/iv/atm_30h.parquet, staleness ≤30 min);
-#       3. pre-registered rule: edge = log(RV_pred/var_iv); >+0.25 → LONG ATM
-#          ~30h daily straddle; <−0.25 → SHORT; else flat. Max 1 position,
-#          hold to EXPIRY (cash settlement at the delivery price).
-#     Execution: default = SIMULATED (fills at Deribit mark price — zero fill
-#     noise); --execute places REAL market orders on the testnet (OAuth2 from
-#     config/secrets.yaml, deribit_testnet block). NO mainnet: the base URL
-#     comes from secrets and MUST contain "test.deribit.com" (assert).
-#     Output: results/vol_paper/{forecasts.parquet, trades.jsonl, position.json,
-#     exec_diag.jsonl}. The forecasts log is written EVEN when flat: it feeds the
-#     always-long/short-vol baselines over the full calendar (pre-registered gate).
-#     exec_diag.jsonl (A6, ROADMAP_VOL_BOOK) = real bid/ask + greeks per tick,
-#     diagnostic ONLY: no input to the pre-registered rule.
-#     V2 (B2/A1, ROADMAP_VOL_BOOK) — perp delta-hedge leg behind the --hedge
-#     flag, INERT by default (without it: bit-identical v1 behavior, no hedge
-#     file is read/written). Rebalance ONLY beyond the |book_delta| no-trade
-#     band (2026-07-10 dry-run: ATM churn = pure drag); hedge ratio = venue
-#     theoretical delta (parametric raw/adj convention, NEVER estimated from
-#     testnet marks — 2026-07-08 verdict); automatic flatten at settlement.
-#     V2 output: hedge_state.json + hedge_ledger.jsonl (exact fills → inverse
-#     perp PnL is reconstructable offline: pnl = H_usd·(1/s0−1/s1)).
-#     ⚠ ENABLE ONLY post-gate n≥20 and ONLY after the hedged-vs-unhedged
-#     pre-registration (STATUS.md): the v1 gate closes on the frozen design.
+# VOL-PAPER FORWARD TEST (pre-registered in STATUS.md 2026-06-12) — hourly loop:
+#   1. NN-RV 30h forecast with the PASS vol-1h model (FULL z→raw inversion:
+#      μ_z·scale + center from the persisted RobustScaler — QLIKE-judge
+#      pattern; features from the parity-blessed path: FeatureBuilder
+#      fit=False + scaler/columns from PipelineState, macro via
+#      MacroSnapshotUpdater with zeros fallback);
+#   2. comparison vs the implied forward variance at 30h tenor from the IV
+#      poller (data/iv/atm_30h.parquet, staleness ≤30 min);
+#   3. pre-registered rule: edge = log(RV_pred/var_iv); >+0.25 → LONG ATM
+#      ~30h daily straddle; <−0.25 → SHORT; else flat. Max 1 position,
+#      hold to EXPIRY (cash settlement at the delivery price).
+# Execution: default = SIMULATED (fills at Deribit mark price — zero fill
+# noise); --execute places REAL market orders on the testnet (OAuth2 from
+# config/secrets.yaml, deribit_testnet block). NO mainnet: the base URL
+# comes from secrets and MUST contain "test.deribit.com" (assert).
+# Output: results/vol_paper/{forecasts.parquet, trades.jsonl, position.json,
+# exec_diag.jsonl}. The forecasts log is written EVEN when flat: it feeds the
+# always-long/short-vol baselines over the full calendar (pre-registered gate).
+# exec_diag.jsonl (A6, ROADMAP_VOL_BOOK) = real bid/ask + greeks per tick,
+# diagnostic ONLY: no input to the pre-registered rule.
+# V2 (B2/A1, ROADMAP_VOL_BOOK) — perp delta-hedge leg behind the --hedge
+# flag, INERT by default (without it: bit-identical v1 behavior, no hedge
+# file is read/written). Rebalance ONLY beyond the |book_delta| no-trade
+# band (2026-07-10 dry-run: ATM churn = pure drag); hedge ratio = venue
+# theoretical delta (parametric raw/adj convention, NEVER estimated from
+# testnet marks — 2026-07-08 verdict); automatic flatten at settlement.
+# V2 output: hedge_state.json + hedge_ledger.jsonl (exact fills → inverse
+# perp PnL is reconstructable offline: pnl = H_usd·(1/s0−1/s1)).
+# ⚠ ENABLE ONLY post-gate n≥20 and ONLY after the hedged-vs-unhedged
+# pre-registration (STATUS.md): the v1 gate closes on the frozen design.
 import argparse
 import json
 import logging
@@ -74,12 +44,9 @@ import pandas as pd
 import requests
 import torch
 
-# IT: seam monotono — TUTTI i controlli di timeout dell'esecutore adattivo passano
-#     da qui (mai time.time(), sensibile ai salti di orologio) ed è l'unico punto
-#     che i test patchano per simulare un timeout senza sleep reali.
-# EN: monotonic seam — ALL adaptive-executor timeout checks go through here (never
-#     time.time(), which is sensitive to clock jumps) and it is the single point
-#     tests patch to simulate a timeout without real sleeps.
+# monotonic seam — ALL adaptive-executor timeout checks go through here (never
+# time.time(), which is sensitive to clock jumps) and it is the single point
+# tests patch to simulate a timeout without real sleeps.
 _monotonic = time.monotonic
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -97,80 +64,58 @@ FORECASTS_PATH = OUT_DIR / "forecasts.parquet"
 TRADES_PATH = OUT_DIR / "trades.jsonl"
 POSITION_PATH = OUT_DIR / "position.json"
 IV_PATH = Path("data/iv/atm_30h.parquet")
-# IT: A6 (ROADMAP_VOL_BOOK) — log diagnostico esecuzione (bid/ask + delta), append-only.
-# EN: A6 (ROADMAP_VOL_BOOK) — execution diagnostic log (bid/ask + delta), append-only.
+# A6 (ROADMAP_VOL_BOOK) — execution diagnostic log (bid/ask + delta), append-only.
 EXEC_DIAG_PATH = OUT_DIR / "exec_diag.jsonl"
 
-# IT: V2 (B2/A1) — leg delta-hedge perp: stato corrente (sopravvive ai restart) +
-#     ledger append-only dei fill (ricostruzione PnL inverse esatta offline).
-#     File toccati SOLO con --hedge attivo (default: inerti, mai creati).
-# EN: V2 (B2/A1) — perp delta-hedge leg: current state (survives restarts) +
-#     append-only fill ledger (exact offline inverse-PnL reconstruction).
-#     Files touched ONLY with --hedge active (default: inert, never created).
+# V2 (B2/A1) — perp delta-hedge leg: current state (survives restarts) +
+# append-only fill ledger (exact offline inverse-PnL reconstruction).
+# Files touched ONLY with --hedge active (default: inert, never created).
 HEDGE_STATE_PATH = OUT_DIR / "hedge_state.json"
 HEDGE_LEDGER_PATH = OUT_DIR / "hedge_ledger.jsonl"
 PERP_INSTRUMENT = "BTC-PERPETUAL"
-# IT: taglia contratto perp Deribit (10 USD) — gli ordini vanno arrotondati al multiplo.
-# EN: Deribit perp contract size (10 USD) — orders must be rounded to the multiple.
+# Deribit perp contract size (10 USD) — orders must be rounded to the multiple.
 PERP_CONTRACT_USD = 10.0
-# IT: default PARAMETRICI (CLI), NON costanti pre-registrate: band e convenzione
-#     delta vengono CONGELATE nella pre-registrazione hedged-vs-unhedged della v2
-#     (dimensionate sul dry-run A6 a serie matura) PRIMA di attivare --hedge.
-#     band = soglia |delta_book| in BTC-equivalenti (dry-run 07-10: sotto ~0.17 il
-#     ribilanciamento non riduce varianza e paga fee); fee = taker perp (frazione
-#     del nozionale, stessa assunzione del dry-run — dal venue al design finale).
-# EN: PARAMETRIC defaults (CLI), NOT pre-registered constants: band and delta
-#     convention get FROZEN in the v2 hedged-vs-unhedged pre-registration (sized
-#     on the matured A6 dry-run) BEFORE --hedge is ever enabled.
-#     band = |book_delta| threshold in BTC-equivalents (07-10 dry-run: below ~0.17
-#     rebalancing reduces no variance and pays fees); fee = perp taker fraction.
+# PARAMETRIC defaults (CLI), NOT pre-registered constants: band and delta
+# convention get FROZEN in the v2 hedged-vs-unhedged pre-registration (sized
+# on the matured A6 dry-run) BEFORE --hedge is ever enabled.
+# band = |book_delta| threshold in BTC-equivalents (07-10 dry-run: below ~0.17
+# rebalancing reduces no variance and pays fees); fee = perp taker (fraction of
+# notional, same assumption as the dry-run — from the venue to the final design).
 DEFAULT_HEDGE_BAND = 0.20
 DEFAULT_HEDGE_FEE = 5e-4
 
-# IT: costanti PRE-REGISTRATE (STATUS.md 2026-06-12) — non toccarle a risultati visti.
-# EN: PRE-REGISTERED constants (STATUS.md 2026-06-12) — do not touch after seeing results.
+# PRE-REGISTERED constants (STATUS.md 2026-06-12) — do not touch after seeing results.
 TENOR_HOURS = 30.0
 EDGE_THRESHOLD = 0.25
 SIZE_CONTRACTS = 1.0
-HOURS_PER_YEAR = 8760.0          # IT: convenzione 365gg di Deribit | EN: Deribit 365-day convention
+HOURS_PER_YEAR = 8760.0          # Deribit 365-day convention
 IV_MAX_AGE_MIN = 30.0
-FEE_PER_CONTRACT = 0.0003        # IT: taker opzioni, BTC/contratto | EN: options taker, BTC/contract
-FEE_CAP_FRAC = 0.125             # IT: cap 12.5% del premio | EN: 12.5% premium cap
+FEE_PER_CONTRACT = 0.0003        # options taker, BTC/contract
+FEE_CAP_FRAC = 0.125             # 12.5% premium cap
 
-# IT: leva ADATTIVA (--adaptive), INERTE di default: senza flag nulla di questo blocco
-#     viene letto e il path v1 è bit-identico. Con il flag la regola d'entry NON usa il
-#     segnale NN: legge il DVOL (indice mainnet dal poller 01c) e sceglie la struttura
-#     per banda — sopra soglia short straddle daily (macchinario v1), sotto soglia short
-#     iron butterfly a ~7 giorni con 4 gambe (ali comprate PRIMA, corpo venduto dopo).
-#     Soglia e k sono parametri OBBLIGATORI ed espliciti (pattern MINOR-3), mai default.
-# EN: ADAPTIVE lever (--adaptive), INERT by default: without the flag nothing in this
-#     block is read and the v1 path is bit-identical. With the flag the entry rule does
-#     NOT use the NN signal: it reads the DVOL (mainnet index from the 01c poller) and
-#     picks the structure by band — above threshold short daily straddle (v1 machinery),
-#     below threshold short ~7-day iron butterfly with 4 legs (wings bought FIRST, body
-#     sold after). Threshold and k are REQUIRED explicit parameters (MINOR-3 pattern).
+# ADAPTIVE lever (--adaptive), INERT by default: without the flag nothing in this
+# block is read and the v1 path is bit-identical. With the flag the entry rule does
+# NOT use the NN signal: it reads the DVOL (mainnet index from the 01c poller) and
+# picks the structure by band — above threshold short daily straddle (v1 machinery),
+# below threshold short ~7-day iron butterfly with 4 legs (wings bought FIRST, body
+# sold after). Threshold and k are REQUIRED explicit parameters (MINOR-3 pattern), never defaults.
 DVOL_PATH = Path("data/iv/dvol.parquet")
-DVOL_MAX_AGE_H = 1.0             # IT: fail-fast se il DVOL è più vecchio | EN: fail-fast if older
-ADAPTIVE_LOG_PATH = OUT_DIR / "adaptive.jsonl"   # IT/EN: creato SOLO con --adaptive / ONLY with --adaptive
-# IT: journal DURABILE del tentativo di entry in corso (begin PRIMA di ogni ordine,
-#     clear SOLO a flat verificato) — la sua sola PRESENZA blocca tick() e main() al
-#     riavvio: un tentativo interrotto non riprende mai in autonomia.
-# EN: DURABLE journal of the in-flight entry attempt (begin BEFORE any order, clear
-#     ONLY on verified-flat) — its mere PRESENCE blocks tick() and main() on restart:
-#     an interrupted attempt never resumes on its own.
+DVOL_MAX_AGE_H = 1.0             # fail-fast if older
+ADAPTIVE_LOG_PATH = OUT_DIR / "adaptive.jsonl"   # created ONLY with --adaptive
+# DURABLE journal of the in-flight entry attempt (begin BEFORE any order, clear
+# ONLY on verified-flat) — its mere PRESENCE blocks tick() and main() on restart:
+# an interrupted attempt never resumes on its own.
 ADAPTIVE_JOURNAL_PATH = OUT_DIR / "adaptive_entry_journal.json"
-ADAPTIVE_TENOR_HOURS = 168.0     # IT: expiry più vicina a 7 giorni | EN: expiry nearest to 7 days
-ADAPTIVE_ENTRY_HOUR = 8          # IT: entry farfalla al tick delle 08 UTC | EN: butterfly entry at the 08 UTC tick
-ADAPTIVE_ENTRY_WEEKDAY = 4       # IT: venerdì (settlement weekly) | EN: Friday (weekly settlement)
-ADAPTIVE_TRAIL_H = 720           # IT: σ_trail = RV 30g trailing | EN: σ_trail = trailing 30d RV
+ADAPTIVE_TENOR_HOURS = 168.0     # expiry nearest to 7 days
+ADAPTIVE_ENTRY_HOUR = 8          # butterfly entry at the 08 UTC tick
+ADAPTIVE_ENTRY_WEEKDAY = 4       # Friday (weekly settlement)
+ADAPTIVE_TRAIL_H = 720           # σ_trail = trailing 30d RV
 
 
 # ──────────────────────────── Deribit testnet client ────────────────────────────
 class DeribitTestnet:
-    # IT: client minimo REST — OAuth2 client_credentials con refresh del token;
-    #     SOLO testnet (assert sull'URL: un --execute non può mai toccare il mainnet).
-    # EN: minimal REST client — OAuth2 client_credentials with token refresh;
-    #     testnet ONLY (URL assert: --execute can never touch mainnet).
+    # minimal REST client — OAuth2 client_credentials with token refresh;
+    # testnet ONLY (URL assert: --execute can never touch mainnet).
     def __init__(self, cfg: dict):
         d = cfg["deribit_testnet"]
         self.base = d["endpoint"].rstrip("/")
@@ -180,8 +125,7 @@ class DeribitTestnet:
         self._token, self._token_exp = None, 0.0
 
     def _headers(self) -> dict:
-        # IT: rinnova il Bearer token se mancano <60s alla scadenza.
-        # EN: refresh the Bearer token when <60s to expiry.
+        # refresh the Bearer token when <60s to expiry.
         if self._token is None or time.time() > self._token_exp - 60:
             r = requests.get(f"{self.base}/public/auth", params={
                 "grant_type": "client_credentials",
@@ -201,8 +145,7 @@ class DeribitTestnet:
             raise RuntimeError(f"Deribit: {payload}")
         return payload["result"]
 
-    # IT: sceglie l'expiry daily più vicina al tenor e lo strike ATM (più vicino all'index).
-    # EN: picks the daily expiry closest to the tenor and the ATM strike (nearest to index).
+    # picks the daily expiry closest to the tenor and the ATM strike (nearest to index).
     def pick_straddle(self, tenor_hours: float) -> dict:
         ins = self.get("public/get_instruments",
                        {"currency": "BTC", "kind": "option", "expired": "false"})
@@ -222,12 +165,9 @@ class DeribitTestnet:
         return {"expiry_ms": int(exp), "t_hours": (exp - now_ms) / 3.6e6,
                 "strike": float(k), "index": idx, "call": call, "put": put}
 
-    # IT: --adaptive — iron butterfly: expiry più vicina al tenor (fra TUTTE le opzioni
-    #     quotate, quindi la weekly a ~7g), corpo ATM come pick_straddle, ali allo strike
-    #     quotato più vicino a S·exp(±k·σ·√T) e STRETTAMENTE OTM rispetto al corpo.
-    # EN: --adaptive — iron butterfly: expiry nearest the tenor (among ALL listed
-    #     options, i.e. the ~7d weekly), ATM body as pick_straddle, wings at the listed
-    #     strike nearest S·exp(±k·σ·√T) and STRICTLY OTM of the body.
+    # --adaptive — iron butterfly: expiry nearest the tenor (among ALL listed
+    # options, i.e. the ~7d weekly), ATM body as pick_straddle, wings at the listed
+    # strike nearest S·exp(±k·σ·√T) and STRICTLY OTM of the body.
     def pick_butterfly(self, tenor_hours: float, k: float, sigma_ann: float) -> dict:
         ins = self.get("public/get_instruments",
                        {"currency": "BTC", "kind": "option", "expired": "false"})
@@ -265,58 +205,46 @@ class DeribitTestnet:
         return float(self.get("public/ticker",
                               {"instrument_name": instrument})["mark_price"])
 
-    # IT: prezzo indice BTC/USD corrente — input del check pin-risk (A13a).
-    # EN: current BTC/USD index price — input of the pin-risk check (A13a).
+    # current BTC/USD index price — input of the pin-risk check (A13a).
     def index_price(self) -> float:
         return float(self.get("public/get_index_price",
                               {"index_name": "btc_usd"})["index_price"])
 
-    # IT: ticker completo (bid/ask/mark/IV/greeks) — base del logging diagnostico A6.
-    # EN: full ticker (bid/ask/mark/IV/greeks) — basis of the A6 diagnostic logging.
+    # full ticker (bid/ask/mark/IV/greeks) — basis of the A6 diagnostic logging.
     def ticker(self, instrument: str) -> dict:
         return self.get("public/ticker", {"instrument_name": instrument})
 
-    # IT: ordine market sul testnet; ritorna il prezzo medio di fill (BTC/contratto).
-    # EN: testnet market order; returns the average fill price (BTC/contract).
+    # testnet market order; returns the average fill price (BTC/contract).
     def market_order(self, instrument: str, side: str, amount: float) -> float:
         res = self.get(f"private/{side}", {"instrument_name": instrument,
                                            "amount": amount, "type": "market"},
                        private=True)
         return float(res["order"]["average_price"])
 
-    # IT: ordine market con la risposta COMPLETA (order+trades) e label univoca —
-    #     base del verificatore strutturato (classify_order). NON tocca il contratto
-    #     legacy `market_order` sopra, usato da v1/pin-close/perp-hedge.
-    # EN: market order with the FULL response (order+trades) and a unique label —
-    #     basis of the structured verifier (classify_order). Does NOT touch the
-    #     legacy `market_order` contract above, used by v1/pin-close/perp-hedge.
+    # market order with the FULL response (order+trades) and a unique label —
+    # basis of the structured verifier (classify_order). Does NOT touch the
+    # legacy `market_order` contract above, used by v1/pin-close/perp-hedge.
     def order_detailed(self, instrument: str, side: str, amount: float, label: str) -> dict:
         return self.get(f"private/{side}", {"instrument_name": instrument, "amount": amount,
                                             "type": "market", "label": label}, private=True)
 
-    # IT: annulla il residuo non eseguito di un ordine (private/cancel).
-    # EN: cancels an order's unfilled remainder (private/cancel).
+    # cancels an order's unfilled remainder (private/cancel).
     def cancel_order(self, order_id) -> dict:
         return self.get("private/cancel", {"order_id": order_id}, private=True)
 
-    # IT: stato corrente di un ordine (private/get_order_state) — usato per la
-    #     ri-verifica dopo il cancel di un ordine nonterminal (open/untriggered).
-    # EN: current order state (private/get_order_state) — used to re-verify after
-    #     cancelling a nonterminal (open/untriggered) order.
+    # current order state (private/get_order_state) — used to re-verify after
+    # cancelling a nonterminal (open/untriggered) order.
     def get_order_state(self, order_id) -> dict:
         return self.get("private/get_order_state", {"order_id": order_id}, private=True)
 
-    # IT: posizione perp REALE sul venue (USD firmati, 0 se flat) — base della
-    #     riconciliazione dello stato hedge all'avvio (audit MINOR-1).
-    # EN: REAL venue perp position (signed USD, 0 if flat) — basis of the hedge
-    #     state reconciliation at startup (MINOR-1 audit).
+    # REAL venue perp position (signed USD, 0 if flat) — basis of the hedge
+    # state reconciliation at startup (MINOR-1 audit).
     def perp_position_usd(self, instrument: str = "BTC-PERPETUAL") -> float:
         res = self.get("private/get_position", {"instrument_name": instrument},
                        private=True)
         return float(res.get("size") or 0.0)
 
-    # IT: delivery price del giorno di settlement (08:00 UTC) — None se non ancora pubblicato.
-    # EN: settlement-day delivery price (08:00 UTC) — None if not yet published.
+    # settlement-day delivery price (08:00 UTC) — None if not yet published.
     def delivery_price(self, expiry_ms: int):
         date = datetime.fromtimestamp(expiry_ms / 1000, timezone.utc).strftime("%d%b%y").upper()
         res = self.get("public/get_delivery_prices",
@@ -328,19 +256,15 @@ class DeribitTestnet:
         return None
 
 
-# IT: VolForecaster PROMOSSO in quantsys/model/vol_forecaster.py (C2 2ter
-#     2026-07-18, corpo invariato, prova A/B bit-perfetta in STATUS) - 04b
-#     e vol_paper_replay lo consumano da li'.
-# EN: VolForecaster PROMOTED to quantsys/model/vol_forecaster.py (C2 2ter
-#     2026-07-18, unchanged body, bit-perfect A/B proof in STATUS) - 04b
-#     and vol_paper_replay consume it from there.
+# VolForecaster PROMOTED to quantsys/model/vol_forecaster.py (C2 2ter
+# 2026-07-18, unchanged body, bit-perfect A/B proof in STATUS) - 04b
+# and vol_paper_replay consume it from there.
 from quantsys.model.vol_forecaster import VolForecaster, MACRO_NORM_REFIT                       # noqa: E402
 
 
-# ──────────────────────────── IV + segnale ────────────────────────────
+# ──────────────────────────── IV + signal ────────────────────────────
 def read_iv() -> dict | None:
-    # IT: ultima riga del poller; None se file assente o stale > IV_MAX_AGE_MIN.
-    # EN: latest poller row; None if the file is missing or stale > IV_MAX_AGE_MIN.
+    # latest poller row; None if the file is missing or stale > IV_MAX_AGE_MIN.
     if not IV_PATH.exists():
         return None
     row = pd.read_parquet(IV_PATH).iloc[-1]
@@ -349,20 +273,16 @@ def read_iv() -> dict | None:
     if age_min > IV_MAX_AGE_MIN or not np.isfinite(row["iv_30h"]):
         return None
     iv = float(row["iv_30h"])
-    # IT: IV annualizzata (%) → varianza implicita sulla finestra di 30h.
-    # EN: annualized IV (%) → implied variance over the 30h window.
+    # annualized IV (%) → implied variance over the 30h window.
     var_iv = (iv / 100.0) ** 2 * (TENOR_HOURS / HOURS_PER_YEAR)
     return {"iv_ts": ts, "iv_30h": iv, "var_iv": var_iv, "iv_age_min": age_min}
 
 
-# ──────────────────────────── adattivo (--adaptive) ────────────────────────────
+# ──────────────────────────── adaptive (--adaptive) ────────────────────────────
 def read_dvol(max_age_h: float = DVOL_MAX_AGE_H) -> dict | None:
-    # IT: ultimo punto DVOL del poller 01c (indice mainnet, frazione); None se il file
-    #     manca o è più vecchio di max_age_h → la regola resta FLAT (fail-fast, mai
-    #     un default silenzioso su una banda).
-    # EN: latest DVOL point from the 01c poller (mainnet index, fraction); None if the
-    #     file is missing or older than max_age_h → the rule stays FLAT (fail-fast,
-    #     never a silent default onto a band).
+    # latest DVOL point from the 01c poller (mainnet index, fraction); None if the
+    # file is missing or older than max_age_h → the rule stays FLAT (fail-fast,
+    # never a silent default onto a band).
     if not DVOL_PATH.exists():
         return None
     dv = pd.read_parquet(DVOL_PATH, columns=["timestamp", "dvol"]).dropna()
@@ -379,26 +299,21 @@ def read_dvol(max_age_h: float = DVOL_MAX_AGE_H) -> dict | None:
 
 
 def sigma_trail_30d(candles: pd.DataFrame, trail_h: int = ADAPTIVE_TRAIL_H) -> float:
-    # IT: vol realizzata annualizzata sulle ultime trail_h barre orarie (causale) —
-    #     la σ con cui si collocano le ali, stessa definizione dei calcoli offline.
-    # EN: annualised realised vol over the last trail_h hourly bars (causal) — the σ
-    #     wings are placed with, same definition as the offline computations.
+    # annualised realised vol over the last trail_h hourly bars (causal) — the σ
+    # wings are placed with, same definition as the offline computations.
     lr2 = np.log(candles["close"] / candles["close"].shift(1)) ** 2
     return float(np.sqrt(lr2.tail(trail_h).sum() / trail_h * HOURS_PER_YEAR))
 
 
 def adaptive_band(dvol: float, threshold: float) -> str:
-    # IT/EN: la banda si legge UNA volta all'entry; nessuna isteresi (posizione al settlement).
+    # the band is read ONCE at entry; no hysteresis (position held to settlement).
     return "daily" if dvol >= threshold else "fly"
 
 
 def build_adaptive_cfg(args) -> dict | None:
-    # IT: config SOLO con --adaptive (None = path v1). Fail-fast: soglia DVOL e k
-    #     ESPLICITI (valori congelati da una pre-registrazione, mai default di design);
-    #     incompatibile con --hedge, pin-close e sizing vega (nessuno è nel disegno).
-    # EN: config ONLY with --adaptive (None = v1 path). Fail-fast: EXPLICIT DVOL
-    #     threshold and k (frozen by a pre-registration, never design defaults);
-    #     incompatible with --hedge, pin-close and vega sizing (none is in the design).
+    # config ONLY with --adaptive (None = v1 path). Fail-fast: EXPLICIT DVOL
+    # threshold and k (frozen by a pre-registration, never design defaults);
+    # incompatible with --hedge, pin-close and vega sizing (none is in the design).
     if not args.adaptive:
         return None
     if args.adaptive_dvol_threshold is None or args.adaptive_k is None:
@@ -415,38 +330,28 @@ def build_adaptive_cfg(args) -> dict | None:
             "tenor_hours": float(args.adaptive_tenor_hours)}
 
 
-# ──────────── journal adattivo (durabilità dell'esecuzione strutturata) ────────────
-# IT: contratto: il journal viene APERTO prima di qualunque ordine (simulato o reale),
-#     AGGIORNATO atomicamente prima/dopo ogni sottomissione, e CANCELLATO solo quando
-#     la struttura è o completa (posizione salvata) o verificata flat (ogni gamba nota
-#     riacquistata). In ogni altro esito resta su disco con status
-#     "blocked_operator_review": la sua sola presenza blocca tick() e main() (§7-8).
-# EN: contract: the journal is OPENED before any order (simulated or real), atomically
-#     UPDATED before/after every submission, and CLEARED only when the structure is
-#     either complete (position saved) or verified flat (every known leg bought back).
-#     In every other outcome it stays on disk with status "blocked_operator_review":
-#     its mere presence blocks tick() and main() (§7-8).
+# ──────────── adaptive journal (durability of the structured execution) ────────────
+# contract: the journal is OPENED before any order (simulated or real), atomically
+# UPDATED before/after every submission, and CLEARED only when the structure is
+# either complete (position saved) or verified flat (every known leg bought back).
+# In every other outcome it stays on disk with status "blocked_operator_review":
+# its mere presence blocks tick() and main() (§7-8).
 def adaptive_journal_present() -> bool:
-    # IT: vera anche su un journal CORROTTO — non lo si analizza mai per decidere
-    #     se bloccare: la decisione è binaria sull'esistenza del file.
-    # EN: true even for a CORRUPT journal — it is never parsed to decide whether to
-    #     block: the decision is binary on the file's existence.
+    # true even for a CORRUPT journal — it is never parsed to decide whether to
+    # block: the decision is binary on the file's existence.
     return ADAPTIVE_JOURNAL_PATH.exists()
 
 
 def _adaptive_journal_write(rec: dict):
-    # IT: write atomica (.tmp + os.replace), stesso pattern di save_hedge_state.
-    # EN: atomic write (.tmp + os.replace), same pattern as save_hedge_state.
+    # atomic write (.tmp + os.replace), same pattern as save_hedge_state.
     tmp = ADAPTIVE_JOURNAL_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(rec, indent=2, default=str), encoding="utf-8")
     os.replace(tmp, ADAPTIVE_JOURNAL_PATH)
 
 
 def _adaptive_journal_begin(structure: str, execute: bool, amount: float, meta: dict) -> dict:
-    # IT: MAI sovrascrivere un journal esistente — la sua presenza è già un segnale
-    #     di tentativo non chiuso, un secondo `begin` lo cancellerebbe in silenzio.
-    # EN: NEVER overwrite an existing journal — its presence already signals an
-    #     unclosed attempt, a second `begin` would silently erase it.
+    # NEVER overwrite an existing journal — its presence already signals an
+    # unclosed attempt, a second `begin` would silently erase it.
     if ADAPTIVE_JOURNAL_PATH.exists():
         raise RuntimeError(
             "journal adattivo già presente — tentativo NON avviato, serve review "
@@ -469,10 +374,8 @@ def _adaptive_journal_clear():
 
 def _adaptive_journal_mark_leg(journal: dict, phase: str, name: str, resolved: dict,
                                cancel_err: str | None, state_err: str | None):
-    # IT: aggiorna IN PLACE l'ultima voce (fase, gamba) col risultato della ri-verifica
-    #     cancel+get_order_state — non se ne aggiunge una seconda per la stessa gamba.
-    # EN: updates IN PLACE the last (phase, leg) entry with the cancel+get_order_state
-    #     re-verification result — never a second entry for the same leg.
+    # updates IN PLACE the last (phase, leg) entry with the cancel+get_order_state
+    # re-verification result — never a second entry for the same leg.
     for lr in reversed(journal["legs"]):
         if lr["phase"] == phase and lr["leg"] == name:
             lr.update({"status": resolved["kind"], "order_id": resolved.get("order_id"),
@@ -489,22 +392,15 @@ def _adaptive_journal_mark_leg(journal: dict, phase: str, name: str, resolved: d
 
 
 def classify_order(order: dict, instrument: str, side: str, amount: float) -> dict:
-    # IT: verificatore PURO (offline-testabile) dell'esito di un ordine Deribit contro
-    #     l'amount atteso. kind ∈ {filled, terminal_partial, nonterminal, ambiguous} —
-    #     MAI un fill dedotto per assenza di informazione: ogni caso non esplicitamente
-    #     riconosciuto è ambiguous (fail-safe verso il review manuale).
-    # EN: PURE verifier (offline-testable) of a Deribit order's outcome against the
-    #     expected amount. kind ∈ {filled, terminal_partial, nonterminal, ambiguous} —
-    #     NEVER a fill inferred from missing information: any case not explicitly
-    #     recognised is ambiguous (fail-safe towards manual review).
+    # PURE verifier (offline-testable) of a Deribit order's outcome against the
+    # expected amount. kind ∈ {filled, terminal_partial, nonterminal, ambiguous} —
+    # NEVER a fill inferred from missing information: any case not explicitly
+    # recognised is ambiguous (fail-safe towards manual review).
     out = {"kind": "ambiguous", "order_id": None, "order_state": None,
            "filled_amount": None, "average_price": None}
-    # IT: un amount non finito o ≤0 rende ogni confronto privo di senso — ambiguous
-    #     a prescindere dal contenuto dell'ordine (mai un fill giudicato su un
-    #     riferimento invalido).
-    # EN: a non-finite or ≤0 amount makes any comparison meaningless — ambiguous
-    #     regardless of the order's content (never a fill judged against an
-    #     invalid reference).
+    # a non-finite or ≤0 amount makes any comparison meaningless — ambiguous
+    # regardless of the order's content (never a fill judged against an
+    # invalid reference).
     if not (np.isfinite(amount) and amount > 0.0):
         return out
     if not isinstance(order, dict):
@@ -514,16 +410,11 @@ def classify_order(order: dict, instrument: str, side: str, amount: float) -> di
         return out
     out["order_id"] = oid
     out["order_state"] = order.get("order_state")
-    # IT: identità RICHIESTA (revisione 2026-09-15): strumento e verso devono essere
-    #     PRESENTI e uguali a quelli dell'ordine inviato. Il vecchio `is not None and !=`
-    #     classificava "filled" una risposta priva di identità — stesso difetto di
-    #     verifica per assenza già chiuso in _verify_trade_history, ereditato anche
-    #     dalla ri-verifica post-cancel, dove la quantità diventa quella della reverse.
-    # EN: identity REQUIRED (2026-09-15 review): instrument and side must be PRESENT
-    #     and equal to the submitted order's. The old `is not None and !=` classified
-    #     an identity-less response as "filled" — the same verify-by-absence defect
-    #     already closed in _verify_trade_history, inherited by the post-cancel
-    #     re-verification too, where the quantity becomes the reverse's.
+    # identity REQUIRED (2026-09-15 review): instrument and side must be PRESENT
+    # and equal to the submitted order's. The old `is not None and !=` classified
+    # an identity-less response as "filled" — the same verify-by-absence defect
+    # already closed in _verify_trade_history, inherited by the post-cancel
+    # re-verification too, where the quantity becomes the reverse's.
     if order.get("instrument_name") != instrument:
         return out
     if order.get("direction") != side:
@@ -547,13 +438,9 @@ def classify_order(order: dict, instrument: str, side: str, amount: float) -> di
     tol = 1e-9 * max(1.0, amount)
     if state == "filled" and abs(filled - amount) <= tol:
         out["kind"] = "filled"
-    # IT: "filled" con filled_amount < amount è una risposta CONTRADDITTORIA (su
-    #     Deribit "filled" = eseguito per intero): non è una quantità nota su cui
-    #     dimensionare una reverse → cade in ambiguous. Parziale terminale solo da
-    #     cancelled/rejected.
-    # EN: "filled" with filled_amount < amount is a CONTRADICTORY response (on Deribit
-    #     "filled" = fully executed): not a known quantity to size a reverse on → falls
-    #     to ambiguous. Terminal partial only from cancelled/rejected.
+    # "filled" with filled_amount < amount is a CONTRADICTORY response (on Deribit
+    # "filled" = fully executed): not a known quantity to size a reverse on → falls
+    # to ambiguous. Terminal partial only from cancelled/rejected.
     elif state in ("cancelled", "rejected") and filled < amount:
         out["kind"] = "terminal_partial"
     elif state in ("open", "untriggered"):
@@ -565,41 +452,27 @@ def classify_order(order: dict, instrument: str, side: str, amount: float) -> di
 
 def _verify_trade_history(result: dict, instrument: str, side: str, order_id,
                           filled_amount) -> dict | None:
-    # IT: BUG A FIX — verifica di COPERTURA dei trade REALI di un ordine PRIMA di
-    #     trattare fee/orari come completi: id trade univoci (mai due volte lo stesso
-    #     fill), order_id/strumento/verso coerenti con l'ordine richiesto, quantità
-    #     positive che sommano ESATTAMENTE (entro tolleranza) al filled_amount noto
-    #     da classify_order, timestamp finiti. Una qualunque violazione → None: MAI
-    #     fee/orari inventati o dedotti, mai zero per default, mai il tempo di
-    #     RICEZIONE locale al posto di un fill verificato. Ritorna sia il primo
-    #     (`first_ts`) sia l'ultimo (`last_ts`) timestamp — servono ENTRAMBI a
-    #     _fill_timing per uno span globale corretto quando una gamba ha più fill.
-    # EN: BUG A FIX — COVERAGE verification of an order's REAL trades BEFORE
-    #     treating fee/timing as complete: unique trade ids (never the same fill
-    #     twice), order_id/instrument/side consistent with the requested order,
-    #     positive quantities summing EXACTLY (within tolerance) to the known
-    #     filled_amount from classify_order, finite timestamps. Any violation →
-    #     None: NEVER invented or inferred fee/timing, never a default zero, never
-    #     the local RECEIPT time in place of a verified fill. Returns both the
-    #     first (`first_ts`) and the last (`last_ts`) timestamp — _fill_timing
-    #     needs BOTH for a correct global span when a leg has multiple fills.
+    # BUG A FIX — COVERAGE verification of an order's REAL trades BEFORE
+    # treating fee/timing as complete: unique trade ids (never the same fill
+    # twice), order_id/instrument/side consistent with the requested order,
+    # positive quantities summing EXACTLY (within tolerance) to the known
+    # filled_amount from classify_order, finite timestamps. Any violation →
+    # None: NEVER invented or inferred fee/timing, never a default zero, never
+    # the local RECEIPT time in place of a verified fill. Returns both the
+    # first (`first_ts`) and the last (`last_ts`) timestamp — _fill_timing
+    # needs BOTH for a correct global span when a leg has multiple fills.
     if not isinstance(result, dict):
         return None
     trades = result.get("trades")
-    # IT: una lista e basta — un valore truthy non iterabile (1, True, 3.5) sollevava
-    #     TypeError sul `for` dentro _adaptive_submit_leg non protetto, a ordine già
-    #     eseguito; stringhe e dict non sollevavano ma non sono comunque trade.
-    # EN: a list only — a truthy non-iterable (1, True, 3.5) raised TypeError on the
-    #     `for` inside the unprotected _adaptive_submit_leg, with the order already
-    #     executed; strings and dicts did not raise but are not trades either.
+    # a list only — a truthy non-iterable (1, True, 3.5) raised TypeError on the
+    # `for` inside the unprotected _adaptive_submit_leg, with the order already
+    # executed; strings and dicts did not raise but are not trades either.
     if not isinstance(trades, list) or not trades:
         return None
     if filled_amount is None or not (np.isfinite(filled_amount) and filled_amount > 0.0):
         return None
-    # IT: senza un order_id noto lato ORDINE non esiste un'identità contro cui
-    #     verificare i trade — copertura ignota, mai "coerente per assenza".
-    # EN: without a known ORDER-side order_id there is no identity to verify the
-    #     trades against — coverage unknown, never "consistent by absence".
+    # without a known ORDER-side order_id there is no identity to verify the
+    # trades against — coverage unknown, never "consistent by absence".
     if order_id is None:
         return None
     seen_ids = set()
@@ -608,24 +481,15 @@ def _verify_trade_history(result: dict, instrument: str, side: str, order_id,
     for t in trades:
         if not isinstance(t, dict):
             return None
-        # IT: identità RICHIESTA, non opzionale (fix 2026-09-15). Prima il confronto
-        #     `not in (None, atteso)` accettava un trade con order_id/strumento/verso
-        #     ASSENTI: la copertura risultava verificata pur non avendo nulla da
-        #     verificare, ed è esattamente l'identità che il record di recovery
-        #     conserva. E un trade_id non hashabile (lista/dict da una risposta
-        #     malformata) sollevava TypeError su `in seen_ids`: il chiamante
-        #     (_adaptive_submit_leg) NON è protetto, quindi il raise avrebbe
-        #     interrotto il journaling DOPO che gli ordini erano già partiti.
-        #     Entrambi i casi degradano a ignoto: None, mai un'eccezione.
-        # EN: identity REQUIRED, not optional (2026-09-15 fix). The previous
-        #     `not in (None, expected)` test accepted a trade with MISSING
-        #     order_id/instrument/side: coverage came out verified while there was
-        #     nothing to verify — and that is exactly the identity the recovery
-        #     record retains. A non-hashable trade_id (list/dict from a malformed
-        #     response) also raised TypeError on `in seen_ids`: the caller
-        #     (_adaptive_submit_leg) is NOT protected, so the raise would have
-        #     interrupted journaling AFTER orders had already been submitted.
-        #     Both degrade to unknown: None, never an exception.
+        # identity REQUIRED, not optional (2026-09-15 fix). The previous
+        # `not in (None, expected)` test accepted a trade with MISSING
+        # order_id/instrument/side: coverage came out verified while there was
+        # nothing to verify — and that is exactly the identity the recovery
+        # record retains. A non-hashable trade_id (list/dict from a malformed
+        # response) also raised TypeError on `in seen_ids`: the caller
+        # (_adaptive_submit_leg) is NOT protected, so the raise would have
+        # interrupted journaling AFTER orders had already been submitted.
+        # Both degrade to unknown: None, never an exception.
         tid = t.get("trade_id")
         if not isinstance(tid, (str, int)) or isinstance(tid, bool) or tid in seen_ids:
             return None
@@ -655,20 +519,13 @@ def _verify_trade_history(result: dict, instrument: str, side: str, order_id,
 
 
 def _fill_timing(fills: dict, names) -> tuple:
-    # IT: BUG A FIX — fill_span_s è il GLOBALE ultimo-meno-primo fill su TUTTE le
-    #     gambe di entry, non il max/min dei soli `exchange_fill_ts` (l'ultimo fill
-    #     per gamba): con più fill sulla stessa gamba il primo (`exchange_fill_ts_first`)
-    #     poteva precedere quello dell'ultima gamba e veniva scartato, sottostimando
-    #     lo span. SOLO se OGNI gamba elencata ha ENTRAMBI first/last (trade REALI
-    #     verificati dall'exchange, mai il tempo di ricezione locale) — altrimenti
-    #     (None, "unavailable"): nessuna misura, non un default silenzioso.
-    # EN: BUG A FIX — fill_span_s is the GLOBAL last-minus-first fill over ALL entry
-    #     legs, not the max/min of the per-leg `exchange_fill_ts` (last fill per leg):
-    #     with multiple fills on the same leg the first one (`exchange_fill_ts_first`)
-    #     could precede the last leg's and was discarded, undercounting the span.
-    #     ONLY if EVERY listed leg has BOTH first/last (REAL exchange-verified
-    #     trades, never local receipt time) — otherwise (None, "unavailable"): no
-    #     measurement, not a silent default.
+    # BUG A FIX — fill_span_s is the GLOBAL last-minus-first fill over ALL entry
+    # legs, not the max/min of the per-leg `exchange_fill_ts` (last fill per leg):
+    # with multiple fills on the same leg the first one (`exchange_fill_ts_first`)
+    # could precede the last leg's and was discarded, undercounting the span.
+    # ONLY if EVERY listed leg has BOTH first/last (REAL exchange-verified
+    # trades, never local receipt time) — otherwise (None, "unavailable"): no
+    # measurement, not a silent default.
     firsts = [fills[n].get("exchange_fill_ts_first") for n in names]
     lasts = [fills[n].get("exchange_fill_ts") for n in names]
     if all(t is not None and np.isfinite(t) for t in firsts) and \
@@ -679,26 +536,16 @@ def _fill_timing(fills: dict, names) -> tuple:
 
 def _adaptive_reclassify_nonterminal(db: "DeribitTestnet", order_id, instrument: str,
                                      side: str, amount: float, prev_filled: float):
-    # IT: un ordine `nonterminal` (open/untriggered) va cancellato e RI-VERIFICATO —
-    #     solo la classificazione post-cancel è autorevole sulla quantità nota.
-    #     La risposta di get_order_state conta SOLO se il suo order_id combacia con
-    #     quello richiesto E il suo filled_amount non è diminuito rispetto a
-    #     prev_filled (l'ultimo fill osservato prima del cancel): una risposta
-    #     disallineata o stale (order id diverso, fill regredito) non autorizza MAI
-    #     una reverse o una conclusione di flat — resta ambiguous.
-    #     Eccezioni tollerate su ENTRAMBE le chiamate (registrate per nome di tipo,
-    #     mai testo grezzo): un cancel fallito non impedisce comunque di leggere lo
-    #     stato reale con get_order_state.
-    # EN: a `nonterminal` order (open/untriggered) must be cancelled and RE-VERIFIED —
-    #     only the post-cancel classification is authoritative on the known quantity.
-    #     The get_order_state response counts ONLY if its order_id matches the one
-    #     requested AND its filled_amount has not decreased relative to prev_filled
-    #     (the last fill observed before the cancel): a mismatched or stale response
-    #     (different order id, regressed fill) NEVER authorizes a reverse or a flat
-    #     conclusion — it stays ambiguous.
-    #     Exceptions tolerated on BOTH calls (recorded by type name, never raw text):
-    #     a failed cancel still does not prevent reading the real state via
-    #     get_order_state.
+    # a `nonterminal` order (open/untriggered) must be cancelled and RE-VERIFIED —
+    # only the post-cancel classification is authoritative on the known quantity.
+    # The get_order_state response counts ONLY if its order_id matches the one
+    # requested AND its filled_amount has not decreased relative to prev_filled
+    # (the last fill observed before the cancel): a mismatched or stale response
+    # (different order id, regressed fill) NEVER authorizes a reverse or a flat
+    # conclusion — it stays ambiguous.
+    # Exceptions tolerated on BOTH calls (recorded by type name, never raw text):
+    # a failed cancel still does not prevent reading the real state via
+    # get_order_state.
     try:
         db.cancel_order(order_id)
         cancel_err = None
@@ -724,12 +571,9 @@ def _adaptive_reclassify_nonterminal(db: "DeribitTestnet", order_id, instrument:
                 "filled_amount": None, "average_price": None, "fee_observed_btc": None},
                cancel_err, None)
     resolved = classify_order(order2, instrument, side, amount)
-    # IT: get_order_state non porta né i trade né i loro timestamp: la risposta
-    #     iniziale (pre-cancel) NON è più prova di fill finale — si resetta a
-    #     ignoto, mai propagata come se fosse la verifica.
-    # EN: get_order_state carries neither trades nor their timestamps: the
-    #     initial (pre-cancel) response is no longer final-fill evidence — reset
-    #     to unknown, never propagated as if it were the verification.
+    # get_order_state carries neither trades nor their timestamps: the
+    # initial (pre-cancel) response is no longer final-fill evidence — reset
+    # to unknown, never propagated as if it were the verification.
     resolved["fee_observed_btc"] = None
     resolved["exchange_fill_ts"] = None
     resolved["exchange_fill_ts_first"] = None
@@ -738,18 +582,12 @@ def _adaptive_reclassify_nonterminal(db: "DeribitTestnet", order_id, instrument:
 
 def _adaptive_submit_leg(db: "DeribitTestnet", execute: bool, instrument: str, verb: str,
                          amount: float, label: str) -> dict:
-    # IT: sottomissione di UNA gamba, simulata o reale, in una forma uniforme per
-    #     l'executor condiviso. Simulato: fill al mark, sempre "filled" (nessuna
-    #     ambiguità di piazza) salvo eccezione sul mark stesso → ambiguous (mai un
-    #     fill dedotto). Reale: order_detailed + classify_order; una risposta senza
-    #     "order" o un'eccezione (risposta persa) è SEMPRE ambiguous — mai un
-    #     rigetto a fill-zero dedotto dall'assenza di informazione.
-    # EN: submission of ONE leg, simulated or real, in a uniform shape for the
-    #     shared executor. Simulated: fill at mark, always "filled" (no venue
-    #     ambiguity) unless the mark call itself raises → ambiguous (never a fill
-    #     inferred). Real: order_detailed + classify_order; a response without
-    #     "order", or an exception (lost response), is ALWAYS ambiguous — never a
-    #     zero-fill rejection inferred from missing information.
+    # submission of ONE leg, simulated or real, in a uniform shape for the
+    # shared executor. Simulated: fill at mark, always "filled" (no venue
+    # ambiguity) unless the mark call itself raises → ambiguous (never a fill
+    # inferred). Real: order_detailed + classify_order; a response without
+    # "order", or an exception (lost response), is ALWAYS ambiguous — never a
+    # zero-fill rejection inferred from missing information.
     if not execute:
         try:
             px = db.mark_price(instrument)
@@ -757,12 +595,9 @@ def _adaptive_submit_leg(db: "DeribitTestnet", execute: bool, instrument: str, v
             return {"kind": "ambiguous", "order_id": None, "order_state": None,
                     "filled_amount": None, "average_price": None, "fee_observed_btc": None,
                     "exchange_fill_ts": None, "submit_error": type(e).__name__}
-        # IT: A3 — un mark simulato non finito o ≤0 non è un fill: fallimento con
-        #     diagnostica FISSA (mai il valore grezzo, che potrebbe portare
-        #     NaN/inf/negativo in un log o in trades.jsonl).
-        # EN: A3 — a non-finite or ≤0 simulated mark is not a fill: failure with a
-        #     FIXED diagnostic (never the raw value, which could carry
-        #     NaN/inf/negative into a log or trades.jsonl).
+        # A3 — a non-finite or ≤0 simulated mark is not a fill: failure with a
+        # FIXED diagnostic (never the raw value, which could carry
+        # NaN/inf/negative into a log or trades.jsonl).
         if not (math.isfinite(px) and px > 0.0):
             return {"kind": "ambiguous", "order_id": None, "order_state": None,
                     "filled_amount": None, "average_price": None, "fee_observed_btc": None,
@@ -777,25 +612,18 @@ def _adaptive_submit_leg(db: "DeribitTestnet", execute: bool, instrument: str, v
                 "filled_amount": None, "average_price": None, "fee_observed_btc": None,
                 "exchange_fill_ts": None, "submit_error": type(e).__name__}
     order = result.get("order") if isinstance(result, dict) else None
-    # IT: un "order" non-dict (lista/stringa da una risposta malformata) sollevava
-    #     AttributeError su `order.get` qui sotto, a ordine già inviato e fuori da
-    #     ogni protezione → ambiguous come una risposta senza "order".
-    # EN: a non-dict "order" (list/string from a malformed response) raised
-    #     AttributeError on `order.get` below, with the order already sent and
-    #     outside any protection → ambiguous like a response with no "order".
+    # a non-dict "order" (list/string from a malformed response) raised
+    # AttributeError on `order.get` below, with the order already sent and
+    # outside any protection → ambiguous like a response with no "order".
     if not isinstance(order, dict):
         return {"kind": "ambiguous", "order_id": None, "order_state": None,
                 "filled_amount": None, "average_price": None, "fee_observed_btc": None,
                 "exchange_fill_ts": None, "submit_error": None}
     resolved = classify_order(order, instrument, verb, amount)
-    # IT: A2/BUG A FIX — fee e timing (first+last) SOLO se la coperture dei trade
-    #     REALI passa _verify_trade_history (id univoci, identità ordine/strumento/
-    #     verso, quantità coerenti col filled_amount, timestamp finiti) — altrimenti
-    #     entrambi None, MAI confusi col tempo di ricezione locale `receipt_ts` sotto.
-    # EN: A2/BUG A FIX — fee and timing (first+last) ONLY if the REAL trades'
-    #     coverage passes _verify_trade_history (unique ids, order/instrument/side
-    #     identity, quantities consistent with filled_amount, finite timestamps) —
-    #     otherwise both None, NEVER confused with the local `receipt_ts` below.
+    # A2/BUG A FIX — fee and timing (first+last) ONLY if the REAL trades'
+    # coverage passes _verify_trade_history (unique ids, order/instrument/side
+    # identity, quantities consistent with filled_amount, finite timestamps) —
+    # otherwise both None, NEVER confused with the local `receipt_ts` below.
     verified = _verify_trade_history(result, instrument, verb, order.get("order_id"),
                                      resolved.get("filled_amount"))
     resolved["fee_observed_btc"] = verified["fee_btc"] if verified else None
@@ -806,20 +634,13 @@ def _adaptive_submit_leg(db: "DeribitTestnet", execute: bool, instrument: str, v
 
 
 def _leg_exec_detail(resolved: dict) -> dict:
-    # IT: proiezione dei campi di esecuzione persistiti nella posizione/nel record —
-    #     mai il dizionario grezzo (che porta anche `raw_result`/`submit_error`).
-    #     Fix 2026-09-15: include STRUMENTO e VERSO concreti. Prima la proiezione
-    #     portava solo il nome LOGICO della gamba ("wing_put") e l'order id: lo
-    #     strumento e il verso della reverse vivevano SOLO nel journal, che su
-    #     verified_flat viene cancellato — il record di recovery restava quindi senza
-    #     l'identità di ciò che era stato davvero comprato o venduto.
-    # EN: projection of the execution fields persisted in the position/record —
-    #     never the raw dict (which also carries `raw_result`/`submit_error`).
-    #     2026-09-15 fix: includes the concrete INSTRUMENT and SIDE. The projection
-    #     used to carry only the leg's LOGICAL name ("wing_put") and the order id:
-    #     the reverse's instrument and side lived ONLY in the journal, which is
-    #     cleared on verified_flat — so the recovery record lost the identity of
-    #     what had actually been bought or sold.
+    # projection of the execution fields persisted in the position/record —
+    # never the raw dict (which also carries `raw_result`/`submit_error`).
+    # 2026-09-15 fix: includes the concrete INSTRUMENT and SIDE. The projection
+    # used to carry only the leg's LOGICAL name ("wing_put") and the order id:
+    # the reverse's instrument and side lived ONLY in the journal, which is
+    # cleared on verified_flat — so the recovery record lost the identity of
+    # what had actually been bought or sold.
     return {"order_id": resolved.get("order_id"), "order_state": resolved.get("order_state"),
             "instrument": resolved.get("instrument"), "side": resolved.get("side"),
             "filled_amount": resolved.get("filled_amount"),
@@ -828,20 +649,13 @@ def _leg_exec_detail(resolved: dict) -> dict:
 
 
 def _adaptive_record_incomplete(structure: str, outcome: str, info: dict, meta: dict):
-    # IT: esito NON completo dell'executor condiviso (verified_flat o blocked) →
-    #     SEMPRE un record in trades.jsonl (mai silenzioso), con la prova COMPLETA
-    #     di recovery (A1): attempt_id, executed, gambe di ENTRY (`legs`, come
-    #     prima) e di REVERSE (`flatten` — order id/quantità/fee per gamba,
-    #     "error" presente solo se la ri-verifica non ha chiuso "filled"). Il
-    #     record va scritto e persistito su disco PRIMA di cancellare il journal:
-    #     il journal si cancella SOLO su verified_flat, e solo DOPO la write.
-    # EN: NON-complete outcome of the shared executor (verified_flat or blocked) →
-    #     ALWAYS a trades.jsonl record (never silent), with the COMPLETE recovery
-    #     evidence (A1): attempt_id, executed, ENTRY legs (`legs`, as before) and
-    #     REVERSE legs (`flatten` — per-leg order id/quantity/fee, "error" present
-    #     only when the re-verification did not resolve "filled"). The record is
-    #     written and persisted to disk BEFORE the journal is cleared: the journal
-    #     is cleared ONLY on verified_flat, and only AFTER the write.
+    # NON-complete outcome of the shared executor (verified_flat or blocked) →
+    # ALWAYS a trades.jsonl record (never silent), with the COMPLETE recovery
+    # evidence (A1): attempt_id, executed, ENTRY legs (`legs`, as before) and
+    # REVERSE legs (`flatten` — per-leg order id/quantity/fee, "error" present
+    # only when the re-verification did not resolve "filled"). The record is
+    # written and persisted to disk BEFORE the journal is cleared: the journal
+    # is cleared ONLY on verified_flat, and only AFTER the write.
     fills = info.get("fills", {})
     legs_filled = [n for n, f in fills.items() if (f.get("filled_amount") or 0.0) > 0.0]
     flatten = []
@@ -871,41 +685,24 @@ def _adaptive_record_incomplete(structure: str, outcome: str, info: dict, meta: 
 
 def _adaptive_run_structure(db: "DeribitTestnet", legs: list, execute: bool, timeout_s: float,
                             structure: str, amount: float, meta: dict):
-    # IT: executor journaled CONDIVISO fra open_butterfly e lo short straddle daily
-    #     adattivo (open_adaptive_straddle). `legs` = [(nome, strumento, verbo), ...]
-    #     nell'ORDINE di entry. Ritorna (outcome, info): outcome ∈ {complete,
-    #     verified_flat, blocked}; info porta sempre `fills` (per gamba di ENTRY,
-    #     l'ultima risoluzione nota) e, se non completo, `reason`. Contratto:
-    #     - begin PRIMA di qualunque ordine (raise se un journal esiste già);
-    #     - un leg "filled" prosegue; "terminal_partial" ferma con fill noto
-    #       (anche 0) e ABILITA la compensazione; "nonterminal" va ri-verificato
-    #       (cancel+get_order_state) PRIMA di qualunque compensazione; "ambiguous"
-    #       (iniziale o dopo ri-verifica, insieme a un "nonterminal" persistente)
-    #       ferma SENZA compensazione — status blocked_operator_review;
-    #     - il timeout si controlla PRIMA di ogni submission e DOPO ogni risposta
-    #       (anche l'ultima gamba): una struttura completata OLTRE il timeout non è
-    #       valida e passa comunque dalla regola di flatten;
-    #     - la compensazione rivende SOLO le quantità note, in ordine di entry
-    #       INVERSO, verbo opposto; il primo reverse non pienamente verificato
-    #       "filled" blocca (blocked_operator_review), altrimenti verified_flat.
-    # EN: journaled executor SHARED by open_butterfly and the adaptive daily short
-    #     straddle (open_adaptive_straddle). `legs` = [(name, instrument, verb), ...]
-    #     in ENTRY order. Returns (outcome, info): outcome ∈ {complete,
-    #     verified_flat, blocked}; info always carries `fills` (per ENTRY leg, the
-    #     last known resolution) and, when not complete, `reason`. Contract:
-    #     - begin BEFORE any order (raises if a journal already exists);
-    #     - a "filled" leg continues; "terminal_partial" stops with a known fill
-    #       (possibly 0) and ENABLES compensation; "nonterminal" must be
-    #       re-verified (cancel+get_order_state) BEFORE any compensation;
-    #       "ambiguous" (initial or after re-verification, together with a
-    #       persisting "nonterminal") stops WITHOUT compensation — status
-    #       blocked_operator_review;
-    #     - the timeout is checked BEFORE each submission and AFTER each response
-    #       (the final leg included): a structure completed PAST the timeout is
-    #       invalid and still goes through the flatten rule;
-    #     - compensation reverses ONLY known quantities, in REVERSE entry order,
-    #       opposite verb; the first reverse not fully verified "filled" blocks
-    #       (blocked_operator_review), else verified_flat.
+    # journaled executor SHARED by open_butterfly and the adaptive daily short
+    # straddle (open_adaptive_straddle). `legs` = [(name, instrument, verb), ...]
+    # in ENTRY order. Returns (outcome, info): outcome ∈ {complete,
+    # verified_flat, blocked}; info always carries `fills` (per ENTRY leg, the
+    # last known resolution) and, when not complete, `reason`. Contract:
+    # - begin BEFORE any order (raises if a journal already exists);
+    # - a "filled" leg continues; "terminal_partial" stops with a known fill
+    #   (possibly 0) and ENABLES compensation; "nonterminal" must be
+    #   re-verified (cancel+get_order_state) BEFORE any compensation;
+    #   "ambiguous" (initial or after re-verification, together with a
+    #   persisting "nonterminal") stops WITHOUT compensation — status
+    #   blocked_operator_review;
+    # - the timeout is checked BEFORE each submission and AFTER each response
+    #   (the final leg included): a structure completed PAST the timeout is
+    #   invalid and still goes through the flatten rule;
+    # - compensation reverses ONLY known quantities, in REVERSE entry order,
+    #   opposite verb; the first reverse not fully verified "filled" blocks
+    #   (blocked_operator_review), else verified_flat.
     if not (np.isfinite(amount) and amount > 0.0):
         raise RuntimeError(
             "amount non valido per l'executor adattivo, nessun ordine sottomesso / "
@@ -929,10 +726,8 @@ def _adaptive_run_structure(db: "DeribitTestnet", legs: list, execute: bool, tim
         _adaptive_journal_update(journal)
         resolved = _adaptive_submit_leg(db, execute, instrument, verb, amount, label)
         resolved["label"] = label
-        # IT: A2 — tempo di RICEZIONE locale della risposta (mai confuso col fill
-        #     dell'exchange in `exchange_fill_ts`, che classify/reclassify popolano).
-        # EN: A2 — local RECEIPT time of the response (never confused with the
-        #     exchange fill in `exchange_fill_ts`, populated by classify/reclassify).
+        # A2 — local RECEIPT time of the response (never confused with the
+        # exchange fill in `exchange_fill_ts`, populated by classify/reclassify).
         resolved["receipt_ts"] = time.time()
         entry_order.append((name, instrument, verb))
         cancel_err = state_err = None
@@ -943,12 +738,9 @@ def _adaptive_run_structure(db: "DeribitTestnet", legs: list, execute: bool, tim
             reclassified["label"] = label
             reclassified["receipt_ts"] = resolved["receipt_ts"]
             resolved = reclassified
-        # IT: identità CONCRETA della gamba, attaccata alla risoluzione FINALE (anche
-        #     a quella ri-classificata, che nasce da un dict nuovo) — è ciò che
-        #     _leg_exec_detail persiste e che sopravvive alla cancellazione del journal.
-        # EN: the leg's CONCRETE identity, attached to the FINAL resolution (the
-        #     re-classified one included, which is built from a fresh dict) — this is
-        #     what _leg_exec_detail persists and what survives the journal's clearing.
+        # the leg's CONCRETE identity, attached to the FINAL resolution (the
+        # re-classified one included, which is built from a fresh dict) — this is
+        # what _leg_exec_detail persists and what survives the journal's clearing.
         resolved["instrument"], resolved["side"] = instrument, verb
         _adaptive_journal_mark_leg(journal, "entry", name, resolved, cancel_err, state_err)
         fills[name] = resolved
@@ -961,7 +753,7 @@ def _adaptive_run_structure(db: "DeribitTestnet", legs: list, execute: bool, tim
         elif kind == "terminal_partial":
             incomplete_reason = f"terminal_partial_{name}"
         else:
-            # IT/EN: "nonterminal" persistente o "ambiguous" → nessuna compensazione.
+            # persistent "nonterminal" or "ambiguous" → no compensation.
             incomplete_reason = f"unresolved_{name}"
             allow_compensation = False
         break
@@ -980,12 +772,9 @@ def _adaptive_run_structure(db: "DeribitTestnet", legs: list, execute: bool, tim
         return "blocked", {"reason": incomplete_reason, "fills": fills,
                            "attempt_id": attempt_id, "executed": bool(execute), "reverses": {}}
 
-    # IT: A1 — record COMPLETO per gamba di reverse (order id/quantità/fee),
-    #     usato da _adaptive_record_incomplete per non perdere la prova di
-    #     recovery quando il journal viene cancellato.
-    # EN: A1 — COMPLETE per-leg reverse record (order id/quantity/fee), used by
-    #     _adaptive_record_incomplete so recovery evidence is not lost once the
-    #     journal is cleared.
+    # A1 — COMPLETE per-leg reverse record (order id/quantity/fee), used by
+    # _adaptive_record_incomplete so recovery evidence is not lost once the
+    # journal is cleared.
     reverses = {}
     reverse_fail = None
     for idx in range(len(entry_order) - 1, -1, -1):
@@ -1007,7 +796,7 @@ def _adaptive_run_structure(db: "DeribitTestnet", legs: list, execute: bool, tim
                 db, rev["order_id"], instrument, back_verb, filled_amt,
                 rev.get("filled_amount") or 0.0)
             rev["label"] = label
-        # IT/EN: idem per la gamba di compensazione — strumento e VERBO INVERSO.
+        # same for the compensation leg — instrument and REVERSE VERB.
         rev["instrument"], rev["side"] = instrument, back_verb
         _adaptive_journal_mark_leg(journal, "reverse", name, rev, cancel_err, state_err)
         reverses[name] = rev
@@ -1030,7 +819,7 @@ def _adaptive_run_structure(db: "DeribitTestnet", legs: list, execute: bool, tim
                              "reverses": reverses}
 
 
-# ──────────────────────────── persistenza ────────────────────────────
+# ──────────────────────────── persistence ────────────────────────────
 def append_forecast(row: dict):
     df_new = pd.DataFrame([row])
     if FORECASTS_PATH.exists():
@@ -1056,29 +845,22 @@ def save_position(pos: dict | None):
 
 
 def fee_btc(premium: float, amount: float = SIZE_CONTRACTS) -> float:
-    # IT: fee taker per contratto, cap al 12.5% del premio (schema Deribit opzioni).
-    #     `amount` parametrico per il sizing v2 (A14); default = costante v1.
-    # EN: per-contract taker fee, capped at 12.5% of premium (Deribit options schema).
-    #     `amount` parametric for v2 sizing (A14); default = v1 constant.
+    # per-contract taker fee, capped at 12.5% of premium (Deribit options schema).
+    # `amount` parametric for v2 sizing (A14); default = v1 constant.
     return min(FEE_PER_CONTRACT, FEE_CAP_FRAC * premium) * amount
 
 
-# ──────────────────────── diagnostica esecuzione (A6) ────────────────────────
+# ──────────────────────── execution diagnostics (A6) ────────────────────────
 def _leg_snapshot(db: DeribitTestnet, instrument: str) -> dict:
-    # IT: snapshot per-leg dal ticker: bid/ask reali (metà-spread = il costo che il
-    #     fill al mark ignora), mark, IV e greeks Deribit (delta teorico BS della
-    #     venue — stessa convenzione inverse/coin-settled del margin engine).
-    # EN: per-leg ticker snapshot: real bid/ask (half-spread = the cost mark-price
-    #     fills ignore), mark, IV and Deribit greeks (venue BS theoretical delta —
-    #     same inverse/coin-settled convention as the margin engine).
+    # per-leg ticker snapshot: real bid/ask (half-spread = the cost mark-price
+    # fills ignore), mark, IV and Deribit greeks (venue BS theoretical delta —
+    # same inverse/coin-settled convention as the margin engine).
     t = db.ticker(instrument)
     g = t.get("greeks") or {}
 
     def _f(v):
-        # IT: float finito o None (il testnet può dare campi assenti/null su strike
-        #     illiquidi — mai crashare, il delta si ricalcola offline dal mark_iv).
-        # EN: finite float or None (testnet may return missing/null fields on
-        #     illiquid strikes — never crash, delta is recomputable offline from mark_iv).
+        # finite float or None (testnet may return missing/null fields on
+        # illiquid strikes — never crash, delta is recomputable offline from mark_iv).
         try:
             v = float(v)
             return v if np.isfinite(v) else None
@@ -1096,21 +878,14 @@ def _leg_snapshot(db: DeribitTestnet, instrument: str) -> dict:
 
 
 def exec_diag_aggregate(legs: list, side: int, n_body: int = 2) -> dict:
-    # IT: aggregati di struttura per exec_diag, funzione PURA (testabile offline).
-    #     Il CORPO sono le prime `n_body` gambe (call, put ATM) e gli aggregati storici
-    #     — straddle_delta, net_delta, half_spread_btc, half_spread_frac — si calcolano
-    #     SOLO sul corpo, con la stessa aritmetica e lo stesso ordine di somma di prima:
-    #     su un record a 2 gambe l'output è bit-identico. Con più di `n_body` gambe si
-    #     aggiungono (e SOLO allora) i campi dell'intera struttura: n_legs, body_idx,
-    #     structure_delta_all, half_spread_btc_all, half_spread_frac_all. I consumatori
-    #     che misurano l'ATM leggono il corpo; chi vuole la struttura legge `_all`.
-    # EN: structure aggregates for exec_diag, PURE function (offline-testable). The
-    #     BODY is the first `n_body` legs (ATM call, put) and the historical aggregates
-    #     — straddle_delta, net_delta, half_spread_btc, half_spread_frac — are computed
-    #     on the body ONLY, same arithmetic and summation order as before: on a 2-leg
-    #     record the output is bit-identical. With more than `n_body` legs, and ONLY
-    #     then, whole-structure fields are added: n_legs, body_idx, structure_delta_all,
-    #     half_spread_btc_all, half_spread_frac_all.
+    # structure aggregates for exec_diag, PURE function (offline-testable). The
+    # BODY is the first `n_body` legs (ATM call, put) and the historical aggregates
+    # — straddle_delta, net_delta, half_spread_btc, half_spread_frac — are computed
+    # on the body ONLY, same arithmetic and summation order as before: on a 2-leg
+    # record the output is bit-identical. With more than `n_body` legs, and ONLY
+    # then, whole-structure fields are added: n_legs, body_idx, structure_delta_all,
+    # half_spread_btc_all, half_spread_frac_all. Consumers measuring the ATM read the
+    # body; those who want the structure read `_all`.
     def _agg(ls):
         d = None
         if all(l["delta"] is not None for l in ls):
@@ -1137,27 +912,16 @@ def exec_diag_aggregate(legs: list, side: int, n_body: int = 2) -> dict:
 
 
 def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
-    # IT: A6 (ROADMAP_VOL_BOOK, sequencing B3 step 1) — colonne SOLO diagnostiche,
-    #     la regola pre-registrata resta INTATTA (nessun input al trading). A ogni
-    #     tick orario logga bid/ask reali + delta teorico: (a) posizione aperta →
-    #     le 2 leg in essere (serie del delta lungo l'holding → stima offline del
-    #     valore dell'hedge, alimenta A1); (b) flat → lo straddle ATM che
-    #     open_straddle sceglierebbe ORA (serie half-spread di entry → rilettura
-    #     PnL net-of-half-spread a gate chiuso). Fail-soft: MAI un raise verso tick().
-    #     BUG B FIX: guardia contro un journal adattivo SOPRAVVISSUTO — se un tentativo
-    #     di entry è rimasto bloccato in QUESTO stesso tick (§tick), l'esposizione reale
-    #     è ignota: non si scrive uno snapshot "flat"/posizione fasulla mentre si aspetta
-    #     la review manuale.
-    # EN: A6 (ROADMAP_VOL_BOOK, B3 sequencing step 1) — diagnostic-ONLY columns,
-    #     the pre-registered rule stays UNTOUCHED (no input to trading). Each hourly
-    #     tick logs real bid/ask + theoretical delta: (a) open position → its 2 live
-    #     legs (delta series over the holding → offline hedge-value estimate, feeds
-    #     A1); (b) flat → the ATM straddle open_straddle would pick NOW (entry
-    #     half-spread series → post-gate net-of-half-spread PnL re-read). Fail-soft:
-    #     NEVER raises into tick().
-    #     BUG B FIX: guard against a SURVIVING adaptive journal — if an entry attempt
-    #     was left blocked in THIS very tick (§tick), the real exposure is unknown: do
-    #     not log a "flat"/fake-position snapshot while awaiting manual review.
+    # A6 (ROADMAP_VOL_BOOK, B3 sequencing step 1) — diagnostic-ONLY columns,
+    # the pre-registered rule stays UNTOUCHED (no input to trading). Each hourly
+    # tick logs real bid/ask + theoretical delta: (a) open position → its 2 live
+    # legs (delta series over the holding → offline hedge-value estimate, feeds
+    # A1); (b) flat → the ATM straddle open_straddle would pick NOW (entry
+    # half-spread series → post-gate net-of-half-spread PnL re-read). Fail-soft:
+    # NEVER raises into tick().
+    # BUG B FIX: guard against a SURVIVING adaptive journal — if an entry attempt
+    # was left blocked in THIS very tick (§tick), the real exposure is unknown: do
+    # not log a "flat"/fake-position snapshot while awaiting manual review.
     if adaptive_journal_present():
         return
     try:
@@ -1171,24 +935,16 @@ def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
             src, side = "atm_pick", 0
             strike, expiry_ms = float(pick["strike"]), int(pick["expiry_ms"])
             call, put = pick["call"], pick["put"]
-        # IT: gambe della struttura: il CORPO (call, put ATM) sempre per primo, poi le
-        #     eventuali gambe aggiuntive della posizione (`wings`, assenti oggi → lista
-        #     vuota, record a 2 gambe come sempre). L'ordine è il contratto che i
-        #     consumatori usano per isolare il corpo (`body_idx`).
-        # EN: structure legs: the BODY (ATM call, put) always first, then any extra legs
-        #     of the position (`wings`, absent today → empty list, 2-leg record as ever).
-        #     The order is the contract consumers use to isolate the body (`body_idx`).
+        # structure legs: the BODY (ATM call, put) always first, then any extra legs
+        # of the position (`wings`, absent today → empty list, 2-leg record as ever).
+        # The order is the contract consumers use to isolate the body (`body_idx`).
         extra = list((pos or {}).get("wings") or [])
         legs = [_leg_snapshot(db, inst) for inst in [call, put] + extra]
 
-        # IT: delta di struttura + delta netto (side×struttura; 0 da flat È il dato
-        #     corretto) e half-spread aggregato — il "haircut" che l'IVS ha dimostrato
-        #     essere decision-relevant — calcolati sul CORPO da exec_diag_aggregate;
-        #     i campi `_all` compaiono solo con più di 2 gambe.
-        # EN: structure delta + net delta (side×structure; 0 when flat IS the correct
-        #     datum) and aggregate half-spread — the "haircut" the IVS work proved
-        #     decision-relevant — computed on the BODY by exec_diag_aggregate; the
-        #     `_all` fields appear only with more than 2 legs.
+        # structure delta + net delta (side×structure; 0 when flat IS the correct
+        # datum) and aggregate half-spread — the "haircut" the IVS work proved
+        # decision-relevant — computed on the BODY by exec_diag_aggregate; the
+        # `_all` fields appear only with more than 2 legs.
         agg = exec_diag_aggregate(legs, side)
 
         rec = {"ts": str(pd.Timestamp.now(tz="UTC").floor("s")),
@@ -1199,53 +955,39 @@ def log_exec_diag(db: DeribitTestnet, path: Path = EXEC_DIAG_PATH):
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, default=str) + "\n")
     except Exception as e:
-        # IT: la diagnostica non deve mai costare un tick di trading.
-        # EN: diagnostics must never cost a trading tick.
+        # diagnostics must never cost a trading tick.
         log.warning(f"exec-diag (A6) fallito/failed — tick NON impattato: "
                     f"{type(e).__name__}: {e}")
 
 
-# ──────────────── funzioni gamma (A12/A13/A14 — lever v2, puri) ────────────────
+# ──────────────── gamma functions (A12/A13/A14 — v2 levers, pure) ────────────────
 def ww_band(fee: float, S: float, gamma_struct: float, lam: float,
             band_ref: float) -> float:
-    # IT: A12 — half-width della no-trade band asintotica di Whalley–Wilmott (1997)
-    #     sotto costi proporzionali: (3·k·S·Γ²/2λ)^(1/3), in spazio |delta_book|
-    #     BTC-eq (lo stesso della banda fissa). k = fee frazione del nozionale,
-    #     Γ = gamma di struttura in ∂δ/∂S (venue, × amount), λ = avversione al
-    #     rischio (CONGELATA alla pre-registrazione). Clip a [band_ref/4, 4·band_ref]:
-    #     un greek testnet assurdo non può né azzerare la banda (churn illimitato)
-    #     né spalancarla (delta nudo) — stesso spirito del bound MINOR-2.
-    # EN: A12 — asymptotic Whalley–Wilmott (1997) no-trade band half-width under
-    #     proportional costs: (3·k·S·Γ²/2λ)^(1/3), in |book_delta| BTC-eq space
-    #     (same as the fixed band). k = fee as notional fraction, Γ = structure
-    #     gamma in ∂δ/∂S (venue, × amount), λ = risk aversion (FROZEN at
-    #     pre-registration). Clipped to [band_ref/4, 4·band_ref]: an absurd
-    #     testnet greek can neither zero the band (unbounded churn) nor blow it
-    #     open (naked delta) — same spirit as the MINOR-2 bound.
+    # A12 — asymptotic Whalley–Wilmott (1997) no-trade band half-width under
+    # proportional costs: (3·k·S·Γ²/2λ)^(1/3), in |book_delta| BTC-eq space
+    # (same as the fixed band). k = fee as notional fraction, Γ = structure
+    # gamma in ∂δ/∂S (venue, × amount), λ = risk aversion (FROZEN at
+    # pre-registration). Clipped to [band_ref/4, 4·band_ref]: an absurd
+    # testnet greek can neither zero the band (unbounded churn) nor blow it
+    # open (naked delta) — same spirit as the MINOR-2 bound.
     h = (1.5 * fee * S * gamma_struct ** 2 / lam) ** (1.0 / 3.0)
     return float(min(max(h, band_ref / 4.0), band_ref * 4.0))
 
 
 def pin_close_due(strike: float, s_index: float, expiry_ms: float, now_ms: float,
                   max_hours: float, pin_band: float) -> bool:
-    # IT: A13a — True se la posizione è nella pin region a ridosso della scadenza:
-    #     0 < ore residue ≤ max_hours E |S−K|/S ≤ pin_band. A expiry passata (≤0)
-    #     ritorna False: lì il payoff è congelato, compete a maybe_settle.
-    # EN: A13a — True when the position sits in the pin region near expiry:
-    #     0 < hours left ≤ max_hours AND |S−K|/S ≤ pin_band. Past expiry (≤0)
-    #     returns False: payoff is frozen there, maybe_settle's jurisdiction.
+    # A13a — True when the position sits in the pin region near expiry:
+    # 0 < hours left ≤ max_hours AND |S−K|/S ≤ pin_band. Past expiry (≤0)
+    # returns False: payoff is frozen there, maybe_settle's jurisdiction.
     t_left_h = (expiry_ms - now_ms) / 3.6e6
     return 0.0 < t_left_h <= max_hours and abs(s_index - strike) / s_index <= pin_band
 
 
 def vega_sized_amount(vega_sum_usd: float, target_vega_usd: float,
                       max_contracts: float) -> float:
-    # IT: A14 — contratti per portare la vega di struttura al target: round a step
-    #     0.1 (granularità opzioni Deribit), floor 0.1, cap fail-safe. Input non
-    #     finiti/≤0 → 0.0 (il chiamante fa fallback alla size fissa).
-    # EN: A14 — contracts bringing structure vega to target: rounded to the 0.1
-    #     step (Deribit options granularity), 0.1 floor, fail-safe cap. Non-finite
-    #     or ≤0 inputs → 0.0 (caller falls back to fixed size).
+    # A14 — contracts bringing structure vega to target: rounded to the 0.1
+    # step (Deribit options granularity), 0.1 floor, fail-safe cap. Non-finite
+    # or ≤0 inputs → 0.0 (caller falls back to fixed size).
     if not (np.isfinite(vega_sum_usd) and vega_sum_usd > 0.0
             and np.isfinite(target_vega_usd) and target_vega_usd > 0.0):
         return 0.0
@@ -1254,20 +996,13 @@ def vega_sized_amount(vega_sum_usd: float, target_vega_usd: float,
 
 
 def maybe_pin_close(db: DeribitTestnet, pos: dict, pcfg: dict, execute: bool) -> bool:
-    # IT: A13a (V2, INERTE senza --pin-close-hours) — chiusura anticipata nella pin
-    #     region: a ≤x ore dalla scadenza con S nella banda |S−K|/S ≤ f il PnL
-    #     marginale è pin-risk (coin-flip su S vs K), non più la bet RV-vs-IV →
-    #     chiudi al market/mark e registra il trade con exit_mode="pin_close".
-    #     ⚠ Cambia la regola hold-to-expiry pre-registrata: SOLO v2. Fail-soft:
-    #     un errore lascia la posizione intatta (settlement resta il default).
-    #     Ritorna True se la posizione è stata chiusa.
-    # EN: A13a (V2, INERT without --pin-close-hours) — early close inside the pin
-    #     region: within ≤x hours of expiry with S inside |S−K|/S ≤ f, marginal
-    #     PnL is pin risk (coin-flip on S vs K), no longer the RV-vs-IV bet →
-    #     close at market/mark and record the trade with exit_mode="pin_close".
-    #     ⚠ Alters the pre-registered hold-to-expiry rule: v2 ONLY. Fail-soft:
-    #     any error leaves the position intact (settlement stays the default).
-    #     Returns True when the position was closed.
+    # A13a (V2, INERT without --pin-close-hours) — early close inside the pin
+    # region: within ≤x hours of expiry with S inside |S−K|/S ≤ f, marginal
+    # PnL is pin risk (coin-flip on S vs K), no longer the RV-vs-IV bet →
+    # close at market/mark and record the trade with exit_mode="pin_close".
+    # ⚠ Alters the pre-registered hold-to-expiry rule: v2 ONLY. Fail-soft:
+    # any error leaves the position intact (settlement stays the default).
+    # Returns True when the position was closed.
     try:
         s_idx = db.index_price()
         if not pin_close_due(float(pos["strike"]), s_idx, float(pos["expiry_ms"]),
@@ -1275,8 +1010,7 @@ def maybe_pin_close(db: DeribitTestnet, pos: dict, pcfg: dict, execute: bool) ->
             return False
         amt = float(pos.get("amount", SIZE_CONTRACTS))
         if execute:
-            # IT: chiusura = verbo opposto all'entry (long chiude vendendo).
-            # EN: closing = the verb opposite to entry (a long closes by selling).
+            # closing = the verb opposite to entry (a long closes by selling).
             verb = "sell" if pos["side"] > 0 else "buy"
             exit_c = db.market_order(pos["call"], verb, amt)
             exit_p = db.market_order(pos["put"], verb, amt)
@@ -1284,10 +1018,8 @@ def maybe_pin_close(db: DeribitTestnet, pos: dict, pcfg: dict, execute: bool) ->
             exit_c = db.mark_price(pos["call"])
             exit_p = db.mark_price(pos["put"])
         exit_fee = fee_btc(exit_c, amt) + fee_btc(exit_p, amt)
-        # IT: PnL = side·(premio uscita − premio entrata)·amount − fee entry − fee exit
-        #     (stessa convenzione BTC/contratto di maybe_settle).
-        # EN: PnL = side·(exit premium − entry premium)·amount − entry fee − exit fee
-        #     (same BTC-per-contract convention as maybe_settle).
+        # PnL = side·(exit premium − entry premium)·amount − entry fee − exit fee
+        # (same BTC-per-contract convention as maybe_settle).
         pnl = pos["side"] * ((exit_c + exit_p) - (pos["prem_call"] + pos["prem_put"])) \
             * amt - pos["fee_btc"] - exit_fee
         rec = {**pos, "exit_prem_call": exit_c, "exit_prem_put": exit_p,
@@ -1307,7 +1039,7 @@ def maybe_pin_close(db: DeribitTestnet, pos: dict, pcfg: dict, execute: bool) ->
         return False
 
 
-# ──────────────────── leg delta-hedge perp (V2, B2/A1) ────────────────────
+# ──────────────────── perp delta-hedge leg (V2, B2/A1) ────────────────────
 def load_hedge_state() -> dict | None:
     if HEDGE_STATE_PATH.exists():
         return json.loads(HEDGE_STATE_PATH.read_text(encoding="utf-8"))
@@ -1315,10 +1047,8 @@ def load_hedge_state() -> dict | None:
 
 
 def save_hedge_state(st: dict | None):
-    # IT: write atomica (.tmp + os.replace) — pattern safety-net del repo (audit
-    #     MINOR-1: un crash tra fill e write lascerebbe uno stato stale → doppio hedge).
-    # EN: atomic write (.tmp + os.replace) — repo safety-net pattern (MINOR-1
-    #     audit: a crash between fill and write would leave stale state → double hedge).
+    # atomic write (.tmp + os.replace) — repo safety-net pattern (MINOR-1
+    # audit: a crash between fill and write would leave stale state → double hedge).
     if st is None:
         HEDGE_STATE_PATH.unlink(missing_ok=True)
     else:
@@ -1333,12 +1063,9 @@ def _hedge_ledger_append(rec: dict):
 
 
 def _perp_trade(db: DeribitTestnet, dh_usd: float, execute: bool) -> float:
-    # IT: esegue il delta-ordine perp (USD firmati: >0 buy, <0 sell) e ritorna il
-    #     prezzo di fill. Senza --execute il fill è simulato al mark del perp —
-    #     stessa convenzione zero-rumore dei fill opzioni (spread perp ~1bp).
-    # EN: executes the perp delta-order (signed USD: >0 buy, <0 sell) and returns
-    #     the fill price. Without --execute the fill is simulated at the perp mark —
-    #     same zero-noise convention as option fills (perp spread ~1bp).
+    # executes the perp delta-order (signed USD: >0 buy, <0 sell) and returns
+    # the fill price. Without --execute the fill is simulated at the perp mark —
+    # same zero-noise convention as option fills (perp spread ~1bp).
     if execute:
         verb = "buy" if dh_usd > 0 else "sell"
         return db.market_order(PERP_INSTRUMENT, verb, abs(dh_usd))
@@ -1346,8 +1073,7 @@ def _perp_trade(db: DeribitTestnet, dh_usd: float, execute: bool) -> float:
 
 
 def _flatten_hedge(db: DeribitTestnet, st: dict, hcfg: dict, execute: bool, reason: str):
-    # IT: chiude l'intera leg perp residua (settlement o cambio struttura sotto hedge).
-    # EN: closes the whole residual perp leg (settlement or structure change under hedge).
+    # closes the whole residual perp leg (settlement or structure change under hedge).
     h_usd = float(st.get("h_usd", 0.0))
     if abs(h_usd) < PERP_CONTRACT_USD:
         save_hedge_state(None)
@@ -1363,14 +1089,10 @@ def _flatten_hedge(db: DeribitTestnet, st: dict, hcfg: dict, execute: bool, reas
 
 
 def reconcile_hedge_state(db: DeribitTestnet):
-    # IT: audit MINOR-1 — all'avvio con --execute allinea lo stato locale alla
-    #     posizione perp REALE del venue: un crash tra fill e write dello stato
-    #     non può più produrre un doppio hedge al restart. Se divergono adotta
-    #     il venue (è la verità contabile) e logga l'evento nel ledger.
-    # EN: MINOR-1 audit — at --execute startup, aligns local state with the
-    #     venue's REAL perp position: a crash between fill and state write can
-    #     no longer produce a double hedge on restart. On divergence the venue
-    #     wins (it is the accounting truth) and the event is ledgered.
+    # MINOR-1 audit — at --execute startup, aligns local state with the
+    # venue's REAL perp position: a crash between fill and state write can
+    # no longer produce a double hedge on restart. On divergence the venue
+    # wins (it is the accounting truth) and the event is ledgered.
     try:
         h_venue = db.perp_position_usd(PERP_INSTRUMENT)
     except Exception as e:
@@ -1398,22 +1120,14 @@ def reconcile_hedge_state(db: DeribitTestnet):
 
 
 def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
-    # IT: V2 (B2/A1) — mantiene delta_book ≈ 0 col perp inverse, MA solo oltre la
-    #     no-trade band (isteresi anti-churn, dry-run 07-10: sull'ATM il ribilancio
-    #     è drag puro). Convenzione delta dal venue (greeks del ticker), parametrica:
-    #     'raw' = Σdelta leg (∂V_usd/∂S) · 'adj' = Σdelta − Σmark (BTC-terms,
-    #     coerente con lo slope −0.98 sui mark mainnet, verdetto 07-08). Nozionale:
-    #     delta_book (BTC-eq) = side·δ_conv·size + H_usd/S → target H*_usd =
-    #     −side·δ_conv·size·S. Errori: log.error, MAI un raise verso tick()
-    #     (la leg opzioni pre-registrata non deve mai perdere un tick).
-    # EN: V2 (B2/A1) — keeps book delta ≈ 0 with the inverse perp, but ONLY beyond
-    #     the no-trade band (anti-churn hysteresis; 07-10 dry-run: ATM rebalancing
-    #     is pure drag). Venue delta convention (ticker greeks), parametric:
-    #     'raw' = Σ leg delta (∂V_usd/∂S) · 'adj' = Σdelta − Σmark (BTC-terms,
-    #     consistent with the −0.98 mainnet-mark slope, 07-08 verdict). Notional:
-    #     book_delta (BTC-eq) = side·δ_conv·size + H_usd/S → target H*_usd =
-    #     −side·δ_conv·size·S. Errors: log.error, NEVER raised into tick()
-    #     (the pre-registered options leg must never lose a tick).
+    # V2 (B2/A1) — keeps book delta ≈ 0 with the inverse perp, but ONLY beyond
+    # the no-trade band (anti-churn hysteresis; 07-10 dry-run: ATM rebalancing
+    # is pure drag). Venue delta convention (ticker greeks), parametric:
+    # 'raw' = Σ leg delta (∂V_usd/∂S) · 'adj' = Σdelta − Σmark (BTC-terms,
+    # consistent with the −0.98 mainnet-mark slope, 07-08 verdict). Notional:
+    # book_delta (BTC-eq) = side·δ_conv·size + H_usd/S → target H*_usd =
+    # −side·δ_conv·size·S. Errors: log.error, NEVER raised into tick()
+    # (the pre-registered options leg must never lose a tick).
     try:
         pos = load_position()
         st = load_hedge_state()
@@ -1422,23 +1136,15 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
             pos_key = {"side": int(pos["side"]), "strike": float(pos["strike"]),
                        "expiry_ms": int(pos["expiry_ms"])}
 
-        # IT: audit MAJOR-1 — a expiry passata le opzioni sono MORTE (payoff
-        #     congelato al TWAP 07:30-08:00 UTC) anche se il delivery price non è
-        #     ancora pubblicato e position.json esiste ancora: tenere il perp
-        #     sarebbe delta NUDO attribuito alla leg hedge (bias sistematico
-        #     contro il gate hedged-vs-unhedged). Flatten indipendente dal
-        #     bookkeeping del settlement.
-        # EN: MAJOR-1 audit — past expiry the options are DEAD (payoff frozen at
-        #     the 07:30-08:00 UTC TWAP) even while the delivery price is not yet
-        #     published and position.json still exists: keeping the perp would be
-        #     NAKED delta charged to the hedge leg (systematic bias against the
-        #     hedged-vs-unhedged gate). Flatten independently of settlement bookkeeping.
+        # MAJOR-1 audit — past expiry the options are DEAD (payoff frozen at
+        # the 07:30-08:00 UTC TWAP) even while the delivery price is not yet
+        # published and position.json still exists: keeping the perp would be
+        # NAKED delta charged to the hedge leg (systematic bias against the
+        # hedged-vs-unhedged gate). Flatten independently of settlement bookkeeping.
         expired = pos is not None and time.time() * 1000 >= float(pos["expiry_ms"])
 
-        # IT: flatten se il book è flat, la struttura è cambiata sotto l'hedge,
-        #     o la struttura è scaduta (vedi sopra).
-        # EN: flatten if the book is flat, the structure changed under the hedge,
-        #     or the structure expired (see above).
+        # flatten if the book is flat, the structure changed under the hedge,
+        # or the structure expired (see above).
         if st is not None and (pos is None or expired
                                or st.get("position_key") != pos_key):
             _flatten_hedge(db, st, hcfg, execute,
@@ -1451,8 +1157,7 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
         legs = [_leg_snapshot(db, pos["call"]), _leg_snapshot(db, pos["put"])]
         if any(l["delta"] is None or l["mark"] is None or l["underlying"] is None
                for l in legs):
-            # IT: meglio saltare un ribilancio che hedgiare con un delta sbagliato.
-            # EN: better to skip one rebalance than hedge with a wrong delta.
+            # better to skip one rebalance than hedge with a wrong delta.
             log.warning("hedge: greeks/mark assenti su una leg — ribilanciamento "
                         "saltato questo tick / missing greeks — rebalance skipped")
             return
@@ -1460,13 +1165,9 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
         d_raw = float(sum(l["delta"] for l in legs))
         m_sum = float(sum(l["mark"] for l in legs))
         d_conv = d_raw if hcfg["conv"] == "raw" else d_raw - m_sum
-        # IT: audit MINOR-2 — bound analitico dello straddle: |δ_raw| ≤ 1
-        #     (call∈[0,1], put∈[−1,0]), |δ_adj| ≤ 1 + Σmark; un greek testnet
-        #     numericamente assurdo dimensionerebbe un hedge macroscopico →
-        #     skip fail-soft (margine 0.10 per tolleranza di quotazione).
-        # EN: MINOR-2 audit — analytic straddle bound: |δ_raw| ≤ 1, |δ_adj| ≤
-        #     1 + Σmark; a numerically absurd testnet greek would size a
-        #     macroscopic hedge → fail-soft skip (0.10 quoting-tolerance margin).
+        # MINOR-2 audit — analytic straddle bound: |δ_raw| ≤ 1, |δ_adj| ≤
+        # 1 + Σmark; a numerically absurd testnet greek would size a
+        # macroscopic hedge → fail-soft skip (0.10 quoting-tolerance margin).
         d_bound = 1.0 + (m_sum if hcfg["conv"] == "adj" else 0.0) + 0.10
         if abs(d_conv) > d_bound:
             log.warning(f"hedge: delta implausibile |{d_conv:.3f}| > bound "
@@ -1477,12 +1178,9 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
         amt = float(pos.get("amount", SIZE_CONTRACTS))
         h_usd_cur = float(st["h_usd"]) if st else 0.0
 
-        # IT: A12 — banda effettiva: fissa (default, design storico) o Whalley–
-        #     Wilmott gamma-scalata (∝ Γ^(2/3), vedi ww_band). Fail-soft: greeks
-        #     gamma assenti → fallback alla banda fissa congelata.
-        # EN: A12 — effective band: fixed (default, legacy design) or gamma-scaled
-        #     Whalley–Wilmott (∝ Γ^(2/3), see ww_band). Fail-soft: missing gamma
-        #     greeks → fallback to the frozen fixed band.
+        # A12 — effective band: fixed (default, legacy design) or gamma-scaled
+        # Whalley–Wilmott (∝ Γ^(2/3), see ww_band). Fail-soft: missing gamma
+        # greeks → fallback to the frozen fixed band.
         band_eff = hcfg["band"]
         if hcfg.get("band_mode") == "ww":
             gammas = [l["gamma"] for l in legs]
@@ -1494,11 +1192,10 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
                 log.warning("hedge ww: gamma assente su una leg — banda fissa "
                             "questo tick / missing gamma — fixed band this tick")
 
-        # IT: delta del book in BTC-equivalenti (opzioni + perp già in essere).
-        # EN: book delta in BTC-equivalents (options + perp already on).
+        # book delta in BTC-equivalents (options + perp already on).
         book_delta = side * d_conv * amt + h_usd_cur / S
         if abs(book_delta) < band_eff:
-            return                                     # dentro la banda / inside the band
+            return                                     # inside the band
         h_usd_target = -side * d_conv * amt * S
         dh = h_usd_target - h_usd_cur
         dh = float(np.round(dh / PERP_CONTRACT_USD) * PERP_CONTRACT_USD)
@@ -1526,37 +1223,28 @@ def maybe_hedge(db: DeribitTestnet, hcfg: dict, execute: bool):
                   f"{type(e).__name__}: {e}", exc_info=True)
 
 
-# ──────────────────────────── ciclo di trade ────────────────────────────
+# ──────────────────────────── trade cycle ────────────────────────────
 def maybe_settle(db: DeribitTestnet, pos: dict) -> bool:
-    # IT: se l'expiry è passata e il delivery price è pubblicato: P&L cash-settled
-    #     (opzioni inverse: payoff straddle = |S−K|/S_del in BTC/contratto) → trades.jsonl.
-    # EN: if expiry has passed and the delivery price is out: cash-settled P&L
-    #     (inverse options: straddle payoff = |S−K|/S_del in BTC/contract) → trades.jsonl.
+    # if expiry has passed and the delivery price is out: cash-settled P&L
+    # (inverse options: straddle payoff = |S−K|/S_del in BTC/contract) → trades.jsonl.
     if time.time() * 1000 < pos["expiry_ms"]:
         return False
     dp = db.delivery_price(pos["expiry_ms"])
     if dp is None:
         log.info("expiry passata ma delivery price non ancora pubblicato — riprovo al prossimo tick")
         return False
-    # IT: amount dalla posizione (A14-ready); fallback = costante v1 → bit-identico
-    #     per le posizioni storiche (amount è sempre stato SIZE_CONTRACTS).
-    # EN: amount from the position (A14-ready); fallback = v1 constant → bit-identical
-    #     for historical positions (amount has always been SIZE_CONTRACTS).
+    # amount from the position (A14-ready); fallback = v1 constant → bit-identical
+    # for historical positions (amount has always been SIZE_CONTRACTS).
     amt = float(pos.get("amount", SIZE_CONTRACTS))
     payoff = abs(dp - pos["strike"]) / dp * amt
     premium = (pos["prem_call"] + pos["prem_put"]) * amt
     extra = {}
     if pos.get("wings"):
-        # IT: iron butterfly (--adaptive): le ali LONG pagano max(S−Kc,0)/S e max(Kp−S,0)/S
-        #     in BTC/contratto e il loro premio è stato PAGATO. Il PnL è quello dello
-        #     straddle corto più quello dello strangle lungo: side·((payoff_corpo −
-        #     payoff_ali) − (premio_corpo − premio_ali)) − fee. Le posizioni a 2 gambe
-        #     non entrano qui: la formula v1 sotto è invariata.
-        # EN: iron butterfly (--adaptive): the LONG wings pay max(S−Kc,0)/S and
-        #     max(Kp−S,0)/S in BTC/contract and their premium was PAID. PnL is the short
-        #     straddle's plus the long strangle's: side·((body_payoff − wing_payoff) −
-        #     (body_premium − wing_premium)) − fee. 2-leg positions never enter here:
-        #     the v1 formula below is unchanged.
+        # iron butterfly (--adaptive): the LONG wings pay max(S−Kc,0)/S and
+        # max(Kp−S,0)/S in BTC/contract and their premium was PAID. PnL is the short
+        # straddle's plus the long strangle's: side·((body_payoff − wing_payoff) −
+        # (body_premium − wing_premium)) − fee. 2-leg positions never enter here:
+        # the v1 formula below is unchanged.
         kc, kp = pos["wing_strikes"]
         payoff_wings = (max(dp - kc, 0.0) + max(kp - dp, 0.0)) / dp * amt
         premium_wings = (pos["prem_wing_call"] + pos["prem_wing_put"]) * amt
@@ -1578,14 +1266,10 @@ def maybe_settle(db: DeribitTestnet, pos: dict) -> bool:
 
 def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool,
                   size_cfg: dict | None = None) -> dict:
-    # IT: apre lo straddle (LONG side=+1 compra, SHORT side=−1 vende). Senza --execute
-    #     i fill sono simulati al mark price (zero rumore di fill, pre-registrato).
-    #     A14 (V2, size_cfg non-None): amount = target_vega/Σν all'entry (bet uniforme
-    #     in spazio-vol); fail-soft alla size fissa se le vega venue mancano.
-    # EN: opens the straddle (LONG side=+1 buys, SHORT side=−1 sells). Without
-    #     --execute, fills are simulated at mark price (zero fill noise, pre-registered).
-    #     A14 (V2, non-None size_cfg): amount = target_vega/Σν at entry (uniform bet
-    #     in vol space); fail-soft to fixed size when venue vegas are missing.
+    # opens the straddle (LONG side=+1 buys, SHORT side=−1 sells). Without
+    # --execute, fills are simulated at mark price (zero fill noise, pre-registered).
+    # A14 (V2, non-None size_cfg): amount = target_vega/Σν at entry (uniform bet
+    # in vol space); fail-soft to fixed size when venue vegas are missing.
     pick = db.pick_straddle(TENOR_HOURS)
     amount = SIZE_CONTRACTS
     if size_cfg is not None:
@@ -1624,27 +1308,20 @@ def open_straddle(db: DeribitTestnet, side: int, sig: dict, execute: bool,
 
 
 def _adaptive_log(rec: dict):
-    # IT/EN: diario della regola adattiva (banda, DVOL, esito) — file creato SOLO con --adaptive.
+    # adaptive-rule journal (band, DVOL, outcome) — file created ONLY with --adaptive.
     with open(ADAPTIVE_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, default=str) + "\n")
 
 
 def open_butterfly(db: DeribitTestnet, pick: dict, execute: bool, timeout_s: float,
                    meta: dict) -> dict | None:
-    # IT: apre lo short iron butterfly via l'executor journaled condiviso
-    #     (_adaptive_run_structure), ali PRIMA (buy) e corpo DOPO (sell): fra i fill
-    #     la struttura incompleta è long gamma. Ogni esito non-completo (verified_flat
-    #     o blocked) passa da _adaptive_record_incomplete: su verified_flat ogni
-    #     gamba nota risulta riacquistata, ma su blocked (esito ambiguo o reverse
-    #     falliti) può restare un'esposizione RESIDUA non verificata — nessuna
-    #     garanzia di flat automatico oltre il tick, serve review manuale.
-    # EN: opens the short iron butterfly via the shared journaled executor
-    #     (_adaptive_run_structure), wings FIRST (buy) and body AFTER (sell): between
-    #     fills the incomplete structure is long gamma. Every non-complete outcome
-    #     (verified_flat or blocked) goes through _adaptive_record_incomplete: on
-    #     verified_flat every known leg was bought back, but on blocked (ambiguous
-    #     outcome or failed reverses) RESIDUAL unverified exposure can remain — no
-    #     guarantee of automatic flat beyond the tick, manual review is required.
+    # opens the short iron butterfly via the shared journaled executor
+    # (_adaptive_run_structure), wings FIRST (buy) and body AFTER (sell): between
+    # fills the incomplete structure is long gamma. Every non-complete outcome
+    # (verified_flat or blocked) goes through _adaptive_record_incomplete: on
+    # verified_flat every known leg was bought back, but on blocked (ambiguous
+    # outcome or failed reverses) RESIDUAL unverified exposure can remain — no
+    # guarantee of automatic flat beyond the tick, manual review is required.
     legs = [("wing_call", pick["wing_call"], "buy"), ("wing_put", pick["wing_put"], "buy"),
             ("call", pick["call"], "sell"), ("put", pick["put"], "sell")]
     amount = SIZE_CONTRACTS
@@ -1671,21 +1348,14 @@ def open_butterfly(db: DeribitTestnet, pick: dict, execute: bool, timeout_s: flo
         "prem_call": fills["call"]["average_price"], "prem_put": fills["put"]["average_price"],
         "prem_wing_call": fills["wing_call"]["average_price"],
         "prem_wing_put": fills["wing_put"]["average_price"],
-        # IT: la size v1 resta la stima da schedule (invariante per maybe_settle);
-        #     l'osservata è un campo AGGIUNTIVO, MAI None spacciata da 0.
-        # EN: the v1 size stays the schedule estimate (invariant for maybe_settle);
-        #     the observed one is an ADDITIONAL field, NEVER a None disguised as 0.
+        # the v1 size stays the schedule estimate (invariant for maybe_settle);
+        # the observed one is an ADDITIONAL field, NEVER a None disguised as 0.
         "fee_btc": fee, "fee_btc_source": "schedule_estimate",
         "fee_btc_observed": (sum(fee_obs_all) if all(f is not None for f in fee_obs_all) else None),
-        # IT: A2 — DUE misure distinte: receipt_span_s (tempo locale di risposta,
-        #     sempre disponibile) e fill_span_s (span dei fill VERIFICATI
-        #     dall'exchange, None + fill_timing_source="unavailable" se anche una
-        #     sola gamba non porta un trade reale — mai il tempo di ricezione
-        #     spacciato per il fill).
-        # EN: A2 — TWO distinct measures: receipt_span_s (local response time,
-        #     always available) and fill_span_s (span of exchange-VERIFIED fills,
-        #     None + fill_timing_source="unavailable" if even one leg lacks a real
-        #     trade — never the receipt time passed off as the fill).
+        # A2 — TWO distinct measures: receipt_span_s (local response time,
+        # always available) and fill_span_s (span of exchange-VERIFIED fills,
+        # None + fill_timing_source="unavailable" if even one leg lacks a real
+        # trade — never the receipt time passed off as the fill).
         "receipt_span_s": round(fills["put"]["receipt_ts"] - fills["wing_call"]["receipt_ts"], 3),
         "receipt_ts": {k: str(pd.Timestamp(fills[k]["receipt_ts"], unit="s", tz="UTC"))
                       for k in ("wing_call", "wing_put", "call", "put")},
@@ -1706,16 +1376,11 @@ def open_butterfly(db: DeribitTestnet, pick: dict, execute: bool, timeout_s: flo
 
 def open_adaptive_straddle(db: DeribitTestnet, sig: dict, execute: bool, timeout_s: float,
                            meta: dict) -> dict | None:
-    # IT: apre lo short straddle daily adattivo via l'executor journaled condiviso.
-    #     SEMPRE side=-1 (short): il disegno adattivo non prevede il ramo LONG sulla
-    #     banda daily. Specchia le chiavi di posizione di open_straddle (v1, usato
-    #     invariato dal path non-adattivo) ma con durabilità completa — journal,
-    #     verifica strutturata, compensazione — al posto del fill diretto.
-    # EN: opens the adaptive daily short straddle via the shared journaled executor.
-    #     ALWAYS side=-1 (short): the adaptive design has no LONG branch on the daily
-    #     band. Mirrors open_straddle's (v1, used unchanged by the non-adaptive path)
-    #     position keys but with full durability — journal, structured verification,
-    #     compensation — instead of a direct fill.
+    # opens the adaptive daily short straddle via the shared journaled executor.
+    # ALWAYS side=-1 (short): the adaptive design has no LONG branch on the daily
+    # band. Mirrors open_straddle's (v1, used unchanged by the non-adaptive path)
+    # position keys but with full durability — journal, structured verification,
+    # compensation — instead of a direct fill.
     pick = db.pick_straddle(TENOR_HOURS)
     amount = SIZE_CONTRACTS
     legs = [("call", pick["call"], "sell"), ("put", pick["put"], "sell")]
@@ -1751,20 +1416,13 @@ def open_adaptive_straddle(db: DeribitTestnet, sig: dict, execute: bool, timeout
 
 def adaptive_entry(fc: VolForecaster, db: DeribitTestnet, execute: bool, acfg: dict,
                    sig: dict, now: pd.Timestamp) -> str:
-    # IT: regola d'entry adattiva, da FLAT. Legge il DVOL (fail-fast → NO_DVOL, flat),
-    #     sceglie la banda: daily → short straddle SOLO al tick delle 08 UTC (altrimenti
-    #     WAIT_HOUR, nessun ordine né journal) via l'executor journaled; fly → farfalla
-    #     SOLO al tick delle 08 UTC del venerdì (7 DTE esatti), altrimenti WAIT_FRIDAY.
-    #     L'esito non-completo dell'executor (verified_flat/blocked) si legge dalla
-    #     presenza del journal DOPO la chiamata: pos=None + journal presente = blocked,
-    #     pos=None + journal assente = verified_flat (compensazione riuscita).
-    # EN: adaptive entry rule, from FLAT. Reads the DVOL (fail-fast → NO_DVOL, flat),
-    #     picks the band: daily → short straddle ONLY at the 08 UTC tick (else
-    #     WAIT_HOUR, no order and no journal) via the journaled executor; fly →
-    #     butterfly ONLY at the Friday 08 UTC tick (exactly 7 DTE), else WAIT_FRIDAY.
-    #     The executor's non-complete outcome (verified_flat/blocked) is read from the
-    #     journal's presence AFTER the call: pos=None + journal present = blocked,
-    #     pos=None + journal absent = verified_flat (compensation succeeded).
+    # adaptive entry rule, from FLAT. Reads the DVOL (fail-fast → NO_DVOL, flat),
+    # picks the band: daily → short straddle ONLY at the 08 UTC tick (else
+    # WAIT_HOUR, no order and no journal) via the journaled executor; fly →
+    # butterfly ONLY at the Friday 08 UTC tick (exactly 7 DTE), else WAIT_FRIDAY.
+    # The executor's non-complete outcome (verified_flat/blocked) is read from the
+    # journal's presence AFTER the call: pos=None + journal present = blocked,
+    # pos=None + journal absent = verified_flat (compensation succeeded).
     dv = read_dvol()
     rec = {"ts": str(now.floor("s")), "dvol": None, "band": None, "action": None}
     if dv is None:
@@ -1803,20 +1461,13 @@ def adaptive_entry(fc: VolForecaster, db: DeribitTestnet, execute: bool, acfg: d
 def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
          hedge_cfg: dict | None = None, pin_cfg: dict | None = None,
          size_cfg: dict | None = None, adaptive_cfg: dict | None = None):
-    # IT: un ciclo completo: settlement → pin-close (SOLO v2) → forecast → IV →
-    #     regola → log (sempre) → hedge (SOLO v2). Tutti i cfg=None = v1 bit-identico.
-    # EN: one full cycle: settlement → pin-close (v2 ONLY) → forecast → IV → rule
-    #     → log (always) → hedge (v2 ONLY). All cfg=None = bit-identical v1.
-    # IT: guard di riavvio — PRIMA di qualunque altra cosa nel tick (load_position,
-    #     settlement, pin-close, forecast, IV, adaptive, log, hedge): la sola
-    #     PRESENZA del journal (anche corrotto — non lo si analizza mai) salta
-    #     l'intero tick. Vale a prescindere da adaptive_cfg: un tentativo interrotto
-    #     non deve mai riprendere in autonomia, nemmeno tornando al path v1.
-    # EN: restart guard — BEFORE anything else in the tick (load_position,
-    #     settlement, pin-close, forecast, IV, adaptive, log, hedge): the journal's
-    #     mere PRESENCE (even corrupt — never parsed) skips the whole tick. Holds
-    #     regardless of adaptive_cfg: an interrupted attempt must never resume on
-    #     its own, not even by falling back to the v1 path.
+    # one full cycle: settlement → pin-close (v2 ONLY) → forecast → IV → rule
+    # → log (always) → hedge (v2 ONLY). All cfg=None = bit-identical v1.
+    # restart guard — BEFORE anything else in the tick (load_position,
+    # settlement, pin-close, forecast, IV, adaptive, log, hedge): the journal's
+    # mere PRESENCE (even corrupt — never parsed) skips the whole tick. Holds
+    # regardless of adaptive_cfg: an interrupted attempt must never resume on
+    # its own, not even by falling back to the v1 path.
     if adaptive_journal_present():
         log.error("journal adattivo presente — tick SALTATO, serve review manuale "
                   "(il riavvio NON risolve) / adaptive journal present — tick "
@@ -1825,10 +1476,8 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
     pos = load_position()
     if pos is not None and maybe_settle(db, pos):
         pos = None
-    # IT: A13a — dopo il settlement (expiry passata compete a maybe_settle) e prima
-    #     della regola di entry: un pin-close libera il libro nello stesso tick.
-    # EN: A13a — after settlement (past expiry belongs to maybe_settle) and before
-    #     the entry rule: a pin-close frees the book within the same tick.
+    # A13a — after settlement (past expiry belongs to maybe_settle) and before
+    # the entry rule: a pin-close frees the book within the same tick.
     if pos is not None and pin_cfg is not None and maybe_pin_close(db, pos, pin_cfg, execute):
         pos = None
 
@@ -1849,14 +1498,10 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
         else:
             row["action"] = "FLAT"
     sig = {"edge": row["edge"], "rv_pred": f["rv_pred"], "var_iv": row["var_iv"]}
-    # IT: --adaptive — da FLAT la decisione NON è il segnale NN ma la banda DVOL; la
-    #     riga del forecasts log porta l'azione adattiva (prefisso ADAPT_) e il segnale
-    #     resta registrato (edge/rv_pred/var_iv) per le analisi. Con adaptive_cfg=None
-    #     nulla cambia: v1 bit-identico.
-    # EN: --adaptive — from FLAT the decision is NOT the NN signal but the DVOL band; the
-    #     forecasts-log row carries the adaptive action (ADAPT_ prefix) and the signal is
-    #     still recorded (edge/rv_pred/var_iv) for analysis. With adaptive_cfg=None
-    #     nothing changes: bit-identical v1.
+    # --adaptive — from FLAT the decision is NOT the NN signal but the DVOL band; the
+    # forecasts-log row carries the adaptive action (ADAPT_ prefix) and the signal is
+    # still recorded (edge/rv_pred/var_iv) for analysis. With adaptive_cfg=None
+    # nothing changes: bit-identical v1.
     if adaptive_cfg is not None:
         row["action"] = ("ADAPT_HOLD" if pos is not None else
                          adaptive_entry(fc, db, execute, adaptive_cfg, sig,
@@ -1870,21 +1515,13 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
     if adaptive_cfg is None and row["action"] in ("LONG", "SHORT"):
         open_straddle(db, +1 if row["action"] == "LONG" else -1, sig, execute, size_cfg)
 
-    # IT: BUG B FIX — se l'entry adattiva di QUESTO tick ha lasciato un journal
-    #     aperto (esito "blocked_operator_review", riga forecast ADAPT_BLOCKED già
-    #     scritta sopra da append_forecast), la coda diagnostica/hedge si SALTA: la
-    #     riconciliazione del reverse-ledger è già stata persistita in trades.jsonl
-    #     PRIMA che il journal restasse aperto (§_adaptive_record_incomplete), qui
-    #     si evita solo di aggiungere uno snapshot exec_diag/hedge su un'esposizione
-    #     non verificata. Nessuna garanzia nuova di "mai nudo"/"gamma long garantito":
-    #     resta la review manuale.
-    # EN: BUG B FIX — if THIS tick's adaptive entry left a journal open
-    #     ("blocked_operator_review" outcome, ADAPT_BLOCKED forecast row already
-    #     written above by append_forecast), the diagnostic/hedge tail is SKIPPED:
-    #     reverse-ledger reconciliation was already persisted to trades.jsonl BEFORE
-    #     the journal stayed open (§_adaptive_record_incomplete), this only avoids
-    #     adding an exec_diag/hedge snapshot on unverified exposure. No new "never
-    #     naked"/"guaranteed long gamma" guarantee: manual review still applies.
+    # BUG B FIX — if THIS tick's adaptive entry left a journal open
+    # ("blocked_operator_review" outcome, ADAPT_BLOCKED forecast row already
+    # written above by append_forecast), the diagnostic/hedge tail is SKIPPED:
+    # reverse-ledger reconciliation was already persisted to trades.jsonl BEFORE
+    # the journal stayed open (§_adaptive_record_incomplete), this only avoids
+    # adding an exec_diag/hedge snapshot on unverified exposure. No new "never
+    # naked"/"guaranteed long gamma" guarantee: manual review still applies.
     if adaptive_cfg is not None and adaptive_journal_present():
         log.error("journal adattivo lasciato aperto da questo tick — coda "
                   "diagnostica/hedge saltata, review manuale necessaria / adaptive "
@@ -1892,22 +1529,18 @@ def tick(fc: VolForecaster, db: DeribitTestnet, execute: bool,
                   "manual review required")
         return
 
-    # IT: A6 — dopo l'eventuale open, così la riga cattura le leg della posizione
-    #     appena aperta al momento dell'ingresso (half-spread di entry reale).
-    # EN: A6 — after any open, so the row captures the just-opened position's legs
-    #     at entry time (real entry half-spread).
+    # A6 — after any open, so the row captures the just-opened position's legs
+    # at entry time (real entry half-spread).
     log_exec_diag(db)
 
-    # IT: V2 — la leg hedge gira per ULTIMA (dopo settlement/open/diagnostica):
-    #     vede lo stato book definitivo del tick. Inerte se hedge_cfg è None.
-    # EN: V2 — the hedge leg runs LAST (after settlement/open/diagnostics): it
-    #     sees the tick's final book state. Inert when hedge_cfg is None.
+    # V2 — the hedge leg runs LAST (after settlement/open/diagnostics): it
+    # sees the tick's final book state. Inert when hedge_cfg is None.
     if hedge_cfg is not None:
         maybe_hedge(db, hedge_cfg, execute)
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
+    # UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -1920,45 +1553,31 @@ def main():
     ap.add_argument("--execute", action="store_true",
                     help="piazza ordini REALI sul testnet (default: fill simulati al mark) / "
                          "place REAL testnet orders (default: simulated mark fills)")
-    # IT: arch del modello da caricare (models/{arch}); flag esplicito, NON env
-    #     QUANTSYS_ARCH — default itransformer = run storica bit-identica.
-    # EN: model arch to load (models/{arch}); explicit flag, NOT the QUANTSYS_ARCH
-    #     env var — default itransformer = bit-identical legacy run.
+    # model arch to load (models/{arch}); explicit flag, NOT the QUANTSYS_ARCH
+    # env var — default itransformer = bit-identical legacy run.
     ap.add_argument("--arch", default="itransformer",
                     choices=["itransformer", "nhits", "tcnmamba", "lstm"],
                     help="architettura del modello vol da caricare (models/{arch}) / "
                          "vol model architecture to load (models/{arch})")
-    # IT: normalizer macro — INERTE di default. Senza il flag lo strumento e'
-    #     ri-stimato whole-df a ogni bootstrap (comportamento storico bit-identico);
-    #     con un path lo strumento e' PINNATO a un vintage dichiarato e varia solo
-    #     lo stato. ⚠ Cambia l'input del live: attivarlo e' un atto DELIBERATO e va
-    #     datato in STATUS.md se un campione forward e' aperto. Flag esplicito e MAI
-    #     env, come --arch: una env residua cambierebbe l'input in silenzio.
-    # EN: macro normalizer — INERT by default. Without the flag the instrument is
-    #     refitted whole-df at every bootstrap (bit-identical legacy behavior); with
-    #     a path the instrument is PINNED at a declared vintage and only the state
-    #     moves. ⚠ It changes the live input: enabling it is a DELIBERATE act and must
-    #     be dated in STATUS.md if a forward sample is open. Explicit flag and NEVER
-    #     env, like --arch: a stale env would change the input silently.
+    # macro normalizer — INERT by default. Without the flag the instrument is
+    # refitted whole-df at every bootstrap (bit-identical legacy behavior); with
+    # a path the instrument is PINNED at a declared vintage and only the state
+    # moves. ⚠ It changes the live input: enabling it is a DELIBERATE act and must
+    # be dated in STATUS.md if a forward sample is open. Explicit flag and NEVER
+    # env, like --arch: a stale env would change the input silently.
     ap.add_argument("--macro-norm", default=None, metavar="PATH",
                     help="pickle del MacroNormalizer pinnato (default: ri-stima "
                          "whole-df, comportamento storico) / pinned MacroNormalizer "
                          "pickle (default: whole-df refit, legacy behavior)")
-    # IT: V2 (B2/A1) — flag hedge, INERTI di default. ⚠ Attivarli SOLO post-gate
-    #     n≥20 e SOLO con band/convenzione CONGELATE dalla pre-registrazione
-    #     hedged-vs-unhedged in STATUS.md (i default qui sono placeholder di design).
-    # EN: V2 (B2/A1) — hedge flags, INERT by default. ⚠ Enable ONLY post-gate
-    #     n≥20 and ONLY with band/convention FROZEN by the hedged-vs-unhedged
-    #     pre-registration in STATUS.md (defaults here are design placeholders).
+    # V2 (B2/A1) — hedge flags, INERT by default. ⚠ Enable ONLY post-gate
+    # n≥20 and ONLY with band/convention FROZEN by the hedged-vs-unhedged
+    # pre-registration in STATUS.md (defaults here are design placeholders).
     ap.add_argument("--hedge", action="store_true",
                     help="attiva la leg delta-hedge perp (v2; default OFF = v1 "
                          "bit-identico) / enable the perp delta-hedge leg (v2)")
-    # IT: audit MINOR-3 — band/conv SENZA default: con --hedge vanno passati
-    #     esplicitamente (fail-fast sotto), così un --hedge distratto non parte
-    #     coi placeholder non congelati dalla pre-registrazione.
-    # EN: MINOR-3 audit — band/conv WITHOUT defaults: with --hedge they must be
-    #     passed explicitly (fail-fast below), so a careless --hedge cannot start
-    #     on placeholders the pre-registration has not frozen.
+    # MINOR-3 audit — band/conv WITHOUT defaults: with --hedge they must be
+    # passed explicitly (fail-fast below), so a careless --hedge cannot start
+    # on placeholders the pre-registration has not frozen.
     ap.add_argument("--hedge-band", type=float, default=None,
                     help="no-trade band su |delta_book| in BTC-eq (OBBLIGATORIA "
                          f"con --hedge; riferimento design {DEFAULT_HEDGE_BAND}) / "
@@ -1970,12 +1589,9 @@ def main():
     ap.add_argument("--hedge-fee", type=float, default=DEFAULT_HEDGE_FEE,
                     help="fee taker perp (frazione nozionale, solo contabilità "
                          "ledger) / perp taker fee (ledger accounting only)")
-    # IT: A12 (V2) — modalità banda: fixed (default, design storico) o ww =
-    #     Whalley–Wilmott gamma-scalata; con ww, λ è OBBLIGATORIA (pattern MINOR-3:
-    #     il valore va CONGELATO dalla pre-registrazione hedged-vs-unhedged).
-    # EN: A12 (V2) — band mode: fixed (default, legacy design) or ww = gamma-scaled
-    #     Whalley–Wilmott; with ww, λ is REQUIRED (MINOR-3 pattern: the value must
-    #     be FROZEN by the hedged-vs-unhedged pre-registration).
+    # A12 (V2) — band mode: fixed (default, legacy design) or ww = gamma-scaled
+    # Whalley–Wilmott; with ww, λ is REQUIRED (MINOR-3 pattern: the value must
+    # be FROZEN by the hedged-vs-unhedged pre-registration).
     ap.add_argument("--hedge-band-mode", choices=["fixed", "ww"], default="fixed",
                     help="banda no-trade: fixed (default) o ww gamma-scalata "
                          "Whalley–Wilmott / no-trade band: fixed (default) or "
@@ -1984,10 +1600,8 @@ def main():
                     help="avversione al rischio λ della banda ww (OBBLIGATORIA con "
                          "--hedge-band-mode ww) / ww-band risk aversion λ "
                          "(REQUIRED with --hedge-band-mode ww)")
-    # IT: A13a (V2, INERTI) — early-close nella pin region: entrambe obbligatorie
-    #     insieme; default None = hold-to-expiry pre-registrato INTATTO.
-    # EN: A13a (V2, INERT) — pin-region early close: both required together;
-    #     default None = pre-registered hold-to-expiry UNTOUCHED.
+    # A13a (V2, INERT) — pin-region early close: both required together;
+    # default None = pre-registered hold-to-expiry UNTOUCHED.
     ap.add_argument("--pin-close-hours", type=float, default=None,
                     help="chiudi anticipato se restano ≤ X ore E S è nella pin band "
                          "(v2; default OFF) / close early when ≤ X hours remain AND "
@@ -1996,8 +1610,7 @@ def main():
                     help="pin region |S−K|/S ≤ f per l'early-close (v2, con "
                          "--pin-close-hours) / pin region |S−K|/S ≤ f for the "
                          "early close (v2, with --pin-close-hours)")
-    # IT: A14 (V2, INERTE) — sizing vega-normalizzato: amount = target/Σν all'entry.
-    # EN: A14 (V2, INERT) — vega-normalized sizing: amount = target/Σν at entry.
+    # A14 (V2, INERT) — vega-normalized sizing: amount = target/Σν at entry.
     ap.add_argument("--size-mode", choices=["contracts", "vega"], default="contracts",
                     help="contracts = size fissa pre-registrata (default); vega = "
                          "amount vega-normalizzato (v2) / contracts = pre-registered "
@@ -2009,8 +1622,7 @@ def main():
     ap.add_argument("--size-max-contracts", type=float, default=10.0,
                     help="cap fail-safe sull'amount vega-normalizzato / fail-safe "
                          "cap on the vega-normalized amount")
-    # IT: leva adattiva — INERTE senza flag; soglia e k OBBLIGATORI ed espliciti.
-    # EN: adaptive lever — INERT without the flag; threshold and k REQUIRED and explicit.
+    # adaptive lever — INERT without the flag; threshold and k REQUIRED and explicit.
     ap.add_argument("--adaptive", action="store_true",
                     help="regola d'entry per banda DVOL (straddle daily sopra soglia, iron "
                          "butterfly ~7g sotto), senza segnale NN; INERTE di default / "
@@ -2030,16 +1642,11 @@ def main():
                          "(nearest expiry)")
     args = ap.parse_args()
 
-    # IT: guard di riavvio — PRIMA di qualunque I/O (config, modello, client venue):
-    #     un journal presente significa un tentativo di entry adattivo interrotto,
-    #     che richiede review manuale prima di ripartire. NON è un lock fra istanze
-    #     concorrenti (nessun meccanismo inter-processo qui): serializza solo i
-    #     riavvii successivi di UNA istanza, non ne impedisce due in parallelo.
-    # EN: restart guard — BEFORE any I/O (config, model, venue client): a present
-    #     journal means an interrupted adaptive entry attempt, which requires
-    #     manual review before restarting. It is NOT a lock across concurrent
-    #     instances (no inter-process mechanism here): it only serialises
-    #     successive restarts of ONE instance, it does not prevent two in parallel.
+    # restart guard — BEFORE any I/O (config, model, venue client): a present
+    # journal means an interrupted adaptive entry attempt, which requires
+    # manual review before restarting. It is NOT a lock across concurrent
+    # instances (no inter-process mechanism here): it only serialises
+    # successive restarts of ONE instance, it does not prevent two in parallel.
     if adaptive_journal_present():
         raise SystemExit(
             "journal adattivo presente — avvio BLOCCATO, serve review manuale "
@@ -2056,12 +1663,9 @@ def main():
                       macro_norm=(args.macro_norm or MACRO_NORM_REFIT))
     db = DeribitTestnet(cfg)
 
-    # IT: config hedge SOLO se --hedge (None = path v1, nessun file hedge toccato).
-    #     Fail-fast (audit MINOR-3): band e conv esplicite = valori CONGELATI
-    #     dalla pre-registrazione, mai i placeholder di design.
-    # EN: hedge config ONLY with --hedge (None = v1 path, no hedge file touched).
-    #     Fail-fast (MINOR-3 audit): explicit band and conv = values FROZEN by
-    #     the pre-registration, never the design placeholders.
+    # hedge config ONLY with --hedge (None = v1 path, no hedge file touched).
+    # Fail-fast (MINOR-3 audit): explicit band and conv = values FROZEN by
+    # the pre-registration, never the design placeholders.
     hedge_cfg = None
     if args.hedge:
         if args.hedge_band is None or args.hedge_conv is None:
@@ -2085,19 +1689,14 @@ def main():
                     f"verificare che la pre-registrazione "
                     f"hedged-vs-unhedged sia CHIUSA in STATUS.md / verify the "
                     f"pre-registration is FROZEN in STATUS.md")
-        # IT: audit MINOR-1 (riconciliazione) — con --execute lo stato locale
-        #     viene allineato alla posizione perp REALE del venue all'avvio:
-        #     un crash tra fill e write non può più produrre doppio hedge.
-        # EN: MINOR-1 audit (reconciliation) — with --execute the local state is
-        #     aligned to the venue's REAL perp position at startup: a crash
-        #     between fill and write can no longer produce a double hedge.
+        # MINOR-1 audit (reconciliation) — with --execute the local state is
+        # aligned to the venue's REAL perp position at startup: a crash
+        # between fill and write can no longer produce a double hedge.
         if args.execute:
             reconcile_hedge_state(db)
 
-    # IT: A13a — pin-close: coppia di parametri obbligatoria (fail-fast, pattern
-    #     MINOR-3); None = regola hold-to-expiry pre-registrata intatta.
-    # EN: A13a — pin close: parameter pair required together (fail-fast, MINOR-3
-    #     pattern); None = pre-registered hold-to-expiry rule untouched.
+    # A13a — pin close: parameter pair required together (fail-fast, MINOR-3
+    # pattern); None = pre-registered hold-to-expiry rule untouched.
     pin_cfg = None
     if args.pin_close_hours is not None or args.pin_close_band is not None:
         if args.pin_close_hours is None or args.pin_close_band is None:
@@ -2112,8 +1711,7 @@ def main():
                     f"band={pin_cfg['band']} — la regola hold-to-expiry v1 è "
                     f"SOSPESA / the v1 hold-to-expiry rule is SUSPENDED")
 
-    # IT: A14 — sizing vega-normalizzato (fail-fast sul target, pattern MINOR-3).
-    # EN: A14 — vega-normalized sizing (fail-fast on the target, MINOR-3 pattern).
+    # A14 — vega-normalized sizing (fail-fast on the target, MINOR-3 pattern).
     size_cfg = None
     if args.size_mode == "vega":
         if args.size_vega_target is None:
@@ -2127,8 +1725,7 @@ def main():
                     f"USD/vol-pt cap={size_cfg['max_contracts']} contratti — la "
                     f"size fissa v1 è SOSPESA / the v1 fixed size is SUSPENDED")
 
-    # IT: --adaptive — validazione fail-fast (soglia/k espliciti, nessun altro lever v2).
-    # EN: --adaptive — fail-fast validation (explicit threshold/k, no other v2 lever).
+    # --adaptive — fail-fast validation (explicit threshold/k, no other v2 lever).
     adaptive_cfg = build_adaptive_cfg(args)
     if adaptive_cfg is not None:
         log.warning(f"ADATTIVO ATTIVO: soglia DVOL={adaptive_cfg['threshold']} k={adaptive_cfg['k']} "
@@ -2153,8 +1750,7 @@ def main():
             log.error(f"tick fallito/failed: {type(e).__name__}: {e}", exc_info=True)
         if args.once:
             return
-        # IT: dorme fino a hh:00:90 (chiusura candela 1h + margine propagazione REST).
-        # EN: sleeps until hh:00:90 (1h candle close + REST propagation margin).
+        # sleeps until hh:00:90 (1h candle close + REST propagation margin).
         now = time.time()
         nxt = (int(now // 3600) + 1) * 3600 + 90
         try:

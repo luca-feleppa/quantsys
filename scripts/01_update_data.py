@@ -1,15 +1,7 @@
 """
-Script 01_update — Aggiornamento incrementale del dataset.
-Scarica solo le candele mancanti dall'ultimo aggiornamento ad oggi,
-poi ricalcola features e lstm_dataset su tutto lo storico.
-
-⚠ Il run completo NON è un'operazione neutra: rifitta il RobustScaler sullo split
-   train allungato, riscrive features.parquet + lstm_dataset.npz e salva un nuovo
-   PipelineState sotto models/{QUANTSYS_ARCH|lstm}/. Su una linea con modelli
-   CONGELATI (la vol production ha target_scale persistito nel suo state) questo
-   rompe il contratto train↔inference. Se serve solo la storia OHLCV aggiornata
-   — p.es. per un giudice offline che calcola la RV realizzata dalle barre —
-   usare `--candles-only`, che si ferma dopo il parquet raw.
+Script 01_update — Incremental dataset update.
+Downloads only the candles missing since the last update up to today,
+then recomputes features and lstm_dataset over the whole history.
 
 ⚠ The full run is NOT a neutral operation: it refits the RobustScaler on the
    extended train split, rewrites features.parquet + lstm_dataset.npz and saves a
@@ -19,11 +11,11 @@ poi ricalcola features e lstm_dataset su tutto lo storico.
    needed — e.g. an offline judge computing realized RV from bars — use
    `--candles-only`, which stops right after the raw parquet.
 
-Prerequisito: eseguire prima scripts/01_download_data.py (primo avvio).
+Prerequisite: run scripts/01_download_data.py first (first start).
 
-Run configuration PyCharm:
+PyCharm run configuration:
   Script: scripts/01_update_data.py
-  Working dir: <root del progetto>
+  Working dir: <project root>
 """
 import argparse
 import logging
@@ -42,13 +34,10 @@ setup_logging()
 log = logging.getLogger("quantsys.script.01_update")
 
 
-# IT: aggiornamento incrementale: scarica solo il delta e ricostruisce il dataset.
-# EN: incremental update: fetch only the delta and rebuild the dataset.
+# incremental update: fetch only the delta and rebuild the dataset.
 def main():
-    # IT: boilerplate UTF-8 — il banner contiene box-drawing e frecce, che su una
-    #     console Windows cp1252 farebbero crashare la stampa finale.
-    # EN: UTF-8 boilerplate — the banner contains box-drawing and arrows, which
-    #     would crash the final print on a cp1252 Windows console.
+    # UTF-8 boilerplate — the banner contains box-drawing and arrows, which
+    # would crash the final print on a cp1252 Windows console.
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -56,14 +45,10 @@ def main():
             pass
 
     ap = argparse.ArgumentParser(description="Aggiornamento incrementale del dataset")
-    # IT: --candles-only: estende SOLO data/raw_candles.parquet e si ferma. Nessun
-    #     re-fit dello scaler, nessun npz, nessun PipelineState riscritto — è il
-    #     path sicuro quando i modelli a valle sono congelati. Stesso pattern già
-    #     usato in produzione dal bootstrap gap-aware di VolForecaster.
-    # EN: --candles-only: extends ONLY data/raw_candles.parquet and stops. No
-    #     scaler refit, no npz, no PipelineState rewritten — the safe path when
-    #     downstream models are frozen. Same pattern already used in production by
-    #     VolForecaster's gap-aware bootstrap.
+    # --candles-only: extends ONLY data/raw_candles.parquet and stops. No
+    # scaler refit, no npz, no PipelineState rewritten — the safe path when
+    # downstream models are frozen. Same pattern already used in production by
+    # VolForecaster's gap-aware bootstrap.
     ap.add_argument("--candles-only", action="store_true",
                     help="aggiorna solo raw_candles.parquet, non tocca scaler/npz/state "
                          "/ refresh raw_candles.parquet only, leaves scaler/npz/state alone")
@@ -77,12 +62,10 @@ def main():
     ensure_dirs(dcfg["output_dir"])
     out = Path(dcfg["output_dir"])
 
-    # IT: path del parquet OHLCV raw (override via default.yaml)
-    # EN: path of the raw OHLCV parquet (override via default.yaml)
+    # path of the raw OHLCV parquet (override via default.yaml)
     raw_path = Path(dcfg.get("raw_path", "./data/raw_candles.parquet"))
 
-    # IT: prerequisito - raw_candles.parquet deve esistere (creato da 01_download_data)
-    # EN: prerequisite - raw_candles.parquet must exist (created by 01_download_data)
+    # prerequisite - raw_candles.parquet must exist (created by 01_download_data)
     if not raw_path.exists():
         print(
             f"\n[ERRORE] File non trovato: {raw_path}\n"
@@ -93,8 +76,7 @@ def main():
         )
         sys.exit(1)
 
-    # IT: 1. download incrementale - solo il delta dall'ultimo timestamp salvato
-    # EN: 1. incremental download - only the delta from the last saved timestamp
+    # 1. incremental download - only the delta from the last saved timestamp
     t0 = time.time()
     log.info("Fase 1: aggiornamento incrementale candele ...")
 
@@ -116,12 +98,9 @@ def main():
         f"[{df_raw['open_time'].iloc[0].date()} → {df_raw['open_time'].iloc[-1].date()}]"
     )
 
-    # IT: 1b. funding rate (fetch_funding_rate gestisce il delta internamente).
-    #     Saltato in --candles-only: il funding entra solo nel feature engineering,
-    #     che in quella modalità non viene eseguito.
-    # EN: 1b. funding rate (fetch_funding_rate handles delta internally). Skipped
-    #     in --candles-only: funding feeds feature engineering only, which that
-    #     mode does not run.
+    # 1b. funding rate (fetch_funding_rate handles delta internally). Skipped
+    # in --candles-only: funding feeds feature engineering only, which that
+    # mode does not run.
     funding_df = None
     if args.candles_only:
         log.info("--candles-only: funding rate non aggiornato / funding rate not refreshed")
@@ -137,8 +116,7 @@ def main():
             log.warning(f"Aggiornamento funding rate fallito ({_e}) — continuo senza.")
             funding_df = None
 
-    # IT: nessuna nuova candela -> esce subito senza ricalcolare features
-    # EN: no new candles -> exit early without recomputing features
+    # no new candles -> exit early without recomputing features
     if n_new == 0:
         print(
             f"\n═══════════════════════════════════════════\n"
@@ -150,21 +128,16 @@ def main():
         )
         sys.exit(0)
 
-    # IT: salva il parquet OHLCV aggiornato in modo atomico
-    # EN: persist the updated OHLCV parquet atomically
+    # persist the updated OHLCV parquet atomically
     raw_cols = ["open_time","close_time","open","high","low","close","volume",
                 "quote_vol","trades","taker_buy_vol","taker_buy_quote_vol"]
     atomic_save_parquet(df_raw[raw_cols], raw_path, index=False)
     log.info(f"Raw candles aggiornato → {raw_path}  ({n_after:,} candele, {raw_path.stat().st_size//1024//1024} MB)")
 
-    # IT: uscita anticipata di --candles-only: da qui in poi si ricalcolano feature,
-    #     si RIFITTA lo scaler e si riscrive il PipelineState. Fermarsi PRIMA della
-    #     Fase 2 è l'intero punto del flag: la storia OHLCV è aggiornata, tutto il
-    #     resto resta bit-invariato.
-    # EN: --candles-only early exit: from here on features are recomputed, the
-    #     scaler is REFIT and the PipelineState rewritten. Stopping BEFORE phase 2
-    #     is the whole point of the flag: OHLCV history is refreshed, everything
-    #     else stays bit-invariant.
+    # --candles-only early exit: from here on features are recomputed, the
+    # scaler is REFIT and the PipelineState rewritten. Stopping BEFORE phase 2
+    # is the whole point of the flag: OHLCV history is refreshed, everything
+    # else stays bit-invariant.
     if args.candles_only:
         print(f"""
 ═══════════════════════════════════════════
@@ -180,8 +153,7 @@ def main():
 """)
         return
 
-    # IT: 2. holdout - taglia i dati dopo holdout_start (test set intoccato)
-    # EN: 2. holdout - drop data after holdout_start (test set untouched)
+    # 2. holdout - drop data after holdout_start (test set untouched)
     holdout_start = cfg.get("training", {}).get("holdout_start", None)
     if holdout_start:
         import pandas as pd
@@ -194,14 +166,11 @@ def main():
             f"Questi dati sono bloccati per il test finale."
         )
 
-    # IT: 3. feature engineering raw (la normalizzazione avviene dopo lo split)
-    # EN: 3. raw feature engineering (normalization happens after the split)
+    # 3. raw feature engineering (normalization happens after the split)
     t0 = time.time()
     log.info(f"Fase 2: feature engineering su {len(df_raw):,} candele ...")
-    # IT: interval_minutes da data.interval — finestre TIME-semantic convertite
-    #     in barre dal FeatureBuilder (identità a 1m).
-    # EN: interval_minutes from data.interval — TIME-semantic windows converted
-    #     to bars by the FeatureBuilder (identity at 1m).
+    # interval_minutes from data.interval — TIME-semantic windows converted
+    # to bars by the FeatureBuilder (identity at 1m).
     builder = FeatureBuilder(
         vp_bins          = fcfg["vp_bins"],
         vp_lookback      = fcfg["vp_lookback"],
@@ -211,15 +180,13 @@ def main():
         vp_stride        = fcfg.get("vp_stride", 1),
         frac_diff_d      = fcfg.get("frac_diff_d", 0.0),
         interval_minutes = interval_minutes_from_cfg(cfg),
-        # IT: A4 HAR-CJ — lever inerte (default false = 104 feature bit-invariate).
-        # EN: A4 HAR-CJ — inert lever (default false = 104 features bit-invariant).
+        # A4 HAR-CJ — inert lever (default false = 104 features bit-invariant).
         use_har_cj       = bool(fcfg.get("har_cj", False)),
     )
     df_feat = builder.build(df_raw, normalize=False, fit=False, funding_df=funding_df)
     log.info(f"Fase 2 completata in {time.time()-t0:.1f}s — {len(df_feat):,} righe valide")
 
-    # IT: 4. determina il confine training PRIMA del fit scaler (anti-leakage)
-    # EN: 4. compute the training cutoff BEFORE fitting the scaler (leakage guard)
+    # 4. compute the training cutoff BEFORE fitting the scaler (leakage guard)
     n_total   = len(df_feat)
     val_frac  = cfg["training"]["val_fraction"]
     test_frac = cfg["training"]["test_fraction"]
@@ -231,25 +198,21 @@ def main():
         f"({train_end/n_total:.0%} training)"
     )
 
-    # IT: 5. fit scaler solo su train, poi transform su tutto il dataset
-    # EN: 5. fit scaler on train only, then transform the whole dataset
+    # 5. fit scaler on train only, then transform the whole dataset
     if fcfg["normalize"]:
         t0 = time.time()
         log.info("Fase 3: scaler fit+transform ...")
-        builder.fit_scaler_only(df_feat.iloc[:train_end])   # IT: fit solo su train | EN: fit on train only
-        df_feat = builder._normalize(df_feat, fit=False)    # IT: transform su tutto | EN: transform on all
+        builder.fit_scaler_only(df_feat.iloc[:train_end])   # fit on train only
+        df_feat = builder._normalize(df_feat, fit=False)    # transform on all
         log.info(f"Fase 3 completata in {time.time()-t0:.1f}s")
 
-    # IT: salva il parquet delle feature in modo atomico
-    # EN: persist the feature parquet atomically
+    # persist the feature parquet atomically
     feat_path = out / "features.parquet"
     atomic_save_parquet(df_feat, feat_path, index=False)
     log.info(f"Features → {feat_path}  ({feat_path.stat().st_size//1024} KB)")
 
-    # IT: 6. lista feature canonica condivisa (C2 2ter): exclude non-feature →
-    #     dtype float → C-funding → NaN>50% → Inf, in quantsys.features.
-    # EN: 6. shared canonical feature list (C2 2ter): non-feature exclude →
-    #     float dtype → C-funding → NaN>50% → Inf, in quantsys.features.
+    # 6. shared canonical feature list (C2 2ter): non-feature exclude →
+    # float dtype → C-funding → NaN>50% → Inf, in quantsys.features.
     nan_thresh = 0.5
     diag: dict = {}
     feat_cols = canonical_feature_columns(builder.feature_cols, df_feat,
@@ -301,8 +264,7 @@ def main():
         f"{len(feat_cols)-n_dynamic_final} struct features)"
     )
 
-    # IT: 7. salva PipelineState unificato per l'inference
-    # EN: 7. persist unified PipelineState for inference
+    # 7. persist unified PipelineState for inference
     ensure_dirs("models")
     state = (
         PipelineState()

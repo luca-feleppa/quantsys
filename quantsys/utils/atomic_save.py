@@ -1,23 +1,23 @@
 """
 quantsys/utils/atomic_save.py
 ==============================
-Salvataggio atomico per file dati critici (npz, parquet, pkl).
+Atomic saving for critical data files (npz, parquet, pkl).
 
-Il problema:
-  np.savez_compressed("data/lstm_dataset.npz", ...) sovrascrive il file
-  direttamente. Se il processo crasha a metà scrittura (OOM, Ctrl+C, 
-  crash disco), il file risulta corrotto e si perde tutto il lavoro
-  della Fase 1 (download + feature engineering).
+The problem:
+  np.savez_compressed("data/lstm_dataset.npz", ...) overwrites the file
+  directly. If the process crashes mid-write (OOM, Ctrl+C,
+  disk failure), the file ends up corrupted and all of Phase 1's
+  work (download + feature engineering) is lost.
 
-La soluzione — write-then-rename:
-  1. Scrivi i dati in un file temporaneo nella stessa directory
-     (es. "data/lstm_dataset.npz.tmp")
-  2. Rinomina atomicamente il tmp → file definitivo
-  Su Linux/Mac os.replace() è garantito atomico (syscall rename(2))
-  → il file è sempre o quello vecchio completo o quello nuovo completo,
-     mai parziale.
+The solution — write-then-rename:
+  1. Write the data to a temporary file in the same directory
+     (e.g. "data/lstm_dataset.npz.tmp")
+  2. Atomically rename the tmp → final file
+  On Linux/Mac os.replace() is guaranteed atomic (rename(2) syscall)
+  → the file is always either the complete old one or the complete new one,
+     never partial.
 
-Nota: non funziona cross-device (tmp e dst devono essere sullo stesso filesystem).
+Note: does not work cross-device (tmp and dst must be on the same filesystem).
 """
 import os
 import tempfile
@@ -27,20 +27,17 @@ from typing import Any
 import numpy as np
 
 
-# IT: Helpers per scrittura atomica write-then-rename (mai file parziali).
-# EN: Helpers for atomic write-then-rename (never produces partial files).
+# Helpers for atomic write-then-rename (never produces partial files).
 
 
-# IT: Salva array NumPy in .npz atomicamente (opz. compresso).
-# EN: Atomically saves NumPy arrays to .npz (optionally compressed).
+# Atomically saves NumPy arrays to .npz (optionally compressed).
 def atomic_save_npz(path: str | Path, compressed: bool = False, **arrays) -> None:
-    """Salva un file npz in modo atomico (tmp + rename).
+    """Saves an npz file atomically (tmp + rename).
 
-    compressed=False (default): ~5-10x più veloce, file più grande su disco.
-    compressed=True: comprime con zlib (lento su dataset >1 GB).
+    compressed=False (default): ~5-10x faster, larger file on disk.
+    compressed=True: compresses with zlib (slow on datasets >1 GB).
     """
-    # IT: tmp nella STESSA dir → os.replace atomico (cross-device fallisce).
-    # EN: tmp in SAME dir → os.replace is atomic (cross-device would fail).
+    # tmp in SAME dir → os.replace is atomic (cross-device would fail).
     path = Path(path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -62,10 +59,9 @@ def atomic_save_npz(path: str | Path, compressed: bool = False, **arrays) -> Non
         raise
 
 
-# IT: Salva un DataFrame in parquet atomicamente (tmp + rename).
-# EN: Atomically saves a DataFrame to parquet (tmp + rename).
+# Atomically saves a DataFrame to parquet (tmp + rename).
 def atomic_save_parquet(df: Any, path: str | Path, **kwargs) -> None:
-    """Salva un DataFrame parquet in modo atomico (tmp + rename)."""
+    """Saves a DataFrame to parquet atomically (tmp + rename)."""
     path = Path(path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -86,10 +82,9 @@ def atomic_save_parquet(df: Any, path: str | Path, **kwargs) -> None:
         raise
 
 
-# IT: Serializza un oggetto in pickle atomicamente (tmp + rename).
-# EN: Atomically serializes an object to pickle (tmp + rename).
+# Atomically serializes an object to pickle (tmp + rename).
 def atomic_save_pkl(obj: Any, path: str | Path) -> None:
-    """Salva un oggetto pickle in modo atomico (tmp + rename)."""
+    """Saves an object to pickle atomically (tmp + rename)."""
     import pickle
     path = Path(path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)

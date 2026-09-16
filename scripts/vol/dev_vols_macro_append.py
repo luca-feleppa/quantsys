@@ -1,13 +1,8 @@
-# IT: VOL-S utility — ri-appende X_macro_* a data/lstm_dataset.npz dopo un rebuild
-#     del dataset (es. cambio target_type), SENZA rifare FRED/yfinance/regime
-#     walk-forward (~3h). Replica il passo 6 di 01b_download_macro.py: stesse
-#     macro_features.parquet su disco, stesso MacroNormalizer (refit identico),
-#     stesso merge daily-ffill sui timestamp t_{split}.
-# EN: VOL-S utility — re-appends X_macro_* to data/lstm_dataset.npz after a dataset
-#     rebuild (e.g. target_type change), WITHOUT re-running FRED/yfinance/regime
-#     walk-forward (~3h). Replicates step 6 of 01b_download_macro.py: same on-disk
-#     macro_features.parquet, same MacroNormalizer (identical refit), same
-#     daily-ffill merge onto the t_{split} timestamps.
+# VOL-S utility — re-appends X_macro_* to data/lstm_dataset.npz after a dataset
+# rebuild (e.g. target_type change), WITHOUT re-running FRED/yfinance/regime
+# walk-forward (~3h). Replicates step 6 of 01b_download_macro.py: same on-disk
+# macro_features.parquet, same MacroNormalizer (identical refit), same
+# daily-ffill merge onto the t_{split} timestamps.
 import sys
 from pathlib import Path
 
@@ -25,7 +20,7 @@ log = logging.getLogger("quantsys.script.vols_macro")
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
+    # UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -36,10 +31,8 @@ def main():
     df_macro = pd.read_parquet(out / "macro_features.parquet")
     macro_cols = list(df_macro.columns)
 
-    # IT: refit del normalizer come in 01b (fit_transform sull'intero df macro —
-    #     comportamento pre-esistente, identico run-su-run a parità di parquet).
-    # EN: normalizer refit as in 01b (fit_transform on the whole macro df —
-    #     pre-existing behavior, identical run-over-run for the same parquet).
+    # normalizer refit as in 01b (fit_transform on the whole macro df —
+    # pre-existing behavior, identical run-over-run for the same parquet).
     normalizer = MacroNormalizer()
     normalizer.fit_transform(df_macro, macro_cols)
 

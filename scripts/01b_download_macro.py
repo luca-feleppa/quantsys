@@ -1,17 +1,17 @@
 """
-Script 01b — Download dati macro + costruzione regime session-based (Asia/EU/US).
-Da eseguire UNA VOLTA dopo 01_download_data.py.
-I dati macro vengono poi usati automaticamente da 02_train.py.
+Script 01b — Macro data download + session-based regime construction (Asia/EU/US).
+Run ONCE after 01_download_data.py.
+The macro data is then used automatically by 02_train.py.
 
-Run configuration PyCharm:
+PyCharm run configuration:
   Script: scripts/01b_download_macro.py
-  Working dir: <root del progetto>
+  Working dir: <project root>
 
-API Key FRED (gratuita):
-  1. Vai su https://fred.stlouisfed.org/docs/api/api_key.html
-  2. Registrati (gratis)
-  3. Inserisci la key in config/default.yaml → macro.fred_api_key
-  Senza key: funziona lo stesso ma con rate limit più stretto.
+FRED API key (free):
+  1. Go to https://fred.stlouisfed.org/docs/api/api_key.html
+  2. Sign up (free)
+  3. Put the key in config/default.yaml → macro.fred_api_key
+  Without a key: it still works, but with a tighter rate limit.
 """
 import argparse
 import logging
@@ -34,26 +34,21 @@ setup_logging()
 log = logging.getLogger("quantsys.script.01b")
 
 
-# IT: sezione regime (step 4) — condivisa fra pipeline completa e --regime-only.
-#     Il detector ignora df_macro (legge raw_candles.parquet): accetta None.
-# EN: regime section (step 4) — shared between full pipeline and --regime-only.
-#     The detector ignores df_macro (reads raw_candles.parquet): accepts None.
+# regime section (step 4) — shared between full pipeline and --regime-only.
+# The detector ignores df_macro (reads raw_candles.parquet): accepts None.
 def run_regime_detection(mcfg: dict, out: Path, df_macro=None) -> pd.DataFrame:
     n_regimes = mcfg.get("n_regimes", 3)
     log.info("Regime detector: Markov-Switching su realized vol BTC oraria ...")
     regime_model = RegimeMarkovBTC(n_regimes=n_regimes)
     try:
-        # IT: cadenza walk-forward da config (hmm_burn_in_days/hmm_retrain_days):
-        #     su storie multi-anno il refit expanding è O(t) — vedi commento in default.yaml.
-        # EN: walk-forward cadence from config (hmm_burn_in_days/hmm_retrain_days):
-        #     on multi-year histories the expanding refit is O(t) — see comment in default.yaml.
+        # walk-forward cadence from config (hmm_burn_in_days/hmm_retrain_days):
+        # on multi-year histories the expanding refit is O(t) — see comment in default.yaml.
         regime_df = regime_model.fit_predict_walkforward(
             df_macro,
             burn_in_days = mcfg.get("hmm_burn_in_days", 30),
             retrain_days = mcfg.get("hmm_retrain_days", 90),
         )
-        # IT: stesso filename del MS per backward compat (consumer non toccati).
-        # EN: same filename as MS for backward compat (consumers untouched).
+        # same filename as MS for backward compat (consumers untouched).
         hmm_path = out / "regime_hmm.pkl"
         regime_model.save(str(hmm_path))
         log.info(f"RegimeMarkovBTC salvato → {hmm_path}")
@@ -62,12 +57,9 @@ def run_regime_detection(mcfg: dict, out: Path, df_macro=None) -> pd.DataFrame:
         atomic_save_parquet(regime_df, regime_path)
         log.info(f"Probabilità regime → {regime_path}")
 
-        # IT: B7 — persisti anche il checkpoint della catena walk-forward: rende
-        #     possibile il refresh incrementale (--regime-incremental, minuti vs ore).
-        #     Fallimento non fatale: il full rebuild resta valido anche senza checkpoint.
-        # EN: B7 — also persist the walk-forward chain checkpoint: enables the
-        #     incremental refresh (--regime-incremental, minutes vs hours).
-        #     Non-fatal on failure: the full rebuild stays valid without a checkpoint.
+        # B7 — also persist the walk-forward chain checkpoint: enables the
+        # incremental refresh (--regime-incremental, minutes vs hours).
+        # Non-fatal on failure: the full rebuild stays valid without a checkpoint.
         try:
             chain = regime_model._engine._wf_state
             if chain is not None and len(regime_df):
@@ -77,8 +69,7 @@ def run_regime_detection(mcfg: dict, out: Path, df_macro=None) -> pd.DataFrame:
             log.warning(f"Checkpoint walk-forward NON salvato ({e}) — "
                         f"l'incrementale richiederà un bootstrap.")
 
-        # IT: analisi distribuzione regimi (post burn-in 30gg = 720h)
-        # EN: regime distribution analysis (post 30d=720h burn-in)
+        # regime distribution analysis (post 30d=720h burn-in)
         post = regime_df[~regime_df["regime_burn_in"]] if "regime_burn_in" in regime_df else regime_df
         counts = post["regime_dominant"].value_counts().sort_index()
         print("\n  Distribuzione regimi Markov-Switching su realized vol BTC (hourly UTC, post burn-in):")
@@ -94,12 +85,9 @@ def run_regime_detection(mcfg: dict, out: Path, df_macro=None) -> pd.DataFrame:
     return regime_df
 
 
-# IT: refresh incrementale del regime (B7): checkpoint + parquet esistenti → append
-#     delle sole barre nuove. FAIL-FAST su ogni incoerenza (niente try/except-inghiotti
-#     come nel full rebuild: un append sbagliato avvelenerebbe il parquet).
-# EN: incremental regime refresh (B7): existing checkpoint + parquet → append of the
-#     new bars only. FAIL-FAST on any inconsistency (no swallow-all try/except like
-#     the full rebuild: a wrong append would poison the parquet).
+# incremental regime refresh (B7): existing checkpoint + parquet → append of the
+# new bars only. FAIL-FAST on any inconsistency (no swallow-all try/except like
+# the full rebuild: a wrong append would poison the parquet).
 def run_regime_incremental(mcfg: dict, out: Path) -> int:
     import pickle
     n_regimes   = mcfg.get("n_regimes", 3)
@@ -115,12 +103,9 @@ def run_regime_incremental(mcfg: dict, out: Path) -> int:
 
     probs_old = pd.read_parquet(regime_path)
 
-    # IT: coerenza checkpoint↔parquet PRIMA di girare: n_bars del checkpoint deve
-    #     coincidere con le righe del parquet (un crash tra i due save li disallinea);
-    #     idem la cadenza config vs quella congelata nel checkpoint.
-    # EN: checkpoint↔parquet coherence BEFORE running: checkpoint n_bars must match
-    #     the parquet rows (a crash between the two saves misaligns them); same for
-    #     config cadence vs the one frozen in the checkpoint.
+    # checkpoint↔parquet coherence BEFORE running: checkpoint n_bars must match
+    # the parquet rows (a crash between the two saves misaligns them); same for
+    # config cadence vs the one frozen in the checkpoint.
     with open(ckpt_path, "rb") as f:
         _ck = pickle.load(f)
     if int(_ck["chain"]["n_bars"]) != len(probs_old):
@@ -128,16 +113,11 @@ def run_regime_incremental(mcfg: dict, out: Path) -> int:
             f"Checkpoint (n_bars={_ck['chain']['n_bars']}) ≠ parquet "
             f"({len(probs_old)} righe): rilancia --regime-bootstrap-checkpoint."
         )
-    # IT: guard anti-stale (audit MINOR-1): il posteriore filtrato del checkpoint
-    #     DEVE coincidere bit-per-bit con l'ultima riga del parquet (invariante by
-    #     construction del run che li ha scritti entrambi). Un rebuild ri-lanciato
-    #     sullo STESSO span e crashato tra i due save passerebbe il check n_bars
-    #     ma non questo: catene diverse → append avvelenato evitato.
-    # EN: anti-stale guard (audit MINOR-1): the checkpoint's filtered posterior
-    #     MUST match the parquet's last row bit-for-bit (by-construction invariant
-    #     of the run that wrote both). A rebuild re-run on the SAME span crashing
-    #     between the two saves would pass the n_bars check but not this one:
-    #     different chains → poisoned append avoided.
+    # anti-stale guard (audit MINOR-1): the checkpoint's filtered posterior
+    # MUST match the parquet's last row bit-for-bit (by-construction invariant
+    # of the run that wrote both). A rebuild re-run on the SAME span crashing
+    # between the two saves would pass the n_bars check but not this one:
+    # different chains → poisoned append avoided.
     _prob_cols = [f"regime_prob_{i}" for i in range(_ck["n_regimes"])]
     if not np.array_equal(np.asarray(_ck["chain"]["last_filtered"]),
                           probs_old[_prob_cols].iloc[-1].values):
@@ -155,12 +135,9 @@ def run_regime_incremental(mcfg: dict, out: Path) -> int:
         )
 
     regime_model = RegimeMarkovBTC(n_regimes=n_regimes)
-    # IT: expected_index (audit MINOR-2): valida che l'aggregazione oraria dello
-    #     span vecchio riproduca ESATTAMENTE l'index del parquet (revisioni
-    #     in-place della storia candele → fail-fast, non solo la frontiera).
-    # EN: expected_index (audit MINOR-2): validates that the hourly aggregation of
-    #     the old span reproduces EXACTLY the parquet index (in-place candle
-    #     history revisions → fail-fast, not just the boundary).
+    # expected_index (audit MINOR-2): validates that the hourly aggregation of
+    # the old span reproduces EXACTLY the parquet index (in-place candle
+    # history revisions → fail-fast, not just the boundary).
     df_new, ckpt = regime_model.continue_from_checkpoint(
         str(ckpt_path), expected_index=probs_old.index,
     )
@@ -169,28 +146,22 @@ def run_regime_incremental(mcfg: dict, out: Path) -> int:
         return 0
 
     combined = pd.concat([probs_old, df_new])
-    # IT: invarianti dell'append: index strettamente crescente, zero duplicati.
-    # EN: append invariants: strictly increasing index, zero duplicates.
+    # append invariants: strictly increasing index, zero duplicates.
     if combined.index.has_duplicates or not combined.index.is_monotonic_increasing:
         raise RuntimeError("Append incoerente (duplicati o index non monotono): abort.")
 
-    # IT: ordine parquet→checkpoint: un crash nel mezzo lascia al peggio un checkpoint
-    #     stale (rilevato dal check n_bars al giro dopo), MAI un parquet avanti.
-    # EN: parquet→checkpoint order: a mid-crash leaves at worst a stale checkpoint
-    #     (caught by the n_bars check next run), NEVER a parquet ahead.
+    # parquet→checkpoint order: a mid-crash leaves at worst a stale checkpoint
+    # (caught by the n_bars check next run), NEVER a parquet ahead.
     atomic_save_parquet(combined, regime_path)
     log.info(f"Probabilità regime (append {len(df_new)} righe) → {regime_path}")
     regime_model.save_wf_checkpoint(ckpt, str(ckpt_path))
     return len(df_new)
 
 
-# IT: pipeline macro — download FRED/yfinance, regime MS, normalizer, merge nel dataset NN
-# EN: macro pipeline — download FRED/yfinance, MS regime, normalizer, merge into NN dataset
+# macro pipeline — download FRED/yfinance, MS regime, normalizer, merge into NN dataset
 def main():
-    # IT: Console Windows default cp1252 — i caratteri unicode dei banner (═, ✓, █)
-    #     crashano il print. Reconfigure UTF-8 (stesso fix di 01/02/04).
-    # EN: Windows console defaults to cp1252 — unicode banner chars (═, ✓, █)
-    #     crash the print. Reconfigure UTF-8 (same fix as 01/02/04).
+    # Windows console defaults to cp1252 — unicode banner chars (═, ✓, █)
+    # crash the print. Reconfigure UTF-8 (same fix as 01/02/04).
     import sys as _sys
     for _stream in (_sys.stdout, _sys.stderr):
         try:
@@ -198,18 +169,12 @@ def main():
         except Exception:
             pass
 
-    # IT: --regime-only rigenera SOLO regime_probs.parquet + regime_hmm.pkl (il detector
-    #     legge raw_candles.parquet, ignora df_macro). Salta download FRED/yfinance, refit
-    #     del MacroNormalizer, update PipelineState e merge npz: nessun artefatto consumato
-    #     dai modelli production viene toccato. Default (senza flag) = pipeline completa,
-    #     comportamento bit-invariato.
-    # EN: --regime-only regenerates ONLY regime_probs.parquet + regime_hmm.pkl (the detector
-    #     reads raw_candles.parquet, ignores df_macro). Skips FRED/yfinance download,
-    #     MacroNormalizer refit, PipelineState update and npz merge: no artifact consumed
-    #     by production models is touched. Default (no flag) = full pipeline, bit-identical.
+    # --regime-only regenerates ONLY regime_probs.parquet + regime_hmm.pkl (the detector
+    # reads raw_candles.parquet, ignores df_macro). Skips FRED/yfinance download,
+    # MacroNormalizer refit, PipelineState update and npz merge: no artifact consumed
+    # by production models is touched. Default (no flag) = full pipeline, bit-identical.
     parser = argparse.ArgumentParser(description="01b — macro download + regime detection")
-    # IT: i tre modi regime sono mutuamente esclusivi (default senza flag = pipeline completa).
-    # EN: the three regime modes are mutually exclusive (default with no flag = full pipeline).
+    # the three regime modes are mutually exclusive (default with no flag = full pipeline).
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--regime-only", action="store_true",
                       help="rigenera solo il regime detector (skip macro/normalizer/npz) "
@@ -221,14 +186,10 @@ def main():
                       help="B7: ricostruisce il checkpoint walk-forward da pkl+parquet "
                            "esistenti con golden test integrato (1 fit MLE, no rebuild) "
                            "/ rebuild the checkpoint from existing artifacts")
-    # IT: 2026-07-19 — refresh macro SENZA toccare il regime: il full rebuild (~3h)
-    #     RIMAPPA le etichette (semantica indici non fissa tra run) e romperebbe la
-    #     comparabilità con gli esperimenti già giudicati; per le barre nuove c'è
-    #     --regime-incremental (label-preserving). Inerte di default.
-    # EN: 2026-07-19 — macro refresh WITHOUT touching the regime: the full rebuild
-    #     (~3h) REMAPS the labels (index semantics not fixed across runs) and would
-    #     break comparability with already-judged experiments; new bars are handled
-    #     by --regime-incremental (label-preserving). Inert by default.
+    # 2026-07-19 — macro refresh WITHOUT touching the regime: the full rebuild
+    # (~3h) REMAPS the labels (index semantics not fixed across runs) and would
+    # break comparability with already-judged experiments; new bars are handled
+    # by --regime-incremental (label-preserving). Inert by default.
     mode.add_argument("--skip-regime", action="store_true",
                       help="pipeline macro completa ma regime detector INTATTO "
                            "(regime_probs/regime_hmm non toccati) / full macro "
@@ -254,14 +215,11 @@ def main():
 {'═'*60}
 """)
 
-    # IT: path --regime-incremental (B7): append delle barre nuove dal checkpoint, poi exit.
-    #     Fail-fast: le eccezioni PROPAGANO (exit != 0), nessun fallback silenzioso.
-    # EN: --regime-incremental path (B7): append new bars from the checkpoint, then exit.
-    #     Fail-fast: exceptions PROPAGATE (exit != 0), no silent fallback.
+    # --regime-incremental path (B7): append new bars from the checkpoint, then exit.
+    # Fail-fast: exceptions PROPAGATE (exit != 0), no silent fallback.
     if args.regime_incremental:
         n_new = run_regime_incremental(mcfg, out)
-        # IT: con 0 barre nuove NESSUN file viene scritto (return anticipato).
-        # EN: with 0 new bars NO file is written (early return).
+        # with 0 new bars NO file is written (early return).
         files_line = (f"""  File aggiornati in {out}/:
     ✓ regime_probs.parquet   (append)
     ✓ regime_wf_checkpoint.pkl""" if n_new else
@@ -278,10 +236,8 @@ def main():
 """)
         return
 
-    # IT: path --regime-bootstrap-checkpoint (B7): una-tantum, ricostruisce il checkpoint
-    #     dagli artefatti esistenti e lo valida contro il parquet (golden). Exit != 0 su FAIL.
-    # EN: --regime-bootstrap-checkpoint path (B7): one-off, rebuilds the checkpoint from
-    #     existing artifacts and validates it against the parquet (golden). Exit != 0 on FAIL.
+    # --regime-bootstrap-checkpoint path (B7): one-off, rebuilds the checkpoint from
+    # existing artifacts and validates it against the parquet (golden). Exit != 0 on FAIL.
     if args.regime_bootstrap_checkpoint:
         regime_model = RegimeMarkovBTC(n_regimes=n_regimes)
         report = regime_model.bootstrap_wf_checkpoint(
@@ -303,18 +259,14 @@ def main():
 """)
         return
 
-    # IT: path --regime-only: solo step 4 (regime), poi exit. Nessun file macro/npz/state toccato.
-    # EN: --regime-only path: step 4 (regime) only, then exit. No macro/npz/state file touched.
+    # --regime-only path: step 4 (regime) only, then exit. No macro/npz/state file touched.
     if args.regime_only:
         regime_df = run_regime_detection(mcfg, out, df_macro=None)
         n_rows = len(regime_df)
         last_ts = regime_df.index.max() if n_rows else "n/d"
-        # IT: (audit MINOR-5) banner checkpoint condizionale all'esito reale del
-        #     save (il fallimento è non-fatale ma NON va dichiarato "✓"): fresco =
-        #     esiste ed è coevo/posteriore al parquet appena scritto.
-        # EN: (audit MINOR-5) checkpoint banner conditional on the actual save
-        #     outcome (failure is non-fatal but must NOT be reported as "✓"):
-        #     fresh = exists and is coeval/newer than the just-written parquet.
+        # (audit MINOR-5) checkpoint banner conditional on the actual save
+        # outcome (failure is non-fatal but must NOT be reported as "✓"):
+        # fresh = exists and is coeval/newer than the just-written parquet.
         _ck, _rp = out / "regime_wf_checkpoint.pkl", out / "regime_probs.parquet"
         ckpt_line = (
             "✓ regime_wf_checkpoint.pkl  (B7: abilita --regime-incremental)"
@@ -340,8 +292,7 @@ def main():
 """)
         return
 
-    # IT: 1. download delle serie macro da FRED
-    # EN: 1. download macro series from FRED
+    # 1. download macro series from FRED
     log.info("Download serie FRED ...")
     fred    = FREDDownloader(api_key=fred_key)
     df_fred = fred.fetch_all(FRED_SERIES, start=start)
@@ -350,8 +301,7 @@ def main():
     atomic_save_parquet(df_fred, fred_path)
     log.info(f"FRED → {fred_path}  ({df_fred.shape[1]} serie, {len(df_fred)} giorni)")
 
-    # IT: 2. download dati mercato (indici, VIX, USD, ...) via yfinance
-    # EN: 2. download market data (indices, VIX, USD, ...) via yfinance
+    # 2. download market data (indices, VIX, USD, ...) via yfinance
     log.info("Download dati mercato (yfinance) ...")
     df_yf = fetch_yfinance(YFINANCE_TICKERS, start=start)
     yf_path = out / "macro_yfinance.parquet"
@@ -361,8 +311,7 @@ def main():
     else:
         log.warning("yfinance vuoto — controlla la connessione o installa yfinance.")
 
-    # IT: 3. feature engineering macro (combina FRED + yfinance)
-    # EN: 3. macro feature engineering (combines FRED + yfinance)
+    # 3. macro feature engineering (combines FRED + yfinance)
     log.info("Costruzione macro features ...")
     builder  = MacroFeatureBuilder()
     df_macro = builder.build(df_fred, df_yf)
@@ -370,22 +319,17 @@ def main():
     atomic_save_parquet(df_macro, macro_path)
     log.info(f"Macro features → {macro_path}  ({df_macro.shape[1]} colonne)")
 
-    # IT: 4. regime detection Markov-Switching su realized vol BTC (Variante 3, 2026-06-03)
-    #     — df_macro è ignorato dal detector (usa raw_candles.parquet); sezione condivisa col
-    #     path --regime-only (helper run_regime_detection).
-    # EN: 4. Markov-Switching regime detection on BTC realized vol (Variant 3, 2026-06-03)
-    #     — df_macro is ignored by the detector (uses raw_candles.parquet); section shared with
-    #     the --regime-only path (run_regime_detection helper).
-    #     Con --skip-regime lo step è SALTATO: regime_probs/regime_hmm restano quelli
-    #     su disco (label-preserving). / With --skip-regime the step is SKIPPED:
-    #     regime_probs/regime_hmm stay as on disk (label-preserving).
+    # 4. Markov-Switching regime detection on BTC realized vol (Variant 3, 2026-06-03)
+    # — df_macro is ignored by the detector (uses raw_candles.parquet); section shared with
+    # the --regime-only path (run_regime_detection helper).
+    # With --skip-regime the step is SKIPPED:
+    # regime_probs/regime_hmm stay as on disk (label-preserving).
     if args.skip_regime:
         log.info("--skip-regime: regime detector NON toccato (regime_probs.parquet invariato)")
     else:
         run_regime_detection(mcfg, out, df_macro=df_macro)
 
-    # IT: 5. fit del MacroNormalizer (RobustScaler con clipping)
-    # EN: 5. fit the MacroNormalizer (RobustScaler with clipping)
+    # 5. fit the MacroNormalizer (RobustScaler with clipping)
     log.info("Fitting MacroNormalizer ...")
     macro_cols = list(df_macro.columns)
     normalizer = MacroNormalizer()
@@ -394,8 +338,7 @@ def main():
     normalizer.save(str(norm_path))
     log.info(f"Normalizer salvato → {norm_path}")
 
-    # IT: aggiorna PipelineState con il MacroNormalizer (per inference live)
-    # EN: update PipelineState with the MacroNormalizer (for live inference)
+    # update PipelineState with the MacroNormalizer (for live inference)
     import os as _os
     _ps_arch = _os.environ.get("QUANTSYS_ARCH", "lstm")
     pipeline_state_path = str(Path("models") / _ps_arch / "pipeline_state.pkl")
@@ -410,14 +353,12 @@ def main():
     except Exception as e:
         log.warning(f"PipelineState update fallito (non critico): {e}")
 
-    # IT: 6. merge delle feature macro nel dataset NN gia' esistente
-    # EN: 6. merge macro features into the existing NN dataset
+    # 6. merge macro features into the existing NN dataset
     npz_path = out / "lstm_dataset.npz"
     if npz_path.exists():
         log.info("Merge macro con dataset LSTM esistente ...")
         with np.load(npz_path, allow_pickle=True) as npz:
-            # IT: carica in memoria e chiudi il file (evita file-lock su Windows)
-            # EN: load into memory and close the file (avoid Windows file lock)
+            # load into memory and close the file (avoid Windows file lock)
             splits_out = {k: np.array(npz[k]) for k in npz.files}
 
         for split in ["train", "val", "test"]:
@@ -427,8 +368,7 @@ def main():
             timestamps = pd.to_datetime(splits_out[t_key])
             dates      = timestamps.normalize()
 
-            # IT: mappa ogni timestamp al giorno corrispondente (forward-fill macro)
-            # EN: map each timestamp to its day (forward-fill macro features)
+            # map each timestamp to its day (forward-fill macro features)
             if split == "train":
                 macro_daily = df_macro.copy()
                 macro_daily.index = pd.to_datetime(macro_daily.index, utc=True).normalize()
@@ -438,13 +378,11 @@ def main():
             dates_utc = pd.DatetimeIndex(dates, tz="UTC")
             all_dates = macro_daily.index.append(dates_utc).drop_duplicates().sort_values()
             merged = macro_daily.reindex(all_dates).ffill().loc[dates_utc]
-            # IT: leading NaN (date prima della prima macro) -> 0
-            # EN: leading NaNs (dates before first macro observation) -> 0
+            # leading NaNs (dates before first macro observation) -> 0
             merged = merged.fillna(0.0)
 
             X_macro_split = merged.values.astype(np.float32)
-            # IT: stesso scaler fittato sopra, clip a +/-5 sigma
-            # EN: same scaler fitted above, clipped at +/-5 sigma
+            # same scaler fitted above, clipped at +/-5 sigma
             X_macro_split = np.clip(
                 normalizer.scaler.transform(X_macro_split), -5, 5
             ).astype(np.float32)

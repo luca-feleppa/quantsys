@@ -15,8 +15,7 @@ from quantsys.utils import models_root as _models_root
 log = logging.getLogger("quantsys.model.distillation")
 
 
-# IT: Mappa naming heads (canonico → attributo arch-specifico).
-# EN: Head naming map (canonical → arch-specific attribute name).
+# Head naming map (canonical → arch-specific attribute name).
 _HEAD_NAMES = {
     "itransformer": ("out_mu", "out_logsig2", "out_lognu"),
     "lstm":         ("out_mu", "out_logsig2", "out_lognu"),
@@ -24,8 +23,7 @@ _HEAD_NAMES = {
 }
 
 
-# IT: Rileva la naming convention delle output heads dell'arch.
-# EN: Detects the output-head naming convention of the architecture.
+# Detects the output-head naming convention of the architecture.
 def _get_head_names(model) -> tuple:
     """Detect which output head naming convention the model uses."""
     if hasattr(model, "mu_head"):
@@ -33,13 +31,12 @@ def _get_head_names(model) -> tuple:
     return ("out_mu", "out_logsig2", "out_lognu")
 
 
-# IT: Copia weight/bias gestendo mismatch su in_features (slice min_in).
-# EN: Copies weight/bias handling in_features mismatch (slice to min_in).
+# Copies weight/bias handling in_features mismatch (slice to min_in).
 def _copy_linear(t_head: nn.Linear, s_head: nn.Linear, label: str) -> int:
-    """Copia weight/bias da t_head a s_head, gestendo d_model differenti.
+    """Copies weight/bias from t_head to s_head, handling different d_model.
 
-    Se shapes esattamente uguali → copia completa.
-    Se in_features differiscono → copia bias (calibrazione) + slice min_in del weight.
+    If shapes are exactly equal → full copy.
+    If in_features differ → copy bias (calibration) + min_in slice of the weight.
     """
     if t_head.out_features != s_head.out_features:
         log.warning(f"  {label}: out_features mismatch ({t_head.out_features} vs {s_head.out_features}) — skip")
@@ -63,20 +60,19 @@ def _copy_linear(t_head: nn.Linear, s_head: nn.Linear, label: str) -> int:
     return n
 
 
-# IT: Trasferisce heads teacher→student (warm-start della testa di output).
-# EN: Transfers heads teacher→student (warm-start of the output head).
+# Transfers heads teacher→student (warm-start of the output head).
 def transfer_output_heads(teacher: nn.Module, student: nn.Module) -> int:
     """Copy output head weights from teacher to student.
 
-    Supporta sia loss_type='t_student' (mu/ls2/lnu heads) sia 'quantile'
-    (quantile_head per single-expert, expert_gate + expert_heads per MoE).
+    Supports both loss_type='t_student' (mu/ls2/lnu heads) and 'quantile'
+    (quantile_head for single-expert, expert_gate + expert_heads for MoE).
 
-    Pre-condizioni:
-      - teacher e student devono avere stesso loss_type
-      - se MoE: stesso n_output_experts
+    Preconditions:
+      - teacher and student must have the same loss_type
+      - if MoE: same n_output_experts
 
-    Se le pre-condizioni non sono soddisfatte, skip e ritorna 0.
-    Returns: numero di parametri effettivamente copiati.
+    If the preconditions are not met, skip and return 0.
+    Returns: number of parameters actually copied.
     """
     t_loss = getattr(teacher, "loss_type", "t_student")
     s_loss = getattr(student, "loss_type", "t_student")
@@ -90,12 +86,11 @@ def transfer_output_heads(teacher: nn.Module, student: nn.Module) -> int:
         log.warning(f"Transfer heads: teacher MoE={t_moe} != student MoE={s_moe} — skip")
         return 0
 
-    # IT: Branch quantile — gestisce sia single-head sia MoE.
-    # EN: Quantile branch — handles both single-head and MoE cases.
+    # Quantile branch — handles both single-head and MoE cases.
     if t_loss == "quantile":
         n_transferred = 0
         if t_moe > 1:
-            # IT: MoE quantile: copia gate + ogni expert head | EN: MoE quantile: copy gate + each expert head
+            # MoE quantile: copy gate + each expert head
             t_gate = getattr(teacher, "expert_gate", None)
             s_gate = getattr(student, "expert_gate", None)
             if isinstance(t_gate, nn.Linear) and isinstance(s_gate, nn.Linear):
@@ -107,8 +102,7 @@ def transfer_output_heads(teacher: nn.Module, student: nn.Module) -> int:
                     if isinstance(th, nn.Linear) and isinstance(sh, nn.Linear):
                         n_transferred += _copy_linear(th, sh, f"expert_heads[{i}]")
         else:
-            # IT: Single-expert: una sola head Linear(d_model, Q=5).
-            # EN: Single-expert: a single Linear(d_model, Q=5) head.
+            # Single-expert: a single Linear(d_model, Q=5) head.
             t_qh = getattr(teacher, "quantile_head", None)
             s_qh = getattr(student, "quantile_head", None)
             if isinstance(t_qh, nn.Linear) and isinstance(s_qh, nn.Linear):
@@ -117,10 +111,9 @@ def transfer_output_heads(teacher: nn.Module, student: nn.Module) -> int:
                 log.warning("Transfer quantile: quantile_head non trovato in teacher/student — skip")
         return n_transferred
 
-    # IT: Branch t-Student | EN: t-Student branch
+    # t-Student branch
     if t_moe > 1:
-        # IT: MoE t-Student: identico a MoE quantile ma expert out=3 (μ/ls2/lnu).
-        # EN: MoE t-Student: identical to MoE quantile but expert out=3 (μ/ls2/lnu).
+        # MoE t-Student: identical to MoE quantile but expert out=3 (μ/ls2/lnu).
         n_transferred = 0
         t_gate = getattr(teacher, "expert_gate", None)
         s_gate = getattr(student, "expert_gate", None)
@@ -134,8 +127,7 @@ def transfer_output_heads(teacher: nn.Module, student: nn.Module) -> int:
                     n_transferred += _copy_linear(th, sh, f"expert_heads[{i}]")
         return n_transferred
 
-    # IT: Single-expert t-Student: copia μ/ls2/lnu head-by-head (legacy path).
-    # EN: Single-expert t-Student: copy μ/ls2/lnu head-by-head (legacy path).
+    # Single-expert t-Student: copy μ/ls2/lnu head-by-head (legacy path).
     t_names = _get_head_names(teacher)
     s_names = _get_head_names(student)
     n_transferred = 0
@@ -153,8 +145,7 @@ def transfer_output_heads(teacher: nn.Module, student: nn.Module) -> int:
     return n_transferred
 
 
-# IT: MSE scale-normalized su (μ, σ, ν) — evita dominanza di ν.
-# EN: Scale-normalized MSE on (μ, σ, ν) — prevents ν from dominating.
+# Scale-normalized MSE on (μ, σ, ν) — prevents ν from dominating.
 def distillation_loss_t_student(
     student_mu, student_ls2, student_lnu,
     teacher_mu, teacher_ls2, teacher_lnu,
@@ -171,8 +162,7 @@ def distillation_loss_t_student(
     s_nu = F.softplus(student_lnu) + 2.0 + 1e-6
     t_nu = F.softplus(teacher_lnu) + 2.0 + 1e-6
 
-    # IT: unbiased=False: evita NaN su batch finale N=1 (var con N-1 indefinita).
-    # EN: unbiased=False: avoids NaN on final N=1 batch (N-1 correction undefined).
+    # unbiased=False: avoids NaN on final N=1 batch (N-1 correction undefined).
     scale_mu  = (teacher_mu.detach().var(unbiased=False) + 1e-10)
     scale_sig = (t_sigma.detach().var(unbiased=False) + 1e-10)
     scale_nu  = (t_nu.detach().var(unbiased=False) + 1e-10)
@@ -184,21 +174,19 @@ def distillation_loss_t_student(
     return 0.5 * loss_mu + 0.3 * loss_sigma + 0.2 * loss_nu
 
 
-# IT: Distillation loss quantile: MSE diretta tra quantili predetti.
-# EN: Quantile distillation loss: plain MSE between predicted quantiles.
+# Quantile distillation loss: plain MSE between predicted quantiles.
 def distillation_loss_quantile(student_preds, teacher_preds) -> torch.Tensor:
     """Distillation loss for quantile regression: MSE between predicted quantiles."""
     return F.mse_loss(student_preds, teacher_preds)
 
 
-# IT: MC Dropout: Dropout in train, BN/LN in eval (stats apprese).
-# EN: MC Dropout: Dropout in train, BN/LN in eval (learned stats).
+# MC Dropout: Dropout in train, BN/LN in eval (learned stats).
 def _enable_mc_dropout(model: nn.Module) -> None:
-    """Attiva i layer Dropout in train mode lasciando BN/LN in eval.
+    """Puts Dropout layers in train mode while leaving BN/LN in eval.
 
-    Necessario per MC Dropout: durante l'inferenza vogliamo che il Dropout
-    campioni maschere stocastiche (per catturare l'uncertainty del modello)
-    ma che BatchNorm/LayerNorm usino le statistiche apprese (eval mode).
+    Required for MC Dropout: at inference we want Dropout to sample
+    stochastic masks (to capture model uncertainty) while
+    BatchNorm/LayerNorm use the learned statistics (eval mode).
     """
     model.eval()
     for m in model.modules():
@@ -206,20 +194,19 @@ def _enable_mc_dropout(model: nn.Module) -> None:
             m.train()
 
 
-# IT: Genera soft labels del teacher (deterministico o MC Dropout per uncertainty).
-# EN: Generates teacher soft labels (deterministic or MC Dropout for uncertainty).
+# Generates teacher soft labels (deterministic or MC Dropout for uncertainty).
 def generate_teacher_predictions(teacher, dataloader, device, has_macro=False,
                                  mc_samples: int = 1):
     """Run teacher on entire dataset, return cached predictions.
 
     Args:
-        teacher:     modello teacher caricato
-        dataloader:  dataloader (deve essere shuffle=False per allineamento sample_idx)
+        teacher:     loaded teacher model
+        dataloader:  dataloader (must be shuffle=False for sample_idx alignment)
         device:      torch device
-        has_macro:   se True il batch contiene anche x_macro
-        mc_samples:  numero di forward stocastici (MC Dropout). Se >1, abilita
-                     Dropout in train mode (BN/LN restano in eval) e fa N forward
-                     poi media le predizioni. Cattura l'uncertainty del teacher.
+        has_macro:   if True the batch also contains x_macro
+        mc_samples:  number of stochastic forwards (MC Dropout). If >1, enables
+                     Dropout in train mode (BN/LN stay in eval), runs N forwards
+                     and averages the predictions. Captures teacher uncertainty.
 
     Returns dict with keys:
       - 'mu': (N,) tensor of predicted means
@@ -238,8 +225,7 @@ def generate_teacher_predictions(teacher, dataloader, device, has_macro=False,
 
     all_outputs = {"mu": [], "ls2": [], "lnu": [], "quantiles": []}
 
-    # IT: no_grad (non inference_mode): spectral_norm richiede autograd attivo.
-    # EN: no_grad (not inference_mode): spectral_norm requires autograd enabled.
+    # no_grad (not inference_mode): spectral_norm requires autograd enabled.
     nograd_ctx = torch.no_grad() if mc_samples > 1 else torch.inference_mode()
     with nograd_ctx:
         for batch in dataloader:
@@ -250,8 +236,7 @@ def generate_teacher_predictions(teacher, dataloader, device, has_macro=False,
                 Xb, yb = [x.to(device, non_blocking=True) for x in batch]
                 forward_args = (Xb,)
 
-            # IT: K forward in GPU + media finale (un solo trasferimento → CPU).
-            # EN: K forwards on GPU + final average (single GPU→CPU transfer).
+            # K forwards on GPU + final average (single GPU→CPU transfer).
             mu_acc = None; ls2_acc = None; lnu_acc = None; q_acc = None
             for _ in range(mc_samples):
                 out = teacher(*forward_args)
@@ -266,10 +251,8 @@ def generate_teacher_predictions(teacher, dataloader, device, has_macro=False,
                         ls2_acc = ls2_acc + out[1]
                         lnu_acc = lnu_acc + out[2]
 
-            # IT: accumula i tensori SUL DEVICE (no .cpu() per-batch): un solo GPU→CPU finale (A10)
-            #     dopo il cat. Output (N,) o (N,Q) → memoria GPU trascurabile.
-            # EN: accumulate tensors ON DEVICE (no per-batch .cpu()): a single final GPU→CPU (A10)
-            #     after the cat. Outputs are (N,) or (N,Q) → negligible GPU memory.
+            # accumulate tensors ON DEVICE (no per-batch .cpu()): a single final GPU→CPU (A10)
+            # after the cat. Outputs are (N,) or (N,Q) → negligible GPU memory.
             if loss_type == "quantile":
                 qp = q_acc / mc_samples
                 all_outputs["quantiles"].append(qp)
@@ -285,12 +268,11 @@ def generate_teacher_predictions(teacher, dataloader, device, has_macro=False,
     result = {}
     for k, v in all_outputs.items():
         if v:
-            result[k] = torch.cat(v, dim=0).cpu()   # IT: unico trasferimento GPU→CPU (A10) | EN: single GPU→CPU transfer (A10)
+            result[k] = torch.cat(v, dim=0).cpu()   # single GPU→CPU transfer (A10)
     return result
 
 
-# IT: Carica il best checkpoint del teacher per l'arch indicata.
-# EN: Loads the best teacher checkpoint for the given architecture.
+# Loads the best teacher checkpoint for the given architecture.
 def load_teacher(teacher_arch: str, device: torch.device):
     """Load the best teacher checkpoint for the given architecture."""
     from quantsys.model import load_model
@@ -308,18 +290,17 @@ def load_teacher(teacher_arch: str, device: torch.device):
     return model
 
 
-# IT: Heuristic overfit detector: val-train gap al best epoch > threshold.
-# EN: Heuristic overfit detector: val-train gap at best epoch > threshold.
+# Heuristic overfit detector: val-train gap at best epoch > threshold.
 def _is_teacher_overfit(arch: str, overfit_gap_threshold: float = 1.0) -> bool:
-    """Determina se un teacher è overfit ispezionando history.json.
+    """Determines whether a teacher is overfit by inspecting history.json.
 
-    Criterio: `val_nll[best_val_epoch] - train_nll[best_val_epoch] > threshold`
-    significa che train è significativamente più basso (= migliore) di val al
-    best epoch → memorizzazione. NLL student-t può essere negativa: usiamo la
-    differenza, non un rapporto.
+    Criterion: `val_nll[best_val_epoch] - train_nll[best_val_epoch] > threshold`
+    means train is significantly lower (= better) than val at the
+    best epoch → memorization. Student-t NLL can be negative: we use the
+    difference, not a ratio.
 
-    Returns True se overfit (da escludere dal pool teacher), False altrimenti.
-    Restituisce False (= non escludere) se non riusciamo a leggere history.
+    Returns True if overfit (to be excluded from the teacher pool), False otherwise.
+    Returns False (= do not exclude) if history cannot be read.
     """
     import json
     hist_path = _models_root() / arch / "history.json"
@@ -332,7 +313,7 @@ def _is_teacher_overfit(arch: str, overfit_gap_threshold: float = 1.0) -> bool:
         val_nll   = hist.get("val_nll",   [])
         if not train_nll or not val_nll or len(train_nll) != len(val_nll):
             return False
-        # IT: Best epoch = argmin(val_nll) | EN: Best epoch = argmin(val_nll)
+        # Best epoch = argmin(val_nll)
         best_idx = min(range(len(val_nll)), key=lambda i: val_nll[i])
         gap_at_best = val_nll[best_idx] - train_nll[best_idx]
         if gap_at_best > overfit_gap_threshold:
@@ -347,8 +328,7 @@ def _is_teacher_overfit(arch: str, overfit_gap_threshold: float = 1.0) -> bool:
         return False
 
 
-# IT: Soft labels da pool eterogeneo, blended con pesi normalizzati.
-# EN: Soft labels from heterogeneous pool, blended with normalized weights.
+# Soft labels from heterogeneous pool, blended with normalized weights.
 def generate_multi_teacher_predictions(
     all_archs: list[str],
     arch_weights: dict[str, float],
@@ -369,13 +349,13 @@ def generate_multi_teacher_predictions(
         dataloader:   ordered dataloader (no shuffle) over training set
         device:       torch device
         has_macro:    whether dataloader includes macro features
-        overfit_gap_threshold: teacher esclusi se val_nll - train_nll > threshold
-                               al best epoch (default 1.0 NLL unit). Set a None
-                               per disabilitare il filtro.
-        mc_samples: numero di forward stocastici per teacher (MC Dropout). Se >1,
-                    abilita Dropout in train mode durante l'inferenza e media K
-                    forward — soft labels riflettono l'uncertainty del teacher
-                    invece di un'unica predizione deterministica.
+        overfit_gap_threshold: teachers excluded if val_nll - train_nll > threshold
+                               at the best epoch (default 1.0 NLL unit). Set to None
+                               to disable the filter.
+        mc_samples: number of stochastic forwards per teacher (MC Dropout). If >1,
+                    enables Dropout in train mode during inference and averages K
+                    forwards — soft labels reflect teacher uncertainty
+                    instead of a single deterministic prediction.
 
     Returns:
         dict with 'mu', 'ls2', 'lnu' tensors — weighted average of all teachers
@@ -387,8 +367,7 @@ def generate_multi_teacher_predictions(
         if not ckpt.exists():
             log.warning(f"Multi-teacher: {arch} checkpoint non trovato — skip")
             continue
-        # IT: Esclude teacher overfit (train << val al best epoch).
-        # EN: Excludes overfit teachers (train << val at best epoch).
+        # Excludes overfit teachers (train << val at best epoch).
         if overfit_gap_threshold is not None and _is_teacher_overfit(arch, overfit_gap_threshold):
             skipped_overfit.append(arch)
             continue
@@ -436,24 +415,15 @@ def generate_multi_teacher_predictions(
     return result
 
 
-# IT: Pesi (val_loss, spearman, dir_acc) dello scoring teacher — TARGET-AWARE.
-#     Single source of truth condivisa con `_select_best_teacher` (run_all.py).
-#     • target direzionale (`ret`) o di SEGNO (`log_rs_ratio`): pesi storici
-#       0.40 val_loss + 0.35 spearman + 0.25 dir_acc (il segno È il segnale).
-#     • target di VOLATILITÀ (`log_rv`): la directional accuracy è il segno della
-#       varianza-vs-mediana, NON un segnale tradabile (lo straddle è direction-
-#       neutral) → si AZZERA e si ribilancia su val_loss (QLIKE/NLL, il momento
-#       PARI che generalizza OOS) + spearman (qualità di RANGO della vol). Selezionare
-#       un teacher per "dir_acc della vol" è scientificamente scorretto su questa linea.
-# EN: Teacher-scoring weights (val_loss, spearman, dir_acc) — TARGET-AWARE.
-#     Single source of truth shared with `_select_best_teacher` (run_all.py).
-#     • directional (`ret`) or SIGN target (`log_rs_ratio`): historical weights
-#       0.40 val_loss + 0.35 spearman + 0.25 dir_acc (the sign IS the signal).
-#     • VOLATILITY target (`log_rv`): directional accuracy is the sign of
-#       variance-vs-median, NOT a tradable signal (the straddle is direction-
-#       neutral) → ZERO it and rebalance onto val_loss (QLIKE/NLL, the EVEN moment
-#       that generalizes OOS) + spearman (rank quality of vol). Picking a teacher by
-#       "vol dir_acc" is scientifically wrong on this line.
+# Teacher-scoring weights (val_loss, spearman, dir_acc) — TARGET-AWARE.
+# Single source of truth shared with `_select_best_teacher` (run_all.py).
+# • directional (`ret`) or SIGN target (`log_rs_ratio`): historical weights
+#   0.40 val_loss + 0.35 spearman + 0.25 dir_acc (the sign IS the signal).
+# • VOLATILITY target (`log_rv`): directional accuracy is the sign of
+#   variance-vs-median, NOT a tradable signal (the straddle is direction-
+#   neutral) → ZERO it and rebalance onto val_loss (QLIKE/NLL, the EVEN moment
+#   that generalizes OOS) + spearman (rank quality of vol). Picking a teacher by
+#   "vol dir_acc" is scientifically wrong on this line.
 def teacher_score_weights(target_type: str = "ret") -> tuple[float, float, float]:
     """Return (w_val_loss, w_spearman, w_dir_acc) for the teacher scoring, by target."""
     if target_type == "log_rv":
@@ -461,8 +431,7 @@ def teacher_score_weights(target_type: str = "ret") -> tuple[float, float, float
     return (0.40, 0.35, 0.25)
 
 
-# IT: Pesi teacher da metriche salvate (scoring target-aware via teacher_score_weights).
-# EN: Teacher weights from saved metrics (target-aware scoring via teacher_score_weights).
+# Teacher weights from saved metrics (target-aware scoring via teacher_score_weights).
 def compute_teacher_weights(all_archs: list[str],
                             target_type: str = "ret") -> dict[str, float]:
     """Compute teacher weights from saved metrics (config.json).
@@ -494,8 +463,7 @@ def compute_teacher_weights(all_archs: list[str],
     spearmans = np.array([metrics[a]["spearman"] for a in archs])
     das = np.array([metrics[a]["da"] for a in archs])
 
-    # IT: Min-max normalize in [0,1]; se range≈0 ritorna pesi uniformi.
-    # EN: Min-max normalize to [0,1]; if range≈0 returns uniform weights.
+    # Min-max normalize to [0,1]; if range≈0 returns uniform weights.
     def _norm(arr):
         r = arr.max() - arr.min()
         if r < 1e-10:
@@ -508,8 +476,7 @@ def compute_teacher_weights(all_archs: list[str],
     da_norm = _norm(das)
     scores = w_vl * loss_norm + w_sp * spe_norm + w_da * da_norm
 
-    # IT: Softmax con T=2 — amplifica gap tra teacher (più peso al migliore).
-    # EN: Softmax with T=2 — amplifies gap between teachers (more to the best).
+    # Softmax with T=2 — amplifies gap between teachers (more to the best).
     temp = 2.0
     exp_scores = np.exp(scores * temp)
     weights = exp_scores / exp_scores.sum()

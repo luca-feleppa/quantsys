@@ -1,11 +1,11 @@
 """
-Script 05 — Analisi dei segnali live registrati.
-Legge results/live_signals.jsonl e produce statistiche + aggiorna
-dashboard_results.json con i dati della sessione live.
+Script 05 — Analysis of recorded live signals.
+Reads results/live_signals.jsonl, produces statistics and updates
+dashboard_results.json with the live session data.
 
-Run configuration PyCharm:
+PyCharm run configuration:
   Script: scripts/05_analyze_signals.py
-  Working dir: <root del progetto>
+  Working dir: <project root>
 """
 import json
 import logging
@@ -20,8 +20,7 @@ setup_logging()
 log = logging.getLogger("quantsys.script.05")
 
 
-# IT: legge architettura corrente da config (fallback su lstm)
-# EN: read current architecture from config (fallback to lstm)
+# read current architecture from config (fallback to lstm)
 def _default_arch() -> str:
     try:
         import re
@@ -35,21 +34,17 @@ def _default_arch() -> str:
     return "lstm"
 
 
-# IT: analizza live_signals.jsonl (stats+equity) e aggiorna dashboard_results.json
-# EN: analyze live_signals.jsonl (stats+equity) and update dashboard_results.json
+# analyze live_signals.jsonl (stats+equity) and update dashboard_results.json
 def main():
-    # IT: console Windows default cp1252 — qualsiasi unicode nei banner/report crasha
-    #     il print con UnicodeEncodeError. Reconfigure UTF-8 come 01/02/04.
-    # EN: Windows console defaults to cp1252 — any unicode in banners/reports crashes
-    #     the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
+    # Windows console defaults to cp1252 — any unicode in banners/reports crashes
+    # the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
     import sys as _sys
     for _stream in (_sys.stdout, _sys.stderr):
         try:
             _stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    # IT: env QUANTSYS_ARCH ha precedenza per propagazione da pipeline
-    # EN: QUANTSYS_ARCH env wins to propagate from pipeline parent
+    # QUANTSYS_ARCH env wins to propagate from pipeline parent
     import os as _os
     arch = _os.environ.get("QUANTSYS_ARCH") or _default_arch()
     results_dir = Path("results") / arch
@@ -63,8 +58,7 @@ def main():
         print("  Esegui prima: python scripts/04_live_signals.py")
         return
 
-    # IT: carica JSONL ignorando righe corrotte (resilienza a write parziali)
-    # EN: load JSONL ignoring corrupt lines (resilient to partial writes)
+    # load JSONL ignoring corrupt lines (resilient to partial writes)
     records = []
     with open(log_path, encoding="utf-8") as f:
         for line in f:
@@ -92,8 +86,7 @@ def main():
 {'═'*60}
 """)
 
-    # IT: distribuzione BUY/SELL/HOLD con bar chart ASCII
-    # EN: BUY/SELL/HOLD distribution with ASCII bar chart
+    # BUY/SELL/HOLD distribution with ASCII bar chart
     sig_counts = df["signal"].value_counts()
     total      = len(df)
     print("  DISTRIBUZIONE SEGNALI:")
@@ -101,8 +94,7 @@ def main():
         bar = "█" * int(cnt / total * 40)
         print(f"    {sig:<6} {cnt:>5}  ({cnt/total:.1%})  {bar}")
 
-    # IT: stats medie parametri t-Student (sanity check su drift di mu/sigma/nu)
-    # EN: mean t-Student params (sanity check on mu/sigma/nu drift)
+    # mean t-Student params (sanity check on mu/sigma/nu drift)
     print(f"""
   PARAMETRI DISTRIBUZIONE (media):
     μ medio  : {df['mu'].mean():+.6f}  (std: {df['mu'].std():.6f})
@@ -110,8 +102,7 @@ def main():
     ν medio  : {df['nu'].mean():.2f}   (gradi di libertà t-Student)
     P↑ medio : {df['prob_up'].mean():.3f}""")
 
-    # IT: equity curve di sessione + max drawdown via cummax
-    # EN: session equity curve + max drawdown via cummax
+    # session equity curve + max drawdown via cummax
     if "equity" in df.columns and df["equity"].notna().any():
         eq_start = df["equity"].iloc[0]
         eq_end   = df["equity"].iloc[-1]
@@ -132,8 +123,7 @@ def main():
     Max       : ${eq_max:,.2f}
     Max DD    : {max_dd:.2%}""")
 
-    # IT: ultimo session_*.json (scritto da 04 al shutdown) per metriche reali
-    # EN: last session_*.json (written by 04 on shutdown) for real metrics
+    # last session_*.json (written by 04 on shutdown) for real metrics
     session_files = sorted(results_dir.glob("session_*.json"))
     if session_files:
         latest = session_files[-1]
@@ -147,8 +137,7 @@ def main():
     Sharpe      : {sess.get('sharpe', 0):.2f}
     Max DD      : {sess.get('max_drawdown', 0):.2%}""")
 
-    # IT: merge dati live in dashboard_results.json per la tab BACKTEST
-    # EN: merge live data into dashboard_results.json for BACKTEST tab
+    # merge live data into dashboard_results.json for BACKTEST tab
     dashboard_path = RESULTS_FILE
     if dashboard_path.exists():
         with open(dashboard_path, encoding="utf-8") as f:
@@ -156,15 +145,13 @@ def main():
     else:
         dashboard = {"metrics": {}, "equity_curve": [], "trades": []}
 
-    # IT: downsample lineare a 300 punti per ridurre payload dashboard
-    # EN: linear downsample to 300 points to shrink dashboard payload
+    # linear downsample to 300 points to shrink dashboard payload
     def downsample(arr, n=300):
         if len(arr) <= n: return arr
         idx = np.linspace(0, len(arr)-1, n, dtype=int)
         return [arr[i] for i in idx]
 
-    # IT: JSON non supporta NaN/Inf -> sanifica a None
-    # EN: JSON does not support NaN/Inf -> sanitize to None
+    # JSON does not support NaN/Inf -> sanitize to None
     def clean(v):
         if isinstance(v, float) and (math.isnan(v) or math.isinf(v)): return None
         return v

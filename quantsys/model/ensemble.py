@@ -1,8 +1,8 @@
-"""EnsembleModel: inferenza su N checkpoint, omogeneo o eterogeneo.
+"""EnsembleModel: inference over N checkpoints, homogeneous or heterogeneous.
 
-Modalita':
-  - Omogeneo (legacy): N checkpoint best_model_0..N-1.pt della stessa architettura
-  - Eterogeneo (distillation): 1 checkpoint per architettura (itransformer, nhits, tcnmamba)
+Modes:
+  - Homogeneous (legacy): N checkpoints best_model_0..N-1.pt of the same architecture
+  - Heterogeneous (distillation): 1 checkpoint per architecture (itransformer, nhits, tcnmamba)
 """
 import json
 import math
@@ -15,25 +15,22 @@ from quantsys.utils import models_root as _models_root
 
 log = logging.getLogger("quantsys.model.ensemble")
 
-# IT: Temperatura softmax per pesi inverse-NLL (più bassa = più discriminativa).
-# EN: Softmax temperature for inverse-NLL weights (lower = sharper).
+# Softmax temperature for inverse-NLL weights (lower = sharper).
 DEFAULT_NLL_TEMPERATURE = 0.05
 
-# IT: Composizione default ensemble eterogeneo (override via config.yaml).
-# EN: Default heterogeneous ensemble composition (override via config.yaml).
+# Default heterogeneous ensemble composition (override via config.yaml).
 HETEROGENEOUS_ARCHS = ["itransformer", "nhits", "tcnmamba"]
 
 
-# IT: Risolve la lista archi per distill/ensemble (cfg override → fallback costante).
-# EN: Resolves the archs list for distill/ensemble (cfg override → constant fallback).
+# Resolves the archs list for distill/ensemble (cfg override → constant fallback).
 def get_distillation_archs(cfg: dict = None) -> list:
-    """Restituisce la lista di architetture per la pipeline distill/ensemble
-    eterogeneo.
+    """Returns the list of architectures for the distill/heterogeneous
+    ensemble pipeline.
 
-    Legge da `cfg["distillation"]["archs"]` se presente, altrimenti fallback
-    a HETEROGENEOUS_ARCHS. Filtra silenziosamente entry non-stringa o vuote.
-    Permette di cambiare composizione (es. swap lstm/nhits, aggiungere 4°
-    modello) modificando una sola riga in `config/default.yaml`.
+    Reads `cfg["distillation"]["archs"]` if present, otherwise falls back
+    to HETEROGENEOUS_ARCHS. Silently filters out non-string or empty entries.
+    Allows changing the composition (e.g. swap lstm/nhits, add a 4th
+    model) by editing a single line in `config/default.yaml`.
     """
     if cfg is not None and isinstance(cfg.get("distillation"), dict):
         archs = cfg["distillation"].get("archs")
@@ -44,38 +41,31 @@ def get_distillation_archs(cfg: dict = None) -> list:
                 return cleaned
     return list(HETEROGENEOUS_ARCHS)
 
-# IT: Tolleranza (secondi) tra le scritture sequenziali dello stesso run di training:
-#     entro questa finestra best_model.pt e membri numerati sono considerati coerenti.
-# EN: Tolerance (seconds) between sequential writes of the same training run:
-#     within this window best_model.pt and numbered members are considered coherent.
+# Tolerance (seconds) between sequential writes of the same training run:
+# within this window best_model.pt and numbered members are considered coherent.
 STALE_MEMBERS_TOLERANCE_S = 60.0
 
 
-# IT: Guard anti-stale NON-fatale (bug 2026-06-10): se best_model.pt è molto più recente
-#     dei membri numerati, questi sono probabilmente residui di un run precedente
-#     (altra config/target/interval) che load() preferirà ignorando il nuovo best.
-# EN: Non-fatal anti-stale guard (2026-06-10 bug): if best_model.pt is much newer than
-#     the numbered members, those are likely leftovers from a previous run
-#     (different config/target/interval) that load() will prefer, ignoring the new best.
+# Non-fatal anti-stale guard (2026-06-10 bug): if best_model.pt is much newer than
+# the numbered members, those are likely leftovers from a previous run
+# (different config/target/interval) that load() will prefer, ignoring the new best.
 def _stale_members_warning(base: Path) -> str | None:
-    """Ritorna un messaggio di warning se i membri numerati sembrano stale, altrimenti None.
+    """Returns a warning message if the numbered members look stale, otherwise None.
 
-    Condizione: esistono membri `best_model_[0-9]*.pt` E `best_model.pt` E
-    mtime(best_model.pt) > max(mtime(membri)) + STALE_MEMBERS_TOLERANCE_S.
-    Warning-only: non altera in alcun modo la selezione dei checkpoint.
+    Condition: `best_model_[0-9]*.pt` members AND `best_model.pt` exist AND
+    mtime(best_model.pt) > max(mtime(members)) + STALE_MEMBERS_TOLERANCE_S.
+    Warning-only: does not alter checkpoint selection in any way.
     """
     members = sorted(base.glob("best_model_[0-9]*.pt"))
     single = base / "best_model.pt"
-    # IT: senza membri numerati o senza best singolo non c'è ambiguità → nessun warning.
-    # EN: without numbered members or without the single best there is no ambiguity → no warning.
+    # without numbered members or without the single best there is no ambiguity → no warning.
     if not members or not single.exists():
         return None
     try:
         newest_member = max(p.stat().st_mtime for p in members)
         single_mtime = single.stat().st_mtime
     except OSError:
-        # IT: race su filesystem (file rimosso tra glob e stat) → degrada silenziosamente.
-        # EN: filesystem race (file removed between glob and stat) → degrade silently.
+        # filesystem race (file removed between glob and stat) → degrade silently.
         return None
     if single_mtime > newest_member + STALE_MEMBERS_TOLERANCE_S:
         return (
@@ -93,8 +83,7 @@ def _stale_members_warning(base: Path) -> str | None:
     return None
 
 
-# IT: Pesi default per architettura; sovrascrivibili via arch_weights kwarg.
-# EN: Per-architecture default weights; overridable via arch_weights kwarg.
+# Per-architecture default weights; overridable via arch_weights kwarg.
 DEFAULT_ARCH_WEIGHTS = {
     "itransformer": 1.0,
     "nhits":        1.0,
@@ -104,27 +93,25 @@ DEFAULT_ARCH_WEIGHTS = {
 }
 
 
-# IT: Pesi data-driven via softmax(-val_nll/T) — Bayesian Model Averaging stile temperature-scaled.
-# EN: Data-driven weights via softmax(-val_nll/T) — temperature-scaled Bayesian Model Averaging.
+# Data-driven weights via softmax(-val_nll/T) — temperature-scaled Bayesian Model Averaging.
 def _compute_dynamic_weights(arch_names: list,
                              models_root: Path = None,
                              temperature: float = DEFAULT_NLL_TEMPERATURE) -> dict:
-    """Calcola pesi per architettura usando inverse-NLL softmax sui best
-    val_nll letti da `models/{arch}/history.json`.
+    """Computes per-architecture weights using an inverse-NLL softmax over the
+    best val_nll read from `models/{arch}/history.json`.
 
-    Formula (Strategia C, principled BMA):
+    Formula (Strategy C, principled BMA):
       w_i = exp(-(NLL_i - NLL_min) / T) / Z
 
-    La sottrazione di NLL_min serve solo a stabilità numerica (gli esponenziali
-    rimangono in [0,1]); i pesi finali sono identici a exp(-NLL_i/T)/Z.
+    Subtracting NLL_min is only for numerical stability (the exponentials
+    stay in [0,1]); the final weights are identical to exp(-NLL_i/T)/Z.
 
-    Restituisce dict {arch: peso_raw} (NON normalizzato — la normalizzazione
-    finale resta in __init__). Se una history.json manca o è malformata,
-    quell'arch riceve peso 1.0 (fallback uniforme parziale). Se TUTTE
-    mancano, restituisce dict vuoto → caller userà DEFAULT_ARCH_WEIGHTS.
+    Returns dict {arch: raw_weight} (NOT normalized — final normalization
+    stays in __init__). If a history.json is missing or malformed, that
+    arch gets weight 1.0 (partial uniform fallback). If ALL are missing,
+    returns an empty dict → the caller will use DEFAULT_ARCH_WEIGHTS.
     """
-    # IT: default = root env-aware (QUANTSYS_MODELS_ROOT) per esperimenti isolati.
-    # EN: default = env-aware root (QUANTSYS_MODELS_ROOT) for isolated experiments.
+    # default = env-aware root (QUANTSYS_MODELS_ROOT) for isolated experiments.
     if models_root is None:
         models_root = _models_root()
 
@@ -139,8 +126,7 @@ def _compute_dynamic_weights(arch_names: list,
             with open(hist_path, "r", encoding="utf-8") as f:
                 hist = json.load(f)
             vnll = hist.get("val_nll", [])
-            # IT: Filtra NaN/Inf e valori non finiti (early epochs possono divergere).
-            # EN: Filter out NaN/Inf and non-finite values (early epochs may diverge).
+            # Filter out NaN/Inf and non-finite values (early epochs may diverge).
             vnll = [float(v) for v in vnll
                     if v is not None and isinstance(v, (int, float))
                     and math.isfinite(float(v))]
@@ -154,24 +140,20 @@ def _compute_dynamic_weights(arch_names: list,
             continue
 
     if not nlls:
-        # IT: Nessuna metrica disponibile → fallback a pesi default uniformi.
-        # EN: No metric available → fallback to default uniform weights.
+        # No metric available → fallback to default uniform weights.
         return {}
 
-    # IT: Softmax stabile numericamente: sottraggo il minimo prima di esponenziare.
-    # EN: Numerically stable softmax: subtract min before exponentiating.
+    # Numerically stable softmax: subtract min before exponentiating.
     nll_min = min(nlls.values())
-    T = max(float(temperature), 1e-6)                              # IT: evita div/0 | EN: avoid div/0
+    T = max(float(temperature), 1e-6)                              # avoid div/0
     raw = {a: math.exp(-(v - nll_min) / T) for a, v in nlls.items()}
     Z   = sum(raw.values())
     if Z <= 0:
         return {}
     weights = {a: r / Z for a, r in raw.items()}
 
-    # IT: Per archi senza history.json assegna la mediana dei pesi calcolati
-    #     (compromesso: non favorisce né penalizza l'arch sconosciuto).
-    # EN: For archs missing history.json assign the median of computed weights
-    #     (compromise: neither favors nor penalizes the unknown arch).
+    # For archs missing history.json assign the median of computed weights
+    # (compromise: neither favors nor penalizes the unknown arch).
     if len(weights) < len(arch_names):
         median_w = sorted(weights.values())[len(weights) // 2]
         for arch in arch_names:
@@ -187,23 +169,21 @@ def _compute_dynamic_weights(arch_names: list,
 
 class EnsembleModel:
     """
-    Carica N modelli e fa media (pesata) delle previsioni.
+    Loads N models and takes the (weighted) average of their predictions.
 
-    Formula combinazione incertezza (legge della varianza totale, weighted):
+    Uncertainty combination formula (law of total variance, weighted):
       mu_ens    = Sum_i w_i * mu_i
       sigma_ens = sqrt(Sum_i w_i * sigma_i^2 + Sum_i w_i * (mu_i - mu_ens)^2)
-    dove w_i sono i pesi normalizzati a sommare 1 (uno per modello).
+    where w_i are the weights normalized to sum to 1 (one per model).
     """
 
-    # IT: Costruisce ensemble da modelli già caricati + risolve pesi normalizzati.
-    # EN: Builds ensemble from preloaded models + resolves normalized weights.
+    # Builds ensemble from preloaded models + resolves normalized weights.
     def __init__(self, models: list, device: torch.device,
                  arch_names: list = None, arch_weights: dict = None):
         self._models = models
         self._device = device
         self._arch_names = arch_names or [f"model_{i}" for i in range(len(models))]
-        # IT: Default DEFAULT_ARCH_WEIGHTS; 1.0 per arch ignote.
-        # EN: Defaults to DEFAULT_ARCH_WEIGHTS; 1.0 for unknown archs.
+        # Defaults to DEFAULT_ARCH_WEIGHTS; 1.0 for unknown archs.
         wmap = dict(DEFAULT_ARCH_WEIGHTS)
         if arch_weights:
             wmap.update(arch_weights)
@@ -212,25 +192,22 @@ class EnsembleModel:
         if s <= 0:
             raw = [1.0] * len(self._models)
             s = float(len(self._models))
-        self._weights = [w / s for w in raw]                      # IT: somma=1 | EN: sum=1
+        self._weights = [w / s for w in raw]                      # sum=1
         log.info(
             "EnsembleModel pesi: "
             + ", ".join(f"{a}={w:.3f}" for a, w in zip(self._arch_names, self._weights))
         )
 
-    # IT: Carica ensemble omogeneo dai best_model_*.pt; fallback a best_model.pt singolo.
-    # EN: Loads a homogeneous ensemble from best_model_*.pt; falls back to a single best_model.pt.
+    # Loads a homogeneous ensemble from best_model_*.pt; falls back to a single best_model.pt.
     @classmethod
     def load(cls, models_dir: str, device: torch.device) -> "EnsembleModel":
-        """Carica tutti i best_model_*.pt disponibili. Fallback a best_model.pt."""
+        """Loads all available best_model_*.pt. Falls back to best_model.pt."""
         from quantsys.model import load_model
 
         base = Path(models_dir)
 
-        # IT: Guard anti-stale warning-only (bug 2026-06-10): segnala membri numerati
-        #     potenzialmente residui di un run precedente; NON cambia la selezione.
-        # EN: Warning-only anti-stale guard (2026-06-10 bug): flags numbered members
-        #     possibly left over from a previous run; does NOT change selection.
+        # Warning-only anti-stale guard (2026-06-10 bug): flags numbered members
+        # possibly left over from a previous run; does NOT change selection.
         _stale_msg = _stale_members_warning(base)
         if _stale_msg is not None:
             log.warning(_stale_msg)
@@ -257,37 +234,32 @@ class EnsembleModel:
             models = [m]
             log.info(f"EnsembleModel: 1 membro caricato (fallback a {fallback})")
 
-        # IT: arch_names non passato → __init__ usa default ["model_0", ...]. Safe perché
-        #     in ensemble omogeneo (load()) tutti i membri condividono la stessa arch, e
-        #     i pesi DEFAULT_ARCH_WEIGHTS.get(a, 1.0) fallback a 1.0 → media uniforme corretta.
-        # EN: arch_names not passed → __init__ uses default ["model_0", ...]. Safe because
-        #     in homogeneous ensemble (load()) all members share the same arch, and the
-        #     DEFAULT_ARCH_WEIGHTS.get(a, 1.0) fallback to 1.0 → correct uniform average.
+        # arch_names not passed → __init__ uses default ["model_0", ...]. Safe because
+        # in homogeneous ensemble (load()) all members share the same arch, and the
+        # DEFAULT_ARCH_WEIGHTS.get(a, 1.0) fallback to 1.0 → correct uniform average.
         return cls(models, device)
 
-    # IT: Carica un checkpoint per architettura da models/{arch}/ (ensemble eterogeneo); salta le mancanti.
-    # EN: Loads one checkpoint per architecture from models/{arch}/ (heterogeneous ensemble); skips missing ones.
+    # Loads one checkpoint per architecture from models/{arch}/ (heterogeneous ensemble); skips missing ones.
     @classmethod
     def load_heterogeneous(cls, device: torch.device,
                            archs: list = None,
                            cfg:   dict = None) -> "EnsembleModel":
-        """Carica un modello per ogni architettura disponibile (ensemble eterogeneo).
+        """Loads one model per available architecture (heterogeneous ensemble).
 
-        Cerca best_model.pt in models/{arch}/ per ogni architettura.
-        Salta le architetture senza checkpoint.
+        Looks for best_model.pt in models/{arch}/ for each architecture.
+        Skips architectures without a checkpoint.
 
-        Risoluzione lista archs (in ordine di priorità):
-          1. parametro `archs` esplicito
-          2. `cfg["distillation"]["archs"]` se cfg fornito
-          3. costante HETEROGENEOUS_ARCHS
+        archs list resolution (in priority order):
+          1. explicit `archs` parameter
+          2. `cfg["distillation"]["archs"]` if cfg is given
+          3. HETEROGENEOUS_ARCHS constant
         """
         from quantsys.model import load_model
 
         if archs is None:
             archs = get_distillation_archs(cfg)
 
-        # IT: root env-aware — l'ensemble eterogeneo legge dalla sandbox isolata se attiva.
-        # EN: env-aware root — the heterogeneous ensemble reads from the isolated sandbox if set.
+        # env-aware root — the heterogeneous ensemble reads from the isolated sandbox if set.
         _mroot = _models_root()
         models = []
         arch_names = []
@@ -314,12 +286,9 @@ class EnsembleModel:
         log.info(f"EnsembleModel eterogeneo: {len(models)} architetture "
                  f"[{', '.join(arch_names)}]")
 
-        # IT: Strategia C — pesi data-driven via inverse-NLL softmax sui best
-        #     val_nll. Sostituisce il default uniforme (1/n) di DEFAULT_ARCH_WEIGHTS.
-        #     Temperatura opzionale da cfg["distillation"]["ensemble_nll_temperature"].
-        # EN: Strategy C — data-driven weights via inverse-NLL softmax on best
-        #     val_nll. Replaces the uniform default (1/n) from DEFAULT_ARCH_WEIGHTS.
-        #     Optional temperature via cfg["distillation"]["ensemble_nll_temperature"].
+        # Strategy C — data-driven weights via inverse-NLL softmax on best
+        # val_nll. Replaces the uniform default (1/n) from DEFAULT_ARCH_WEIGHTS.
+        # Optional temperature via cfg["distillation"]["ensemble_nll_temperature"].
         temperature = DEFAULT_NLL_TEMPERATURE
         if isinstance(cfg, dict) and isinstance(cfg.get("distillation"), dict):
             tcfg = cfg["distillation"].get("ensemble_nll_temperature")
@@ -327,13 +296,11 @@ class EnsembleModel:
                 temperature = float(tcfg)
         dyn_weights = _compute_dynamic_weights(arch_names, models_root=_mroot,
                                                temperature=temperature)
-        # IT: Se vuoto → fallback a DEFAULT_ARCH_WEIGHTS (uniforme). Altrimenti override.
-        # EN: If empty → fallback to DEFAULT_ARCH_WEIGHTS (uniform). Otherwise override.
+        # If empty → fallback to DEFAULT_ARCH_WEIGHTS (uniform). Otherwise override.
         return cls(models, device, arch_names,
                    arch_weights=dyn_weights if dyn_weights else None)
 
-    # IT: Tensore pesi cache-ato per (device,dtype) — i pesi non cambiano dopo l'init.
-    # EN: (device,dtype)-cached weights tensor — weights don't change after init.
+    # (device,dtype)-cached weights tensor — weights don't change after init.
     def _weights_tensor(self, device, dtype):
         cache = getattr(self, "_weights_cache", None)
         if cache is None:
@@ -346,15 +313,14 @@ class EnsembleModel:
             cache[key] = t
         return t
 
-    # IT: Forward su tutti i membri + fusione con legge della varianza totale.
-    # EN: Forward across all members + total-variance-law fusion.
+    # Forward across all members + total-variance-law fusion.
     def __call__(self, *args, **kwargs):
-        """Forwarda a tutti i modelli e combina l'output."""
+        """Forwards to all models and combines the output."""
         mus, sigs, nus_list = [], [], []
 
         with torch.no_grad(), torch.amp.autocast(
             device_type=self._device.type,
-            enabled=False,   # IT: AMP off: evita NaN (spectral_norm + Mamba scan) | EN: AMP off: avoids NaN
+            enabled=False,   # AMP off: avoids NaN (spectral_norm + Mamba scan)
         ):
             for m in self._models:
                 loss_type = getattr(m, "loss_type", "t_student")
@@ -377,57 +343,48 @@ class EnsembleModel:
         sigs_t = torch.stack(sigs,     dim=0)
         nus_t  = torch.stack(nus_list, dim=0)
 
-        # IT: Pesi broadcast su (N,1) per fusione tensor-friendly. Cache-ati per (device,dtype):
-        #     i pesi sono immutabili post-init → evita di ricostruire il tensore ad ogni forward (A7).
-        # EN: Weights broadcast to (N,1) for tensor-friendly fusion. Cached per (device,dtype):
-        #     weights are immutable post-init → avoids rebuilding the tensor on every forward (A7).
+        # Weights broadcast to (N,1) for tensor-friendly fusion. Cached per (device,dtype):
+        # weights are immutable post-init → avoids rebuilding the tensor on every forward (A7).
         w = self._weights_tensor(mus_t.device, mus_t.dtype)
 
         mu_ens = (w * mus_t).sum(dim=0)
         nu_ens = (w * nus_t).sum(dim=0)
 
-        # IT: Total variance law: E[σ²] + Var[μ_i] = within + between models.
-        # EN: Total variance law: E[σ²] + Var[μ_i] = within + between models.
+        # Total variance law: E[σ²] + Var[μ_i] = within + between models.
         sig2_mean = (w * sigs_t ** 2).sum(dim=0)
         mu_var    = (w * (mus_t - mu_ens.unsqueeze(0)) ** 2).sum(dim=0)
         sigma_ens = (sig2_mean + mu_var).clamp(min=1e-12).sqrt()
 
         return mu_ens, sigma_ens, nu_ens
 
-    # IT: Numero di membri nell'ensemble.
-    # EN: Number of members in the ensemble.
+    # Number of members in the ensemble.
     @property
     def n_members(self) -> int:
         return len(self._models)
 
-    # IT: Pesi normalizzati (sommano a 1) per membro.
-    # EN: Normalized per-member weights (sum to 1).
+    # Normalized per-member weights (sum to 1).
     @property
     def weights(self) -> list:
-        """Pesi normalizzati (sommano a 1) per ogni membro dell'ensemble."""
+        """Normalized weights (summing to 1) for each ensemble member."""
         return list(self._weights)
 
-    # IT: Nomi delle architetture dei membri.
-    # EN: Member architecture names.
+    # Member architecture names.
     @property
     def arch_names(self) -> list:
         return self._arch_names
 
-    # IT: True se l'ensemble mischia architetture diverse.
-    # EN: True if the ensemble mixes different architectures.
+    # True if the ensemble mixes different architectures.
     @property
     def is_heterogeneous(self) -> bool:
         return len(set(self._arch_names)) > 1
 
-    # IT: Mette tutti i membri in eval mode.
-    # EN: Puts all members into eval mode.
+    # Puts all members into eval mode.
     def eval(self):
         for m in self._models:
             m.eval()
         return self
 
-    # IT: Mette tutti i membri in train/eval mode (mode bool).
-    # EN: Puts all members into train/eval mode (mode bool).
+    # Puts all members into train/eval mode (mode bool).
     def train(self, mode: bool = True):
         for m in self._models:
             m.train(mode)

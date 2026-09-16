@@ -1,22 +1,21 @@
 """
-Probe temporanea (LEVA A) — quale stimatore dei clip bounds e' piu' CORRETTO?
 Temporary probe (LEVER A) — which clip-bounds estimator is more CORRECT?
 
-Non e' una domanda di velocita'. `02_train.py` calcola i clip bounds p0.1/p99.9
-su `X_train.reshape(-1, F)`, cioe' sulla vista ESPANSA delle finestre: con
-window=120 e stride=1 ogni barra compare ~120 volte, ma le barre di BORDO
-compaiono meno. L'alternativa e' calcolarli sulle barre DISTINTE (200x piu'
-veloce). Le due stime differiscono; questa probe stabilisce se la differenza
-e' SEGNALE o ARTEFATTO, con tre prove:
+This is not a speed question. `02_train.py` computes the p0.1/p99.9 clip bounds
+on `X_train.reshape(-1, F)`, i.e. on the EXPANDED view of the windows: with
+window=120 and stride=1 every bar appears ~120 times, but EDGE bars
+appear fewer times. The alternative is computing them on the DISTINCT bars (200x
+faster). The two estimates differ; this probe establishes whether the difference
+is SIGNAL or ARTIFACT, with three proofs:
 
-  A) MECCANISMO — la vista espansa e' esattamente "barre distinte pesate per
-     molteplicita'"? Se si', la differenza e' interamente il ri-peso dei bordi.
-  B) RUMORE — la differenza fra i due stimatori e' grande o piccola rispetto
-     alla variabilita' campionaria dello stimatore stesso (bootstrap)?
-  C) IMPATTO A VALLE — quante celle vengono effettivamente clippate in modo
-     diverso, e di quanto? E' la sola quantita' che il training vede davvero.
+  A) MECHANISM — is the expanded view exactly "distinct bars weighted by
+     multiplicity"? If so, the difference is entirely the re-weighting of the edges.
+  B) NOISE — is the difference between the two estimators large or small relative
+     to the sampling variability of the estimator itself (bootstrap)?
+  C) DOWNSTREAM IMPACT — how many cells are actually clipped
+     differently, and by how much? It is the only quantity training really sees.
 
-Uso / Usage: python scripts/archive/perf_probe/test_clip_bounds_correctness.py
+Usage: python scripts/archive/perf_probe/test_clip_bounds_correctness.py
 """
 import sys
 import time
@@ -26,7 +25,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
 
-W = 120          # IT/EN: window_size (model.window_size)
+W = 120          # window_size (model.window_size)
 P_LO, P_HI = 0.1, 99.9
 
 
@@ -44,17 +43,12 @@ def main():
     assert w == W, f"window inattesa: {w}"
     print(f"X_train = {X.shape}  ({X.nbytes/1e9:.2f} GB)  F={F}")
 
-    # ── struttura a BLOCCHI: X_train NON e' contiguo ────────────────────────
-    # IT: `create_windows` scarta le finestre contenenti NaN (`valid` mask), quindi
-    #     X_train e' fatto di piu' blocchi contigui separati da salti. Ignorarlo
-    #     (assumendo X[j,0,:] = barra j per ogni j) produce una ricostruzione
-    #     SBAGLIATA in silenzio — verificato: la prova A fallisce. I punti di
-    #     rottura si trovano confrontando X[j+1,:-1] con X[j,1:].
-    # EN: `create_windows` drops NaN-containing windows (`valid` mask), so X_train
-    #     is made of several contiguous blocks separated by jumps. Ignoring that
-    #     (assuming X[j,0,:] = bar j for every j) yields a SILENTLY wrong
-    #     reconstruction — verified: proof A fails. Break points are found by
-    #     comparing X[j+1,:-1] against X[j,1:].
+    # ── BLOCK structure: X_train is NOT contiguous ─────────────────────────
+    # `create_windows` drops NaN-containing windows (`valid` mask), so X_train
+    # is made of several contiguous blocks separated by jumps. Ignoring that
+    # (assuming X[j,0,:] = bar j for every j) yields a SILENTLY wrong
+    # reconstruction — verified: proof A fails. Break points are found by
+    # comparing X[j+1,:-1] against X[j,1:].
     breaks = []
     step = 2000
     for s in range(0, n_tr - 1, step):
@@ -65,12 +59,9 @@ def main():
     print(f"discontinuita' trovate: {len(breaks)} -> {len(edges)-1} blocchi contigui")
     print(f"  blocchi: {[(edges[i], edges[i+1]) for i in range(len(edges)-1)]}")
 
-    # IT: barre DISTINTE per blocco: first-bar di ogni finestra + coda dell'ultima.
-    #     Molteplicita': dentro un blocco di nb finestre, la barra b compare in
-    #     ogni (j,k) con j+k=b, 0<=j<nb, 0<=k<W.
-    # EN: DISTINCT bars per block: each window's first bar + the last window's tail.
-    #     Multiplicity: within a block of nb windows, bar b appears in every (j,k)
-    #     with j+k=b, 0<=j<nb, 0<=k<W.
+    # DISTINCT bars per block: each window's first bar + the last window's tail.
+    # Multiplicity: within a block of nb windows, bar b appears in every (j,k)
+    # with j+k=b, 0<=j<nb, 0<=k<W.
     parts, mults = [], []
     for i in range(len(edges) - 1):
         s, e = edges[i], edges[i + 1]
@@ -95,10 +86,8 @@ def main():
     print(f"deficit di peso totale           : {deficit:,} su {n_tr*W:,} "
           f"({deficit/(n_tr*W)*100:.3f}% del peso)")
 
-    # IT: verifica che l'espansione sia SOLO ripetizione: ricostruisco la vista
-    #     espansa su poche colonne via np.repeat e confronto i percentili.
-    # EN: verify the expansion is ONLY repetition: rebuild the expanded view on a
-    #     few columns via np.repeat and compare percentiles.
+    # verify the expansion is ONLY repetition: rebuild the expanded view on a
+    # few columns via np.repeat and compare percentiles.
     probe_cols = [0, 9, 20, 57, F - 1]
     flat = X.reshape(-1, F)
     exp_p = np.percentile(flat[:, probe_cols], [P_LO, P_HI], axis=0)
@@ -113,7 +102,7 @@ def main():
           "      stessa popolazione, con i bordi sotto-pesati.\n")
     del rep
 
-    # ── i due stimatori ─────────────────────────────────────────────────────
+    # ── the two estimators ──────────────────────────────────────────────────
     t0 = time.perf_counter()
     lo_exp, hi_exp = np.percentile(flat, [P_LO, P_HI], axis=0)
     t_exp = time.perf_counter() - t0
@@ -123,11 +112,9 @@ def main():
     print(f"tempo: espanso {t_exp:6.2f} s | distinto {t_dis:5.2f} s "
           f"-> {t_exp/t_dis:.0f}x\n")
 
-    # ── B) la differenza e' dentro il rumore dello stimatore? ───────────────
-    # IT: bootstrap sulle BARRE (l'unita' campionaria vera: le finestre non sono
-    #     indipendenti, sono 120 copie sfalsate della stessa storia).
-    # EN: bootstrap over BARS (the true sampling unit: windows are not
-    #     independent, they are 120 shifted copies of the same history).
+    # ── B) is the difference within the estimator's noise? ──────────────────
+    # bootstrap over BARS (the true sampling unit: windows are not
+    # independent, they are 120 shifted copies of the same history).
     print("=== B) RUMORE — bootstrap sulle barre (B=300) ===")
     rng = np.random.default_rng(42)
     B = 300
@@ -142,8 +129,7 @@ def main():
 
     diff_lo = np.abs(lo_exp - lo_dis)
     diff_hi = np.abs(hi_exp - hi_dis)
-    # IT: differenza fra stimatori in unita' di deviazione standard campionaria.
-    # EN: estimator difference in units of the sampling standard deviation.
+    # estimator difference in units of the sampling standard deviation.
     z_lo = diff_lo / np.maximum(sd_lo, 1e-12)
     z_hi = diff_hi / np.maximum(sd_hi, 1e-12)
     z_all = np.concatenate([z_lo, z_hi])
@@ -160,12 +146,9 @@ def main():
     print("   -> z<1 significa che i due stimatori distano MENO di quanto lo\n"
           "      stimatore stesso oscilli ri-campionando i dati.\n")
 
-    # ── C) impatto a valle: quante celle cambiano davvero ───────────────────
-    # IT: e' la sola quantita' che il training vede. Applico i due clip alle
-    #     barre distinte (il clip e' elemento-per-elemento: la ripetizione non
-    #     cambia le frazioni).
-    # EN: the only quantity training sees. Apply both clips to the distinct bars
-    #     (clipping is elementwise: repetition does not change the fractions).
+    # ── C) downstream impact: how many cells actually change ────────────────
+    # the only quantity training sees. Apply both clips to the distinct bars
+    # (clipping is elementwise: repetition does not change the fractions).
     print("=== C) IMPATTO A VALLE ===")
     c_exp = np.clip(distinct, lo_exp, hi_exp)
     c_dis = np.clip(distinct, lo_dis, hi_dis)
@@ -180,8 +163,7 @@ def main():
           f"({n_diff/n_cells*100:.4f}%)")
     if n_diff:
         nz = delta[delta > 0]
-        # IT: scala di riferimento = IQR della feature (i dati sono z-score robusti).
-        # EN: reference scale = feature IQR (data are robust z-scores).
+        # reference scale = feature IQR (data are robust z-scores).
         iqr = np.percentile(distinct, 75, axis=0) - np.percentile(distinct, 25, axis=0)
         med_iqr = float(np.median(iqr))
         print(f"   |Δ| su quelle celle: mediana {np.median(nz):.4f}  "
@@ -190,7 +172,7 @@ def main():
               f"|Δ| mediana = {np.median(nz)/med_iqr:.4f} IQR")
     print()
 
-    # ── sintesi ─────────────────────────────────────────────────────────────
+    # ── summary ─────────────────────────────────────────────────────────────
     print("=== SINTESI ===")
     print(f"differenza relativa max sui bound: "
           f"lo {np.max(diff_lo/np.maximum(np.abs(lo_dis),1e-9))*100:.2f}%  "

@@ -1,21 +1,12 @@
-# IT: STEP 0 KILL-CHECK (pre-registrato in STATUS.md 2026-06-22) — correlazione
-#     degli ERRORI cross-architettura sul target vol (log_rv), split VAL.
-#     Razionale: se i 3 archi sbagliano in modo quasi identico (corr ≥ kill-thresh,
-#     come ≈0.995 sul direzionale) la riduzione di varianza di ensembling/distill è
-#     ≈0 → KILL prima di spendere il walk-forward k-fold completo (il caro). PROCEDI
-#     solo se almeno una coppia ha corr ≤ proceed-thresh (diversità sfruttabile).
-#     SOLO lettura modelli + forward su val: nessun training, nessuna scrittura su
-#     models/. L'errore è in spazio z (= s·errore_raw): la correlazione è invariante
-#     all'inversione affine, quindi center/scale non servono.
-# EN: STEP 0 KILL-CHECK (pre-registered in STATUS.md 2026-06-22) — cross-architecture
-#     ERROR correlation on the vol target (log_rv), VAL split.
-#     Rationale: if the 3 archs err near-identically (corr ≥ kill-thresh, as ≈0.995
-#     on the directional target) the ensembling/distill variance reduction is ≈0 →
-#     KILL before spending the full k-fold walk-forward (the expensive part). PROCEED
-#     only if at least one pair has corr ≤ proceed-thresh (exploitable diversity).
-#     READ-ONLY models + forward on val: no training, no writes to models/. The error
-#     is in z-space (= s·raw_error): correlation is invariant to the affine inversion,
-#     so center/scale are not needed.
+# STEP 0 KILL-CHECK (pre-registered in STATUS.md 2026-06-22) — cross-architecture
+# ERROR correlation on the vol target (log_rv), VAL split.
+# Rationale: if the 3 archs err near-identically (corr ≥ kill-thresh, as ≈0.995
+# on the directional target) the ensembling/distill variance reduction is ≈0 →
+# KILL before spending the full k-fold walk-forward (the expensive part). PROCEED
+# only if at least one pair has corr ≤ proceed-thresh (exploitable diversity).
+# READ-ONLY models + forward on val: no training, no writes to models/. The error
+# is in z-space (= s·raw_error): correlation is invariant to the affine inversion,
+# so center/scale are not needed.
 import argparse
 import json
 import logging
@@ -34,8 +25,7 @@ setup_logging()
 log = logging.getLogger("quantsys.script.step0_xarch")
 
 
-# IT: forward dell'ensemble di una singola arch → μ in spazio z (mediana q2 se quantile).
-# EN: single-arch ensemble forward → μ in z-space (q2 median if quantile).
+# single-arch ensemble forward → μ in z-space (q2 median if quantile).
 def _forward_mu_z(arch: str, X: torch.Tensor, Xm, device) -> np.ndarray:
     from quantsys.model.ensemble import EnsembleModel
     mdir = models_root() / arch
@@ -51,7 +41,7 @@ def _forward_mu_z(arch: str, X: torch.Tensor, Xm, device) -> np.ndarray:
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
+    # UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -83,7 +73,7 @@ def main():
           if f"X_macro_{args.split}" in d.files else None)
     y = d[f"y_{args.split}"].ravel().astype(np.float64)
 
-    # IT: errore per-campione di ogni arch (spazio z) | EN: per-sample error of each arch (z-space)
+    # per-sample error of each arch (z-space)
     errs = {}
     for a in args.archs:
         mu = _forward_mu_z(a, X, Xm, device).astype(np.float64)
@@ -92,7 +82,7 @@ def main():
         errs[a] = mu - y
         log.info(f"  {a:12s}  err mean={errs[a].mean():+.4f}  std={errs[a].std():.4f}")
 
-    # IT: Pearson degli errori a coppie | EN: pairwise Pearson of errors
+    # pairwise Pearson of errors
     pairs = {}
     for a, b in combinations(args.archs, 2):
         r = float(np.corrcoef(errs[a], errs[b])[0, 1])

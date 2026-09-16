@@ -1,47 +1,21 @@
-# IT: D4 — DERIVAZIONE OFFLINE MFIV@30h + SKEW 25Δ DAL RAW CHAIN (CPU-only,
-#     retroattiva su tutto il periodo di raccolta 01c). Risposta strutturale al
-#     FAIL del gate v1: la IV ATM interpolata (atm_30h) SOTTOSTIMA il var-swap
-#     rate per la convessità dello smile → il vero comparatore dell'edge di 04b
-#     è il tasso model-free (replica VIX-style del variance swap, Carr-Madan /
-#     CBOE). Output PARALLELO (data/iv/mfiv_30h.parquet): MAI nel path
-#     decisionale di 04b — l'eventuale promozione a comparatore = NUOVA pre-reg
-#     v2 con break-even ri-stimato (wedge di convessità MFIV vs IV ATM).
-#     Metodo per (snapshot_ts, expiry):
-#       F      = mediana di underlying_price del gruppo (forward del venue,
-#                più autoritativo della parity sui mark);
-#       K0     = strike massimo ≤ F;
-#       OTM    = put K<K0 + call K>K0 + media call/put a K0 (CBOE);
-#       prezzi USD: Q = mark_price(BTC) × F (opzioni inverse quotate in BTC);
-#       σ²_ann = (2/T)·Σ ΔK/K²·Q − (1/T)·(F/K0−1)²   (r=0, convenzione crypto);
-#       tenor 30h: interpolazione LINEARE IN VARIANZA TOTALE (σ²_ann·T) tra le
-#       due expiry che bracketano 30h (stessa convenzione di atm_30h in 01c);
-#       skew:  smile in delta-space dai mark_iv (delta forward BS: N(d1), N(d1)−1)
-#              → IV a Δcall=+0.25 e Δput=−0.25 (interp. lineare in delta) e IV
-#              ATM a K=F (interp. in ln(K/F)) → RR25 = ivC−ivP,
-#              BF25 = ½(ivC+ivP)−ivATM, interpolati in T a 30h.
-#     Filtri qualità: mark_price>0, mark_iv>0, ≥3 strike OTM per lato; niente
-#     truncation-rule sui bid (i mark Deribit sono model-smooth by design —
-#     scelta dichiarata). Incrementale: gli snapshot già presenti nell'output
-#     vengono saltati (--force = full rebuild). Convenzione annualizzazione:
-#     8760h/anno (Deribit 365d, identica a 04b).
-# EN: D4 — OFFLINE MFIV@30h + 25Δ SKEW DERIVATION FROM THE RAW CHAIN (CPU-only,
-#     retroactive over the whole 01c collection). Structural response to the v1
-#     gate FAIL: interpolated ATM IV (atm_30h) UNDERSTATES the var-swap rate by
-#     the smile convexity → 04b's true edge comparator is the model-free rate
-#     (VIX-style variance-swap replication, Carr-Madan / CBOE). PARALLEL output
-#     (data/iv/mfiv_30h.parquet): NEVER in 04b's decision path — any promotion
-#     to comparator = NEW v2 pre-reg with re-estimated break-even (MFIV vs ATM
-#     IV convexity wedge). Method per (snapshot_ts, expiry): venue forward F =
-#     median underlying_price; K0 = max strike ≤ F; CBOE OTM selection; USD
-#     prices Q = BTC mark × F (inverse options); σ²_ann = (2/T)·Σ ΔK/K²·Q −
-#     (1/T)·(F/K0−1)² with r=0; 30h tenor = LINEAR-IN-TOTAL-VARIANCE
-#     interpolation across the two bracketing expiries (same convention as
-#     atm_30h in 01c); 25Δ smile from mark_iv via forward BS deltas → RR/BF
-#     interpolated in T to 30h. Quality filters: positive mark/IV, ≥3 OTM
-#     strikes per side; no bid truncation rule (Deribit marks are model-smooth
-#     by design — declared choice). Incremental: snapshots already in the
-#     output are skipped (--force = full rebuild). Annualization: 8760h/year
-#     (Deribit 365d, identical to 04b).
+# D4 — OFFLINE MFIV@30h + 25Δ SKEW DERIVATION FROM THE RAW CHAIN (CPU-only,
+# retroactive over the whole 01c collection). Structural response to the v1
+# gate FAIL: interpolated ATM IV (atm_30h) UNDERSTATES the var-swap rate by
+# the smile convexity → 04b's true edge comparator is the model-free rate
+# (VIX-style variance-swap replication, Carr-Madan / CBOE). PARALLEL output
+# (data/iv/mfiv_30h.parquet): NEVER in 04b's decision path — any promotion
+# to comparator = NEW v2 pre-reg with re-estimated break-even (MFIV vs ATM
+# IV convexity wedge). Method per (snapshot_ts, expiry): venue forward F =
+# median underlying_price; K0 = max strike ≤ F; CBOE OTM selection; USD
+# prices Q = BTC mark × F (inverse options); σ²_ann = (2/T)·Σ ΔK/K²·Q −
+# (1/T)·(F/K0−1)² with r=0; 30h tenor = LINEAR-IN-TOTAL-VARIANCE
+# interpolation across the two bracketing expiries (same convention as
+# atm_30h in 01c); 25Δ smile from mark_iv via forward BS deltas → RR/BF
+# interpolated in T to 30h. Quality filters: positive mark/IV, ≥3 OTM
+# strikes per side; no bid truncation rule (Deribit marks are model-smooth
+# by design — declared choice). Incremental: snapshots already in the
+# output are skipped (--force = full rebuild). Annualization: 8760h/year
+# (Deribit 365d, identical to 04b).
 import argparse
 import logging
 import sys
@@ -61,24 +35,21 @@ ROOT = Path(__file__).resolve().parents[2]
 CHAIN_DIR = ROOT / "data" / "iv" / "chain"
 OUT_PATH = ROOT / "data" / "iv" / "mfiv_30h.parquet"
 
-HOURS_PER_YEAR = 8760.0     # IT: convenzione Deribit 365g (come 04b) | EN: Deribit 365d convention (as 04b)
+HOURS_PER_YEAR = 8760.0     # Deribit 365d convention (as 04b)
 TENOR_HOURS = 30.0
-MIN_OTM_PER_SIDE = 3        # IT: sotto, l'integrale è troppo rado | EN: below this the integral is too sparse
-MAX_TENOR_DAYS = 8.0        # IT: bastano le expiry corte per bracketare 30h | EN: short expiries suffice to bracket 30h
+MIN_OTM_PER_SIDE = 3        # below this the integral is too sparse
+MAX_TENOR_DAYS = 8.0        # short expiries suffice to bracket 30h
 
 
 def _norm_cdf(x: np.ndarray) -> np.ndarray:
-    # IT: CDF normale via erf (niente scipy nel critical path degli script).
-    # EN: normal CDF via erf (no scipy in the scripts' critical path).
+    # normal CDF via erf (no scipy in the scripts' critical path).
     from math import erf, sqrt
     return np.array([0.5 * (1.0 + erf(v / sqrt(2.0))) for v in np.asarray(x, dtype=float)])
 
 
 def mfiv_one_expiry(grp: pd.DataFrame, t_years: float) -> dict | None:
-    # IT: replica var-swap CBOE su UNA expiry: ritorna σ²_ann + diagnostica,
-    #     None se il gruppo non passa i filtri qualità.
-    # EN: CBOE variance-swap replication on ONE expiry: returns annualized σ² +
-    #     diagnostics, None when the group fails the quality filters.
+    # CBOE variance-swap replication on ONE expiry: returns annualized σ² +
+    # diagnostics, None when the group fails the quality filters.
     g = grp[(grp["mark_price"] > 0) & (grp["mark_iv"] > 0)]
     if g.empty:
         return None
@@ -91,8 +62,7 @@ def mfiv_one_expiry(grp: pd.DataFrame, t_years: float) -> dict | None:
         return None
     K0 = float(below.max())
 
-    # IT: selezione OTM (put sotto K0, call sopra, media a K0) in USD: Q=mark·F.
-    # EN: OTM selection (puts below K0, calls above, K0 average) in USD: Q=mark·F.
+    # OTM selection (puts below K0, calls above, K0 average) in USD: Q=mark·F.
     puts = g[(g["option_type"] == "P") & (g["strike"] < K0)]
     calls = g[(g["option_type"] == "C") & (g["strike"] > K0)]
     if len(puts) < MIN_OTM_PER_SIDE or len(calls) < MIN_OTM_PER_SIDE:
@@ -102,14 +72,13 @@ def mfiv_one_expiry(grp: pd.DataFrame, t_years: float) -> dict | None:
         for _, r in df_side.iterrows():
             rows.append((float(r["strike"]), float(r["mark_price"]) * F))
     at0 = g[g["strike"] == K0]
-    q0 = float(at0["mark_price"].mean()) * F   # IT: media C/P se entrambe | EN: C/P average when both
+    q0 = float(at0["mark_price"].mean()) * F   # C/P average when both
     rows.append((K0, q0))
     rows.sort()
     K = np.array([r[0] for r in rows])
     Q = np.array([r[1] for r in rows])
 
-    # IT: ΔK centrale (one-sided ai bordi), integrale 2/T Σ ΔK/K² Q − correzione K0.
-    # EN: central ΔK (one-sided at the edges), 2/T Σ ΔK/K² Q integral − K0 correction.
+    # central ΔK (one-sided at the edges), 2/T Σ ΔK/K² Q integral − K0 correction.
     dK = np.empty_like(K)
     dK[1:-1] = (K[2:] - K[:-2]) / 2.0
     dK[0] = K[1] - K[0]
@@ -119,8 +88,7 @@ def mfiv_one_expiry(grp: pd.DataFrame, t_years: float) -> dict | None:
     if var_ann <= 0:
         return None
 
-    # IT: smile 25Δ dai mark_iv (delta forward BS; put OTM per Δput, call OTM per Δcall).
-    # EN: 25Δ smile from mark_iv (forward BS deltas; OTM puts for Δput, OTM calls for Δcall).
+    # 25Δ smile from mark_iv (forward BS deltas; OTM puts for Δput, OTM calls for Δcall).
     def _iv_at_delta(side: pd.DataFrame, target: float, is_call: bool) -> float:
         iv = side["mark_iv"].values / 100.0
         sqt = np.sqrt(t_years)
@@ -149,10 +117,8 @@ def mfiv_one_expiry(grp: pd.DataFrame, t_years: float) -> dict | None:
 
 
 def process_snapshot(snap: pd.DataFrame, ts: pd.Timestamp) -> dict | None:
-    # IT: MFIV per expiry corta + interpolazione in varianza TOTALE a 30h
-    #     (bracketing; None se non bracketabile). RR/BF interpolati in T.
-    # EN: per-short-expiry MFIV + TOTAL-variance interpolation at 30h
-    #     (bracketing; None when not bracketable). RR/BF interpolated in T.
+    # per-short-expiry MFIV + TOTAL-variance interpolation at 30h
+    # (bracketing; None when not bracketable). RR/BF interpolated in T.
     per_exp = []
     for exp, grp in snap.groupby("expiry"):
         t_h = (pd.Timestamp(exp) - ts).total_seconds() / 3600.0
@@ -169,8 +135,7 @@ def process_snapshot(snap: pd.DataFrame, ts: pd.Timestamp) -> dict | None:
     lo = max(below, key=lambda r: r["t_hours"])
     hi = min(above, key=lambda r: r["t_hours"])
 
-    # IT: varianza TOTALE (σ²_ann·T_anni) lineare in T → tasso var-swap 30h.
-    # EN: TOTAL variance (ann σ²·T_years) linear in T → 30h var-swap rate.
+    # TOTAL variance (ann σ²·T_years) linear in T → 30h var-swap rate.
     tv_lo = lo["var_ann"] * lo["t_hours"] / HOURS_PER_YEAR
     tv_hi = hi["var_ann"] * hi["t_hours"] / HOURS_PER_YEAR
     w = (TENOR_HOURS - lo["t_hours"]) / (hi["t_hours"] - lo["t_hours"])
@@ -186,8 +151,8 @@ def process_snapshot(snap: pd.DataFrame, ts: pd.Timestamp) -> dict | None:
         return a + w * (b - a)
 
     return {"timestamp": ts,
-            "mfiv_30h": float(np.sqrt(var_ann_30h) * 100.0),   # IT: vol % ann | EN: ann vol %
-            "mfiv_var_total_30h": float(tv_30h),               # IT: confrontabile con var_iv di 04b | EN: comparable to 04b's var_iv
+            "mfiv_30h": float(np.sqrt(var_ann_30h) * 100.0),   # ann vol %
+            "mfiv_var_total_30h": float(tv_30h),               # comparable to 04b's var_iv
             "rr25_30h": _interp("rr25"), "bf25_30h": _interp("bf25"),
             "iv_atm_smile_30h": _interp("iv_atm_smile"),
             "tenor_lo_h": lo["t_hours"], "tenor_hi_h": hi["t_hours"],
@@ -195,8 +160,7 @@ def process_snapshot(snap: pd.DataFrame, ts: pd.Timestamp) -> dict | None:
 
 
 def main():
-    # IT: boilerplate UTF-8 console Windows (checklist nuovo script — bug cp1252).
-    # EN: Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
+    # Windows console UTF-8 boilerplate (new-script checklist — cp1252 bug).
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -244,10 +208,8 @@ def main():
     log.info(f"→ {OUT_PATH} ({len(out)} righe totali, +{len(new)} nuove / "
              f"total rows, new)")
 
-    # IT: sanity vs IV ATM del poller: il wedge di convessità DEVE essere ≥0 in
-    #     mediana (MFIV ≥ ATM da disuguaglianza di Jensen sullo smile).
-    # EN: sanity vs the poller's ATM IV: the convexity wedge MUST be ≥0 in the
-    #     median (MFIV ≥ ATM by Jensen's inequality over the smile).
+    # sanity vs the poller's ATM IV: the convexity wedge MUST be ≥0 in the
+    # median (MFIV ≥ ATM by Jensen's inequality over the smile).
     atm_path = ROOT / "data" / "iv" / "atm_30h.parquet"
     if atm_path.exists() and len(out):
         atm = pd.read_parquet(atm_path)[["timestamp", "iv_30h"]].copy()

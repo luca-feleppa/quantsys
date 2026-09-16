@@ -1,19 +1,14 @@
 """
-Probe temporanea (PERF AUDIT) — compute-bound o launch-bound?
 Temporary probe (PERF AUDIT) — compute-bound or launch-bound?
 
-Tre misure decisive, senza overhead di torch.profiler:
-  A) sweep del batch size: se il wall/step e' quasi piatto al crescere di B,
-     il tempo e' dominato dal LANCIO dei kernel, non dal loro calcolo.
-  B) fwd+bwd puro su un batch GPU-resident (nessun DataLoader, nessun H2D):
-     isola il costo del modello da quello del data path.
-  C) costo del DataLoader da solo (iterazione senza modello).
 Three decisive measurements without torch.profiler overhead:
-  A) batch-size sweep: flat wall/step vs B ⇒ kernel LAUNCH bound.
-  B) pure fwd+bwd on a GPU-resident batch (no DataLoader, no H2D).
-  C) DataLoader-only iteration cost.
+  A) batch-size sweep: if wall/step is nearly flat as B grows, time is
+     dominated by kernel LAUNCH, not by kernel compute.
+  B) pure fwd+bwd on a GPU-resident batch (no DataLoader, no H2D):
+     isolates the model cost from the data-path cost.
+  C) DataLoader-only iteration cost (no model).
 
-Uso / Usage: python scripts/archive/perf_probe/bench_train_scaling.py
+Usage: python scripts/archive/perf_probe/bench_train_scaling.py
 """
 import sys
 import time
@@ -74,8 +69,7 @@ def main():
     opt = torch.optim.AdamW(model.parameters(), lr=3e-5)
     scaler = torch.amp.GradScaler(device=device.type, enabled=use_amp)
 
-    # IT: replica della loss production (quantile 0.7 + CE direzionale 0.3).
-    # EN: production loss replica (0.7 quantile + 0.3 directional CE).
+    # production loss replica (0.7 quantile + 0.3 directional CE).
     ma, thr = mcfg.get("multitask_alpha", 0.7), mcfg.get("multitask_threshold", 1e-4)
 
     def loss_fn(out, yb):
@@ -94,12 +88,12 @@ def main():
             out = model(Xb, Xmb)
             loss = loss_fn(out, yb)
         if sync_item:
-            _ = loss.item()          # IT: sync GPU→CPU come in run_train | EN: GPU→CPU sync as in run_train
+            _ = loss.item()          # GPU→CPU sync as in run_train
         scaler.scale(loss).backward()
         scaler.step(opt); scaler.update()
         opt.zero_grad(set_to_none=True)
 
-    # ── B) fwd+bwd puro, batch GPU-resident ─────────────────────────────────
+    # ── B) pure fwd+bwd, GPU-resident batch ─────────────────────────────────
     print("=== B) fwd+bwd puro (batch GPU-resident, nessun DataLoader/H2D) ===")
     print(f"{'batch':>6} {'ms/step':>9} {'sample/s':>11} {'ms/step (no .item())':>21}")
     for bs in (32, 64, 128, 256, 512, 1024):
@@ -122,7 +116,7 @@ def main():
         del Xb, Xmb, yb
         torch.cuda.empty_cache()
 
-    # ── C) DataLoader da solo ───────────────────────────────────────────────
+    # ── C) DataLoader only ──────────────────────────────────────────────────
     print("\n=== C) DataLoader da solo (num_workers=0, pin_memory=True) ===")
     for bs in (64, 256):
         dl = DataLoader(TensorDataset(X[:bs * 60], Xm[:bs * 60], y[:bs * 60]),
@@ -136,7 +130,7 @@ def main():
         ms = (time.perf_counter() - t0) / nb * 1000
         print(f"batch={bs:>4}  {ms:6.2f} ms/batch  (collate+pin+H2D, senza modello)")
 
-    # ── A) step completo con DataLoader ─────────────────────────────────────
+    # ── A) full step with DataLoader ────────────────────────────────────────
     print("\n=== A) step completo (DataLoader + fwd/bwd), come in produzione ===")
     print(f"{'batch':>6} {'ms/step':>9} {'sample/s':>11} {'min/epoca(51882)':>18}")
     for bs in (64, 128, 256, 512):

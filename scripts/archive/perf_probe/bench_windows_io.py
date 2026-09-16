@@ -1,13 +1,10 @@
 """
-Probe temporanea (PERF AUDIT) — costo di create_windows + I/O del dataset npz.
 Temporary probe (PERF AUDIT) — cost of create_windows + npz dataset I/O.
 
-Misura: lettura features.parquet, create_windows (materializza ~3.3 GB),
-scrittura npz atomica, rilettura npz (quello che fa 02_train allo start).
 Measures: features.parquet read, create_windows (materializes ~3.3 GB),
 atomic npz write, npz re-read (what 02_train does at startup).
 
-Uso / Usage: python scripts/archive/perf_probe/bench_windows_io.py [--skip-write]
+Usage: python scripts/archive/perf_probe/bench_windows_io.py [--skip-write]
 """
 import sys
 import time
@@ -22,8 +19,7 @@ sys.path.insert(0, str(ROOT))
 from quantsys.utils import load_config  # noqa: E402
 from quantsys.features import create_windows, canonical_feature_columns, temporal_split  # noqa: E402
 
-# IT: dir temporanea di sistema — la probe non scrive mai in models/ o data/.
-# EN: system temp dir — this probe never writes into models/ or data/.
+# system temp dir — this probe never writes into models/ or data/.
 import tempfile  # noqa: E402
 SCRATCH = Path(tempfile.gettempdir())
 
@@ -43,8 +39,7 @@ def main():
     feat = pd.read_parquet(ROOT / "data/features.parquet")
     print(f"read features.parquet     : {time.perf_counter()-t0:7.2f} s  ({len(feat):,} righe)")
 
-    # IT: la lista canonica viene derivata come in 01 (non assunta).
-    # EN: canonical list derived as in 01 (not assumed).
+    # canonical list derived as in 01 (not assumed).
     all_cols = [c for c in feat.columns]
     t0 = time.perf_counter()
     cols = canonical_feature_columns(all_cols, feat)
@@ -78,8 +73,7 @@ def main():
         print(f"np.load (materializza X)  : {time.perf_counter()-t0:7.2f} s")
         out.unlink(missing_ok=True)
 
-    # IT: rilettura del npz DI PRODUZIONE (quella che paga 02_train allo start).
-    # EN: re-read of the PRODUCTION npz (what 02_train pays at startup).
+    # re-read of the PRODUCTION npz (what 02_train pays at startup).
     prod = ROOT / "data/lstm_dataset.npz"
     if prod.exists():
         t0 = time.perf_counter()

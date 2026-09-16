@@ -1,30 +1,28 @@
 """
-Probe temporanea (LEVA B) — torch.compile(cudagraphs) e' USABILE sul training?
 Temporary probe (LEVER B) — is torch.compile(cudagraphs) USABLE for training?
 
-La velocita' (1.56x) e' gia' misurata. Qui si risponde alle due domande che
-decidono se la leva e' adottabile, e che nell'audit erano marcate "da verificare":
+The speed-up (1.56x) is already measured. This answers the questions that
+decide whether the lever can be adopted, which the audit marked "to be verified":
 
-  ① RIPRODUCIBILITA'. Dropout 0.3 e drop_path 0.2 sono attivi in training. Sotto
-     cattura CUDA Graph il RNG e' gestito con offset philox: due run con lo stesso
-     seed danno gli stessi pesi? Se NO, la leva costa la riproducibilita' del
-     training — su questo progetto, probabilmente squalificante.
-     Baseline necessaria: eager e' riproducibile con se stesso? (cudnn_benchmark
-     e' true in config, quindi non e' scontato.)
-  ② EQUIVALENZA. I pesi dopo N step compiled coincidono con quelli eager? Ci si
-     attende di no (kernel e ordine di riduzione diversi); interessa la MAGNITUDINE.
-  ③ SHAPE VARIABILE. L'ultimo batch dell'epoca e' parziale (51882 % 64 = 42):
-     la cattura del grafo lo gestisce o esplode/ricompila?
+  ① REPRODUCIBILITY. Dropout 0.3 and drop_path 0.2 are active in training. Under
+     CUDA Graph capture the RNG is handled with philox offsets: do two runs with the
+     same seed give the same weights? If NOT, the lever costs training
+     reproducibility — on this project, probably disqualifying.
+     Required baseline: is eager reproducible with itself? (cudnn_benchmark
+     is true in config, so it is not a given.)
+  ② EQUIVALENCE. Do the weights after N compiled steps match the eager ones? Not
+     expected (different kernels and reduction order); the MAGNITUDE is what matters.
+  ③ VARIABLE SHAPE. The last batch of the epoch is partial (51882 % 64 = 42):
+     does graph capture handle it or blow up/recompile?
 
-Uso / Usage: python scripts/archive/perf_probe/bench_compile_reproducibility.py
+Usage: python scripts/archive/perf_probe/bench_compile_reproducibility.py
 """
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
-# IT: pandas prima di torch/sklearn — invariante di init DLL del package.
-# EN: pandas before torch/sklearn — package DLL-init invariant.
+# pandas before torch/sklearn — package DLL-init invariant.
 import pandas as pd  # noqa: F401,E402
 
 import torch
@@ -50,8 +48,7 @@ def _load(cfg):
 def _mk(cfg, meta, device, seed=0):
     from quantsys.model import QuantiTransformer
     m = cfg["model"]
-    # IT: seed PRIMA della costruzione: init dei pesi deterministica.
-    # EN: seed BEFORE construction: deterministic weight init.
+    # seed BEFORE construction: deterministic weight init.
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     return QuantiTransformer(
@@ -67,7 +64,7 @@ def _mk(cfg, meta, device, seed=0):
 
 
 def _train(model, X, Xm, y, cfg, device, seed, n_steps=N_STEPS, bs=BS):
-    """N step deterministici; ritorna i pesi finali su CPU."""
+    """N deterministic steps; returns the final weights on CPU."""
     from quantsys.model import quantile_loss
     mcfg, tcfg = cfg["model"], cfg["training"]
     use_amp = tcfg.get("use_amp", True)
@@ -76,8 +73,7 @@ def _train(model, X, Xm, y, cfg, device, seed, n_steps=N_STEPS, bs=BS):
     opt = torch.optim.AdamW(model.parameters(), lr=tcfg["learning_rate"],
                             weight_decay=tcfg["weight_decay"])
     scaler = torch.amp.GradScaler(device=device.type, enabled=use_amp)
-    # IT: seed PRIMA del loop: fissa dropout/drop_path/input-noise.
-    # EN: seed BEFORE the loop: pins dropout/drop_path/input noise.
+    # seed BEFORE the loop: pins dropout/drop_path/input noise.
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     model.train()
@@ -105,8 +101,7 @@ def _train(model, X, Xm, y, cfg, device, seed, n_steps=N_STEPS, bs=BS):
         scaler.step(opt); scaler.update()
         opt.zero_grad(set_to_none=True)
     torch.cuda.synchronize()
-    # IT: `_orig_mod` = modulo sotto il wrapper di torch.compile.
-    # EN: `_orig_mod` = module under the torch.compile wrapper.
+    # `_orig_mod` = module under the torch.compile wrapper.
     base = getattr(model, "_orig_mod", model)
     return {k: v.detach().float().cpu().clone()
             for k, v in base.state_dict().items()}
@@ -153,13 +148,13 @@ def main():
           f"drop_path={cfg['model'].get('drop_path_rate')} "
           f"cudnn_benchmark={cfg['hardware'].get('cudnn_benchmark')}\n")
 
-    # ── ① riproducibilita' EAGER (baseline: e' scontata?) ───────────────────
+    # ── ① EAGER reproducibility (baseline: is it a given?) ──────────────────
     print("=== ① RIPRODUCIBILITA' ===")
     w_e1 = _train(_mk(cfg, meta, device), X, Xm, y, cfg, device, seed=1234)
     w_e2 = _train(_mk(cfg, meta, device), X, Xm, y, cfg, device, seed=1234)
     eager_repro = _cmp(w_e1, w_e2, "eager vs eager (stesso seed)     ")
 
-    # ── compiled, due volte con lo stesso seed ──────────────────────────────
+    # ── compiled, twice with the same seed ──────────────────────────────────
     dynamo.reset()
     t0 = time.perf_counter()
     mc1 = torch.compile(_mk(cfg, meta, device), backend="cudagraphs")
@@ -171,11 +166,11 @@ def main():
     comp_repro = _cmp(w_c1, w_c2, "compiled vs compiled (stesso seed)")
     print(f"  (primo run compiled, incl. compilazione: {t_first:.1f}s)")
 
-    # ── ② equivalenza eager vs compiled ─────────────────────────────────────
+    # ── ② eager vs compiled equivalence ─────────────────────────────────────
     print("\n=== ② EQUIVALENZA eager vs compiled ===")
     _cmp(w_e1, w_c1, "eager vs compiled (stesso seed)   ")
 
-    # ── ③ shape variabile (ultimo batch parziale) ───────────────────────────
+    # ── ③ variable shape (last partial batch) ───────────────────────────────
     print("\n=== ③ SHAPE VARIABILE (ultimo batch parziale) ===")
     n_last = 51882 % BS
     print(f"  ultimo batch reale di un'epoca = {n_last} campioni")
@@ -192,7 +187,7 @@ def main():
         print(f"  batch parziale ({n_last}): FALLITO — "
               f"{type(e).__name__}: {str(e)[:200]}")
 
-    # ── verdetto ────────────────────────────────────────────────────────────
+    # ── verdict ─────────────────────────────────────────────────────────────
     print("\n=== VERDETTO ===")
     print(f"eager riproducibile    : {eager_repro}")
     print(f"compiled riproducibile : {comp_repro}")

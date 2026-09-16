@@ -1,30 +1,30 @@
 """
 quantsys/macro/regime.py
 ========================
-Rilevamento del Regime Economico in due stadi:
+Two-stage Economic Regime Detection:
 
-  STADIO 1 — HMM (Hidden Markov Model) non supervisionato
-    Trova automaticamente N regimi latenti nei dati macro storici.
-    Output: probabilità di trovarsi in ciascun regime per ogni giorno.
+  STAGE 1 — unsupervised HMM (Hidden Markov Model)
+    Automatically finds N latent regimes in historical macro data.
+    Output: probability of being in each regime for every day.
 
-  STADIO 2 — MacroEncoder (MLP)
-    Rete neurale leggera che trasforma le macro features grezze
-    in un embedding denso a 16 dimensioni.
-    Viene addestrata INSIEME alla LSTM principale (end-to-end).
+  STAGE 2 — MacroEncoder (MLP)
+    Lightweight neural network that turns the raw macro features
+    into a dense 16-dimensional embedding.
+    Trained TOGETHER with the main LSTM (end-to-end).
 
-Perché HMM?
-  · Modella esplicitamente che il regime cambia nel tempo (transizioni)
-  · I 4 regimi emergono dai dati — non li definiamo a priori
-  · Le probabilità di regime (es. [0.8, 0.1, 0.05, 0.05]) sono
-    interpretabili e robuste anche con dati mancanti
+Why an HMM?
+  · Explicitly models that the regime changes over time (transitions)
+  · The 4 regimes emerge from the data — we do not define them a priori
+  · Regime probabilities (e.g. [0.8, 0.1, 0.05, 0.05]) are
+    interpretable and robust even with missing data
 
-I 4 regimi che l'HMM tipicamente scopre nei dati USA:
-  0 = Espansione moderata    (crescita stabile, inflazione bassa)
-  1 = Surriscaldamento       (crescita alta, inflazione in salita)
-  2 = Stagflazione / crisi   (crescita bassa, inflazione alta)
-  3 = Recessione / pivot Fed (crescita negativa, Fed in taglio)
+The 4 regimes the HMM typically discovers in US data:
+  0 = Moderate expansion     (stable growth, low inflation)
+  1 = Overheating            (high growth, rising inflation)
+  2 = Stagflation / crisis   (low growth, high inflation)
+  3 = Recession / Fed pivot  (negative growth, Fed cutting)
 
-Nota: le etichette sono interpretative — l'HMM impara solo pattern.
+Note: the labels are interpretive — the HMM only learns patterns.
 """
 
 import logging
@@ -42,8 +42,8 @@ from sklearn.preprocessing import RobustScaler
 
 log = logging.getLogger("quantsys.macro.regime")
 
-# Colonne macro chiave per l'HMM (quelle più informative sul regime)
-# Ordine: [inflazione, crescita, mercato_lavoro, condizioni_finanziarie, tassi]
+# Key macro columns for the HMM (the most informative about the regime)
+# Order: [inflation, growth, labor_market, financial_conditions, rates]
 HMM_CORE_FEATURES = [
     "cpi_yoy_yoy",
     "core_cpi_yoy_yoy",
@@ -62,71 +62,67 @@ HMM_CORE_FEATURES = [
 ]
 
 
-# ─── STADIO 1: HMM REGIME DETECTOR ──────────────────────────────────────────
+# ─── STAGE 1: HMM REGIME DETECTOR ───────────────────────────────────────────
 
-# IT: Gaussian HMM walk-forward (expanding window) che etichetta i regimi macro senza look-ahead.
-# EN: Walk-forward Gaussian HMM (expanding window) labeling macro regimes without look-ahead.
+# Walk-forward Gaussian HMM (expanding window) labeling macro regimes without look-ahead.
 class RegimeHMM:
     """
-    Gaussian HMM con N stati latenti per il rilevamento del regime economico.
+    Gaussian HMM with N latent states for economic regime detection.
 
-    FIX LOOK-AHEAD BIAS — Walk-Forward Expanding Window:
+    LOOK-AHEAD BIAS FIX — Walk-Forward Expanding Window:
     ─────────────────────────────────────────────────────
-    Il problema originale: l'HMM veniva addestrato sull'intero storico
-    (es. 2018-2024) e poi applicato per classificare ogni giorno, inclusi
-    quelli del 2018. Ma l'HMM "sapeva già" come andava a finire nel 2024
-    quando classificava il 2018 — look-ahead bias sottile ma reale.
+    The original problem: the HMM was trained on the whole history
+    (e.g. 2018-2024) and then applied to classify every day, including
+    those of 2018. But the HMM "already knew" how things ended in 2024
+    when classifying 2018 — subtle but real look-ahead bias.
 
-    La soluzione — expanding window:
-      · Per ogni data t nel dataset, l'HMM viene addestrato SOLO sui dati
-        disponibili fino a t-1 (nessuna informazione futura).
-      · In pratica: addestriamo L'HMM su un burn-in iniziale (es. 2 anni),
-        poi lo aggiorniamo incrementalmente ogni N giorni con nuovi dati.
-      · Le etichette di regime per ogni giorno vengono generate con il
-        modello che esisteva a quel momento, non con quello finale.
+    The solution — expanding window:
+      · For every date t in the dataset, the HMM is trained ONLY on the data
+        available up to t-1 (no future information).
+      · In practice: we train the HMM on an initial burn-in (e.g. 2 years),
+        then update it incrementally every N days with new data.
+      · Each day's regime labels are generated with the model that
+        existed at that moment, not with the final one.
 
     Trade-off:
-      · Più lento (K addestramenti invece di 1, dove K = n_updates).
-      · Più realistico: le probabilità di regime che il MacroEncoder
-        riceve durante il training corrispondono a quelle disponibili
-        in quell'istante, senza informazione dal futuro.
+      · Slower (K trainings instead of 1, where K = n_updates).
+      · More realistic: the regime probabilities the MacroEncoder
+        receives during training match those available
+        at that instant, with no information from the future.
     """
 
-    # IT: Configura n. regimi, iterazioni EM e restart; lo scaler è fittato al fit.
-    # EN: Sets regime count, EM iterations and restarts; the scaler is fit at fit time.
+    # Sets regime count, EM iterations and restarts; the scaler is fit at fit time.
     def __init__(self, n_regimes: int = 4, n_iter: int = 100, random_state: int = 42,
                  n_restarts: int = 5):
         self.n_regimes    = n_regimes
         self.n_iter       = n_iter
         self.random_state = random_state
         self.n_restarts   = n_restarts
-        self.model        = None   # modello corrente (l'ultimo addestrato)
+        self.model        = None   # current model (the last one trained)
         self.scaler       = RobustScaler()
         self.feature_cols: list[str] = []
 
-    # IT: Sceglie le HMM_CORE_FEATURES presenti; fallback alle prime 20 colonne numeriche.
-    # EN: Picks the available HMM_CORE_FEATURES; falls back to the first 20 numeric columns.
+    # Picks the available HMM_CORE_FEATURES; falls back to the first 20 numeric columns.
     def _select_features(self, df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
-        """Seleziona le colonne disponibili tra quelle ideali per l'HMM."""
+        """Select the available columns among the ideal ones for the HMM."""
         available = [c for c in HMM_CORE_FEATURES if c in df.columns]
         if len(available) < 4:
-            # Fallback: usa tutte le colonne numeriche disponibili (fino a 20)
+            # Fallback: use all available numeric columns (up to 20)
             available = [c for c in df.select_dtypes("number").columns][:20]
         log.info(f"HMM: {len(available)} features selezionate")
         return df[available].values, available
 
-    # IT: Fit HMM con n_restarts seed; tiene il modello con log-likelihood massima (early-exit a convergenza).
-    # EN: Fits the HMM over n_restarts seeds; keeps the max log-likelihood model (early-exit on convergence).
+    # Fits the HMM over n_restarts seeds; keeps the max log-likelihood model (early-exit on convergence).
     def _fit_single(self, X_norm: np.ndarray):
         """
-        Addestra HMM con n_restarts seed diversi, ritorna il modello con log-likelihood massima.
+        Train the HMM with n_restarts different seeds, return the model with maximum log-likelihood.
 
-        Perché i restart: GaussianHMM con covariance_type="full" ha 14×14×4=784 parametri
-        di covarianza. Con finestre brevi (365-500 gg) l'EM si inceppa spesso in ottimi
-        locali con log-likelihood decrescente. Provando N seed diversi e tenendo il
-        modello con score più alto si ottiene una soluzione stabile senza cambiare il
-        modello statistico.
-        Early exit: se un restart converge prima di esaurire n_iter, non serve provarne altri.
+        Why restarts: GaussianHMM with covariance_type="full" has 14×14×4=784 covariance
+        parameters. With short windows (365-500 days) EM often gets stuck in local
+        optima with decreasing log-likelihood. Trying N different seeds and keeping the
+        highest-scoring model yields a stable solution without changing the
+        statistical model.
+        Early exit: if a restart converges before exhausting n_iter, no need to try others.
         """
         try:
             from hmmlearn import hmm as hmmlearn_hmm
@@ -157,34 +153,33 @@ class RegimeHMM:
                     best_score = score
                     best_model = model
                 if model.monitor_.converged:
-                    break   # converged → inutile provare altri seed
+                    break   # converged → no point trying other seeds
             except Exception:
                 continue
 
         return best_model
 
-    # IT: Genera le etichette di regime giorno-per-giorno usando solo dati passati (no look-ahead).
-    # EN: Produces day-by-day regime labels using only past data (no look-ahead).
+    # Produces day-by-day regime labels using only past data (no look-ahead).
     def fit_predict_walkforward(
         self,
         df_macro:     pd.DataFrame,
-        burn_in_days: int = 365,   # giorni minimi di storia prima di predire
-        retrain_days: int = 90,    # riaddestra ogni N giorni
+        burn_in_days: int = 365,   # minimum days of history before predicting
+        retrain_days: int = 90,    # retrain every N days
     ) -> pd.DataFrame:
         """
         Walk-forward expanding window:
-        per ogni giorno t genera le probabilità di regime usando SOLO
-        i dati disponibili fino a t (nessun look-ahead).
+        for every day t generates regime probabilities using ONLY
+        the data available up to t (no look-ahead).
 
         Args:
-            df_macro:     DataFrame giornaliero con macro features
-            burn_in_days: giorni minimi prima di iniziare a classificare
-            retrain_days: frequenza di riaddestramento (es. ogni 90 gg)
+            df_macro:     daily DataFrame with macro features
+            burn_in_days: minimum days before starting to classify
+            retrain_days: retraining frequency (e.g. every 90 days)
 
         Returns:
-            DataFrame con colonne regime_prob_0..K e regime_dominant,
-            indicizzato come df_macro. Le prime burn_in_days righe
-            avranno probabilità uniformi (1/n_regimes) — periodo di burn-in.
+            DataFrame with columns regime_prob_0..K and regime_dominant,
+            indexed like df_macro. The first burn_in_days rows
+            have uniform probabilities (1/n_regimes) — burn-in period.
         """
         if "open_time" in df_macro.columns:
             df_daily = df_macro.groupby(
@@ -201,18 +196,18 @@ class RegimeHMM:
                 f"Troppo pochi dati ({n} giorni) per walk-forward con burn_in={burn_in_days}."
             )
 
-        # Normalizzazione globale: fittiamo lo scaler su tutto lo storico
-        # (lo scaler non "sa il futuro" — usa solo statistiche di posizione/scala)
-        # Alternativa più rigorosa: scaler espandente. Ma RobustScaler è
-        # già robusto agli outlier, e la normalizzazione non porta look-ahead
-        # nelle probabilità di regime.
+        # Global normalization: we fit the scaler on the whole history
+        # (the scaler does not "know the future" — it only uses location/scale statistics)
+        # Stricter alternative: expanding scaler. But RobustScaler is
+        # already robust to outliers, and the normalization carries no look-ahead
+        # into the regime probabilities.
         mask_valid = ~np.isnan(X_raw).any(axis=1)
         self.scaler.fit(X_raw[mask_valid])
         X_norm = np.clip(self.scaler.transform(
             np.nan_to_num(X_raw, nan=0.0)
         ), -5, 5)
 
-        # Storage risultati — inizia con probabilità uniformi (no-info prior)
+        # Result storage — starts with uniform probabilities (no-info prior)
         probs_all = np.full((n, self.n_regimes), 1.0 / self.n_regimes)
 
         current_model = None
@@ -224,9 +219,9 @@ class RegimeHMM:
         )
 
         for t in range(burn_in_days, n):
-            # Riaddestra se: primo modello, o scaduto il periodo di retrain
+            # Retrain if: first model, or the retrain period has elapsed
             if current_model is None or (t - last_retrain) >= retrain_days:
-                # Usa SOLO dati fino a t (esclude t stesso e il futuro)
+                # Use ONLY data up to t (excludes t itself and the future)
                 X_train = X_norm[:t]
                 mask_t  = ~np.isnan(X_raw[:t]).any(axis=1)
                 X_train = X_train[mask_t]
@@ -239,27 +234,27 @@ class RegimeHMM:
                     except Exception as e:
                         log.warning(f"  HMM fit fallito a t={t}: {e}")
 
-            # Genera probabilità per il giorno t con il modello corrente
+            # Generate probabilities for day t with the current model
             if current_model is not None:
                 x_t = X_norm[t:t+1]
                 if not np.isnan(X_raw[t]).any():
                     try:
                         probs_all[t] = current_model.predict_proba(x_t)[0]
                     except Exception:
-                        pass  # mantieni probabilità uniformi
+                        pass  # keep uniform probabilities
 
-        # Salva il modello finale (addestrato su tutto lo storico)
+        # Save the final model (trained on the whole history)
         if current_model is not None:
             self.model = current_model
 
-        # Costruisce DataFrame risultato allineato all'indice di df_macro
+        # Build the result DataFrame aligned to df_macro's index
         result = pd.DataFrame(
             probs_all,
             index  = df_daily.index,
             columns= [f"regime_prob_{i}" for i in range(self.n_regimes)],
         )
         result["regime_dominant"] = probs_all.argmax(axis=1)
-        # Le prime burn_in_days righe hanno probabilità uniformi
+        # The first burn_in_days rows have uniform probabilities
         result["regime_burn_in"] = False
         result.iloc[:burn_in_days, -1] = True
 
@@ -271,10 +266,9 @@ class RegimeHMM:
         self._describe_regimes_wf(X_raw, probs_all, burn_in_days)
         return result
 
-    # IT: Logga le caratteristiche medie di ciascun regime sul periodo classificato (diagnostica).
-    # EN: Logs each regime's mean characteristics over the classified period (diagnostics).
+    # Logs each regime's mean characteristics over the classified period (diagnostics).
     def _describe_regimes_wf(self, X_raw, probs_all, burn_in_days):
-        """Analisi dei regimi sul periodo classificato (post burn-in)."""
+        """Regime analysis over the classified period (post burn-in)."""
         labels = probs_all[burn_in_days:].argmax(axis=1)
         X_post = X_raw[burn_in_days:]
         log.info("─── Caratteristiche regimi (post burn-in) ──────────────")
@@ -289,13 +283,12 @@ class RegimeHMM:
             )
             log.info(f"  Regime {r} ({mask.sum()} gg, {mask.mean():.0%}): {feat_str}")
 
-    # IT: Fit finale su tutto lo storico per il modello di produzione (NON per le etichette di training).
-    # EN: Final fit on the full history for the production model (NOT for training labels).
+    # Final fit on the full history for the production model (NOT for training labels).
     def fit(self, df_macro: pd.DataFrame) -> "RegimeHMM":
         """
-        Addestramento finale sull'intero storico (per il modello di produzione).
-        Usare SOLO per il modello che gira in produzione/live — NON per
-        generare le etichette di training (usare fit_predict_walkforward).
+        Final training on the whole history (for the production model).
+        Use ONLY for the model running in production/live — NOT to
+        generate training labels (use fit_predict_walkforward).
         """
         if "open_time" in df_macro.columns:
             df_daily = df_macro.groupby(
@@ -316,10 +309,9 @@ class RegimeHMM:
         self.model = self._fit_single(X)
         return self
 
-    # IT: Probabilità di regime per ogni riga via predict_proba dell'HMM addestrato.
-    # EN: Per-row regime probabilities via the trained HMM's predict_proba.
+    # Per-row regime probabilities via the trained HMM's predict_proba.
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
-        """Predice le probabilità di regime (usa il modello corrente)."""
+        """Predict regime probabilities (uses the current model)."""
         if self.model is None:
             raise RuntimeError("HMM non addestrato.")
         X_raw = df[self.feature_cols].values if self.feature_cols else df.values
@@ -327,8 +319,7 @@ class RegimeHMM:
         X     = np.clip(self.scaler.transform(X_raw), -5, 5)
         return self.model.predict_proba(X)
 
-    # IT: Serializza modello + scaler + metadati su disco (pickle).
-    # EN: Serializes model + scaler + metadata to disk (pickle).
+    # Serializes model + scaler + metadata to disk (pickle).
     def save(self, path: str):
         import pickle
         with open(path, "wb") as f:
@@ -338,8 +329,7 @@ class RegimeHMM:
             }, f)
         log.info(f"HMM salvato → {path}")
 
-    # IT: Ricostruisce un RegimeHMM da un pickle salvato.
-    # EN: Reconstructs a RegimeHMM from a saved pickle.
+    # Reconstructs a RegimeHMM from a saved pickle.
     @classmethod
     def load(cls, path: str) -> "RegimeHMM":
         import pickle
@@ -352,43 +342,37 @@ class RegimeHMM:
         return obj
 
 
-# ─── STADIO 1b: MARKOV-SWITCHING REGIME DETECTOR (Hamilton 1989) ────────────
+# ─── STAGE 1b: MARKOV-SWITCHING REGIME DETECTOR (Hamilton 1989) ─────────────
 
-# IT: Markov-Switching (Hamilton 1989) su PC1 con PCA expanding window + Hamilton filter walk-forward.
-# EN: Markov-Switching (Hamilton 1989) on PC1 with expanding-window PCA + walk-forward Hamilton filter.
+# Markov-Switching (Hamilton 1989) on PC1 with expanding-window PCA + walk-forward Hamilton filter.
 class RegimeMarkovSwitching:
     """
-    Markov-Switching Regression (Hamilton 1989) per regime detection.
+    Markov-Switching Regression (Hamilton 1989) for regime detection.
 
-    Pipeline standard quant finance:
-      1. RobustScaler sulle macro features (resistente a outlier)
-      2. PCA → n_pca componenti principali (riduce multicollinearità)
-      3. MarkovRegression su PC1 con switching mean + variance
-      4. Hamilton filter per probabilità di regime sequenziali
+    Standard quant-finance pipeline:
+      1. RobustScaler on the macro features (outlier resistant)
+      2. PCA → n_pca principal components (reduces multicollinearity)
+      3. MarkovRegression on PC1 with switching mean + variance
+      4. Hamilton filter for sequential regime probabilities
 
-    Vantaggi rispetto a GaussianHMM:
-      · Convergenza stabile (EM + scoring optimizer, non solo EM)
-      · Standard econometrico pubblicato (Hamilton 1989, Kim & Nelson 1999)
-      · PCA elimina multicollinearità fra le 14 macro features
-      · switching_variance cattura i cambi di volatilità tra regimi
-      · Meno parametri → meno overfitting con finestre corte
+    Advantages over GaussianHMM:
+      · Stable convergence (EM + scoring optimizer, not EM alone)
+      · Published econometric standard (Hamilton 1989, Kim & Nelson 1999)
+      · PCA removes multicollinearity among the 14 macro features
+      · switching_variance captures volatility changes across regimes
+      · Fewer parameters → less overfitting with short windows
 
-    Approccio walk-forward:
-      Identico a RegimeHMM — expanding window con riaddestramento periodico.
-      Fra un retrain e l'altro, usa il Hamilton filter (O(1) per giorno)
-      anziché ri-fittare il modello.
+    Walk-forward approach:
+      Identical to RegimeHMM — expanding window with periodic retraining.
+      Between retrains, uses the Hamilton filter (O(1) per day)
+      instead of refitting the model.
     """
 
-    # IT: Configura n. regimi/PCA/restart; scaler, PCA e cache parametri sono popolati al fit.
-    #     `max_fit_failure_ratio`: soglia di abort del walk-forward (vedi il guard in
-    #     fit_predict_walkforward). 1.0 = nessun abort per rapporto, resta comunque
-    #     l'abort su ZERO fit riusciti — quello non è disattivabile perché un
-    #     walk-forward senza un solo fit non produce informazione, produce la prior.
-    # EN: Sets regime/PCA/restart counts; scaler, PCA and param cache are populated at fit time.
-    #     `max_fit_failure_ratio`: walk-forward abort threshold (see the guard in
-    #     fit_predict_walkforward). 1.0 = no ratio-based abort, but the abort on ZERO
-    #     successful fits still stands — it is not disableable, because a walk-forward
-    #     without a single fit yields no information, it yields the prior.
+    # Sets regime/PCA/restart counts; scaler, PCA and param cache are populated at fit time.
+    # `max_fit_failure_ratio`: walk-forward abort threshold (see the guard in
+    # fit_predict_walkforward). 1.0 = no ratio-based abort, but the abort on ZERO
+    # successful fits still stands — it is not disableable, because a walk-forward
+    # without a single fit yields no information, it yields the prior.
     def __init__(self, n_regimes: int = 3, n_iter: int = 300,
                  random_state: int = 42, n_pca: int = 3,
                  n_restarts: int = 5, max_fit_failure_ratio: float = 0.5):
@@ -405,24 +389,19 @@ class RegimeMarkovSwitching:
         self.n_pca        = n_pca
         self.n_restarts   = n_restarts
         self.max_fit_failure_ratio = max_fit_failure_ratio
-        # IT: diagnostica dell'ultimo walk-forward (popolata dal guard) — leggibile
-        #     dai chiamanti per loggare la qualità del rebuild senza ri-parsare i log.
-        # EN: last walk-forward diagnostics (filled by the guard) — readable by
-        #     callers to log rebuild quality without re-parsing the logs.
+        # last walk-forward diagnostics (filled by the guard) — readable by
+        # callers to log rebuild quality without re-parsing the logs.
         self.last_fit_diagnostics: dict | None = None
         self.model        = None
         self.pca          = None
         self.scaler       = RobustScaler()
         self.feature_cols: list[str] = []
         self._params_cache: dict | None = None
-        # IT: stato di catena walk-forward (B7): popolato a fine fit_predict_walkforward,
-        #     serializzato nel checkpoint per la continuazione incrementale.
-        # EN: walk-forward chain state (B7): populated at the end of fit_predict_walkforward,
-        #     serialized into the checkpoint for incremental continuation.
+        # walk-forward chain state (B7): populated at the end of fit_predict_walkforward,
+        # serialized into the checkpoint for incremental continuation.
         self._wf_state: dict | None = None
 
-    # IT: Come la versione HMM, ma scarta anche le colonne interamente NaN (PCA non le tollera).
-    # EN: Like the HMM version, but also drops all-NaN columns (PCA cannot handle them).
+    # Like the HMM version, but also drops all-NaN columns (PCA cannot handle them).
     def _select_features(self, df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
         available = [c for c in HMM_CORE_FEATURES if c in df.columns]
         if len(available) < 4:
@@ -432,8 +411,7 @@ class RegimeMarkovSwitching:
         log.info(f"MarkovSwitching: {len(available)} features selezionate")
         return df[available].values, available
 
-    # IT: Fitta la PCA e proietta X_norm sulle componenti principali (logga la varianza spiegata).
-    # EN: Fits the PCA and projects X_norm onto principal components (logs explained variance).
+    # Fits the PCA and projects X_norm onto principal components (logs explained variance).
     def _pca_fit_transform(self, X_norm: np.ndarray) -> np.ndarray:
         n_comp = min(self.n_pca, X_norm.shape[1], X_norm.shape[0])
         self.pca = PCA(n_components=n_comp, random_state=self.random_state)
@@ -446,17 +424,15 @@ class RegimeMarkovSwitching:
         )
         return X_pca
 
-    # IT: Proietta nuovi dati sulla PCA già fittata (nessun refit).
-    # EN: Projects new data onto the already-fitted PCA (no refit).
+    # Projects new data onto the already-fitted PCA (no refit).
     def _pca_transform(self, X_norm: np.ndarray) -> np.ndarray:
         return self.pca.transform(X_norm)
 
-    # IT: Fitta MarkovRegression su PC1 (switching mean+variance) su n_restarts seed; tiene la llf massima.
-    # EN: Fits MarkovRegression on PC1 (switching mean+variance) over n_restarts seeds; keeps the max llf.
+    # Fits MarkovRegression on PC1 (switching mean+variance) over n_restarts seeds; keeps the max llf.
     def _fit_single(self, pc1: np.ndarray):
         """
-        Fitta MarkovRegression su PC1 con switching mean + variance.
-        Prova n_restarts starting values per robustezza.
+        Fit MarkovRegression on PC1 with switching mean + variance.
+        Tries n_restarts starting values for robustness.
         """
         from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
@@ -497,14 +473,13 @@ class RegimeMarkovSwitching:
 
         return best_result
 
-    # IT: Estrae transizioni, medie e varianze dal risultato statsmodels per il Hamilton filter manuale.
-    # EN: Extracts transitions, means and variances from the statsmodels result for the manual Hamilton filter.
+    # Extracts transitions, means and variances from the statsmodels result for the manual Hamilton filter.
     def _extract_params(self, result) -> dict:
         """
-        Estrae i parametri per il Hamilton filter manuale.
+        Extract the parameters for the manual Hamilton filter.
 
-        Convenzione statsmodels: regime_transition[i,j] = P(S_t=i | S_{t-1}=j)
-        (le colonne sommano a 1).
+        statsmodels convention: regime_transition[i,j] = P(S_t=i | S_{t-1}=j)
+        (columns sum to 1).
         """
         k = self.n_regimes
         param_dict = dict(zip(result.model.param_names, result.params))
@@ -519,41 +494,39 @@ class RegimeMarkovSwitching:
 
         return {'trans': trans, 'means': means, 'variances': variances}
 
-    # IT: Un passo del filtro di Hamilton (predict + emission log-space + update normalizzato).
-    # EN: One Hamilton-filter step (predict + log-space emission + normalized update).
+    # One Hamilton-filter step (predict + log-space emission + normalized update).
     def _hamilton_filter_step(self, y_t: float, params: dict,
                               prev_filtered: np.ndarray) -> np.ndarray:
         """
-        Singolo passo del Hamilton (1989) filter.
+        Single step of the Hamilton (1989) filter.
 
         P(S_t=j | Y_{1:t}) ∝ f(y_t | S_t=j) · P(S_t=j | Y_{1:t-1})
 
-        dove P(S_t=j | Y_{1:t-1}) = Σ_i P(S_t=j | S_{t-1}=i) · P(S_{t-1}=i | Y_{1:t-1})
+        where P(S_t=j | Y_{1:t-1}) = Σ_i P(S_t=j | S_{t-1}=i) · P(S_{t-1}=i | Y_{1:t-1})
 
-        Emission calcolata in log-space per evitare underflow su outlier.
+        Emission computed in log-space to avoid underflow on outliers.
         """
         trans = params['trans']
 
-        # Prediction step: trans @ prev (colonne sommano a 1)
+        # Prediction step: trans @ prev (columns sum to 1)
         predicted = trans @ prev_filtered
         predicted = np.maximum(predicted, 1e-20)
 
-        # Emission in log-space (evita underflow per |y_t - μ_j| >> σ_j)
+        # Emission in log-space (avoids underflow for |y_t - μ_j| >> σ_j)
         diff = y_t - params['means']
         var  = params['variances']
         log_emission = -0.5 * diff**2 / var - 0.5 * np.log(2.0 * np.pi * var)
         log_emission -= log_emission.max()
         emission = np.exp(log_emission)
 
-        # Update step (la costante sottratta si cancella nella normalizzazione)
+        # Update step (the subtracted constant cancels out in the normalization)
         joint = emission * predicted
         total = joint.sum()
         if total < 1e-300:
             return np.full(self.n_regimes, 1.0 / self.n_regimes)
         return joint / total
 
-    # IT: Etichette di regime walk-forward: a ogni retrain ri-fitta PCA+MS (sign-aligned), poi Hamilton filter fino al prossimo.
-    # EN: Walk-forward regime labels: each retrain refits PCA+MS (sign-aligned), then Hamilton-filters until the next.
+    # Walk-forward regime labels: each retrain refits PCA+MS (sign-aligned), then Hamilton-filters until the next.
     def fit_predict_walkforward(
         self,
         df_macro:     pd.DataFrame,
@@ -562,21 +535,21 @@ class RegimeMarkovSwitching:
         _stop_at:     int | None = None,
     ) -> pd.DataFrame:
         """
-        Walk-forward expanding window con Markov-Switching + PCA.
+        Walk-forward expanding window with Markov-Switching + PCA.
 
-        Per ogni giorno t genera le probabilità di regime usando SOLO
-        i dati disponibili fino a t (nessun look-ahead).
+        For every day t generates regime probabilities using ONLY
+        the data available up to t (no look-ahead).
 
-        Pipeline per ogni retrain a t:
-          1. PCA fit su X_norm[:t] (expanding window, sign-aligned)
-          2. MarkovRegression su PC1[:t]
-          3. Hamilton filter per i giorni successivi fino al prossimo retrain,
-             trasformando ogni x_t con la PCA corrente
+        Pipeline for each retrain at t:
+          1. PCA fit on X_norm[:t] (expanding window, sign-aligned)
+          2. MarkovRegression on PC1[:t]
+          3. Hamilton filter for the following days until the next retrain,
+             transforming each x_t with the current PCA
 
-        `_stop_at`: SOLO per i test di bit-parity B7 (default None = comportamento
-        production bit-invariato): tronca il loop alla barra indicata lasciando
-        scaler e storage identici al run pieno, così `continue_walkforward` può
-        essere confrontata bit-per-bit col run pieno sulle barre restanti.
+        `_stop_at`: ONLY for the B7 bit-parity tests (default None = production
+        behavior bit-unchanged): truncates the loop at the given bar leaving
+        scaler and storage identical to the full run, so `continue_walkforward` can
+        be compared bit-for-bit with the full run on the remaining bars.
         """
         if "open_time" in df_macro.columns:
             df_daily = df_macro.groupby(
@@ -594,8 +567,8 @@ class RegimeMarkovSwitching:
                 f"con burn_in={burn_in_days}."
             )
 
-        # Normalizzazione globale (RobustScaler: statistiche di posizione/scala,
-        # look-ahead trascurabile — mediana e IQR sono stabili nel tempo)
+        # Global normalization (RobustScaler: location/scale statistics,
+        # negligible look-ahead — median and IQR are stable over time)
         mask_valid = ~np.isnan(X_raw).any(axis=1)
         self.scaler.fit(X_raw[mask_valid])
         X_norm = np.clip(self.scaler.transform(
@@ -604,12 +577,12 @@ class RegimeMarkovSwitching:
 
         n_comp = min(self.n_pca, X_norm.shape[1], X_norm.shape[0])
 
-        # Storage risultati
+        # Result storage
         probs_all = np.full((n, self.n_regimes), 1.0 / self.n_regimes)
 
         current_params  = None
         current_pca     = None
-        pc1_cache       = None   # IT: proiezione PC1 di tutto X_norm sotto la PCA corrente (A6) | EN: PC1 of all X_norm under current PCA (A6)
+        pc1_cache       = None   # PC1 of all X_norm under current PCA (A6)
         prev_components = None
         last_filtered   = np.full(self.n_regimes, 1.0 / self.n_regimes)
         last_retrain    = -1
@@ -620,28 +593,18 @@ class RegimeMarkovSwitching:
             f"{self.n_regimes} regimi, PCA expanding window ..."
         )
 
-        # IT: n_eff = fine del loop (B7: _stop_at tronca per il golden test; None = n).
-        # EN: n_eff = loop end (B7: _stop_at truncates for the golden test; None = n).
+        # n_eff = loop end (B7: _stop_at truncates for the golden test; None = n).
         n_eff = n if _stop_at is None else min(int(_stop_at), n)
 
-        # IT: Contatori del guard anti-degradazione-silenziosa. Prima, OGNI fallimento
-        #     di fit finiva in un log.warning per timestep e il loop proseguiva: con
-        #     current_params=None, probs_all[t] non veniva mai scritto e il walk-forward
-        #     restituiva la PRIOR UNIFORME al posto delle probabilità filtrate, senza
-        #     che nulla fallisse. `n_filtered` misura la copertura reale (timestep con
-        #     probabilità effettivamente calcolate), che è la grandezza da controllare:
-        #     i fit falliti sono la causa, la copertura è l'effetto.
-        #     I contatori NON toccano il path numerico: a fit riusciti l'output è
-        #     bit-identico (golden test di bit-parity B7 invariato).
-        # EN: Counters for the anti-silent-degradation guard. Previously EVERY fit
-        #     failure produced one log.warning per timestep and the loop carried on:
-        #     with current_params=None, probs_all[t] was never written and the
-        #     walk-forward returned the UNIFORM PRIOR instead of filtered
-        #     probabilities, without anything failing. `n_filtered` measures actual
-        #     coverage (timesteps with genuinely computed probabilities), which is the
-        #     quantity to check: failed fits are the cause, coverage is the effect.
-        #     The counters do NOT touch the numeric path: with successful fits the
-        #     output is bit-identical (B7 bit-parity golden test unchanged).
+        # Counters for the anti-silent-degradation guard. Previously EVERY fit
+        # failure produced one log.warning per timestep and the loop carried on:
+        # with current_params=None, probs_all[t] was never written and the
+        # walk-forward returned the UNIFORM PRIOR instead of filtered
+        # probabilities, without anything failing. `n_filtered` measures actual
+        # coverage (timesteps with genuinely computed probabilities), which is the
+        # quantity to check: failed fits are the cause, coverage is the effect.
+        # The counters do NOT touch the numeric path: with successful fits the
+        # output is bit-identical (B7 bit-parity golden test unchanged).
         n_fit_attempts = 0
         n_fit_ok       = 0
         n_filtered     = 0
@@ -652,27 +615,23 @@ class RegimeMarkovSwitching:
                 if t >= 50:
                     n_fit_attempts += 1
                     try:
-                        # PCA expanding window: fit solo su dati[:t]
+                        # PCA expanding window: fit only on data[:t]
                         pca_t = PCA(n_components=n_comp,
                                     random_state=self.random_state)
                         pca_t.fit(X_norm[:t])
 
-                        # Sign alignment: PC1 deve puntare nella stessa
-                        # direzione tra un retrain e l'altro, altrimenti il
-                        # Hamilton filter riceve un segnale invertito
+                        # Sign alignment: PC1 must point in the same
+                        # direction from one retrain to the next, otherwise the
+                        # Hamilton filter receives an inverted signal
                         if prev_components is not None:
                             if np.dot(pca_t.components_[0],
                                       prev_components[0]) < 0:
                                 pca_t.components_[0] *= -1
                         prev_components = pca_t.components_.copy()
                         current_pca = pca_t
-                        # IT: proietta TUTTO X_norm una volta per retrain (A6): tra due retrain la PCA
-                        #     è fissa → pc1_cache[t] == transform(X_norm[t:t+1]) bit-identico, ma evita
-                        #     ~n chiamate sklearn riga-per-riga. CAUSALE: si indicizza solo [t] (≤ futuro
-                        #     calcolato ma MAI usato), la PCA è fittata su [:t].
-                        # EN: project ALL X_norm once per retrain (A6): between retrains the PCA is fixed
-                        #     → pc1_cache[t] == transform(X_norm[t:t+1]) bit-identical, but avoids ~n
-                        #     row-by-row sklearn calls. CAUSAL: only [t] is indexed, PCA fit on [:t].
+                        # project ALL X_norm once per retrain (A6): between retrains the PCA is fixed
+                        # → pc1_cache[t] == transform(X_norm[t:t+1]) bit-identical, but avoids ~n
+                        # row-by-row sklearn calls. CAUSAL: only [t] is indexed, PCA fit on [:t].
                         pc1_cache = current_pca.transform(X_norm)[:, 0]
 
                         pc1_train = pc1_cache[:t]
@@ -693,10 +652,8 @@ class RegimeMarkovSwitching:
                                 f"PCA var={pca_t.explained_variance_ratio_[0]:.1%}"
                             )
                         else:
-                            # IT: _fit_single ritorna None quando TUTTI gli n_restarts
-                            #     falliscono: prima era un ramo muto (nessun log).
-                            # EN: _fit_single returns None when ALL n_restarts fail:
-                            #     this used to be a silent branch (no logging at all).
+                            # _fit_single returns None when ALL n_restarts fail:
+                            # this used to be a silent branch (no logging at all).
                             log.warning(
                                 f"  MarkovSwitching: nessun restart converge a t={t} "
                                 f"(su {self.n_restarts} tentativi)"
@@ -707,34 +664,24 @@ class RegimeMarkovSwitching:
                         )
 
             if current_params is not None and current_pca is not None:
-                pc1_t = pc1_cache[t]   # IT: lookup O(1) dalla cache (A6) | EN: O(1) cache lookup (A6)
+                pc1_t = pc1_cache[t]   # O(1) cache lookup (A6)
                 last_filtered = self._hamilton_filter_step(
                     pc1_t, current_params, last_filtered
                 )
                 probs_all[t] = last_filtered
                 n_filtered += 1
 
-        # ── Guard anti-degradazione silenziosa ────────────────────────────────
-        # IT: Due condizioni di abort, deliberatamente diverse per severità.
-        #     ① ZERO fit riusciti → il risultato è la prior uniforme travestita da
-        #        probabilità di regime: sempre fatale, non disattivabile. È il caso
-        #        che si presenta con statsmodels mancante o rotto.
-        #     ② Troppi fit falliti (> max_fit_failure_ratio) → il walk-forward gira
-        #        su parametri stantii per lunghi tratti: degradazione parziale,
-        #        soglia configurabile perché su serie corte qualche fallimento è
-        #        fisiologico.
-        #     La diagnostica è sempre persistita, anche quando non si aborta: un
-        #     rebuild degradato deve lasciare traccia leggibile a valle.
-        # EN: Two abort conditions, deliberately differing in severity.
-        #     ① ZERO successful fits → the result is the uniform prior dressed up as
-        #        regime probabilities: always fatal, not disableable. This is the case
-        #        that shows up with statsmodels missing or broken.
-        #     ② Too many failed fits (> max_fit_failure_ratio) → the walk-forward runs
-        #        on stale parameters for long stretches: partial degradation,
-        #        configurable threshold because on short series some failures are
-        #        physiological.
-        #     Diagnostics are always persisted, even when not aborting: a degraded
-        #     rebuild must leave a trace readable downstream.
+        # ── Anti-silent-degradation guard ─────────────────────────────────────
+        # Two abort conditions, deliberately differing in severity.
+        # ① ZERO successful fits → the result is the uniform prior dressed up as
+        #    regime probabilities: always fatal, not disableable. This is the case
+        #    that shows up with statsmodels missing or broken.
+        # ② Too many failed fits (> max_fit_failure_ratio) → the walk-forward runs
+        #    on stale parameters for long stretches: partial degradation,
+        #    configurable threshold because on short series some failures are
+        #    physiological.
+        # Diagnostics are always persisted, even when not aborting: a degraded
+        # rebuild must leave a trace readable downstream.
         fail_ratio = (
             0.0 if n_fit_attempts == 0
             else (n_fit_attempts - n_fit_ok) / n_fit_attempts
@@ -772,14 +719,10 @@ class RegimeMarkovSwitching:
                 f"{fail_ratio:.1%} > threshold {self.max_fit_failure_ratio:.1%})."
             )
 
-        # IT: B7 — stash dello stato di catena a fine loop (PRIMA del fit finale, che
-        #     sovrascrive self.pca/self.model col fit full-sample): è tutto ciò che serve
-        #     a continue_walkforward per riprendere l'append senza rifare la storia.
-        #     Copie difensive: il fit finale e i consumer non devono mutare lo stash.
-        # EN: B7 — chain-state stash at loop end (BEFORE the final fit, which overwrites
-        #     self.pca/self.model with the full-sample fit): everything that
-        #     continue_walkforward needs to resume appending without redoing history.
-        #     Defensive copies: the final fit and consumers must not mutate the stash.
+        # B7 — chain-state stash at loop end (BEFORE the final fit, which overwrites
+        # self.pca/self.model with the full-sample fit): everything that
+        # continue_walkforward needs to resume appending without redoing history.
+        # Defensive copies: the final fit and consumers must not mutate the stash.
         self._wf_state = {
             "params":          None if current_params is None else {
                 k: np.array(v, copy=True) for k, v in current_params.items()
@@ -794,7 +737,7 @@ class RegimeMarkovSwitching:
             "retrain_bars":    retrain_days,
         }
 
-        # Fit finale su tutto lo storico (per produzione/predict_proba)
+        # Final fit on the whole history (for production/predict_proba)
         self._pca_fit_transform(X_norm)
         if prev_components is not None:
             if np.dot(self.pca.components_[0], prev_components[0]) < 0:
@@ -808,7 +751,7 @@ class RegimeMarkovSwitching:
                 self.model = final_result
                 self._params_cache = self._extract_params(self.model)
 
-        # DataFrame risultato
+        # Result DataFrame
         result_df = pd.DataFrame(
             probs_all,
             index   = df_daily.index,
@@ -826,8 +769,7 @@ class RegimeMarkovSwitching:
         self._describe_regimes_wf(X_raw, probs_all, burn_in_days)
         return result_df
 
-    # IT: Diagnostica: logga le medie per regime + μ/σ²/P(stay) dei parametri stimati.
-    # EN: Diagnostics: logs per-regime means + the estimated μ/σ²/P(stay) parameters.
+    # Diagnostics: logs per-regime means + the estimated μ/σ²/P(stay) parameters.
     def _describe_regimes_wf(self, X_raw, probs_all, burn_in_days):
         labels = probs_all[burn_in_days:].argmax(axis=1)
         X_post = X_raw[burn_in_days:]
@@ -855,42 +797,39 @@ class RegimeMarkovSwitching:
                     f"P(stay)={params['trans'][r,r]:.2%}"
                 )
 
-    # IT: B7 — continuazione incrementale del walk-forward da uno stato di catena persistito.
-    # EN: B7 — incremental walk-forward continuation from a persisted chain state.
+    # B7 — incremental walk-forward continuation from a persisted chain state.
     def continue_walkforward(self, df_macro: pd.DataFrame,
                              state: dict) -> pd.DataFrame:
         """
-        Estende il walk-forward alle sole barre nuove (append) riprendendo dallo
-        stato di catena `state` (formato di `self._wf_state`), SENZA rifare i
-        refit storici. Bit-parity garantita verso il **run originale esteso a
-        scaler CONGELATO** (è ciò che il golden test misura via `_stop_at`):
-        un full rebuild sullo span esteso rifitterebbe il RobustScaler globale
-        → X_norm diverso su tutte le barre → divergenza lieve attesa e
-        documentata (re-ancoraggio con full rebuild periodico). Lo scaler
-        congelato è strettamente causale sulle barre nuove (più del fit
-        globale del rebuild): nessun lookahead.
+        Extend the walk-forward to the new bars only (append), resuming from the
+        chain state `state` (format of `self._wf_state`), WITHOUT redoing the
+        historical refits. Bit-parity guaranteed against the **original run extended
+        with a FROZEN scaler** (which is what the golden test measures via `_stop_at`):
+        a full rebuild over the extended span would refit the global RobustScaler
+        → different X_norm on all bars → slight divergence, expected and
+        documented (re-anchoring via periodic full rebuild). The frozen
+        scaler is strictly causal on the new bars (more so than the rebuild's
+        global fit): no lookahead.
 
-        ⚠ MIRROR del blocco retrain+filter di `fit_predict_walkforward`: qualsiasi
-        modifica là va replicata qui (golden test in tests/test_regime_incremental.py
-        fallisce in caso di divergenza). Il passo Hamilton per-barra è lo STESSO
-        metodo (`_hamilton_filter_step`) — zona da-non-toccare, nessuna copia.
+        ⚠ MIRROR of the retrain+filter block of `fit_predict_walkforward`: any
+        change there must be replicated here (golden test in tests/test_regime_incremental.py
+        fails on divergence). The per-bar Hamilton step is the SAME
+        method (`_hamilton_filter_step`) — do-not-touch zone, no copy.
 
         Args:
-            df_macro: storia COMPLETA (barre vecchie + nuove), stessa costruzione
-                      feature del run pieno. Serve intera: i retrain sono
-                      expanding-window su [:t].
-            state:    stato di catena (chiavi di `_wf_state`); viene AGGIORNATO
-                      in place a fine run (n_bars/last_* /params/pca) per il
-                      re-save del checkpoint.
+            df_macro: FULL history (old + new bars), same feature construction
+                      as the full run. Needed in full: retrains are
+                      expanding-window over [:t].
+            state:    chain state (keys of `_wf_state`); UPDATED
+                      in place at the end of the run (n_bars/last_* /params/pca) for
+                      the checkpoint re-save.
 
         Returns:
-            DataFrame con le SOLE righe nuove (posizionali [n_old:n)) e colonne
+            DataFrame with ONLY the new rows (positional [n_old:n)) and columns
             regime_prob_i / regime_dominant / regime_burn_in=False.
         """
-        # IT: stesso pre-processing del run pieno, ma con colonne e scaler CONGELATI
-        #     dallo stato (nessun refit: è ciò che rende l'append deterministico).
-        # EN: same pre-processing as the full run, but with columns and scaler FROZEN
-        #     from the state (no refit: this is what makes the append deterministic).
+        # same pre-processing as the full run, but with columns and scaler FROZEN
+        # from the state (no refit: this is what makes the append deterministic).
         if "open_time" in df_macro.columns:
             df_daily = df_macro.groupby(
                 df_macro["open_time"].dt.date
@@ -927,10 +866,8 @@ class RegimeMarkovSwitching:
         last_filtered   = np.array(state["last_filtered"], copy=True)
         last_retrain    = int(state["last_retrain"])
 
-        # IT: proiezione PC1 dell'intera storia sotto la PCA corrente (stesso
-        #     pattern-cache A6 del run pieno: causale, si indicizza solo [t]).
-        # EN: PC1 projection of the whole history under the current PCA (same A6
-        #     cache pattern as the full run: causal, only [t] is indexed).
+        # PC1 projection of the whole history under the current PCA (same A6
+        # cache pattern as the full run: causal, only [t] is indexed).
         pc1_cache = current_pca.transform(X_norm)[:, 0]
 
         probs_new = np.full((n - n_old, self.n_regimes), 1.0 / self.n_regimes)
@@ -942,21 +879,16 @@ class RegimeMarkovSwitching:
             f"prossimo a t={last_retrain + retrain_days}"
         )
 
-        # IT: MIRROR dei contatori del run pieno. Qui la degradazione è più mite ma
-        #     più insidiosa: current_params non è mai None, quindi un retrain fallito
-        #     NON produce la prior uniforme — produce probabilità filtrate con
-        #     parametri STANTII, indistinguibili da quelle buone a valle. Contarli è
-        #     l'unico modo per accorgersene.
-        # EN: MIRROR of the full-run counters. Degradation here is milder but more
-        #     insidious: current_params is never None, so a failed retrain does NOT
-        #     produce the uniform prior — it produces filtered probabilities from
-        #     STALE parameters, indistinguishable downstream from good ones. Counting
-        #     them is the only way to notice.
+        # MIRROR of the full-run counters. Degradation here is milder but more
+        # insidious: current_params is never None, so a failed retrain does NOT
+        # produce the uniform prior — it produces filtered probabilities from
+        # STALE parameters, indistinguishable downstream from good ones. Counting
+        # them is the only way to notice.
         n_fit_attempts = 0
 
         for t in range(n_old, n):
-            # ── MIRROR del blocco retrain del run pieno (differenza: current_params
-            #    non è mai None, verificato sopra) ─ MIRROR of the full-run retrain block
+            # ── MIRROR of the full-run retrain block (difference: current_params
+            #    is never None, verified above)
             if (t - last_retrain) >= retrain_days:
                 if t >= 50:
                     n_fit_attempts += 1
@@ -1003,14 +935,10 @@ class RegimeMarkovSwitching:
             )
             probs_new[t - n_old] = last_filtered
 
-        # IT: MIRROR del guard del run pieno. Zero retrain TENTATI è legittimo (l'append
-        #     può non attraversare un confine di refit): non è un errore. Zero riusciti
-        #     su ≥1 tentato invece significa che l'append ha superato un confine di
-        #     refit continuando su parametri congelati dal checkpoint — silenziosamente.
-        # EN: MIRROR of the full-run guard. Zero ATTEMPTED retrains is legitimate (the
-        #     append may not cross a refit boundary): not an error. Zero successful out
-        #     of ≥1 attempted means the append crossed a refit boundary and carried on
-        #     with parameters frozen from the checkpoint — silently.
+        # MIRROR of the full-run guard. Zero ATTEMPTED retrains is legitimate (the
+        # append may not cross a refit boundary): not an error. Zero successful out
+        # of ≥1 attempted means the append crossed a refit boundary and carried on
+        # with parameters frozen from the checkpoint — silently.
         self.last_fit_diagnostics = {
             "fit_attempts": n_fit_attempts,
             "fit_ok":       n_retrains,
@@ -1029,24 +957,15 @@ class RegimeMarkovSwitching:
                 f"have produced filtered probabilities from checkpoint-frozen "
                 f"parameters, indistinguishable from valid ones."
             )
-        # IT: secondo ramo del mirror — il run pieno aborta anche su rapporto di
-        #     fallimento eccessivo, non solo su zero successi. Senza questo,
-        #     un append con backlog lungo (mesi di pausa → più confini di retrain
-        #     attraversati) che fallisse 3 refit su 4 passerebbe silenziosamente,
-        #     mentre il run pieno equivalente avrebbe abortito: è la stessa
-        #     degradazione, con una soglia diversa a seconda del metodo chiamato.
-        #     Con n_fit_attempts==1 questo ramo coincide col precedente (nessun
-        #     cambio di comportamento nel caso comune: cadenza incrementale
-        #     settimanale contro retrain a 90 giorni ⇒ 0 o 1 tentativo).
-        # EN: second mirror branch — the full run also aborts on an excessive
-        #     failure ratio, not only on zero successes. Without this, an append
-        #     with a long backlog (months of pause → several retrain boundaries
-        #     crossed) failing 3 refits out of 4 would pass silently, while the
-        #     equivalent full run would have aborted: same degradation, different
-        #     threshold depending on which method was called. With
-        #     n_fit_attempts==1 this branch coincides with the previous one (no
-        #     behaviour change in the common case: weekly incremental cadence
-        #     against a 90-day retrain ⇒ 0 or 1 attempt).
+        # second mirror branch — the full run also aborts on an excessive
+        # failure ratio, not only on zero successes. Without this, an append
+        # with a long backlog (months of pause → several retrain boundaries
+        # crossed) failing 3 refits out of 4 would pass silently, while the
+        # equivalent full run would have aborted: same degradation, different
+        # threshold depending on which method was called. With
+        # n_fit_attempts==1 this branch coincides with the previous one (no
+        # behaviour change in the common case: weekly incremental cadence
+        # against a 90-day retrain ⇒ 0 or 1 attempt).
         _fail_ratio = self.last_fit_diagnostics["fail_ratio"]
         if n_fit_attempts > 0 and _fail_ratio > self.max_fit_failure_ratio:
             raise RuntimeError(
@@ -1059,8 +978,7 @@ class RegimeMarkovSwitching:
                 f"{self.max_fit_failure_ratio:.1%})."
             )
 
-        # IT: aggiorna lo stato in place per il re-save del checkpoint (append riuscito).
-        # EN: update the state in place for the checkpoint re-save (append succeeded).
+        # update the state in place for the checkpoint re-save (append succeeded).
         state.update({
             "params":          {k: np.array(v, copy=True)
                                 for k, v in current_params.items()},
@@ -1078,8 +996,7 @@ class RegimeMarkovSwitching:
             columns = [f"regime_prob_{i}" for i in range(self.n_regimes)],
         )
         result_df["regime_dominant"] = probs_new.argmax(axis=1)
-        # IT: le barre nuove sono sempre post burn-in (il burn-in vive nel run originale).
-        # EN: new bars are always post burn-in (burn-in lives in the original run).
+        # new bars are always post burn-in (burn-in lives in the original run).
         result_df["regime_burn_in"]  = False
 
         log.info(
@@ -1087,11 +1004,10 @@ class RegimeMarkovSwitching:
         )
         return result_df
 
-    # IT: Fit finale su tutto lo storico (PCA+MS) per produzione/live; popola la cache parametri.
-    # EN: Final fit on the full history (PCA+MS) for production/live; populates the param cache.
+    # Final fit on the full history (PCA+MS) for production/live; populates the param cache.
     def fit(self, df_macro: pd.DataFrame) -> "RegimeMarkovSwitching":
         """
-        Addestramento finale sull'intero storico (produzione/live).
+        Final training on the whole history (production/live).
         """
         if "open_time" in df_macro.columns:
             df_daily = df_macro.groupby(
@@ -1124,14 +1040,13 @@ class RegimeMarkovSwitching:
         self._params_cache = self._extract_params(self.model)
         return self
 
-    # IT: Probabilità di regime applicando il Hamilton filter sequenzialmente riga-per-riga.
-    # EN: Regime probabilities by applying the Hamilton filter sequentially, row by row.
+    # Regime probabilities by applying the Hamilton filter sequentially, row by row.
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
         """
-        Predice le probabilità di regime con Hamilton filter.
+        Predict regime probabilities with the Hamilton filter.
 
-        Per ogni riga applica un passo del filtro sequenzialmente,
-        così le probabilità tengono conto della storia precedente.
+        Applies one filter step per row sequentially,
+        so the probabilities account for the preceding history.
         """
         if self.model is None:
             raise RuntimeError("MarkovSwitching non addestrato.")
@@ -1156,8 +1071,7 @@ class RegimeMarkovSwitching:
 
         return probs
 
-    # IT: Serializza modello + PCA + scaler + cache parametri su disco (pickle).
-    # EN: Serializes model + PCA + scaler + param cache to disk (pickle).
+    # Serializes model + PCA + scaler + param cache to disk (pickle).
     def save(self, path: str):
         with open(path, "wb") as f:
             pickle.dump({
@@ -1171,8 +1085,7 @@ class RegimeMarkovSwitching:
             }, f)
         log.info(f"MarkovSwitching salvato → {path}")
 
-    # IT: Ricostruisce un RegimeMarkovSwitching da un pickle salvato.
-    # EN: Reconstructs a RegimeMarkovSwitching from a saved pickle.
+    # Reconstructs a RegimeMarkovSwitching from a saved pickle.
     @classmethod
     def load(cls, path: str) -> "RegimeMarkovSwitching":
         with open(path, "rb") as f:
@@ -1188,17 +1101,16 @@ class RegimeMarkovSwitching:
         obj._params_cache = data.get("params_cache")
         return obj
 
-    # IT: Confronta k regimi candidati via BIC e ritorna {k: BIC}, loggando il vincitore.
-    # EN: Compares candidate regime counts k via BIC and returns {k: BIC}, logging the winner.
+    # Compares candidate regime counts k via BIC and returns {k: BIC}, logging the winner.
     def select_n_regimes(
         self, df_macro: pd.DataFrame,
         candidates: list[int] = [2, 3, 4],
     ) -> dict:
         """
-        Seleziona il numero ottimale di regimi via BIC.
+        Select the optimal number of regimes via BIC.
 
-        Fitta il modello per ogni k in candidates e ritorna
-        {k: BIC} con log del vincitore.
+        Fits the model for each k in candidates and returns
+        {k: BIC}, logging the winner.
         """
         if "open_time" in df_macro.columns:
             df_daily = df_macro.groupby(
@@ -1235,91 +1147,81 @@ class RegimeMarkovSwitching:
         return results
 
 
-# ─── STADIO 1c: SESSION-BASED REGIME DETECTOR (Asia/EU/US) ──────────────────
+# ─── STAGE 1c: SESSION-BASED REGIME DETECTOR (Asia/EU/US) ───────────────────
 
-# IT: Regime intraday basato sulla sessione di trading (Asia/EU/US) — sostituisce
-#     il Markov-Switching macro degenere allineando timescale del regime e
-#     dell'orizzonte di trading (1m, h=30).
-# EN: Intraday regime based on trading session (Asia/EU/US) — replaces the
-#     degenerate macro Markov-Switching by aligning the regime timescale with
-#     the trading horizon (1m, h=30).
+# Intraday regime based on trading session (Asia/EU/US) — replaces the
+# degenerate macro Markov-Switching by aligning the regime timescale with
+# the trading horizon (1m, h=30).
 class RegimeSession:
     """
-    Detector di regime "session-based" deterministico, drop-in per
+    Deterministic "session-based" regime detector, drop-in for
     `RegimeMarkovSwitching`.
 
-    Regola di mapping (UTC):
+    Mapping rule (UTC):
         regime 0 = Asia       [00:00, 08:00)
         regime 1 = EU/London  [08:00, 16:00)
         regime 2 = US         [16:00, 24:00)
-    equivalente a `regime = hour_utc // 8`.
+    equivalent to `regime = hour_utc // 8`.
 
-    Vantaggi rispetto al Markov-Switching macro:
-      · Timescale coerente con l'orizzonte di trading (1-min, h=30)
-      · Sempre 3 cluster ben bilanciati (~33% ciascuno) — niente collasso
-      · Nessuna dipendenza da EM/convergenza/look-ahead
-      · Zero parametri da fittare → riproducibile e robusto
+    Advantages over the macro Markov-Switching:
+      · Timescale consistent with the trading horizon (1-min, h=30)
+      · Always 3 well-balanced clusters (~33% each) — no collapse
+      · No dependence on EM/convergence/look-ahead
+      · Zero parameters to fit → reproducible and robust
 
-    Note di interfaccia:
-      Restituisce lo stesso schema del Markov-Switching
+    Interface notes:
+      Returns the same schema as the Markov-Switching
       (`regime_dominant`, `regime_burn_in`, `regime_prob_0/1/2`)
-      così che i consumer (02_train.py, dashboard) non vadano toccati.
+      so that consumers (02_train.py, dashboard) need not be touched.
     """
 
-    # IT: Configurazione minima — nessun parametro effettivo da apprendere.
-    # EN: Minimal config — no actual parameters to learn.
+    # Minimal config — no actual parameters to learn.
     def __init__(self, n_regimes: int = 3):
-        # IT: forziamo n_regimes=3 (Asia/EU/US); accettiamo il kwarg solo per
-        #     compatibilità di firma con RegimeMarkovSwitching.
-        # EN: we force n_regimes=3 (Asia/EU/US); we accept the kwarg only for
-        #     signature compatibility with RegimeMarkovSwitching.
+        # we force n_regimes=3 (Asia/EU/US); we accept the kwarg only for
+        # signature compatibility with RegimeMarkovSwitching.
         if n_regimes != 3:
             log.warning(
                 f"RegimeSession: n_regimes={n_regimes} ignorato, forzato a 3 "
                 f"(Asia/EU/US sono fisse)."
             )
         self.n_regimes = 3
-        # IT: campi placeholder per drop-in compatibility con il pickle MS.
-        # EN: placeholder fields for drop-in pickle compatibility with MS.
+        # placeholder fields for drop-in pickle compatibility with MS.
         self.model = None
         self.pca = None
         self.scaler = None
         self.feature_cols: list[str] = []
 
-    # IT: Genera l'index orario UTC sul range di df_macro e calcola i regimi.
-    # EN: Builds the hourly UTC index over df_macro's range and computes regimes.
+    # Builds the hourly UTC index over df_macro's range and computes regimes.
     def fit_predict_walkforward(
         self,
         df_macro: pd.DataFrame,
-        burn_in_days: int = 0,   # IT: non usato — accettato per compat / EN: unused — accepted for compat
-        retrain_days: int = 0,   # IT: non usato — accettato per compat / EN: unused — accepted for compat
-        **kwargs,                # IT: assorbe eventuali kwargs futuri / EN: absorbs any future kwargs
+        burn_in_days: int = 0,   # unused — accepted for compat
+        retrain_days: int = 0,   # unused — accepted for compat
+        **kwargs,                # absorbs any future kwargs
     ) -> pd.DataFrame:
         """
-        Calcola i regimi session-based su un range orario UTC.
+        Compute session-based regimes over a UTC hourly range.
 
         Args:
-            df_macro:     usato SOLO per determinare il range temporale
-                          (min/max dell'index). Il contenuto non viene letto.
-            burn_in_days: ignorato (no fit, no burn-in necessario).
-            retrain_days: ignorato (deterministico, niente retrain).
+            df_macro:     used ONLY to determine the time range
+                          (min/max of the index). Its content is not read.
+            burn_in_days: ignored (no fit, no burn-in needed).
+            retrain_days: ignored (deterministic, no retrain).
 
         Returns:
-            DataFrame indicizzato su timestamps orari UTC con colonne:
+            DataFrame indexed on UTC hourly timestamps with columns:
               · regime_dominant (int 0/1/2)
-              · regime_burn_in  (bool, sempre False)
+              · regime_burn_in  (bool, always False)
               · regime_prob_0   (float, one-hot)
               · regime_prob_1   (float, one-hot)
               · regime_prob_2   (float, one-hot)
         """
-        # IT: estrae il range temporale da df_macro (tollera index non-tz / nullo).
-        # EN: extracts the time range from df_macro (tolerates non-tz / empty index).
+        # extracts the time range from df_macro (tolerates non-tz / empty index).
         if df_macro is None or len(df_macro) == 0:
             raise ValueError("RegimeSession: df_macro vuoto, impossibile derivare il range.")
 
         idx_raw = pd.to_datetime(df_macro.index)
-        # IT: normalizza a UTC (se naive, assume UTC; se tz-aware, converti).
-        # EN: normalize to UTC (if naive, assume UTC; if tz-aware, convert).
+        # normalize to UTC (if naive, assume UTC; if tz-aware, convert).
         if idx_raw.tz is None:
             idx_utc = idx_raw.tz_localize("UTC")
         else:
@@ -1328,17 +1230,14 @@ class RegimeSession:
         t_min = idx_utc.min().floor("h")
         t_max = idx_utc.max().ceil("h")
 
-        # IT: index orario UTC che copre l'intero range [t_min, t_max].
-        # EN: hourly UTC index spanning the full range [t_min, t_max].
+        # hourly UTC index spanning the full range [t_min, t_max].
         hourly_idx = pd.date_range(start=t_min, end=t_max, freq="h", tz="UTC")
 
-        # IT: mapping hour → regime (0=Asia, 1=EU, 2=US).
-        # EN: hour → regime mapping (0=Asia, 1=EU, 2=US).
+        # hour → regime mapping (0=Asia, 1=EU, 2=US).
         hours = hourly_idx.hour.to_numpy()
         regime_dominant = (hours // 8).astype(np.int64)
 
-        # IT: one-hot delle probabilità per match con lo schema MS.
-        # EN: one-hot probabilities to match the MS schema.
+        # one-hot probabilities to match the MS schema.
         n = len(hourly_idx)
         prob_0 = (regime_dominant == 0).astype(np.float32)
         prob_1 = (regime_dominant == 1).astype(np.float32)
@@ -1362,8 +1261,7 @@ class RegimeSession:
         )
         return out
 
-    # IT: Pickle dei pochi attributi (nessun parametro fittato).
-    # EN: Pickles the few attributes (no fitted parameters).
+    # Pickles the few attributes (no fitted parameters).
     def save(self, path: str) -> None:
         with open(path, "wb") as f:
             pickle.dump(
@@ -1379,8 +1277,7 @@ class RegimeSession:
             )
         log.info(f"RegimeSession salvato → {path}")
 
-    # IT: Ricostruisce un RegimeSession da pickle.
-    # EN: Reconstructs a RegimeSession from a pickle.
+    # Reconstructs a RegimeSession from a pickle.
     @classmethod
     def load(cls, path: str) -> "RegimeSession":
         with open(path, "rb") as f:
@@ -1393,45 +1290,40 @@ class RegimeSession:
         return obj
 
 
-# ─── STADIO 1d: MARKOV-SWITCHING SU REALIZED VOL BTC (intraday) ─────────────
+# ─── STAGE 1d: MARKOV-SWITCHING ON BTC REALIZED VOL (intraday) ──────────────
 
-# IT: Markov-Switching su realized vol BTC oraria — "Variante 3" (decisione 2026-06-03, vedi TEORIA.md §regime).
-#     Sostituisce RegimeSession allineando il timescale del regime (switch ogni 3-8h)
-#     col timeframe trading. Il clock del regime è ORARIO by design, a prescindere
-#     dall'intervallo candele (≤1h, aggregate a 1h). Usa SOLO dati BTC, non più macro USA.
-# EN: Markov-Switching on hourly BTC realized volatility — "Variant 3" (2026-06-03 decision, see TEORIA.md §regime).
-#     Replaces RegimeSession by aligning the regime timescale (switches every 3-8h)
-#     with the trading timeframe. The regime clock is HOURLY by design, regardless of the
-#     candle interval (≤1h, aggregated to 1h). Uses BTC data ONLY, no more US macro.
+# Markov-Switching on hourly BTC realized volatility — "Variant 3" (2026-06-03 decision, see THEORY.md §regime).
+# Replaces RegimeSession by aligning the regime timescale (switches every 3-8h)
+# with the trading timeframe. The regime clock is HOURLY by design, regardless of the
+# candle interval (≤1h, aggregated to 1h). Uses BTC data ONLY, no more US macro.
 class RegimeMarkovBTC:
     """
-    Markov-Switching (Hamilton 1989) su realized volatility intraday di BTC.
+    Markov-Switching (Hamilton 1989) on BTC intraday realized volatility.
 
     Pipeline:
-      1. Carica candele BTC a qualunque intervallo ≤1h da `data/raw_candles.parquet`
-         (con input 1h il resample è un'identità; input >1h → ValueError fail-fast)
-      2. Aggrega a 1 ora: log_ret_h (somma dei log_ret per bucket) + log_rv (log della
-         realized variance = log(Σ log_ret²) clippato per stabilità)
-      3. RobustScaler globale (mediana/IQR, look-ahead trascurabile)
-      4. Walk-forward expanding window con `RegimeMarkovSwitching` come engine:
-         · PCA(n_pca=1) combina log_ret_h + log_rv in un singolo segnale
-         · MarkovRegression con switching mean + variance su PC1
-         · Hamilton filter O(1) tra un retrain e l'altro
+      1. Load BTC candles at any interval ≤1h from `data/raw_candles.parquet`
+         (with 1h input the resample is an identity; input >1h → ValueError fail-fast)
+      2. Aggregate to 1 hour: log_ret_h (sum of log_ret per bucket) + log_rv (log of the
+         realized variance = log(Σ log_ret²) clipped for stability)
+      3. Global RobustScaler (median/IQR, negligible look-ahead)
+      4. Walk-forward expanding window with `RegimeMarkovSwitching` as the engine:
+         · PCA(n_pca=1) combines log_ret_h + log_rv into a single signal
+         · MarkovRegression with switching mean + variance on PC1
+         · O(1) Hamilton filter between retrains
 
-    Razionale:
-      - "Variante 3" della decisione 2026-06-03 (sostituire il MS macro con
-        regime intraday su BTC). Il MS su macro era degenere (regimi mensili
-        vs trading 1m); il session-based era informativamente vuoto. La realized
-        vol BTC oraria cambia 3-8 volte/giorno → match col forecast horizon h=30.
+    Rationale:
+      - "Variant 3" of the 2026-06-03 decision (replace the macro MS with an
+        intraday BTC regime). The macro MS was degenerate (monthly regimes
+        vs 1m trading); the session-based one was informationally empty. Hourly BTC
+        realized vol changes 3-8 times/day → matches the forecast horizon h=30.
 
-    Interfaccia drop-in con RegimeSession / RegimeMarkovSwitching:
-      - `fit_predict_walkforward(df_macro=...)` accetta ma IGNORA df_macro.
-      - Restituisce DataFrame con index orario UTC e colonne
+    Drop-in interface with RegimeSession / RegimeMarkovSwitching:
+      - `fit_predict_walkforward(df_macro=...)` accepts but IGNORES df_macro.
+      - Returns a DataFrame with a UTC hourly index and columns
         `regime_dominant`, `regime_burn_in`, `regime_prob_0/1/2`.
     """
 
-    # IT: Configura il detector; il MS engine è composito (non subclass) per riuso clean.
-    # EN: Configures the detector; the MS engine is composed (not subclassed) for clean reuse.
+    # Configures the detector; the MS engine is composed (not subclassed) for clean reuse.
     def __init__(
         self,
         n_regimes: int = 3,
@@ -1444,8 +1336,7 @@ class RegimeMarkovBTC:
             raise ValueError(f"n_regimes deve essere >= 2, ricevuto {n_regimes}")
         self.n_regimes = n_regimes
         self.candles_path = candles_path
-        # IT: n_pca=1 → PCA riduce (log_ret_h, log_rv) a un'unica direzione informativa.
-        # EN: n_pca=1 → PCA reduces (log_ret_h, log_rv) to a single informative direction.
+        # n_pca=1 → PCA reduces (log_ret_h, log_rv) to a single informative direction.
         self._engine = RegimeMarkovSwitching(
             n_regimes=n_regimes,
             n_iter=n_iter,
@@ -1453,29 +1344,27 @@ class RegimeMarkovBTC:
             n_pca=1,
             n_restarts=n_restarts,
         )
-        # IT: campi mirror per save/load drop-in con i consumer.
-        # EN: mirror fields for save/load drop-in with consumers.
+        # mirror fields for save/load drop-in with consumers.
         self.model = None
         self.pca = None
         self.scaler = None
         self.feature_cols: list[str] = []
 
-    # IT: Aggrega candele a qualunque intervallo ≤1h in feature orarie (log-return + log RV).
-    # EN: Aggregates candles at any interval ≤1h into hourly features (log-return + log RV).
+    # Aggregates candles at any interval ≤1h into hourly features (log-return + log RV).
     def _build_btc_hourly_df(self) -> pd.DataFrame:
         """
-        Carica `raw_candles.parquet` (candele a qualunque intervallo ≤1h; con input
-        1h il resample orario è un'identità) e produce un DataFrame orario UTC con:
-          · log_ret_h: somma dei log-return del bucket (return orario)
-          · log_rv   : log della realized variance oraria = log(Σ log_ret²)
+        Load `raw_candles.parquet` (candles at any interval ≤1h; with 1h input
+        the hourly resample is an identity) and produce a UTC hourly DataFrame with:
+          · log_ret_h: sum of the bucket's log-returns (hourly return)
+          · log_rv   : log of the hourly realized variance = log(Σ log_ret²)
 
-        Con input 1h ogni bucket contiene UNA sola osservazione → rv = log_ret² della
-        singola barra: proxy povera ma valida della RV; il clip a 1e-12 evita log(0)
-        sistematici sulle ore senza variazione. Input >1h → ValueError (fail-fast:
-        il clock del regime è orario by design e non può essere ricostruito).
+        With 1h input each bucket contains ONE observation only → rv = log_ret² of the
+        single bar: a poor but valid RV proxy; the 1e-12 clip avoids systematic log(0)
+        on hours with no variation. Input >1h → ValueError (fail-fast:
+        the regime clock is hourly by design and cannot be reconstructed).
 
-        Il log-trasform su `rv` è essenziale: la realized variance è fortemente
-        right-skewed → senza log, la MarkovRegression collassa su outlier.
+        The log transform on `rv` is essential: realized variance is strongly
+        right-skewed → without the log, the MarkovRegression collapses on outliers.
         """
         from pathlib import Path as _Path
         path = _Path(self.candles_path)
@@ -1485,11 +1374,9 @@ class RegimeMarkovBTC:
                 f"Esegui prima `python scripts/01_download_data.py`."
             )
 
-        # IT: lettura + normalizzazione dell'indice temporale UTC.
-        # EN: read + UTC time-index normalization.
+        # read + UTC time-index normalization.
         candles = pd.read_parquet(path, columns=["open_time", "close"])
-        # IT: pd.api.types gestisce sia datetime naive sia tz-aware (np.issubdtype no).
-        # EN: pd.api.types handles both naive and tz-aware datetime (np.issubdtype doesn't).
+        # pd.api.types handles both naive and tz-aware datetime (np.issubdtype doesn't).
         if not pd.api.types.is_datetime64_any_dtype(candles["open_time"]):
             candles["open_time"] = pd.to_datetime(
                 candles["open_time"], unit="ms", utc=True,
@@ -1500,12 +1387,9 @@ class RegimeMarkovBTC:
         else:
             candles.index = candles.index.tz_convert("UTC")
 
-        # IT: fail-fast se l'intervallo dei dati è >1h: il clock del regime è ORARIO by
-        #     design (Markov su realized vol oraria) e con barre >1h il resample("1h")
-        #     produrrebbe bucket vuoti / RV degeneri. Passo inferito dalla MEDIANA dei diff.
-        # EN: fail-fast if the data interval is >1h: the regime clock is HOURLY by design
-        #     (Markov on hourly realized vol) and >1h bars would yield empty buckets /
-        #     degenerate RV under resample("1h"). Step inferred from the MEDIAN diff.
+        # fail-fast if the data interval is >1h: the regime clock is HOURLY by design
+        # (Markov on hourly realized vol) and >1h bars would yield empty buckets /
+        # degenerate RV under resample("1h"). Step inferred from the MEDIAN diff.
         _step = candles.index.to_series().diff().median()
         if pd.notna(_step) and _step > pd.Timedelta("1h"):
             raise ValueError(
@@ -1514,25 +1398,18 @@ class RegimeMarkovBTC:
                 f"(aggregate a 1h; con input 1h il resample è identità)."
             )
 
-        # IT: log-return per barra (close-to-close, a qualunque intervallo ≤1h);
-        #     inf/NaN dropati a valle.
-        # EN: per-bar log-return (close-to-close, at any interval ≤1h);
-        #     inf/NaN dropped downstream.
+        # per-bar log-return (close-to-close, at any interval ≤1h);
+        # inf/NaN dropped downstream.
         log_ret = np.log(candles["close"]).diff()
         log_ret = log_ret.replace([np.inf, -np.inf], np.nan)
 
-        # IT: aggregazione oraria — somma log-return + somma quadrati (realized var).
-        #     Con input 1h il resample è identità: rv = log_ret² della singola barra
-        #     (proxy povera ma valida della RV oraria).
-        # EN: hourly aggregation — sum of log-returns + sum of squares (realized var).
-        #     With 1h input the resample is an identity: rv = the single bar's log_ret²
-        #     (a poor but valid proxy of hourly RV).
+        # hourly aggregation — sum of log-returns + sum of squares (realized var).
+        # With 1h input the resample is an identity: rv = the single bar's log_ret²
+        # (a poor but valid proxy of hourly RV).
         log_ret_h = log_ret.resample("1h").sum()
         rv = log_ret.pow(2).resample("1h").sum()
-        # IT: clip a 1e-12 per evitare log(0) su ore senza variazione (o, con input 1h,
-        #     su barre con close invariato).
-        # EN: clip at 1e-12 to avoid log(0) on hours with no variation (or, with 1h
-        #     input, on bars with unchanged close).
+        # clip at 1e-12 to avoid log(0) on hours with no variation (or, with 1h
+        # input, on bars with unchanged close).
         log_rv = np.log(rv.clip(lower=1e-12))
 
         out = pd.DataFrame({"log_ret_h": log_ret_h, "log_rv": log_rv})
@@ -1544,8 +1421,7 @@ class RegimeMarkovBTC:
         )
         return out
 
-    # IT: Walk-forward sul df BTC; df_macro è ignorato (interfaccia drop-in).
-    # EN: Walk-forward on the BTC df; df_macro is ignored (drop-in interface).
+    # Walk-forward on the BTC df; df_macro is ignored (drop-in interface).
     def fit_predict_walkforward(
         self,
         df_macro: pd.DataFrame = None,
@@ -1554,25 +1430,23 @@ class RegimeMarkovBTC:
         **kwargs,
     ) -> pd.DataFrame:
         """
-        Walk-forward expanding window con Markov-Switching su realized vol BTC.
+        Walk-forward expanding window with Markov-Switching on BTC realized vol.
 
         Args:
-            df_macro:     ignorato (usato SOLO per compat di firma).
-            burn_in_days: convertito in ore (×24). Default 30gg = 720h.
-            retrain_days: convertito in ore (×24). Default 30gg = 720h.
+            df_macro:     ignored (used ONLY for signature compatibility).
+            burn_in_days: converted to hours (×24). Default 30d = 720h.
+            retrain_days: converted to hours (×24). Default 30d = 720h.
 
         Returns:
-            DataFrame indicizzato su ore UTC con colonne:
+            DataFrame indexed on UTC hours with columns:
               · regime_dominant   (int 0..n_regimes-1)
               · regime_burn_in    (bool)
-              · regime_prob_{i}   (float, somma=1 per riga)
+              · regime_prob_{i}   (float, sum=1 per row)
         """
         df_btc = self._build_btc_hourly_df()
 
-        # IT: il MS engine ragiona in "giorni" come unità positional; qui un
-        #     "passo" è un'ora — convertiamo burn_in e retrain in ore.
-        # EN: the MS engine reasons in "days" as positional units; here a "step"
-        #     is one hour — convert burn_in and retrain to hours.
+        # the MS engine reasons in "days" as positional units; here a "step"
+        # is one hour — convert burn_in and retrain to hours.
         burn_in_h = burn_in_days * 24
         retrain_h = retrain_days * 24
 
@@ -1589,19 +1463,16 @@ class RegimeMarkovBTC:
             retrain_days=retrain_h,
         )
 
-        # IT: l'engine resetta l'index a positional 0..N-1; ripristiniamo orario UTC.
-        # EN: the engine resets the index to positional 0..N-1; restore UTC hourly index.
+        # the engine resets the index to positional 0..N-1; restore UTC hourly index.
         result.index = df_btc.index
 
-        # IT: mirror dei campi engine per i consumer di save/load.
-        # EN: mirror engine fields for save/load consumers.
+        # mirror engine fields for save/load consumers.
         self.model = self._engine.model
         self.pca = self._engine.pca
         self.scaler = self._engine.scaler
         self.feature_cols = self._engine.feature_cols
 
-        # IT: log distribuzione finale (post burn-in) per diagnostica rapida.
-        # EN: final post-burn-in distribution log for quick diagnostics.
+        # final post-burn-in distribution log for quick diagnostics.
         post = result.iloc[burn_in_h:]
         counts = post["regime_dominant"].value_counts().sort_index()
         log.info("─── Distribuzione regimi BTC (post burn-in) ───")
@@ -1611,14 +1482,12 @@ class RegimeMarkovBTC:
 
         return result
 
-    # IT: Delega il pickle al MS engine (stesso schema, drop-in con MS loader).
-    # EN: Delegates pickling to the MS engine (same schema, drop-in MS loader).
+    # Delegates pickling to the MS engine (same schema, drop-in MS loader).
     def save(self, path: str) -> None:
         self._engine.save(path)
         log.info(f"RegimeMarkovBTC salvato → {path}  (schema MS engine)")
 
-    # IT: Ricostruisce un RegimeMarkovBTC riusando il loader dell'engine MS.
-    # EN: Reconstructs a RegimeMarkovBTC by reusing the MS engine loader.
+    # Reconstructs a RegimeMarkovBTC by reusing the MS engine loader.
     @classmethod
     def load(cls, path: str) -> "RegimeMarkovBTC":
         engine = RegimeMarkovSwitching.load(path)
@@ -1630,22 +1499,16 @@ class RegimeMarkovBTC:
         obj.feature_cols = engine.feature_cols
         return obj
 
-    # ── B7 — checkpoint walk-forward incrementale ────────────────────────────
-    # IT: Il checkpoint persiste la CATENA del walk-forward (parametri dell'ultimo
-    #     retrain, PCA sign-aligned, posteriore filtrato, cadenza, scaler congelato):
-    #     è ciò che il pkl production NON contiene (quello ha solo il fit finale
-    #     full-sample per predict_proba). Con il checkpoint, estendere il parquet
-    #     costa 0-1 fit MLE invece di ~30 (minuti vs ore).
-    # EN: The checkpoint persists the walk-forward CHAIN (last-retrain params,
-    #     sign-aligned PCA, filtered posterior, cadence, frozen scaler): what the
-    #     production pkl does NOT contain (that one only has the final full-sample
-    #     fit for predict_proba). With the checkpoint, extending the parquet costs
-    #     0-1 MLE fits instead of ~30 (minutes vs hours).
+    # ── B7 — incremental walk-forward checkpoint ─────────────────────────────
+    # The checkpoint persists the walk-forward CHAIN (last-retrain params,
+    # sign-aligned PCA, filtered posterior, cadence, frozen scaler): what the
+    # production pkl does NOT contain (that one only has the final full-sample
+    # fit for predict_proba). With the checkpoint, extending the parquet costs
+    # 0-1 MLE fits instead of ~30 (minutes vs hours).
 
     _WF_CKPT_SCHEMA = 1
 
-    # IT: Scrittura atomica del checkpoint (pattern .tmp + os.replace dei safety net).
-    # EN: Atomic checkpoint write (the safety-net .tmp + os.replace pattern).
+    # Atomic checkpoint write (the safety-net .tmp + os.replace pattern).
     @staticmethod
     def save_wf_checkpoint(ckpt: dict, path: str) -> None:
         import os
@@ -1660,8 +1523,7 @@ class RegimeMarkovBTC:
             f"last_ts={ckpt['last_timestamp']})"
         )
 
-    # IT: Compone il dict checkpoint dallo stato engine post-run (full o incrementale).
-    # EN: Builds the checkpoint dict from the engine state after a run (full or incremental).
+    # Builds the checkpoint dict from the engine state after a run (full or incremental).
     def build_wf_checkpoint(self, chain: dict,
                             last_timestamp: pd.Timestamp) -> dict:
         eng = self._engine
@@ -1678,27 +1540,26 @@ class RegimeMarkovBTC:
             "last_timestamp": last_timestamp,
         }
 
-    # IT: Continuazione incrementale: candele fresche + checkpoint → SOLO righe nuove.
-    # EN: Incremental continuation: fresh candles + checkpoint → NEW rows only.
+    # Incremental continuation: fresh candles + checkpoint → NEW rows only.
     def continue_from_checkpoint(self, checkpoint_path: str,
                                  expected_index: pd.Index | None = None,
                                  ) -> tuple[pd.DataFrame, dict]:
         """
-        Estende il walk-forward alle barre orarie successive al checkpoint.
+        Extend the walk-forward to the hourly bars after the checkpoint.
 
-        Fail-fast (RuntimeError) su: schema/n_regimi del checkpoint, timestamp
-        di frontiera e — se `expected_index` è fornito (l'index del parquet
-        esistente) — sull'intero index dello span coperto. NESSUN fallback
-        silenzioso: un append sbagliato avvelenerebbe il parquet.
-        ⚠ La CADENZA usata è quella congelata nel checkpoint (coerenza di
-        catena); la validazione config↔checkpoint è a carico del chiamante
-        (vedi `run_regime_incremental` in 01b).
+        Fail-fast (RuntimeError) on: checkpoint schema/n_regimes, boundary
+        timestamp and — if `expected_index` is given (the index of the existing
+        parquet) — on the whole index of the covered span. NO silent
+        fallback: a wrong append would poison the parquet.
+        ⚠ The CADENCE used is the one frozen in the checkpoint (chain
+        consistency); config↔checkpoint validation is the caller's job
+        (see `run_regime_incremental` in 01b).
 
         Returns:
-            (df_new, ckpt): righe nuove (index orario UTC) + checkpoint AGGIORNATO
-            (da ri-salvare via save_wf_checkpoint DOPO il salvataggio del parquet:
-            l'ordine parquet→checkpoint garantisce che un crash lasci al peggio un
-            checkpoint stale, mai un parquet avanti rispetto al checkpoint).
+            (df_new, ckpt): new rows (UTC hourly index) + UPDATED checkpoint
+            (to be re-saved via save_wf_checkpoint AFTER saving the parquet:
+            the parquet→checkpoint order guarantees a crash leaves at worst a
+            stale checkpoint, never a parquet ahead of the checkpoint).
         """
         with open(checkpoint_path, "rb") as f:
             ckpt = pickle.load(f)
@@ -1713,10 +1574,8 @@ class RegimeMarkovBTC:
                 f"({self.n_regimes}): full rebuild richiesto."
             )
 
-        # IT: engine configurato DAL checkpoint (single source of truth: scaler
-        #     congelato, colonne, iperparametri del fit).
-        # EN: engine configured FROM the checkpoint (single source of truth:
-        #     frozen scaler, columns, fit hyper-parameters).
+        # engine configured FROM the checkpoint (single source of truth:
+        # frozen scaler, columns, fit hyper-parameters).
         eng              = self._engine
         eng.scaler       = ckpt["scaler"]
         eng.feature_cols = ckpt["feature_cols"]
@@ -1731,21 +1590,16 @@ class RegimeMarkovBTC:
                 f"Candele aggregate ({len(df_btc)} ore) meno del checkpoint "
                 f"({n_old}): storia troncata — full rebuild richiesto."
             )
-        # IT: la frontiera DEVE combaciare: l'aggregazione oraria delle barre
-        #     vecchie è deterministica, un mismatch = candele cambiate sotto i piedi.
-        # EN: the boundary MUST match: hourly aggregation of old bars is
-        #     deterministic, a mismatch = candles changed under our feet.
+        # the boundary MUST match: hourly aggregation of old bars is
+        # deterministic, a mismatch = candles changed under our feet.
         if df_btc.index[n_old - 1] != ckpt["last_timestamp"]:
             raise RuntimeError(
                 f"Frontiera disallineata: checkpoint @ {ckpt['last_timestamp']}, "
                 f"candele @ {df_btc.index[n_old - 1]} — full rebuild o re-bootstrap."
             )
-        # IT: (audit MINOR-2) con expected_index valida TUTTO lo span coperto, non
-        #     solo la frontiera: intercetta revisioni in-place della storia candele
-        #     a parità di row-count e ultimo timestamp.
-        # EN: (audit MINOR-2) with expected_index validate the WHOLE covered span,
-        #     not just the boundary: catches in-place candle-history revisions with
-        #     identical row-count and last timestamp.
+        # (audit MINOR-2) with expected_index validate the WHOLE covered span,
+        # not just the boundary: catches in-place candle-history revisions with
+        # identical row-count and last timestamp.
         if expected_index is not None and not df_btc.index[:n_old].equals(expected_index):
             raise RuntimeError(
                 "Index candele-aggregate ≠ index atteso sullo span coperto "
@@ -1757,12 +1611,9 @@ class RegimeMarkovBTC:
             ckpt["last_timestamp"] = df_new.index[-1]
         return df_new, ckpt
 
-    # IT: Bootstrap una-tantum del checkpoint da pkl+parquet ESISTENTI (nessun rebuild):
-    #     ricostruisce lo stato all'ultimo retrain con UN fit MLE e lo VALIDA replay-ando
-    #     la coda contro il parquet production (golden test integrato).
-    # EN: One-off checkpoint bootstrap from EXISTING pkl+parquet (no rebuild):
-    #     reconstructs the last-retrain state with ONE MLE fit and VALIDATES it by
-    #     replaying the tail against the production parquet (built-in golden test).
+    # One-off checkpoint bootstrap from EXISTING pkl+parquet (no rebuild):
+    # reconstructs the last-retrain state with ONE MLE fit and VALIDATES it by
+    # replaying the tail against the production parquet (built-in golden test).
     def bootstrap_wf_checkpoint(
         self,
         hmm_path:        str,
@@ -1773,13 +1624,13 @@ class RegimeMarkovBTC:
         atol:            float = 1e-9,
     ) -> dict:
         """
-        Assunzioni (validate dal replay, fail-fast in caso contrario):
-          · il run originale ha usato gli stessi iperparametri di fit dell'engine
-            corrente (n_iter/n_restarts/random_state — default production);
-          · tutti i retrain schedulati sono riusciti (cadenza regolare da burn-in);
-          · lo scaler persistito nel pkl è quello del run (fit globale sul span).
-        Il sign della PCA ricostruita è allineato alla PCA finale persistita, che
-        il run originale ha allineato alla stessa catena → orientazione identica.
+        Assumptions (validated by the replay, fail-fast otherwise):
+          · the original run used the same fit hyper-parameters as the current
+            engine (n_iter/n_restarts/random_state — production defaults);
+          · all scheduled retrains succeeded (regular cadence from burn-in);
+          · the scaler persisted in the pkl is the run's (global fit over the span).
+        The sign of the reconstructed PCA is aligned to the persisted final PCA, which
+        the original run aligned to the same chain → identical orientation.
         """
         engine = RegimeMarkovSwitching.load(hmm_path)
         if engine.n_regimes != self.n_regimes:
@@ -1805,8 +1656,7 @@ class RegimeMarkovBTC:
         retrain_h = retrain_days * 24
         if n <= burn_in_h + retrain_h:
             raise RuntimeError("Storia troppo corta per il bootstrap: full rebuild.")
-        # IT: ultimo retrain schedulato: primo a burn_in, poi ogni retrain_h barre.
-        # EN: last scheduled retrain: first at burn_in, then every retrain_h bars.
+        # last scheduled retrain: first at burn_in, then every retrain_h bars.
         last_retrain = burn_in_h + retrain_h * ((n - 1 - burn_in_h) // retrain_h)
 
         X_raw  = df_btc[engine.feature_cols].values[:n]
@@ -1833,12 +1683,9 @@ class RegimeMarkovBTC:
         last_filtered = (fmp.values[-1] if isinstance(fmp, pd.DataFrame)
                          else fmp[-1]).copy()
 
-        # IT: replay Hamilton della coda [last_retrain, n) e confronto col parquet:
-        #     golden test contro la produzione — se diverge, il checkpoint NON viene
-        #     scritto (nessun artefatto avvelenato).
-        # EN: Hamilton replay of the tail [last_retrain, n) compared to the parquet:
-        #     golden test against production — on divergence the checkpoint is NOT
-        #     written (no poisoned artifact).
+        # Hamilton replay of the tail [last_retrain, n) compared to the parquet:
+        # golden test against production — on divergence the checkpoint is NOT
+        # written (no poisoned artifact).
         prob_cols = [f"regime_prob_{i}" for i in range(engine.n_regimes)]
         ref    = probs_old[prob_cols].values
         replay = np.empty((n - last_retrain, engine.n_regimes))
@@ -1858,8 +1705,7 @@ class RegimeMarkovBTC:
                 f"full rebuild richiesto."
             )
 
-        # IT: engine mirror per build_wf_checkpoint (scaler/cols dal pkl del run).
-        # EN: engine mirror for build_wf_checkpoint (scaler/cols from the run's pkl).
+        # engine mirror for build_wf_checkpoint (scaler/cols from the run's pkl).
         self._engine.scaler       = engine.scaler
         self._engine.feature_cols = engine.feature_cols
         self._engine.n_iter       = engine.n_iter
@@ -1890,30 +1736,28 @@ class RegimeMarkovBTC:
         return report
 
 
-# ─── STADIO 2: MacroEncoder ───────────────────────────────────────────────────
+# ─── STAGE 2: MacroEncoder ────────────────────────────────────────────────────
 
-# IT: MLP leggero che comprime lo snapshot macro in un embedding denso bounded [-1,1], addestrato end-to-end con la LSTM.
-# EN: Lightweight MLP compressing the macro snapshot into a bounded [-1,1] dense embedding, trained end-to-end with the LSTM.
+# Lightweight MLP compressing the macro snapshot into a bounded [-1,1] dense embedding, trained end-to-end with the LSTM.
 class MacroEncoder(nn.Module):
     """
-    MLP leggero che trasforma il vettore macro completo
-    in un embedding denso a `embed_dim` dimensioni.
+    Lightweight MLP that turns the full macro vector
+    into a dense `embed_dim`-dimensional embedding.
 
-    Viene addestrato INSIEME alla LSTM (end-to-end backprop).
-    L'embedding viene concatenato all'output della GRU prima della testa
-    di output parametrico.
+    Trained TOGETHER with the LSTM (end-to-end backprop).
+    The embedding is concatenated to the GRU output before the parametric
+    output head.
 
-    Input: (batch, n_macro_features)  — snapshot macro del giorno corrente
-    Output:(batch, embed_dim)         — vettore di contesto per la LSTM
+    Input: (batch, n_macro_features)  — macro snapshot of the current day
+    Output:(batch, embed_dim)         — context vector for the LSTM
 
-    Architettura:
+    Architecture:
         Linear(n_macro → 64) → LayerNorm → SiLU
         Linear(64 → 32)       → LayerNorm → SiLU → Dropout
         Linear(32 → embed_dim)→ Tanh          ← bounded [-1, 1]
     """
 
-    # IT: Costruisce lo stack Linear→LN→SiLU→Tanh con init conservativo (gain 0.5) per non dominare il gradiente.
-    # EN: Builds the Linear→LN→SiLU→Tanh stack with conservative init (gain 0.5) so it doesn't dominate the gradient.
+    # Builds the Linear→LN→SiLU→Tanh stack with conservative init (gain 0.5) so it doesn't dominate the gradient.
     def __init__(self, n_macro_features: int, embed_dim: int = 16, dropout: float = 0.2):
         super().__init__()
         self.embed_dim = embed_dim
@@ -1927,22 +1771,21 @@ class MacroEncoder(nn.Module):
             nn.SiLU(),
             nn.Dropout(dropout),
             nn.Linear(32, embed_dim),
-            nn.Tanh(),   # bounded: evita che l'embedding domini il gradiente
+            nn.Tanh(),   # bounded: prevents the embedding from dominating the gradient
         )
 
-        # Inizializzazione conservativa: embedding piccolo all'inizio
-        # → la rete impara prima dai dati di prezzo, poi integra il macro
+        # Conservative initialization: small embedding at the start
+        # → the network learns from price data first, then integrates the macro
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight, gain=0.5)
                 nn.init.zeros_(m.bias)
 
-    # IT: Sostituisce i NaN con 0 e proietta lo snapshot macro nell'embedding.
-    # EN: Replaces NaNs with 0 and projects the macro snapshot into the embedding.
+    # Replaces NaNs with 0 and projects the macro snapshot into the embedding.
     def forward(self, x_macro: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x_macro: (batch, n_macro_features) — NaN sostituiti con 0 prima
+            x_macro: (batch, n_macro_features) — NaNs replaced with 0 first
 
         Returns:
             (batch, embed_dim)
@@ -1951,13 +1794,12 @@ class MacroEncoder(nn.Module):
         return self.net(x)
 
 
-# ─── RETE COMPLETA CON MACRO ─────────────────────────────────────────────────
+# ─── FULL NETWORK WITH MACRO ─────────────────────────────────────────────────
 
-# IT: Rete completa: branch prezzo (LSTM→GRU, opz. dual-stream) fuso col macro embedding → testa t-Student (μ, log σ², log ν).
-# EN: Full network: price branch (LSTM→GRU, optional dual-stream) fused with the macro embedding → t-Student head (μ, log σ², log ν).
+# Full network: price branch (LSTM→GRU, optional dual-stream) fused with the macro embedding → t-Student head (μ, log σ², log ν).
 class QuantLSTMWithMacro(nn.Module):
     """
-    Architettura completa con macro embedding:
+    Full architecture with macro embedding:
 
         Candele (batch, 60, n_price_features)
                ↓
@@ -1974,13 +1816,12 @@ class QuantLSTMWithMacro(nn.Module):
                            [μ,  log_σ²,  log_ν]
                            (t-Student parametrica)
 
-    Il macro embedding da 16 dim aggiunge ~0.5% dei parametri totali
-    ma può migliorare significativamente la calibrazione in periodi
-    di stress macroeconomico (es. crisi SVB 2023, pivot Fed 2022).
+    The 16-dim macro embedding adds ~0.5% of the total parameters
+    but can significantly improve calibration in periods of
+    macroeconomic stress (e.g. SVB crisis 2023, Fed pivot 2022).
     """
 
-    # IT: Costruisce price branch (single/dual-stream), macro encoder e fusion head con residual + clip buffer.
-    # EN: Builds the price branch (single/dual-stream), macro encoder and fusion head with residual + clip buffer.
+    # Builds the price branch (single/dual-stream), macro encoder and fusion head with residual + clip buffer.
     def __init__(
         self,
         n_price_features:  int,
@@ -1991,7 +1832,7 @@ class QuantLSTMWithMacro(nn.Module):
         macro_embed_dim:   int   = 16,
         n_lstm_layers:     int   = 2,
         dropout:           float = 0.2,
-        n_dynamic_features: int  = None,   # Miglioramento 9: dual-stream
+        n_dynamic_features: int  = None,   # Improvement 9: dual-stream
     ):
         super().__init__()
         self.n_price_features  = n_price_features
@@ -2003,7 +1844,7 @@ class QuantLSTMWithMacro(nn.Module):
         self.dual_stream       = (n_dynamic_features is not None and
                                   n_dynamic_features < n_price_features)
 
-        # ── Price branch — singolo o dual stream ──────────────────────────────
+        # ── Price branch — single or dual stream ──────────────────────────────
         if self.dual_stream:
             n_struct = n_price_features - n_dynamic_features
             self.input_norm_dyn = nn.LayerNorm(n_dynamic_features)
@@ -2039,8 +1880,7 @@ class QuantLSTMWithMacro(nn.Module):
         self.register_buffer("clip_hi", torch.full((n_price_features,), +500.0))
         self._init_weights(math)
 
-    # IT: Init pesi: Xavier su input/lineari, orthogonal sui ricorrenti, bias log ν a ~ν=5.
-    # EN: Weight init: Xavier on input/linear, orthogonal on recurrent, log ν bias at ~ν=5.
+    # Weight init: Xavier on input/linear, orthogonal on recurrent, log ν bias at ~ν=5.
     def _init_weights(self, math):
         for name, p in self.named_parameters():
             if "weight_ih" in name:    nn.init.xavier_uniform_(p)
@@ -2051,8 +1891,7 @@ class QuantLSTMWithMacro(nn.Module):
         with torch.no_grad():
             self.out_lognu.bias.fill_(math.log(5.0 - 2.0))
 
-    # IT: Forward: clip prezzo → price branch → fonde col macro embedding (zeros se assente) → (μ, log σ², log ν).
-    # EN: Forward: clip price → price branch → fuse with macro embedding (zeros if missing) → (μ, log σ², log ν).
+    # Forward: clip price → price branch → fuse with macro embedding (zeros if missing) → (μ, log σ², log ν).
     def forward(
         self,
         x_price: torch.Tensor,
@@ -2061,7 +1900,7 @@ class QuantLSTMWithMacro(nn.Module):
 
         x_price = x_price.clamp(self.clip_lo, self.clip_hi)
 
-        # ── Price branch (single o dual stream) ──────────────────────────
+        # ── Price branch (single or dual stream) ─────────────────────────
         if self.dual_stream:
             x_dyn   = x_price[:, :, :self.n_dynamic]
             x_str   = x_price[:, :, self.n_dynamic:]
@@ -2075,8 +1914,8 @@ class QuantLSTMWithMacro(nn.Module):
         go, _ = self.gru(lo);  h_price = self.gru_norm(go[:, -1, :])
 
         # ── Macro branch ───────────────────────────────────────────────────
-        # Se x_macro è None (es. macro non disponibile in live o backtest),
-        # usa un tensore di zeri — il MacroEncoder apprende a ignorarli
+        # If x_macro is None (e.g. macro unavailable in live or backtest),
+        # use a zero tensor — the MacroEncoder learns to ignore it
         if x_macro is None:
             x_macro = torch.zeros(
                 x_price.shape[0], self.macro_encoder.net[0].in_features,
@@ -2095,8 +1934,7 @@ class QuantLSTMWithMacro(nn.Module):
 
         return mu, log_sig2, log_nu
 
-    # IT: Inference no-grad: trasforma gli output grezzi in {mu, sigma, nu} su CPU/numpy.
-    # EN: No-grad inference: maps raw outputs to {mu, sigma, nu} on CPU/numpy.
+    # No-grad inference: maps raw outputs to {mu, sigma, nu} on CPU/numpy.
     @torch.no_grad()
     def predict(self, x_price: torch.Tensor,
                 x_macro: torch.Tensor | None = None) -> dict:
@@ -2111,29 +1949,25 @@ class QuantLSTMWithMacro(nn.Module):
         }
 
 
-# ─── NORMALIZZATORE MACRO ────────────────────────────────────────────────────
+# ─── MACRO NORMALIZER ────────────────────────────────────────────────────────
 
-# IT: RobustScaler dedicato alle macro features (separato dagli scaler di prezzo), con clip a ±5.
-# EN: RobustScaler dedicated to macro features (separate from price scalers), clipped to ±5.
+# RobustScaler dedicated to macro features (separate from price scalers), clipped to ±5.
 class MacroNormalizer:
     """
-    Normalizza le macro features per il MacroEncoder.
-    Usa RobustScaler (resistente agli outlier degli shock macro).
-    Salvato separatamente dagli scaler delle features di prezzo.
+    Normalize the macro features for the MacroEncoder.
+    Uses RobustScaler (resistant to macro-shock outliers).
+    Saved separately from the price-feature scalers.
     """
 
-    # IT: Inizializza scaler vuoto (fitted=False finché non si chiama fit_transform).
-    # EN: Initializes an empty scaler (fitted=False until fit_transform is called).
+    # Initializes an empty scaler (fitted=False until fit_transform is called).
     def __init__(self):
         self.scaler      = RobustScaler()
         self.feature_cols: list[str] = []
         self.fitted      = False
-        # IT: etichetta del vintage macro di fit (None = non pinnato). Vedi save().
-        # EN: label of the macro vintage fitted on (None = not pinned). See save().
+        # label of the macro vintage fitted on (None = not pinned). See save().
         self.pinned_vintage: str | None = None
 
-    # IT: Memorizza le colonne, fitta lo scaler e ritorna i dati normalizzati (NaN→0, clip ±5).
-    # EN: Stores the columns, fits the scaler and returns normalized data (NaN→0, clip ±5).
+    # Stores the columns, fits the scaler and returns normalized data (NaN→0, clip ±5).
     def fit_transform(self, df: pd.DataFrame,
                       macro_cols: list[str]) -> np.ndarray:
         self.feature_cols = macro_cols
@@ -2144,33 +1978,25 @@ class MacroNormalizer:
         self.fitted = True
         return result
 
-    # IT: Applica lo scaler già fittato a nuovi dati (NaN→0, clip ±5).
-    # EN: Applies the already-fitted scaler to new data (NaN→0, clip ±5).
+    # Applies the already-fitted scaler to new data (NaN→0, clip ±5).
     def transform(self, df: pd.DataFrame) -> np.ndarray:
         X = df[self.feature_cols].fillna(0).values.astype(np.float32)
         X = np.clip(X, -1e6, 1e6)
         result = self.scaler.transform(X)
         return np.clip(result, -5, 5).astype(np.float32)
 
-    # IT: Serializza scaler + colonne su disco (pickle). `pinned_vintage` è un campo
-    #     OPZIONALE (etichetta del vintage macro su cui il normalizer è stato fittato):
-    #     serve al normalizer PINNATO della linea vol, dove sapere a quale vintage lo
-    #     strumento è fermo è metà dell'informazione. Assente = pickle storico.
-    # EN: Serializes scaler + columns to disk (pickle). `pinned_vintage` is an OPTIONAL
-    #     field (label of the macro vintage the normalizer was fitted on): it serves
-    #     the vol line's PINNED normalizer, where knowing which vintage the instrument
-    #     is frozen at is half the information. Absent = legacy pickle.
+    # Serializes scaler + columns to disk (pickle). `pinned_vintage` is an OPTIONAL
+    # field (label of the macro vintage the normalizer was fitted on): it serves
+    # the vol line's PINNED normalizer, where knowing which vintage the instrument
+    # is frozen at is half the information. Absent = legacy pickle.
     def save(self, path: str):
         with open(path, "wb") as f:
             pickle.dump({"scaler": self.scaler, "feature_cols": self.feature_cols,
                          "pinned_vintage": getattr(self, "pinned_vintage", None)}, f)
 
-    # IT: Ricostruisce un MacroNormalizer già fittato da un pickle salvato.
-    #     Retro-compatibile: i pickle scritti prima del campo `pinned_vintage`
-    #     si caricano con None, senza migrazione.
-    # EN: Reconstructs an already-fitted MacroNormalizer from a saved pickle.
-    #     Backward compatible: pickles written before the `pinned_vintage` field
-    #     load with None, no migration needed.
+    # Reconstructs an already-fitted MacroNormalizer from a saved pickle.
+    # Backward compatible: pickles written before the `pinned_vintage` field
+    # load with None, no migration needed.
     @classmethod
     def load(cls, path: str) -> "MacroNormalizer":
         with open(path, "rb") as f:

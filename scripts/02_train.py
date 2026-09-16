@@ -1,27 +1,25 @@
 """
-Script 02 — Training con supporto Knowledge Distillation.
+Script 02 — Training with Knowledge Distillation support.
 
-Modalità:
+Modes:
   - Standard:     python scripts/02_train.py
   - Distillation: python scripts/02_train.py --distill --teacher itransformer
 
-La modalità distillation:
-  1. Carica il teacher pre-addestrato
-  2. Trasferisce i pesi delle output heads al modello student
-  3. Usa loss mista: 0.7 × loss_reale + 0.3 × loss_distillazione
-  4. Riduce le epoche al 60% (convergenza accelerata)
+Distillation mode:
+  1. Loads the pre-trained teacher
+  2. Transfers the output-head weights to the student model
+  3. Uses a mixed loss: 0.7 × real_loss + 0.3 × distillation_loss
+  4. Cuts epochs to 60% (accelerated convergence)
 """
 import json, logging, math, os, shutil, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
 
-# IT: alias per evitare shadowing da variabili locali con lo stesso nome
-# EN: aliases to avoid shadowing by local variables with matching names
+# aliases to avoid shadowing by local variables with matching names
 _json = json
 _sh   = shutil
 
-# IT: limiti CPU/BLAS letti dalla config (deve precedere import numpy/torch)
-# EN: CPU/BLAS caps from config (must precede numpy/torch imports)
+# CPU/BLAS caps from config (must precede numpy/torch imports)
 import yaml as _yaml
 with open(Path(__file__).resolve().parent.parent / "config" / "default.yaml", encoding="utf-8") as _f:
     _cpu_frac = _yaml.safe_load(_f).get("hardware", {}).get("cpu_fraction", 0.5)
@@ -46,18 +44,15 @@ setup_logging()
 log = logging.getLogger("quantsys.script.02")
 
 
-# IT: accuratezza direzionale — frazione di segni predetti corretti
-# EN: directional accuracy — fraction of correctly predicted signs
+# directional accuracy — fraction of correctly predicted signs
 def directional_accuracy(y_true, y_pred):
     return float(np.mean(np.sign(y_true) == np.sign(y_pred)))
 
 
-# IT: set ridotto di metriche per logging frequente (DA + spearman globale)
-# EN: lightweight metric set for frequent logging (DA + global spearman)
+# lightweight metric set for frequent logging (DA + global spearman)
 def prediction_metrics_fast(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
-    """Metriche leggere per validation intermedio: solo DA + spearman globale."""
-    # IT: versione ridotta per logging frequente; full set in prediction_metrics
-    # EN: lightweight set for frequent logging; see prediction_metrics for full
+    """Lightweight metrics for intermediate validation: DA + global spearman only."""
+    # lightweight set for frequent logging; see prediction_metrics for full
     da = directional_accuracy(y_true, y_pred)
     try:
         from scipy.stats import spearmanr
@@ -71,12 +66,11 @@ def prediction_metrics_fast(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
             "ic_mean": 0.0, "icir": 0.0}
 
 
-# IT: set completo di metriche predittive (DA, spearman, WHR, IC, ICIR)
-# EN: full predictive metric set (DA, spearman, WHR, IC, ICIR)
+# full predictive metric set (DA, spearman, WHR, IC, ICIR)
 def prediction_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     """
-    Metriche di qualità predittiva complete (Fix 7).
-    Gestisce correttamente i casi degeneri (array costanti, NaN).
+    Full predictive-quality metrics (Fix 7).
+    Handles degenerate cases correctly (constant arrays, NaN).
     """
     from scipy.stats import spearmanr
 
@@ -90,22 +84,16 @@ def prediction_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     except Exception:
         spearman, p_val = 0.0, 1.0
 
-    # IT: Weighted Hit Rate — pesa i segni corretti per la magnitudine di y
-    # EN: Weighted Hit Rate — weighs correct signs by |y|, so big moves count more
+    # Weighted Hit Rate — weighs correct signs by |y|, so big moves count more
     correct_mask = np.sign(y_true) == np.sign(y_pred)
     total_abs    = np.abs(y_true).sum()
     weighted_hr  = float(np.abs(y_true[correct_mask]).sum() / (total_abs + 1e-10))
 
-    # IT: IC/ICIR su K sub-periodi non sovrapposti (~temporal slice).
-    #     Fix 2026-06-02: precedente window=50 era inflato da autocorrelazione
-    #     (target h=30 → sample consecutivi condividono 29 candele → spearman locale
-    #     misurava persistenza del segnale, non skill). K=5 slice da ≥1000 sample
-    #     ciascuna sono indipendenti e Spearman su slice ≈ skill genuino.
-    # EN: IC/ICIR over K non-overlapping temporal slices.
-    #     Fix 2026-06-02: previous window=50 was inflated by autocorrelation
-    #     (target h=30 → consecutive samples share 29 candles → local spearman
-    #     measured signal persistence, not skill). K=5 slices of ≥1000 samples
-    #     each are independent → Spearman per slice ≈ genuine skill.
+    # IC/ICIR over K non-overlapping temporal slices.
+    # Fix 2026-06-02: previous window=50 was inflated by autocorrelation
+    # (target h=30 → consecutive samples share 29 candles → local spearman
+    # measured signal persistence, not skill). K=5 slices of ≥1000 samples
+    # each are independent → Spearman per slice ≈ genuine skill.
     n_periods       = 5
     min_per_period  = 1000
     if len(y_true) >= n_periods * min_per_period:
@@ -127,8 +115,7 @@ def prediction_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         else:
             ic_mean, icir = spearman, 0.0
     else:
-        # IT: test troppo piccolo per slice indipendenti → fallback su Spearman globale
-        # EN: test set too small for independent slices → fall back to global Spearman
+        # test set too small for independent slices → fall back to global Spearman
         ic_mean, icir = spearman, 0.0
 
     return {
@@ -141,24 +128,20 @@ def prediction_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     }
 
 
-# IT: scheduler: warmup lineare seguito da decadimento cosine fino a min_frac
-# EN: scheduler: linear warmup followed by cosine decay down to min_frac
+# scheduler: linear warmup followed by cosine decay down to min_frac
 class CosineWarmup(torch.optim.lr_scheduler.LambdaLR):
-    # IT: salva i parametri warmup/total/min_frac e registra il lambda LR
-    # EN: store warmup/total/min_frac params and register the LR lambda
+    # store warmup/total/min_frac params and register the LR lambda
     def __init__(self, opt, warmup, total, min_frac=0.05):
         self.w, self.t, self.m = warmup, total, min_frac
         super().__init__(opt, self._lr)
-    # IT: moltiplicatore LR per step: warmup lineare poi decay cosine
-    # EN: per-step LR multiplier: linear warmup then cosine decay
+    # per-step LR multiplier: linear warmup then cosine decay
     def _lr(self, step):
         if step < self.w: return step / max(self.w, 1)
         p = (step - self.w) / max(self.t - self.w, 1)
         return self.m + (1 - self.m) * 0.5 * (1 + math.cos(math.pi * p))
 
 
-# IT: una epoca di training (loss asimmetrica + CRPS + distill + mixup + grad accum)
-# EN: one training epoch (asymmetric loss + CRPS + distill + mixup + grad accum)
+# one training epoch (asymmetric loss + CRPS + distill + mixup + grad accum)
 def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
               asym_alpha: float = 2.0, asym_threshold: float = 0.002,
               crps_weight: float = 0.0, grad_accum_steps: int = 1,
@@ -171,59 +154,45 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
               crps_distill_weight: float = 0.0,
               use_regime_gate: bool = False,
               attn_entropy_lambda: float = 0.0):
-    """Training con loss asimmetrica + CRPS ausiliario + distillation + direction-value loss.
+    """Training with asymmetric loss + auxiliary CRPS + distillation + direction-value loss.
 
-    Se use_distillation=True, il dataloader contiene soft labels come tensori
-    extra (mu, ls2, lnu) che vengono estratti dal batch — shuffle-safe.
+    If use_distillation=True, the dataloader carries soft labels as extra
+    tensors (mu, ls2, lnu) that are extracted from the batch — shuffle-safe.
 
-    Se use_sample_weights=True, il dataloader contiene un tensore di pesi
-    per-sample come ULTIMO elemento del batch. I pesi sono proporzionali a
-    |target| / std(target), cosi' i grandi movimenti contribuiscono di piu'
-    ai gradienti rispetto al rumore laterale.
+    If use_sample_weights=True, the dataloader carries a per-sample weight
+    tensor as the LAST element of the batch. Weights are proportional to
+    |target| / std(target), so large moves contribute more to the gradients
+    than sideways noise.
 
-    IT: Se use_regime_gate=True (A3 regime-MoE), il dataloader contiene il gate
-        regime (N,3) come tensore extra, posizionato PRIMA degli eventuali sample
-        weights (quindi ultimo o penultimo): viene estratto col medesimo pattern
-        pop-dalla-coda e passato al forward come `g=`. La loss risultante è sulla
-        MISCELA (il forward regime_moe ritorna già l'output mixato via legge della
-        varianza totale / Vincentization) — pinball sui quantili mixati, NLL
-        t-Student sulla miscela. Default False = comportamento bit-identico.
-    EN: If use_regime_gate=True (A3 regime-MoE), the dataloader carries the (N,3)
-        regime gate as an extra tensor placed BEFORE any sample weights (i.e. last
-        or second-to-last): popped from the tail with the same pattern and passed
-        to forward as `g=`. The resulting loss is on the MIXTURE (the regime_moe
-        forward already returns the mixed output via total variance law /
-        Vincentization) — pinball on the mixed quantiles, Student-t NLL on the
-        mixture. Default False = bit-identical behaviour.
+    If use_regime_gate=True (A3 regime-MoE), the dataloader carries the (N,3)
+    regime gate as an extra tensor placed BEFORE any sample weights (i.e. last
+    or second-to-last): popped from the tail with the same pattern and passed
+    to forward as `g=`. The resulting loss is on the MIXTURE (the regime_moe
+    forward already returns the mixed output via total variance law /
+    Vincentization) — pinball on the mixed quantiles, Student-t NLL on the
+    mixture. Default False = bit-identical behaviour.
     """
     from quantsys.model.distillation import distillation_loss_t_student
     from quantsys.model import direction_value_loss
 
-    # IT: in regime distill il teacher già calibra sigma/nu nelle soft labels;
-    #     CRPS sulla supervised loss creerebbe gradienti competitivi sulla varianza.
-    # EN: under distill the teacher already calibrates sigma/nu via soft labels;
-    #     keeping CRPS on the supervised loss would fight that signal.
+    # under distill the teacher already calibrates sigma/nu via soft labels;
+    # keeping CRPS on the supervised loss would fight that signal.
     _crps_effective = crps_distill_weight if use_distillation else crps_weight
 
     model.train(); total = 0.0
-    _grad_norms_acc = []  # IT: norme pre-clip per detect exploding/vanishing
-                          # EN: pre-clip norms to detect exploding/vanishing grads
-    # IT: A10 — accumulatori di H_norm (solo se λ>0). Restano a zero sul path
-    #     production, dove il ramo che li incrementa non viene mai eseguito.
-    # EN: A10 — H_norm accumulators (only if λ>0). They stay at zero on the
-    #     production path, where the branch that increments them never runs.
+    _grad_norms_acc = []  # pre-clip norms to detect exploding/vanishing grads
+    # A10 — H_norm accumulators (only if λ>0). They stay at zero on the
+    # production path, where the branch that increments them never runs.
     entropy_sum, entropy_n = 0.0, 0
     opt.zero_grad(set_to_none=True)
     for step, batch in enumerate(loader):
-        # IT: sample weights, se presenti, sono SEMPRE l'ultimo tensore del batch
-        # EN: when present, sample weights are ALWAYS the last tensor in the batch
+        # when present, sample weights are ALWAYS the last tensor in the batch
         if use_sample_weights:
             batch, sw_batch = list(batch[:-1]), batch[-1].to(device, non_blocking=True)
         else:
             batch, sw_batch = list(batch), None
 
-        # IT: gate regime (A3): tensore in coda dopo il pop dei sample weights.
-        # EN: regime gate (A3): tail tensor after the sample-weights pop.
+        # regime gate (A3): tail tensor after the sample-weights pop.
         if use_regime_gate:
             batch, g_batch = list(batch[:-1]), batch[-1].to(device, non_blocking=True)
         else:
@@ -239,17 +208,15 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
         else:
             Xb, yb = [x.to(device, non_blocking=True) for x in batch]; Xm = None
         if input_noise_std > 0:
-            Xb = Xb + torch.randn_like(Xb) * input_noise_std  # IT: data augmentation gaussiana | EN: gaussian input noise
+            Xb = Xb + torch.randn_like(Xb) * input_noise_std  # gaussian input noise
 
-        # IT: mixup temporale (B,T,F): lam unico sul batch per AMP stabile;
-        #     mixa target/macro/soft labels per coerenza, weights/dir restano sull'originale.
-        # EN: temporal mixup (B,T,F): single lam per batch for AMP stability;
-        #     mixes target/macro/soft labels; weights/dir labels follow the original i.
+        # temporal mixup (B,T,F): single lam per batch for AMP stability;
+        # mixes target/macro/soft labels; weights/dir labels follow the original i.
         if mixup_alpha > 0:
             lam = float(torch.distributions.Beta(
                 torch.tensor(mixup_alpha), torch.tensor(mixup_alpha)
             ).sample().item())
-            lam = max(lam, 1.0 - lam)  # IT: bias verso sample originale | EN: bias toward the original sample
+            lam = max(lam, 1.0 - lam)  # bias toward the original sample
             perm = torch.randperm(Xb.size(0), device=Xb.device)
             Xb = lam * Xb + (1.0 - lam) * Xb[perm]
             yb = lam * yb + (1.0 - lam) * yb[perm]
@@ -259,22 +226,18 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
                 t_mu  = lam * t_mu  + (1.0 - lam) * t_mu[perm]
                 t_ls2 = lam * t_ls2 + (1.0 - lam) * t_ls2[perm]
                 t_lnu = lam * t_lnu + (1.0 - lam) * t_lnu[perm]
-            # IT: il gate segue il mixup degli input (combinazione convessa →
-            #     resta sul simplesso); niente input noise sul gate (è una prob).
-            # EN: the gate follows the input mixup (convex combination → stays
-            #     on the simplex); no input noise on the gate (it's a prob).
+            # the gate follows the input mixup (convex combination → stays
+            # on the simplex); no input noise on the gate (it's a prob).
             if g_batch is not None:
                 g_batch = lam * g_batch + (1.0 - lam) * g_batch[perm]
         with torch.amp.autocast(device_type=device.type, enabled=use_amp):
-            # IT: path regime-MoE passa g= al forward; path default INVARIATO.
-            # EN: regime-MoE path passes g= to forward; default path UNCHANGED.
+            # regime-MoE path passes g= to forward; default path UNCHANGED.
             if g_batch is not None:
                 out = model(Xb, Xm, g=g_batch)
             else:
                 out = model(Xb, Xm) if has_macro else model(Xb)
 
-            # IT: ramo loss in base alla testa di output del modello
-            # EN: branch on model output head (quantile vs t-Student)
+            # branch on model output head (quantile vs t-Student)
             if model.loss_type == "quantile":
                 quantile_preds = out[0]
                 main_loss = quantile_loss(yb, quantile_preds,
@@ -287,35 +250,29 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
                                          crps_weight=_crps_effective,
                                          sample_weights=sw_batch)
 
-            # IT: multitask head — classifica SHORT/HOLD/LONG con soft label
-            #     basata su |y| (più |y| alto -> più confidenza nella direzione).
-            # EN: multitask head — SHORT/HOLD/LONG with soft labels driven by |y|
-            #     (larger |y| -> stronger directional confidence).
+            # multitask head — SHORT/HOLD/LONG with soft labels driven by |y|
+            # (larger |y| -> stronger directional confidence).
             if model.use_multitask:
                 dir_logits = out[-1]
                 thr = multitask_threshold
                 conf = torch.tanh(yb.abs() / max(thr, 1e-8))
                 soft_labels = torch.zeros(yb.shape[0], 3, device=yb.device)
-                soft_labels[:, 1] = 1.0 - conf  # IT/EN: HOLD
-                soft_labels[:, 2] = torch.where(yb > 0, conf, torch.zeros_like(conf))  # IT/EN: LONG
-                soft_labels[:, 0] = torch.where(yb < 0, conf, torch.zeros_like(conf))  # IT/EN: SHORT
+                soft_labels[:, 1] = 1.0 - conf  # HOLD
+                soft_labels[:, 2] = torch.where(yb > 0, conf, torch.zeros_like(conf))  # LONG
+                soft_labels[:, 0] = torch.where(yb < 0, conf, torch.zeros_like(conf))  # SHORT
                 dir_loss = -(soft_labels * F.log_softmax(dir_logits, dim=-1)).sum(dim=-1).mean()
                 loss_real = multitask_alpha * main_loss + (1 - multitask_alpha) * dir_loss
             else:
                 loss_real = main_loss
 
-            # IT: direction-value loss — penalizza segno sbagliato di mu
-            # EN: direction-value loss — penalises wrong-sign mu predictions
+            # direction-value loss — penalises wrong-sign mu predictions
             if dv_lambda > 0 and model.loss_type != "quantile":
                 loss_real = loss_real + direction_value_loss(yb, mu, lambda_dv=dv_lambda)
 
-            # IT: distillation loss — soft labels lette dal batch (shuffle-safe)
-            # EN: distillation loss — soft labels pulled from batch (shuffle-safe)
+            # distillation loss — soft labels pulled from batch (shuffle-safe)
             if use_distillation:
-                # IT: per testa quantile mappiamo q50/IQR a mu/log-sigma-equiv per
-                #     riusare la distillation_loss della t-Student.
-                # EN: for quantile heads we map q50/IQR to mu/log-sigma equivalents
-                #     so we can reuse the t-Student distillation loss.
+                # for quantile heads we map q50/IQR to mu/log-sigma equivalents
+                # so we can reuse the t-Student distillation loss.
                 if model.loss_type == "quantile":
                     s_mu  = out[0][:, 2]
                     s_ls2 = (out[0][:, 4] - out[0][:, 0]).clamp(min=1e-6)
@@ -330,18 +287,12 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
             else:
                 loss = loss_real
 
-            # IT: A10 (pre-reg STATUS 2026-07-28) — penalità entropica sull'attention.
-            #     Obiettivo effettivo sul ramo quantile: 0.7·pinball + 0.3·CE + λ·H_norm.
-            #     H_norm ∈ [0,1] (entropia normalizzata per log N), quindi λ è il costo
-            #     MASSIMO in unità di loss. A λ=0 il blocco è saltato per intero e
-            #     `attn_entropy_penalty()` non viene nemmeno chiamata → path invariato.
-            #     `getattr`: solo iTransformer espone la penalità (nhits/tcnmamba no).
-            # EN: A10 (STATUS 2026-07-28 pre-reg) — attention entropy penalty. Effective
-            #     objective on the quantile branch: 0.7·pinball + 0.3·CE + λ·H_norm.
-            #     H_norm ∈ [0,1] (entropy normalized by log N), so λ is the MAXIMUM cost
-            #     in loss units. At λ=0 the block is skipped entirely and
-            #     `attn_entropy_penalty()` is never called → unchanged path.
-            #     `getattr`: only the iTransformer exposes the penalty (nhits/tcnmamba don't).
+            # A10 (STATUS 2026-07-28 pre-reg) — attention entropy penalty. Effective
+            # objective on the quantile branch: 0.7·pinball + 0.3·CE + λ·H_norm.
+            # H_norm ∈ [0,1] (entropy normalized by log N), so λ is the MAXIMUM cost
+            # in loss units. At λ=0 the block is skipped entirely and
+            # `attn_entropy_penalty()` is never called → unchanged path.
+            # `getattr`: only the iTransformer exposes the penalty (nhits/tcnmamba don't).
             if attn_entropy_lambda > 0:
                 _pen_fn = getattr(model, "attn_entropy_penalty", None)
                 _pen = _pen_fn() if _pen_fn is not None else None
@@ -351,8 +302,7 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
 
             loss = loss / grad_accum_steps
         loss_val = loss.item() * grad_accum_steps
-        # IT: NaN/Inf skip per non corrompere le statistiche di AMP scaler
-        # EN: NaN/Inf skip to avoid poisoning AMP scaler statistics
+        # NaN/Inf skip to avoid poisoning AMP scaler statistics
         if math.isnan(loss_val) or math.isinf(loss_val):
             opt.zero_grad(set_to_none=True)
             continue
@@ -360,12 +310,10 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
         scaler.scale(loss).backward()
         total += loss_val
 
-        # IT: step optimizer ogni grad_accum_steps (gradient accumulation)
-        # EN: optimizer step every grad_accum_steps (gradient accumulation)
+        # optimizer step every grad_accum_steps (gradient accumulation)
         if (step + 1) % grad_accum_steps == 0 or step + 1 == len(loader):
             scaler.unscale_(opt)
-            # IT: salviamo la norma pre-clip per monitorare exploding/vanishing
-            # EN: keep pre-clip norm to monitor exploding/vanishing gradients
+            # keep pre-clip norm to monitor exploding/vanishing gradients
             gnorm = nn.utils.clip_grad_norm_(model.parameters(), _GRAD_CLIP)
             try:
                 _grad_norms_acc.append(float(gnorm.item()))
@@ -376,8 +324,7 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
             if sched is not None:
                 sched.step()
 
-    # IT: appende le grad-norm sull'oggetto opt — recuperate dal main loop
-    # EN: stash grad-norm stats on opt so the main loop can fetch them
+    # stash grad-norm stats on opt so the main loop can fetch them
     if _grad_norms_acc:
         import numpy as _np_g
         _opt_state = getattr(opt, "_qs_gradnorm_stats", None)
@@ -386,34 +333,26 @@ def run_train(model, loader, opt, scaler, sched, device, use_amp, has_macro,
             "p95":  float(_np_g.percentile(_grad_norms_acc, 95)),
             "max":  float(max(_grad_norms_acc)),
         }
-    # IT: A10 — H_norm media dell'epoca appesa a `opt` (stesso pattern delle
-    #     grad-norm): il contratto di ritorno di run_train resta invariato, e il
-    #     main loop può loggare la traiettoria di H_norm senza firma nuova.
-    # EN: A10 — epoch-mean H_norm stashed on `opt` (same pattern as the grad
-    #     norms): run_train's return contract stays unchanged and the main loop can
-    #     log the H_norm trajectory without a new signature.
+    # A10 — epoch-mean H_norm stashed on `opt` (same pattern as the grad
+    # norms): run_train's return contract stays unchanged and the main loop can
+    # log the H_norm trajectory without a new signature.
     opt._qs_attn_entropy = (entropy_sum / entropy_n) if entropy_n else None
     return total / len(loader)
 
 
-# IT: una epoca di eval — NLL simmetrica + raccolta mu/sigma/nu per le metriche
-# EN: one eval epoch — symmetric NLL + collect mu/sigma/nu for the metrics
+# one eval epoch — symmetric NLL + collect mu/sigma/nu for the metrics
 def run_eval(model, loader, device, has_macro, full_metrics: bool = False,
              use_regime_gate: bool = False):
-    """Validation con loss simmetrica standard per confrontabilità tra run.
+    """Validation with standard symmetric loss for comparability across runs.
 
     Returns (loss, mu_arr, y_arr, metrics, sigma_arr, nu_arr).
-    sigma_arr e nu_arr sono sempre calcolati per evitare un secondo forward pass.
+    sigma_arr and nu_arr are always computed to avoid a second forward pass.
 
-    IT: use_regime_gate=True (A3): il gate regime (N,3) è l'ULTIMO tensore del
-        batch di eval (val/test non hanno sample weights) e viene passato come
-        `g=` al forward. Default False = bit-identico.
-    EN: use_regime_gate=True (A3): the (N,3) regime gate is the LAST tensor of
-        the eval batch (val/test carry no sample weights) and is passed to the
-        forward as `g=`. Default False = bit-identical.
+    use_regime_gate=True (A3): the (N,3) regime gate is the LAST tensor of
+    the eval batch (val/test carry no sample weights) and is passed to the
+    forward as `g=`. Default False = bit-identical.
     """
-    # IT: SWA AveragedModel non espone loss_type direttamente; va via .module
-    # EN: SWA AveragedModel hides loss_type — resolve via .module once
+    # SWA AveragedModel hides loss_type — resolve via .module once
     loss_type = getattr(model, "loss_type", None)
     if loss_type is None and hasattr(model, "module"):
         loss_type = getattr(model.module, "loss_type", "t_student")
@@ -423,8 +362,7 @@ def run_eval(model, loader, device, has_macro, full_metrics: bool = False,
     model.eval(); total, mus, ys, sigs, nus = 0.0, [], [], [], []
     with torch.inference_mode():
         for batch in loader:
-            # IT: pop del gate regime (A3) dalla coda del batch, se attivo.
-            # EN: pop the regime gate (A3) from the batch tail, when active.
+            # pop the regime gate (A3) from the batch tail, when active.
             if use_regime_gate:
                 g_b   = batch[-1].to(device, non_blocking=True)
                 batch = batch[:-1]
@@ -440,10 +378,10 @@ def run_eval(model, loader, device, has_macro, full_metrics: bool = False,
             if loss_type == "quantile":
                 quantile_preds = out[0]
                 total += quantile_loss(yb, quantile_preds).item()
-                mu_batch = quantile_preds[:, 2]  # IT: q50 come punto | EN: q50 as point estimate
-                iqr = (quantile_preds[:, 3] - quantile_preds[:, 1]).abs()  # IT: proxy di sigma | EN: proxy for sigma
+                mu_batch = quantile_preds[:, 2]  # q50 as point estimate
+                iqr = (quantile_preds[:, 3] - quantile_preds[:, 1]).abs()  # proxy for sigma
                 sigs.append(iqr.cpu().numpy())
-                nus.append(np.full(len(iqr), 10.0))  # IT: nu fittizio | EN: placeholder nu
+                nus.append(np.full(len(iqr), 10.0))  # placeholder nu
             else:
                 mu_batch = out[0]
                 total += student_t_nll(yb, out[0], out[1], out[2]).item()
@@ -458,20 +396,19 @@ def run_eval(model, loader, device, has_macro, full_metrics: bool = False,
     return total / len(loader), mu_arr, y_arr, metrics, sigma_arr, nu_arr
 
 
-_GRAD_CLIP = 1.0  # IT: sovrascritto da main() da config | EN: overridden by main() from config
+_GRAD_CLIP = 1.0  # overridden by main() from config
 
 
-# IT: allinea i regime label Markov-Switching ai sample di validation (merge_asof)
-# EN: align Markov-Switching regime labels to validation samples (merge_asof)
+# align Markov-Switching regime labels to validation samples (merge_asof)
 def _load_val_regimes(data) -> "np.ndarray | None":
-    """Allinea i regime label (Markov-Switching) ai sample di validation.
+    """Aligns the (Markov-Switching) regime labels to the validation samples.
 
-    Legge `data/regime_probs.parquet` (prodotto da 01b_download_macro.py) che
-    contiene `regime_dominant` per ogni timestamp giornaliero. Allinea con
-    `t_val` dal dataset npz tramite merge_asof backward (ultimo regime noto).
+    Reads `data/regime_probs.parquet` (produced by 01b_download_macro.py), which
+    holds `regime_dominant` for each daily timestamp. Aligns it with `t_val`
+    from the npz dataset via backward merge_asof (last known regime).
 
     Returns:
-        np.ndarray (N_val,) di int regime label, oppure None se mancano dati.
+        np.ndarray (N_val,) of int regime labels, or None if data is missing.
     """
     if "t_val" not in data.files:
         log.info("Stratified val: t_val non nel dataset → skip per-regime metrics")
@@ -486,8 +423,7 @@ def _load_val_regimes(data) -> "np.ndarray | None":
         if "regime_dominant" not in df_reg.columns:
             log.info("Stratified val: regime_dominant non presente nel parquet → skip")
             return None
-        # IT: serve un indice timestamp confrontabile con t_val
-        # EN: needs a timestamp index/column compatible with t_val
+        # needs a timestamp index/column compatible with t_val
         if not isinstance(df_reg.index, pd.DatetimeIndex):
             tcol = next((c for c in ("open_time", "timestamp", "date") if c in df_reg.columns), None)
             if tcol is None:
@@ -496,8 +432,7 @@ def _load_val_regimes(data) -> "np.ndarray | None":
             df_reg = df_reg.set_index(pd.to_datetime(df_reg[tcol])).sort_index()
         else:
             df_reg = df_reg.sort_index()
-        # IT: merge_asof richiede stessa risoluzione (ns) e niente tz mismatch
-        # EN: merge_asof needs identical dt resolution (ns) and tz-naive on both sides
+        # merge_asof needs identical dt resolution (ns) and tz-naive on both sides
         def _to_ns_naive(idx_or_series):
             s = pd.to_datetime(idx_or_series)
             if getattr(s, "tz", None) is not None:
@@ -513,8 +448,7 @@ def _load_val_regimes(data) -> "np.ndarray | None":
             on="_t", direction="backward"
         )
         regimes = merged["regime_dominant"].to_numpy()
-        # IT: merge_asof riordina, riportiamo i regime nell'ordine originale di t_val
-        # EN: merge_asof sorts the result — restore original t_val ordering
+        # merge_asof sorts the result — restore original t_val ordering
         order = np.argsort(np.argsort(t_val.values))
         regimes = regimes[order]
         return regimes
@@ -523,17 +457,15 @@ def _load_val_regimes(data) -> "np.ndarray | None":
         return None
 
 
-# IT: NLL t-Student calcolata separatamente per ogni regime di mercato
-# EN: t-Student NLL computed separately for each market regime
+# t-Student NLL computed separately for each market regime
 def _per_regime_nll(mu_arr, sigma_arr, nu_arr, y_arr, regimes) -> dict:
-    """Computa val_nll separato per ogni regime (NLL della t-Student).
+    """Computes a separate val_nll for each regime (Student-t NLL).
 
-    Returns: dict {regime_id: nll_value}. NaN regime skippati.
+    Returns: dict {regime_id: nll_value}. NaN regimes skipped.
     """
     if regimes is None or len(regimes) != len(y_arr):
         return {}
-    # IT: NLL t-Student con sigma/nu già nello spazio naturale (formula chiusa sotto)
-    # EN: t-Student NLL with sigma/nu already in natural space (closed form below)
+    # t-Student NLL with sigma/nu already in natural space (closed form below)
     # log p(y|mu,sigma,nu) = lgamma((nu+1)/2) - lgamma(nu/2) - 0.5*log(nu*pi)
     #                        - log(sigma) - ((nu+1)/2)*log(1 + (y-mu)^2/(nu*sigma^2))
     from scipy.special import gammaln
@@ -552,8 +484,7 @@ def _per_regime_nll(mu_arr, sigma_arr, nu_arr, y_arr, regimes) -> dict:
     return out
 
 
-# IT: parsing dei flag CLI di distillation (--distill, --teacher, alpha schedule)
-# EN: parse distillation CLI flags (--distill, --teacher, alpha schedule)
+# parse distillation CLI flags (--distill, --teacher, alpha schedule)
 def _parse_distill_args():
     """Parse --distill and --teacher CLI flags."""
     import argparse
@@ -581,16 +512,13 @@ def _parse_distill_args():
     return args
 
 
-# IT: entrypoint — setup, dati, loop ensemble, training, eval test, export artefatti
-# EN: entrypoint — setup, data, ensemble loop, training, test eval, artifact export
+# entrypoint — setup, data, ensemble loop, training, test eval, artifact export
 def main():
     global _GRAD_CLIP
-    # IT: Forza UTF-8 su stdout/stderr — evita UnicodeEncodeError cp1252 sui banner Unicode quando
-    #     l'output è rediretto/in pipe su Windows (es. `02_train.py *> file.log`, o background).
-    #     Bug osservato 2026-06-06 (distill in background → exit 1 sul print finale, modello già
-    #     salvato). Stesso fix di 04_live_signals.py / run_all.py / 99_replay_live_vs_training.py.
-    # EN: Force UTF-8 on stdout/stderr — avoids cp1252 UnicodeEncodeError on Unicode banners when
-    #     output is redirected/piped on Windows. The model is saved before the crashing banner.
+    # Force UTF-8 on stdout/stderr — avoids cp1252 UnicodeEncodeError on Unicode banners when
+    # output is redirected/piped on Windows (e.g. `02_train.py *> file.log`, or background).
+    # Bug observed 2026-06-06 (background distill → exit 1 on the final print, model already
+    # saved). Same fix as 04_live_signals.py / run_all.py / 99_replay_live_vs_training.py.
     import sys as _sys
     for _stream in (_sys.stdout, _sys.stderr):
         try:
@@ -599,8 +527,8 @@ def main():
             pass
     cfg   = load_config("config/default.yaml")
     _GRAD_CLIP = cfg.get("training", {}).get("grad_clip_norm", 1.0)
-    # 2026-05-15: opt-in SN solo su mu_head (anti-overfit). Default False = legacy
-    # (compatibile checkpoint pre-2026-05-15).
+    # 2026-05-15: opt-in SN on mu_head only (anti-overfit). Default False = legacy
+    # (compatible with pre-2026-05-15 checkpoints).
     from quantsys.model import set_sn_on_mu_only
     set_sn_on_mu_only(bool(cfg.get("training", {}).get("sn_on_mu_only", False)))
 
@@ -614,28 +542,22 @@ def main():
     student_epoch_frac = distill_args.student_epoch_fraction
     mc_samples = max(1, int(getattr(distill_args, "mc_samples", 1)))
 
-    # IT: crea dir esperimento con timestamp — storicizza ogni run (config + metriche)
-    # EN: create timestamped experiment dir — archives each run (config + metrics)
+    # create timestamped experiment dir — archives each run (config + metrics)
     exp_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # IT: out_dir env-aware — redirige la WRITE su QUANTSYS_MODELS_ROOT mantenendo il
-    #     nome-arch del config (default "models/{arch}" = identico). Isola un train/distill
-    #     sperimentale dal modello LIVE (es. models/itransformer del forward-test 04b).
-    # EN: env-aware out_dir — redirects the WRITE to QUANTSYS_MODELS_ROOT keeping the
-    #     config arch-name (default "models/{arch}" = identical). Isolates an experimental
-    #     train/distill from the LIVE model (e.g. models/itransformer of the 04b forward test).
+    # env-aware out_dir — redirects the WRITE to QUANTSYS_MODELS_ROOT keeping the
+    # config arch-name (default "models/{arch}" = identical). Isolates an experimental
+    # train/distill from the LIVE model (e.g. models/itransformer of the 04b forward test).
     _out_dir_early = models_root() / Path(cfg["training"]["output_dir"]).name
     exp_dir  = _out_dir_early / "experiments" / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
 
-    # IT: salva la config usata (riproducibilità)
-    # EN: persist the config used (reproducibility)
+    # persist the config used (reproducibility)
     try:
         shutil.copy("config/default.yaml", exp_dir / "config.yaml")
     except Exception as _e:
         log.warning(f"Impossibile copiare config: {_e}")
 
-    # IT: salva il git hash se disponibile (tracciabilità codice)
-    # EN: record the git hash when available (code traceability)
+    # record the git hash when available (code traceability)
     try:
         git_hash = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -658,42 +580,28 @@ def main():
     tcfg  = cfg["training"]; mcfg = cfg["model"]
     hwcfg = cfg["hardware"]; mccfg = cfg.get("macro", {})
     device = setup_device(cfg)
-    # IT: stessa root env-aware di _out_dir_early (WRITE isolabile via QUANTSYS_MODELS_ROOT).
-    # EN: same env-aware root as _out_dir_early (WRITE isolable via QUANTSYS_MODELS_ROOT).
+    # same env-aware root as _out_dir_early (WRITE isolable via QUANTSYS_MODELS_ROOT).
     out_dir = _out_dir_early
     ensure_dirs(str(out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # IT: path npz env-aware (QUANTSYS_DATASET_NPZ, default invariato — probe DVOL).
-    # EN: env-aware npz path (QUANTSYS_DATASET_NPZ, default unchanged — DVOL probe).
+    # env-aware npz path (QUANTSYS_DATASET_NPZ, default unchanged — DVOL probe).
     _npz = dataset_npz_path()
-    # IT: confronto tra Path (non stringhe): su Windows str(Path) usa backslash
-    #     → il confronto stringa scattava SEMPRE (warning spurio a ogni run).
-    # EN: Path comparison (not strings): on Windows str(Path) uses backslashes
-    #     → the string compare ALWAYS fired (spurious warning on every run).
+    # Path comparison (not strings): on Windows str(Path) uses backslashes
+    # → the string compare ALWAYS fired (spurious warning on every run).
     if _npz != Path("data/lstm_dataset.npz"):
         log.warning(f"Dataset OVERRIDE via QUANTSYS_DATASET_NPZ: {_npz}")
     data  = np.load(str(_npz), allow_pickle=True)
-    # IT: `copy=False` — su un membro npz GIÀ float32 `astype` restituisce lo stesso
-    #     ndarray invece di allocarne una copia, e `torch.from_numpy` ne condivide il
-    #     buffer: il picco di memoria del caricamento scende di ~2.42 GiB sul dataset
-    #     di produzione, bit-identico. ⚠ È sicuro SOLO perché `NpzFile.__getitem__`
-    #     materializza un array fresco e non condiviso a ogni accesso — altrimenti il
-    #     `clamp_` IN-PLACE poche righe sotto muterebbe stato condiviso e una rilettura
-    #     della stessa chiave darebbe dati già clippati, in silenzio. Quell'ipotesi non
-    #     è assunta: è inchiodata da `tests/test_npz_load_aliasing.py`, che cade se una
-    #     versione futura di numpy inizia a cachare o a mappare i membri, e che verifica
-    #     anche che nessuna chiave `to_t` venga riletta altrove nel file.
-    # EN: `copy=False` — on an ALREADY-float32 npz member `astype` returns the same
-    #     ndarray instead of allocating a copy, and `torch.from_numpy` shares its
-    #     buffer: load-time peak memory drops by ~2.42 GiB on the production dataset,
-    #     bit-identically. ⚠ This is safe ONLY because `NpzFile.__getitem__`
-    #     materialises a fresh, unshared array on every access — otherwise the IN-PLACE
-    #     `clamp_` a few lines below would mutate shared state and a re-read of the same
-    #     key would silently return already-clipped data. That assumption is not
-    #     assumed: it is pinned by `tests/test_npz_load_aliasing.py`, which fails if a
-    #     future numpy starts caching or memory-mapping members, and which also checks
-    #     that no `to_t` key is re-read elsewhere in this file.
+    # `copy=False` — on an ALREADY-float32 npz member `astype` returns the same
+    # ndarray instead of allocating a copy, and `torch.from_numpy` shares its
+    # buffer: load-time peak memory drops by ~2.42 GiB on the production dataset,
+    # bit-identically. ⚠ This is safe ONLY because `NpzFile.__getitem__`
+    # materialises a fresh, unshared array on every access — otherwise the IN-PLACE
+    # `clamp_` a few lines below would mutate shared state and a re-read of the same
+    # key would silently return already-clipped data. That assumption is not
+    # assumed: it is pinned by `tests/test_npz_load_aliasing.py`, which fails if a
+    # future numpy starts caching or memory-mapping members, and which also checks
+    # that no `to_t` key is re-read elsewhere in this file.
     to_t  = lambda k: torch.from_numpy(data[k].astype(np.float32, copy=False))
 
     X_tr, y_tr = to_t("X_train"), to_t("y_train")
@@ -701,9 +609,8 @@ def main():
     X_te, y_te = to_t("X_test"),  to_t("y_test")
     n_feat = X_tr.shape[2]
 
-    # ── Stratified validation per regime (2026-05-15) ───────────────────────
-    # IT: carica i regime label per ogni sample di val; se mancano → None (graceful)
-    # EN: load regime labels per val sample; if absent → None (graceful degrade)
+    # ── Stratified validation by regime (2026-05-15) ───────────────────────
+    # load regime labels per val sample; if absent → None (graceful degrade)
     val_regimes = _load_val_regimes(data)
     if val_regimes is not None:
         _uniq, _cnt = np.unique(val_regimes[~np.isnan(val_regimes.astype(float))], return_counts=True)
@@ -711,36 +618,26 @@ def main():
                  + ", ".join(f"r{int(r)}={int(c)} ({c/len(val_regimes):.0%})"
                              for r, c in zip(_uniq, _cnt)))
 
-    # IT: clip bounds adattivi (p0.1/p99.9 per-feature da X_train); no leakage val/test
-    # EN: adaptive clip bounds (per-feature p0.1/p99.9 from X_train); no val/test leakage
+    # adaptive clip bounds (per-feature p0.1/p99.9 from X_train); no val/test leakage
     log.info("Calcolo clip bounds adattivi da X_train (p0.1 / p99.9) ...")
     _X_flat = X_tr.reshape(-1, n_feat).numpy()
     _clip_lo = np.nanpercentile(_X_flat, 0.1, axis=0).astype(np.float32)
     _clip_hi = np.nanpercentile(_X_flat, 99.9, axis=0).astype(np.float32)
-    clip_lo_t = torch.from_numpy(_clip_lo).to(device)   # (F,) — broadcastable su (B,T,F)
+    clip_lo_t = torch.from_numpy(_clip_lo).to(device)   # (F,) — broadcastable over (B,T,F)
     clip_hi_t = torch.from_numpy(_clip_hi).to(device)
     del _X_flat
 
-    # IT: pre-clip una volta sull'intero dataset (no clamp per-batch); clip interno
-    #     resta per inference live su dati non pre-clippati.
-    # EN: pre-clip once over the whole dataset (no per-batch clamp); in-model clip
-    #     stays for live inference on non-pre-clipped data.
+    # pre-clip once over the whole dataset (no per-batch clamp); in-model clip
+    # stays for live inference on non-pre-clipped data.
     _clip_lo_cpu = torch.from_numpy(_clip_lo)
     _clip_hi_cpu = torch.from_numpy(_clip_hi)
-    # IT: clamp_ IN-PLACE, non clamp(): l'out-of-place alloca un tensore nuovo e
-    #     riassegna il nome, quindi durante l'operazione vecchio e nuovo coesistono
-    #     — un picco pari alla DIMENSIONE PIENA del tensore (X_train da solo e' 2.59 GB
-    #     su 15.9 GB di RAM, con il npz gia' mappato). I tensori sono proprietari
-    #     della loro memoria (to_t fa .astype(), che copia sempre) e a questo punto
-    #     non esiste piu' nessuna vista su di essi (_X_flat e' stato gia' del-etato),
-    #     quindi l'in-place e' sicuro; il risultato e' bit-identico, elemento per elemento.
-    # EN: IN-PLACE clamp_, not clamp(): the out-of-place form allocates a fresh
-    #     tensor and rebinds the name, so old and new coexist during the op — a peak
-    #     equal to the FULL SIZE of the tensor (X_train alone is 2.59 GB out of 15.9 GB
-    #     of RAM, with the npz already mapped). The tensors own their memory (to_t
-    #     calls .astype(), which always copies) and no view onto them survives at this
-    #     point (_X_flat was already deleted), so in-place is safe; the result is
-    #     bit-identical, element by element.
+    # IN-PLACE clamp_, not clamp(): the out-of-place form allocates a fresh
+    # tensor and rebinds the name, so old and new coexist during the op — a peak
+    # equal to the FULL SIZE of the tensor (X_train alone is 2.59 GB out of 15.9 GB
+    # of RAM, with the npz already mapped). The tensors own their memory (to_t
+    # calls .astype(), which always copies) and no view onto them survives at this
+    # point (_X_flat was already deleted), so in-place is safe; the result is
+    # bit-identical, element by element.
     X_tr.clamp_(_clip_lo_cpu, _clip_hi_cpu)
     X_vl.clamp_(_clip_lo_cpu, _clip_hi_cpu)
     X_te.clamp_(_clip_lo_cpu, _clip_hi_cpu)
@@ -752,8 +649,7 @@ def main():
         log.info(f"  feature[0]: [{_clip_lo[0]:.2f}, {_clip_hi[0]:.2f}]  "
                  f"n_feat={n_feat}")
 
-    # IT: dual-stream — legge il confine feature dinamiche/strutturali dal dataset
-    # EN: dual-stream — read the dynamic/structural feature boundary from the dataset
+    # dual-stream — read the dynamic/structural feature boundary from the dataset
     n_dynamic = int(data["n_dynamic_features"][0]) if "n_dynamic_features" in data.files else None
     if n_dynamic is not None:
         log.info(f"Dual-stream: {n_dynamic} feature dinamiche + {n_feat-n_dynamic} strutturali")
@@ -774,25 +670,18 @@ def main():
     else:
         log.info("MacroEncoder non presente — QuantLSTM standard.")
 
-    # ── A3 — Regime-MoE gate (config-gated: model.head_type, default assente) ──
-    # IT: head_type="regime_moe" attiva backbone condiviso + 3 teste-regime con
-    #     gate esterno CAUSALE g(t)=filtered probs (mai appreso). Chiave assente
-    #     o "single" → ZERO cambi di comportamento (stessa loss, stessi batch,
-    #     bit-identico). Gate allineato ai timestamp del dataset con lo stesso
-    #     merge_asof backward della stratificazione val (_load_val_regimes).
-    # EN: head_type="regime_moe" enables shared backbone + 3 regime heads with an
-    #     external CAUSAL gate g(t)=filtered probs (never learned). Key absent or
-    #     "single" → ZERO behaviour change (same loss, same batches, bit-identical).
-    #     Gate aligned to the dataset timestamps with the same backward merge_asof
-    #     as the val stratification (_load_val_regimes).
+    # ── A3 — Regime-MoE gate (config-gated: model.head_type, absent by default) ──
+    # head_type="regime_moe" enables shared backbone + 3 regime heads with an
+    # external CAUSAL gate g(t)=filtered probs (never learned). Key absent or
+    # "single" → ZERO behaviour change (same loss, same batches, bit-identical).
+    # Gate aligned to the dataset timestamps with the same backward merge_asof
+    # as the val stratification (_load_val_regimes).
     _head_type = mcfg.get("head_type", "single") or "single"
     use_regime_gate = (_head_type == "regime_moe")
     G_tr_t = G_vl_t = G_te_t = None
     if use_regime_gate:
-        # IT: guard di scope — regime_moe è iTransformer-only (per ora), esclusivo
-        #     col MoE appreso e con la distillation (soft labels single-output).
-        # EN: scope guards — regime_moe is iTransformer-only (for now), exclusive
-        #     with the learned MoE and with distillation (single-output soft labels).
+        # scope guards — regime_moe is iTransformer-only (for now), exclusive
+        # with the learned MoE and with distillation (single-output soft labels).
         if mcfg.get("architecture", "lstm") != "itransformer":
             raise ValueError(
                 "model.head_type='regime_moe' è supportato SOLO con "
@@ -826,9 +715,8 @@ def main():
             f"val={np.round(G_vl_t.mean(dim=0).numpy(), 3).tolist()}"
         )
 
-    # ── Sample weights proporzionali a |target| (large moves contribute more) ──
-    # IT: pesi per-sample ∝ |y|/std(y) — i grandi movimenti pesano di più nel loss
-    # EN: per-sample weights ∝ |y|/std(y) — big moves contribute more to the loss
+    # ── Sample weights proportional to |target| (large moves contribute more) ──
+    # per-sample weights ∝ |y|/std(y) — big moves contribute more to the loss
     _sw_alpha = tcfg.get("sample_weight_alpha", 0.0)
     _use_sw   = _sw_alpha > 0.0
     if _use_sw:
@@ -842,17 +730,12 @@ def main():
         sample_weights_tr = None
         log.info("Sample weighting disabilitato (sample_weight_alpha=0)")
 
-    # ── Guard anti-trappola: chiavi di loss INERTI sul ramo quantile ───────────
-    # IT: asymmetry_alpha/crps_weight entrano solo in student_t_nll e dv_lambda e'
-    #     dietro una guardia esplicita (loss_type != "quantile"): sul ramo quantile
-    #     valgono zero. Hanno pero' valori non nulli in config e SEMBRANO leve
-    #     attive -> un tuning su di esse restituirebbe "nessun effetto" per ragioni
-    #     implementative, non scientifiche. Solo logging: path numerico invariato.
-    # EN: asymmetry_alpha/crps_weight only feed student_t_nll and dv_lambda sits
-    #     behind an explicit guard (loss_type != "quantile"): on the quantile branch
-    #     they are no-ops. They still hold non-zero config values and LOOK like live
-    #     levers -> tuning them would return "no effect" for implementation, not
-    #     scientific, reasons. Logging only: numeric path unchanged.
+    # ── Anti-trap guard: loss keys that are INERT on the quantile branch ───────
+    # asymmetry_alpha/crps_weight only feed student_t_nll and dv_lambda sits
+    # behind an explicit guard (loss_type != "quantile"): on the quantile branch
+    # they are no-ops. They still hold non-zero config values and LOOK like live
+    # levers -> tuning them would return "no effect" for implementation, not
+    # scientific, reasons. Logging only: numeric path unchanged.
     if mcfg.get("loss_type", "quantile") == "quantile":
         _inert = [(k, tcfg.get(k, 0.0)) for k in
                   ("asymmetry_alpha", "crps_weight", "dv_lambda")
@@ -872,15 +755,10 @@ def main():
 
     _bs_train = tcfg["batch_size"]
     _bs_eval  = _bs_train * 4
-    # IT: sample_weights_tr è SEMPRE l'ultimo tensore del TensorDataset train;
-    #     run_train() lo estrae prima dell'unpacking del resto. Il gate regime
-    #     (A3, se attivo) sta SUBITO PRIMA dei sample weights ed è l'ultimo
-    #     tensore dei dataset di eval; con head_type assente le liste sono
-    #     bit-identiche a prima.
-    # EN: sample_weights_tr is ALWAYS the last tensor of the train TensorDataset;
-    #     run_train() pops it before unpacking the rest. The regime gate (A3, if
-    #     active) sits RIGHT BEFORE the sample weights and is the last tensor of
-    #     the eval datasets; with head_type absent the lists are bit-identical.
+    # sample_weights_tr is ALWAYS the last tensor of the train TensorDataset;
+    # run_train() pops it before unpacking the rest. The regime gate (A3, if
+    # active) sits RIGHT BEFORE the sample weights and is the last tensor of
+    # the eval datasets; with head_type absent the lists are bit-identical.
     _g_tr = [G_tr_t] if use_regime_gate else []
     _g_vl = [G_vl_t] if use_regime_gate else []
     _g_te = [G_te_t] if use_regime_gate else []
@@ -910,9 +788,8 @@ def main():
         model_type = "QuantLSTM"
     use_amp    = tcfg["use_amp"] and device.type == "cuda"
 
-    # ── Knowledge Distillation: carica teacher e genera soft labels ──────
-    # IT: carica il/i teacher e precalcola le soft labels allineate al train set
-    # EN: load teacher(s) and precompute soft labels aligned to the train set
+    # ── Knowledge Distillation: load teacher and generate soft labels ──────
+    # load teacher(s) and precompute soft labels aligned to the train set
     teacher_preds_train = None
     if use_distillation:
         from quantsys.model.distillation import (
@@ -928,8 +805,7 @@ def main():
             log.info(f"  distill_alpha={distill_alpha} (initial, schedulato a {distill_alpha_final} in {distill_alpha_decay_epochs} epoche)")
             log.info(f"  multi_teacher={use_multi_teacher}, student_epochs={student_epoch_frac:.0%}")
 
-            # IT: dataloader non-shuffled — predizioni teacher allineate ai sample
-            # EN: non-shuffled dataloader — teacher predictions aligned to samples
+            # non-shuffled dataloader — teacher predictions aligned to samples
             if has_macro:
                 _train_dl_ordered = DataLoader(
                     TensorDataset(X_tr, Xm_tr, y_tr), _bs_train, shuffle=False, **kw)
@@ -942,8 +818,7 @@ def main():
                 all_archs = get_distillation_archs(cfg)
                 log.info(f"  Multi-teacher: archs={all_archs} (da config/default.yaml)")
                 log.info("  Multi-teacher: generazione soft labels pesate da tutti i modelli...")
-                # IT: scoring target-aware — sul target vol (log_rv) dir_acc=0.
-                # EN: target-aware scoring — on the vol target (log_rv) dir_acc=0.
+                # target-aware scoring — on the vol target (log_rv) dir_acc=0.
                 _ttype = cfg.get("features", {}).get("target_type", "ret")
                 arch_weights = compute_teacher_weights(all_archs, target_type=_ttype)
                 teacher_preds_train = generate_multi_teacher_predictions(
@@ -962,10 +837,8 @@ def main():
             log.info(f"  Soft labels generate: {teacher_preds_train['mu'].shape[0]} campioni")
             del _train_dl_ordered
 
-            # IT: ricrea il train dataloader con le soft labels integrate (shuffle-safe);
-            #     sample_weights_tr (se attivo) resta SEMPRE l'ultimo tensore.
-            # EN: rebuild the train dataloader with soft labels embedded (shuffle-safe);
-            #     sample_weights_tr (if active) stays ALWAYS the last tensor.
+            # rebuild the train dataloader with soft labels embedded (shuffle-safe);
+            # sample_weights_tr (if active) stays ALWAYS the last tensor.
             _t_mu  = teacher_preds_train["mu"]
             _t_ls2 = teacher_preds_train["ls2"]
             _t_lnu = teacher_preds_train["lnu"]
@@ -983,26 +856,22 @@ def main():
                     _bs_train, shuffle=True, **kw)
             log.info("  Training dataloader ricreato con soft labels integrate (shuffle-safe)")
 
-            # IT: riduci le epoche dello student (convergenza accelerata col teacher)
-            # EN: cut student epochs (teacher accelerates convergence)
+            # cut student epochs (teacher accelerates convergence)
             original_epochs = tcfg["epochs"]
             tcfg["epochs"] = max(10, int(original_epochs * student_epoch_frac))
             log.info(f"  Epoche ridotte: {original_epochs} -> {tcfg['epochs']} "
                      f"({student_epoch_frac:.0%})")
 
-            # IT: forza n_ensemble=1 — la distillation usa 1 modello per architettura
-            # EN: force n_ensemble=1 — distillation uses one model per architecture
+            # force n_ensemble=1 — distillation uses one model per architecture
             if tcfg.get("n_ensemble", 1) > 1:
                 log.info(f"  n_ensemble forzato a 1 (era {tcfg['n_ensemble']}): "
                          f"distillation usa 1 modello per architettura")
                 tcfg["n_ensemble"] = 1
 
-            # IT: tieni il teacher in memoria per il transfer heads (no ricaricamento)
-            # EN: keep teacher in memory for output-head transfer (avoid reload)
+            # keep teacher in memory for output-head transfer (avoid reload)
             _teacher_for_transfer = teacher_model
 
-    # IT: stima costo computazionale (mostrata una volta prima dei loop ensemble)
-    # EN: compute-cost estimate (printed once before the ensemble loops)
+    # compute-cost estimate (printed once before the ensemble loops)
     ram_gb    = X_tr.element_size() * X_tr.nelement() / 1e9
     n_batches = len(train_dl)
     eta_min   = n_batches * 0.05 / 60
@@ -1018,14 +887,10 @@ def main():
         log.info(f"n_ensemble override da CLI: {n_ensemble}")
     models_dir = out_dir
 
-    # IT: Pre-check anti-stale warning-only (bug 2026-06-10): un run con n_ensemble
-    #     inferiore ai membri numerati già su disco aggiorna solo best_model.pt
-    #     (o un sottoinsieme dei membri), lasciando checkpoint stale che
-    #     EnsembleModel.load preferirà silenziosamente al nuovo best.
-    # EN: Warning-only anti-stale pre-check (2026-06-10 bug): a run with n_ensemble
-    #     lower than the numbered members already on disk only updates best_model.pt
-    #     (or a subset of the members), leaving stale checkpoints that
-    #     EnsembleModel.load will silently prefer over the new best.
+    # Warning-only anti-stale pre-check (2026-06-10 bug): a run with n_ensemble
+    # lower than the numbered members already on disk only updates best_model.pt
+    # (or a subset of the members), leaving stale checkpoints that
+    # EnsembleModel.load will silently prefer over the new best.
     _existing_members = sorted(out_dir.glob("best_model_[0-9]*.pt"))
     if len(_existing_members) >= 2 and n_ensemble < len(_existing_members):
         _updated = ("solo best_model.pt" if n_ensemble == 1
@@ -1042,8 +907,7 @@ def main():
             f"retrain with the full n-ensemble."
         )
 
-    # IT: history/modello finali — riferiti al membro 0 (o all'unico) per l'export
-    # EN: final history/model — refer to member 0 (or the single one) for export
+    # final history/model — refer to member 0 (or the single one) for export
     history    = None
     model      = None
     test_mu    = None
@@ -1062,9 +926,8 @@ def main():
 
         log.info(f"Ensemble {ensemble_idx+1}/{n_ensemble} (seed={seed})")
 
-        # ── Crea modello fresco ──────────────────────────────────────────────
-        # IT: istanzia un modello nuovo per il membro corrente in base all'arch
-        # EN: instantiate a fresh model for the current member per the chosen arch
+        # ── Create a fresh model ─────────────────────────────────────────────
+        # instantiate a fresh model for the current member per the chosen arch
         architecture = mcfg.get("architecture", "lstm")
 
         if architecture == "itransformer":
@@ -1080,7 +943,7 @@ def main():
                 n_heads         = mcfg.get("tft_n_heads", 4),
                 n_layers        = mcfg.get("tft_n_layers", 3),
                 dropout         = mcfg.get("tft_dropout", 0.1),
-                # Nuovi parametri
+                # New parameters
                 patch_size      = mcfg.get("patch_size", 1),
                 drop_path_rate  = mcfg.get("drop_path_rate", 0.0),
                 use_multitask   = mcfg.get("use_multitask", False),
@@ -1088,21 +951,18 @@ def main():
                 n_output_experts= mcfg.get("n_output_experts", 1),
                 use_revin        = mcfg.get("use_revin", False),
                 revin_target_idx = mcfg.get("revin_target_idx", 0),
-                # IT: A3 — default "single" = path storico bit-identico.
-                # EN: A3 — default "single" = bit-identical legacy path.
+                # A3 — default "single" = bit-identical legacy path.
                 head_type       = _head_type,
-                # IT: A10 — default 0.0 = nessuna materializzazione della matrice di
-                #     attention, path bit-identico. >0 accende misura + penalità.
-                # EN: A10 — default 0.0 = no attention-matrix materialization,
-                #     bit-identical path. >0 turns on measurement + penalty.
+                # A10 — default 0.0 = no attention-matrix materialization,
+                # bit-identical path. >0 turns on measurement + penalty.
                 attn_entropy_lambda = mcfg.get("attn_entropy_lambda", 0.0),
             ).to(device)
             log.info(f"Architettura: QuantiTransformer  d_model={mcfg.get('tft_d_model', 128)}  layers={mcfg.get('tft_n_layers', 3)}  T={_T}  head_type={_head_type}")
         elif architecture == "tft":
             from quantsys.model import QuantTFT
-            # n_dynamic=None → single-stream: entrambi gli stream ricevono tutte le feature
+            # n_dynamic=None → single-stream: both streams receive all features
             _n_dyn    = n_dynamic if n_dynamic is not None else n_feat
-            _n_struct = n_feat - _n_dyn  # 0 se single-stream
+            _n_struct = n_feat - _n_dyn  # 0 if single-stream
             _model = QuantTFT(
                 n_dynamic    = _n_dyn,
                 n_structural = _n_struct,   # 0 = single-stream, handled inside QuantTFT
@@ -1157,8 +1017,7 @@ def main():
                 n_output_experts   = mcfg.get("n_output_experts", 1),
                 use_revin          = mcfg.get("use_revin", False),
                 revin_target_idx   = mcfg.get("revin_target_idx", 0),
-                # IT: A9 — blocco MaxPool parallelo, lever inerte (default false).
-                # EN: A9 — parallel MaxPool block, inert lever (default false).
+                # A9 — parallel MaxPool block, inert lever (default false).
                 use_max_pool_block = mcfg.get("nhits_max_pool_block", False),
                 max_pool_kernel    = mcfg.get("nhits_max_pool_kernel", 8),
             ).to(device)
@@ -1186,20 +1045,18 @@ def main():
                 n_lstm_layers      = mcfg["lstm_layers"],
                 dropout            = mcfg["dropout"],
                 n_dynamic_features = n_dynamic,
-                # Nuovi parametri
+                # New parameters
                 use_multitask      = mcfg.get("use_multitask", False),
                 loss_type          = mcfg.get("loss_type", "t_student"),
                 n_output_experts   = mcfg.get("n_output_experts", 1),
             ).to(device)
 
-        # IT: imposta i clip bounds nel modello — salvati nel ckpt, riusati al load
-        # EN: set clip bounds on the model — saved in the ckpt, reused at load time
+        # set clip bounds on the model — saved in the ckpt, reused at load time
         if hasattr(_model, "clip_lo"):
             set_clip_bounds(_model, _clip_lo, _clip_hi)
 
-        # ── Knowledge Distillation: trasferisci pesi output heads ────────
-        # IT: copia i pesi delle output heads dal teacher allo student (solo membro 0)
-        # EN: copy output-head weights from teacher to student (member 0 only)
+        # ── Knowledge Distillation: transfer output-head weights ─────────
+        # copy output-head weights from teacher to student (member 0 only)
         _heads_transferred = False
         if use_distillation and ensemble_idx == 0:
             n_xfer = transfer_output_heads(_teacher_for_transfer, _model)
@@ -1209,8 +1066,7 @@ def main():
             torch.cuda.empty_cache() if device.type == "cuda" else None
 
         # ── Optimizer ───────────────────────────────────────────────────────
-        # IT: TFT usa macro_proj invece di macro_encoder — controlla entrambi
-        # EN: TFT uses macro_proj instead of macro_encoder — check both
+        # TFT uses macro_proj instead of macro_encoder — check both
         _macro_mod = None
         if has_macro:
             if hasattr(_model, "macro_encoder"):
@@ -1218,11 +1074,9 @@ def main():
             elif hasattr(_model, "macro_proj"):
                 _macro_mod = _model.macro_proj
 
-        # ── Output heads (per LR discriminato post-transfer) ──────────────
-        # IT: heads già calibrate dal teacher → lr ridotto in warmup mentre il body
-        #     si adatta, evitando di "rovinarle". Solo se il transfer è avvenuto.
-        # EN: teacher-calibrated heads → reduced lr during warmup while the body
-        #     adapts, to avoid wrecking them. Only when transfer actually happened.
+        # ── Output heads (for discriminative LR post-transfer) ────────────
+        # teacher-calibrated heads → reduced lr during warmup while the body
+        # adapts, to avoid wrecking them. Only when transfer actually happened.
         _heads_warmup_epochs = int(tcfg.get("heads_warmup_epochs", 10))
         _heads_lr_factor     = float(tcfg.get("heads_lr_factor", 0.1))
         _heads_params = []
@@ -1234,8 +1088,7 @@ def main():
                     _heads_params.extend(list(m.parameters()))
         _heads_ids = {id(p) for p in _heads_params}
 
-        # IT: optimizer in 1-3 gruppi LR distinti: body / macro / heads
-        # EN: optimizer with 1-3 distinct LR groups: body / macro / heads
+        # optimizer with 1-3 distinct LR groups: body / macro / heads
         _macro_params = list(_macro_mod.parameters()) if _macro_mod is not None else []
         _macro_ids    = {id(p) for p in _macro_params}
         _body_params  = [p for p in _model.parameters()
@@ -1257,10 +1110,8 @@ def main():
         _eff_steps = max(1, len(train_dl) // grad_accum_steps)
         _total_s   = tcfg["epochs"] * _eff_steps
 
-        # IT: scheduler mutuamente esclusivi: CosineWarmup (per-batch) O per-epoch;
-        #     usarli insieme fa conflitto sul LR.
-        # EN: mutually exclusive schedulers: CosineWarmup (per-batch) OR per-epoch;
-        #     combining them conflicts on the LR.
+        # mutually exclusive schedulers: CosineWarmup (per-batch) OR per-epoch;
+        # combining them conflicts on the LR.
         if tcfg.get("lr_scheduler") == "plateau":
             _scheduler   = None
             _epoch_sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -1281,8 +1132,7 @@ def main():
             _epoch_sched = None
         _amp_sc = torch.amp.GradScaler(device=device.type, enabled=use_amp)
 
-        # IT: SWA — media i pesi per convergere su minimi piatti (più generalizzanti)
-        # EN: SWA — averages weights to converge on flat minima (better generalization)
+        # SWA — averages weights to converge on flat minima (better generalization)
         _use_swa = tcfg.get("use_swa", False)
         _swa_start_frac = tcfg.get("swa_start_frac", 0.6)
         _swa_start_epoch = max(1, int(tcfg["epochs"] * _swa_start_frac))
@@ -1298,10 +1148,8 @@ def main():
         _es       = EarlyStopping(patience=tcfg["patience"], path=_ckpt)
         _history  = {"train_nll": [], "val_nll": [], "val_dir_acc": [], "lr": [], "gap": []}
 
-        # IT: detector overfit basato sul gap train-val NLL; soglia negativa (NLL),
-        #     streak di N epoche, disabilitato nei primi warmup epoch (shift normale).
-        # EN: overfit detector on the train-val NLL gap; negative threshold (NLL),
-        #     N-epoch streak, disabled during warmup epochs (early shift is normal).
+        # overfit detector on the train-val NLL gap; negative threshold (NLL),
+        # N-epoch streak, disabled during warmup epochs (early shift is normal).
         _gap_threshold       = float(tcfg.get("gap_overfit_threshold", -0.5))
         _gap_overfit_streak  = int(tcfg.get("gap_overfit_streak",   3))
         _gap_overfit_warmup  = int(tcfg.get("gap_overfit_warmup_epochs", 10))
@@ -1310,18 +1158,16 @@ def main():
         log.info(f"Training  device={device}  AMP={use_amp}  macro={has_macro}  batch={tcfg['batch_size']}×{grad_accum_steps}={tcfg['batch_size']*grad_accum_steps}")
         log.info(f"Overfit guard: gap_threshold={_gap_threshold}, streak={_gap_overfit_streak} epoche, warmup={_gap_overfit_warmup} epoche")
         _t0 = time.time()
-        vl_nll, da, sp = 0.0, 0.0, 0.0   # IT: init pre-loop per epoch senza val | EN: pre-loop init for epochs without val
+        vl_nll, da, sp = 0.0, 0.0, 0.0   # pre-loop init for epochs without val
 
         for epoch in range(1, tcfg["epochs"] + 1):
-            # IT: ripristina lr pieno sulle heads transferite a fine warmup
-            # EN: restore full lr on transferred heads once warmup ends
+            # restore full lr on transferred heads once warmup ends
             if _heads_params and epoch == _heads_warmup_epochs + 1:
                 for grp in _opt.param_groups:
                     if grp.get("name") == "heads":
                         grp["lr"] = tcfg["learning_rate"]
                 log.info(f"  Heads warmup terminato a epoch {epoch}: lr restored a {tcfg['learning_rate']:.2e}")
-            # IT: schedule lineare di distill_alpha (initial→final); ignorato se non-distill
-            # EN: linear distill_alpha schedule (initial→final); ignored when non-distill
+            # linear distill_alpha schedule (initial→final); ignored when non-distill
             if use_distillation and distill_alpha_decay_epochs > 0:
                 _t = min(1.0, (epoch - 1) / float(distill_alpha_decay_epochs))
                 _alpha_now = distill_alpha + (distill_alpha_final - distill_alpha) * _t
@@ -1344,16 +1190,12 @@ def main():
                 mixup_alpha         = tcfg.get("mixup_alpha",            0.0),
                 crps_distill_weight = tcfg.get("crps_distill_weight",    0.0),
                 use_regime_gate     = use_regime_gate,
-                # IT: A10 — λ della penalità entropica (0.0 default = leva spenta).
-                # EN: A10 — entropy-penalty λ (0.0 default = lever off).
+                # A10 — entropy-penalty λ (0.0 default = lever off).
                 attn_entropy_lambda = mcfg.get("attn_entropy_lambda",     0.0),
             )
-            # IT: A10 — traiettoria di H_norm nella history: serve al manipulation
-            #     check ④ (la penalità ha davvero concentrato le mappe?) e a vedere
-            #     se il termine satura. Assente sul path production (λ=0 → None).
-            # EN: A10 — H_norm trajectory in the history: feeds manipulation check ④
-            #     (did the penalty actually concentrate the maps?) and shows whether
-            #     the term saturates. Absent on the production path (λ=0 → None).
+            # A10 — H_norm trajectory in the history: feeds manipulation check ④
+            # (did the penalty actually concentrate the maps?) and shows whether
+            # the term saturates. Absent on the production path (λ=0 → None).
             _attn_h = getattr(_opt, "_qs_attn_entropy", None)
             if _attn_h is not None:
                 _history.setdefault("attn_entropy", []).append(float(_attn_h))
@@ -1361,8 +1203,7 @@ def main():
             da = _val_metrics["directional_acc"]
             sp = _val_metrics["spearman"]
             do_val = True
-            # IT: log NLL per-regime ogni 5 epoche (riduce lo spam di log)
-            # EN: log per-regime NLL every 5 epochs (cuts log spam)
+            # log per-regime NLL every 5 epochs (cuts log spam)
             if val_regimes is not None and (epoch == 1 or epoch % 5 == 0):
                 _per_reg = _per_regime_nll(_all_mu, _val_sig, _val_nu, _all_y, val_regimes)
                 if _per_reg:
@@ -1379,7 +1220,7 @@ def main():
                 else:
                     _epoch_sched.step(epoch)
             current_lr = _opt.param_groups[0]["lr"]
-            _gap = tr_nll - vl_nll   # IT: più negativo = train ≪ val = overfit | EN: more negative = train ≪ val = overfit
+            _gap = tr_nll - vl_nll   # more negative = train ≪ val = overfit
             _history["train_nll"].append(tr_nll); _history["val_nll"].append(vl_nll)
             _history["val_dir_acc"].append(da);   _history["lr"].append(lr_now)
             _history["gap"].append(_gap)
@@ -1399,10 +1240,8 @@ def main():
                 _swa_model.update_parameters(_model)
                 _swa_sched.step()
 
-            # IT: early-stop su gap negativo per N epoche consecutive (train memorizza);
-            #     skip nei primi warmup epoch per evitare falsi positivi.
-            # EN: early-stop on negative gap for N consecutive epochs (train memorizing);
-            #     skipped during warmup epochs to avoid false positives.
+            # early-stop on negative gap for N consecutive epochs (train memorizing);
+            # skipped during warmup epochs to avoid false positives.
             if epoch > _gap_overfit_warmup:
                 if _gap < _gap_threshold:
                     _gap_consec += 1
@@ -1422,10 +1261,8 @@ def main():
         _es.restore(_model)
 
         if _swa_model is not None:
-            # IT: update_bn ricalibra le stat BatchNorm con un full pass; modelli
-            #     solo-LayerNorm non hanno BN → skip (loop costoso e inutile).
-            # EN: update_bn recalibrates BatchNorm stats via a full pass; LayerNorm-only
-            #     models have no BN → skip (a costly, useless loop).
+            # update_bn recalibrates BatchNorm stats via a full pass; LayerNorm-only
+            # models have no BN → skip (a costly, useless loop).
             _has_bn = any(isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d,
                                           nn.SyncBatchNorm))
                           for m in _model.modules())
@@ -1441,13 +1278,11 @@ def main():
             else:
                 log.info(f"SWA peggiore: val={swa_vl:+.5f} vs best={_es.best:+.5f} — ignoro SWA")
 
-        # IT: copia il ckpt come best_model.pt per backward-compat (solo membro 0)
-        # EN: copy the ckpt as best_model.pt for backward-compat (member 0 only)
+        # copy the ckpt as best_model.pt for backward-compat (member 0 only)
         if n_ensemble > 1 and ensemble_idx == 0:
             _sh.copy(_ckpt, str(models_dir / "best_model.pt"))
 
-        # IT: valutazione sul test set per il report finale (membro 0 o singolo)
-        # EN: test-set evaluation for the final report (member 0 or the single one)
+        # test-set evaluation for the final report (member 0 or the single one)
         if ensemble_idx == 0:
             n_params = sum(p.numel() for p in _model.parameters() if p.requires_grad)
             log.info(f"Modello: {model_type}  |  Parametri: {n_params:,}")
@@ -1459,8 +1294,7 @@ def main():
         log.info(f"Ensemble {ensemble_idx+1}/{n_ensemble} completato → {_ckpt}")
 
     from scipy.stats import t as t_dist
-    # IT: z90 per-sample col proprio nu (non il medio): t(3)→2.35 vs t(10)→1.81
-    # EN: per-sample z90 with its own nu (not the mean): t(3)→2.35 vs t(10)→1.81
+    # per-sample z90 with its own nu (not the mean): t(3)→2.35 vs t(10)→1.81
     z90_per_sample = t_dist.ppf(0.95, df=np.clip(nu_a, 2.01, None))
     cov90 = np.mean(
         (test_y >= test_mu - z90_per_sample * sig_a) &
@@ -1472,10 +1306,8 @@ def main():
     whr_t = test_metrics["weighted_hit_rate"]
     icir_t= test_metrics["icir"]
 
-    # IT: metriche di VALIDATION alla best-val epoch (argmin val_nll) — persistite
-    #     in config.json per lo scoring teacher target-aware (compute_teacher_weights).
-    # EN: VALIDATION metrics at the best-val epoch (argmin val_nll) — persisted to
-    #     config.json for target-aware teacher scoring (compute_teacher_weights).
+    # VALIDATION metrics at the best-val epoch (argmin val_nll) — persisted to
+    # config.json for target-aware teacher scoring (compute_teacher_weights).
     _vnll = history.get("val_nll", [])
     _vsp  = history.get("val_spearman", [])
     _vda  = history.get("val_dir_acc", [])
@@ -1508,12 +1340,9 @@ def main():
         "n_output_experts":    mcfg.get("n_output_experts", 1),
         "patch_size":          mcfg.get("patch_size", 1),
         "drop_path_rate":      mcfg.get("drop_path_rate", 0.0),
-        # IT: A10 — record del λ con cui il modello è stato addestrato (0.0 =
-        #     nessuna penalità). Serve a rendere il checkpoint auto-descrittivo:
-        #     il giudice valuta comunque con Flash attention su entrambi i bracci.
-        # EN: A10 — record of the λ the model was trained with (0.0 = no penalty).
-        #     Makes the checkpoint self-describing: the judge evaluates both arms
-        #     with Flash attention regardless.
+        # A10 — record of the λ the model was trained with (0.0 = no penalty).
+        # Makes the checkpoint self-describing: the judge evaluates both arms
+        # with Flash attention regardless.
         "attn_entropy_lambda": mcfg.get("attn_entropy_lambda", 0.0),
         # TCNMamba parameters
         "d_model":             mcfg.get("d_model", 128),
@@ -1522,14 +1351,10 @@ def main():
         "mamba_layers":        mcfg.get("mamba_layers", 3),
         "mamba_d_state":       mcfg.get("mamba_d_state", 16),
         "mamba_expand":        mcfg.get("mamba_expand", 2),
-        # IT: metriche di validation alla best-val epoch — lette da
-        #     compute_teacher_weights per pesare il blend multi-teacher (senza
-        #     queste chiavi il blend ricadeva su pesi uniformi). best_da è il
-        #     segno-vs-mediana: ininfluente sul target vol (peso 0 nello scoring).
-        # EN: validation metrics at the best-val epoch — read by
-        #     compute_teacher_weights to weight the multi-teacher blend (without
-        #     these keys the blend fell back to uniform). best_da is the
-        #     sign-vs-median: irrelevant on the vol target (weight 0 in scoring).
+        # validation metrics at the best-val epoch — read by
+        # compute_teacher_weights to weight the multi-teacher blend (without
+        # these keys the blend fell back to uniform). best_da is the
+        # sign-vs-median: irrelevant on the vol target (weight 0 in scoring).
         "best_val_loss":       (float(min(history["val_nll"])) if history.get("val_nll") else None),
         "best_spearman":       _best_val_spearman,
         "best_da":             _best_val_da,
@@ -1545,10 +1370,8 @@ def main():
     np.savez_compressed(out_dir/"test_predictions.npz", mu=test_mu, sigma=sig_a, nu=nu_a, y_true=test_y)
 
     # ── Reliability diagram (calibration plot) ─────────────────────────────
-    # IT: misura la calibrazione di sigma: per ogni livello CI conta gli y entro;
-    #     diagonale=perfetto, sopra=under-confident, sotto=over-confident.
-    # EN: measures sigma calibration: per CI level counts the y inside; diagonal=
-    #     perfect, above=under-confident, below=over-confident.
+    # measures sigma calibration: per CI level counts the y inside; diagonal=
+    # perfect, above=under-confident, below=over-confident.
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -1584,11 +1407,9 @@ def main():
     except Exception as _e_cal:
         log.warning(f"Reliability diagram fallito: {_e_cal}")
 
-    # IT: aggiorna PipelineState con la config del modello addestrato (Fix 6)
-    # EN: update PipelineState with the trained model's config (Fix 6)
+    # update PipelineState with the trained model's config (Fix 6)
     _ps_path = out_dir / "pipeline_state.pkl"
-    # IT: fallback — cerca pipeline_state.pkl in altre arch (scaler condivisi)
-    # EN: fallback — look for pipeline_state.pkl in other archs (scalers are shared)
+    # fallback — look for pipeline_state.pkl in other archs (scalers are shared)
     if not _ps_path.exists():
         _legacy_ps = Path("models/pipeline_state.pkl")
         _root_ps = _legacy_ps if _legacy_ps.exists() else None
@@ -1616,14 +1437,10 @@ def main():
         log.warning(f"PipelineState load fallito (non critico): {e}")
         state = None
     if state is not None:
-        # IT: guard anti-stale — se l'interval del pkl arch-locale non coincide con la
-        #     config corrente, il pkl è di un dataset precedente (es. 1m sotto pivot 1h):
-        #     prova la copia canonica di 01_download_data, altrimenti fail-fast. Salvarlo
-        #     stale propagherebbe target_scale/scaler errati alla denormalizzazione.
-        # EN: anti-stale guard — if the arch-local pkl interval mismatches the current
-        #     config, the pkl belongs to a previous dataset (e.g. 1m under the 1h pivot):
-        #     try 01_download_data's canonical copy, else fail fast. Saving it stale would
-        #     propagate wrong target_scale/scalers into denormalization.
+        # anti-stale guard — if the arch-local pkl interval mismatches the current
+        # config, the pkl belongs to a previous dataset (e.g. 1m under the 1h pivot):
+        # try 01_download_data's canonical copy, else fail fast. Saving it stale would
+        # propagate wrong target_scale/scalers into denormalization.
         from quantsys.utils import interval_minutes_from_cfg
         _cfg_im = interval_minutes_from_cfg(cfg)
         if state.interval_minutes != _cfg_im:
@@ -1646,17 +1463,12 @@ def main():
                     f"Rilancia scripts/01_download_data.py per rigenerarlo."
                 )
         state.set_model_config(cfg_out)
-        # IT: M1 — registra l'impronta del VINTAGE MACRO dell'npz appena consumato.
-        #     È l'unico momento in cui la coppia modello↔macro è nota per costruzione:
-        #     dopo, `01b` può riscrivere `X_macro_*` senza toccare né i pesi né lo
-        #     scaler dei prezzi, e nulla lo segnalerebbe. Fonte "measured" perché
-        #     calcolata sull'array effettivamente letto, non dedotta da una data.
-        # EN: M1 — record the fingerprint of the MACRO VINTAGE of the npz just used.
-        #     This is the only moment when the model↔macro pairing is known by
-        #     construction: afterwards `01b` may rewrite `X_macro_*` without touching
-        #     the weights or the price scaler, and nothing would flag it. Source is
-        #     "measured" since it is computed on the array actually read, not inferred
-        #     from a date.
+        # M1 — record the fingerprint of the MACRO VINTAGE of the npz just used.
+        # This is the only moment when the model↔macro pairing is known by
+        # construction: afterwards `01b` may rewrite `X_macro_*` without touching
+        # the weights or the price scaler, and nothing would flag it. Source is
+        # "measured" since it is computed on the array actually read, not inferred
+        # from a date.
         try:
             from quantsys.utils import macro_fingerprint
             _mfp = macro_fingerprint(data)
@@ -1667,15 +1479,12 @@ def main():
                          f"n_macro={_mfp.get('n_macro_features')} "
                          f"train_md5={_mfp['splits']['X_macro_train']['md5'][:12]}")
         except Exception as _e:
-            # IT: non bloccante — un'impronta mancante degrada a "non verificabile",
-            #     mai a "verificato". Rompere il training per un md5 sarebbe sproporzionato.
-            # EN: non-blocking — a missing fingerprint degrades to "not verifiable",
-            #     never to "verified". Breaking training over an md5 would be disproportionate.
+            # non-blocking — a missing fingerprint degrades to "not verifiable",
+            # never to "verified". Breaking training over an md5 would be disproportionate.
             log.warning(f"impronta vintage macro non calcolata (non critico): {_e}")
         state.save(str(_ps_path))
 
-    # IT: copia best_model + PipelineState nella exp dir (senza scaler il ckpt è inutile)
-    # EN: copy best_model + PipelineState into the exp dir (no scalers = unusable ckpt)
+    # copy best_model + PipelineState into the exp dir (no scalers = unusable ckpt)
     best_model_src = out_dir / "best_model.pt"
     if best_model_src.exists():
         try:
@@ -1689,8 +1498,7 @@ def main():
         except Exception as _e:
             log.warning(f"Impossibile copiare pipeline_state.pkl: {_e}")
 
-    # IT: salva le metriche finali nella experiment dir
-    # EN: persist the final metrics into the experiment dir
+    # persist the final metrics into the experiment dir
     _train_losses = history.get("train_nll", [])
     _val_losses   = history.get("val_nll", [])
     _val_da       = history.get("val_dir_acc", [])

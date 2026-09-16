@@ -1,26 +1,26 @@
 """
-Script 02b — Walk-Forward Validation con riaddestramento per fold.
+Script 02b — Walk-Forward Validation with per-fold retraining.
 
-Miglioramento 7 — Walk-forward che riaddestra:
-  La versione precedente valutava il modello già addestrato su fold diversi.
-  Questo NON è un vero walk-forward: il modello aveva già "visto" i dati
-  futuri durante il suo training originale (overfitting temporale mascherato).
+Improvement 7 — Retraining walk-forward:
+  The previous version evaluated the already-trained model on different folds.
+  That is NOT a true walk-forward: the model had already "seen" the future
+  data during its original training (masked temporal overfitting).
 
-  Ora ogni fold:
-  1. Riaddestra il modello da zero (o da un init) su [0, train_end)
-  2. Valuta su [val_start, val_end) — dati mai visti in training
-  3. Calcola le metriche di quel periodo specifico
+  Now each fold:
+  1. Retrains the model from scratch (or from an init) on [0, train_end)
+  2. Evaluates on [val_start, val_end) — data never seen in training
+  3. Computes the metrics for that specific period
 
-  Questo è costoso (K × training_time) ma dà una stima molto più
-  realistica: se le metriche sono stabili tra fold, il segnale è robusto.
-  Se variano molto, il modello si overfita al regime recente.
+  This is expensive (K × training_time) but gives a much more
+  realistic estimate: if metrics are stable across folds, the signal is robust.
+  If they vary a lot, the model overfits the recent regime.
 
-  Ottimizzazione: usa un training abbreviato per ogni fold (early stopping
-  aggressivo, max_epochs ridotto) per mantenere tempi ragionevoli.
+  Optimization: uses shortened training per fold (aggressive early
+  stopping, reduced max_epochs) to keep run times reasonable.
 
 Run:
-  python scripts/02b_walkforward_validate.py            # riaddestra
-  python scripts/02b_walkforward_validate.py --no-retrain  # solo valuta
+  python scripts/02b_walkforward_validate.py            # retrain
+  python scripts/02b_walkforward_validate.py --no-retrain  # evaluate only
 """
 import argparse
 import json
@@ -30,8 +30,7 @@ import os
 import time
 from pathlib import Path
 
-# IT: cap thread BLAS/OMP prima di importare numpy/torch (cpu_fraction da config)
-# EN: cap BLAS/OMP threads before importing numpy/torch (cpu_fraction from config)
+# cap BLAS/OMP threads before importing numpy/torch (cpu_fraction from config)
 import yaml as _yaml
 with open(Path(__file__).resolve().parent.parent / "config" / "default.yaml", encoding="utf-8") as _f:
     _cpu_frac = _yaml.safe_load(_f).get("hardware", {}).get("cpu_fraction", 0.5)
@@ -56,8 +55,7 @@ setup_logging()
 log = logging.getLogger("quantsys.script.02b")
 
 
-# IT: metriche per fold (DA, Spearman, WHR, coverage CI90)
-# EN: per-fold metrics (DA, Spearman, WHR, CI90 coverage)
+# per-fold metrics (DA, Spearman, WHR, CI90 coverage)
 
 def fold_metrics(y_true: np.ndarray, y_pred: np.ndarray,
                  sig_arr: np.ndarray, nu_arr: np.ndarray) -> dict:
@@ -69,13 +67,11 @@ def fold_metrics(y_true: np.ndarray, y_pred: np.ndarray,
         sp, pv = spearmanr(y_true, y_pred)
     sp = float(sp) if not np.isnan(sp) else 0.0
 
-    # IT: WHR = pct di |y| catturato dai segni corretti (qualita' direzionale pesata)
-    # EN: WHR = % of |y| captured by correct signs (weighted directional quality)
+    # WHR = % of |y| captured by correct signs (weighted directional quality)
     correct = np.sign(y_true) == np.sign(y_pred)
     whr = float(np.abs(y_true[correct]).sum() / (np.abs(y_true).sum() + 1e-10))
 
-    # IT: quantile t-Student a 95% per CI bilaterale 90% (df = nu medio del fold)
-    # EN: 95% t-Student quantile for 90% two-sided CI (df = fold-mean nu)
+    # 95% t-Student quantile for 90% two-sided CI (df = fold-mean nu)
     z90  = t_dist.ppf(0.95, df=nu_arr.mean())
     cov90= float(np.mean(
         (y_true >= y_pred - z90*sig_arr) & (y_true <= y_pred + z90*sig_arr)
@@ -84,27 +80,22 @@ def fold_metrics(y_true: np.ndarray, y_pred: np.ndarray,
     return {"da": da, "spearman": sp, "whr": whr, "ci90": cov90}
 
 
-# IT: training per fold (riaddestra da zero per stima onesta)
-# EN: per-fold training (retrain from scratch for an honest estimate)
+# per-fold training (retrain from scratch for an honest estimate)
 
-# IT: warmup lineare + decay cosine fino a min_frac del lr iniziale
-# EN: linear warmup + cosine decay down to min_frac of initial lr
+# linear warmup + cosine decay down to min_frac of initial lr
 class CosineWarmup(torch.optim.lr_scheduler.LambdaLR):
-    # IT: salva i parametri warmup/total/min_frac e registra il lambda LR
-    # EN: store warmup/total/min_frac params and register the LR lambda
+    # store warmup/total/min_frac params and register the LR lambda
     def __init__(self, opt, warmup, total, min_frac=0.05):
         self.w, self.t, self.m = warmup, total, min_frac
         super().__init__(opt, self._lr)
-    # IT: moltiplicatore LR per step: warmup lineare poi decay cosine
-    # EN: per-step LR multiplier: linear warmup then cosine decay
+    # per-step LR multiplier: linear warmup then cosine decay
     def _lr(self, step):
         if step < self.w: return step / max(self.w, 1)
         p = (step - self.w) / max(self.t - self.w, 1)
         return self.m + (1 - self.m) * 0.5 * (1 + math.cos(math.pi * p))
 
 
-# IT: Addestra il modello su un singolo fold walk-forward con early stopping, ritorna le metriche di validation.
-# EN: Trains the model on a single walk-forward fold with early stopping, returns validation metrics.
+# Trains the model on a single walk-forward fold with early stopping, returns validation metrics.
 def train_fold(
     X_tr, y_tr, X_vl, y_vl,
     X_macro_tr=None, X_macro_vl=None,
@@ -113,14 +104,13 @@ def train_fold(
     n_dynamic=None,
 ) -> tuple:
     """
-    Riaddestra il modello sul training set del fold e valuta sul validation.
-    Usa la stessa loss asimmetrica del training principale (Miglioramento 2).
+    Retrains the model on the fold's training set and evaluates on validation.
+    Uses the same asymmetric loss as the main training (Improvement 2).
     """
     mcfg  = cfg["model"]; tcfg = cfg["training"]; mccfg = cfg.get("macro", {})
     hwcfg = cfg["hardware"]
 
-    # IT: stessi iperparametri loss del training principale (coerenza fold/full)
-    # EN: same loss hyperparams as main training (fold/full consistency)
+    # same loss hyperparams as main training (fold/full consistency)
     asym_alpha     = tcfg.get("asymmetry_alpha",     2.0)
     asym_threshold = tcfg.get("asymmetry_threshold", 0.002)
     dv_lambda      = tcfg.get("dv_lambda",           0.0)
@@ -134,8 +124,7 @@ def train_fold(
                  num_workers=min(hwcfg["num_workers"], 4),
                  persistent_workers=min(hwcfg["num_workers"], 4) > 0)
 
-    # IT: helper DataLoader — include il tensore macro solo se presente
-    # EN: DataLoader helper — includes the macro tensor only when present
+    # DataLoader helper — includes the macro tensor only when present
     def mk_dl(X, Xm, y, shuffle):
         if has_macro:
             return DataLoader(TensorDataset(
@@ -151,19 +140,15 @@ def train_fold(
     tr_dl = mk_dl(X_tr, X_macro_tr, y_tr, True)
     vl_dl = mk_dl(X_vl, X_macro_vl, y_vl, False)
 
-    # IT: nuovo modello per ogni fold (no transfer learning -> stima pulita)
-    # EN: fresh model per fold (no transfer learning -> clean estimate)
+    # fresh model per fold (no transfer learning -> clean estimate)
     architecture = mcfg.get("architecture", "lstm")
     _loss_type    = mcfg.get("loss_type", "t_student")
     _use_multitask= mcfg.get("use_multitask", False)
     if architecture == "itransformer":
         from quantsys.model import QuantiTransformer
-        # IT: guard A3 (audit MINOR-2) — il walk-forward NON threada il gate
-        #     regime: con head_type=regime_moe addestrerebbe in silenzio un
-        #     single-head divergente da 02_train → fail-fast esplicito.
-        # EN: A3 guard (MINOR-2 audit) — the walk-forward does NOT thread the
-        #     regime gate: under head_type=regime_moe it would silently train a
-        #     single-head diverging from 02_train → explicit fail-fast.
+        # A3 guard (MINOR-2 audit) — the walk-forward does NOT thread the
+        # regime gate: under head_type=regime_moe it would silently train a
+        # single-head diverging from 02_train → explicit fail-fast.
         if (mcfg.get("head_type", "single") or "single") == "regime_moe":
             raise ValueError(
                 "02b_walkforward_validate non supporta head_type='regime_moe' "
@@ -218,10 +203,8 @@ def train_fold(
             n_output_experts   = mcfg.get("n_output_experts", 1),
         ).to(device)
     elif architecture == "nhits":
-        # IT: branch N-HiTS — ricalca la costruzione di 02_train (linea vol/distill),
-        #     necessario per riaddestrare il teacher N-HiTS per fold nel walk-forward.
-        # EN: N-HiTS branch — mirrors 02_train's construction (vol/distill line),
-        #     needed to retrain the N-HiTS teacher per fold in the walk-forward.
+        # N-HiTS branch — mirrors 02_train's construction (vol/distill line),
+        # needed to retrain the N-HiTS teacher per fold in the walk-forward.
         from quantsys.model import QuantNHiTS
         _n_dyn = n_dynamic if n_dynamic is not None else n_feat
         _T     = mcfg.get("window_size", 120)
@@ -242,8 +225,7 @@ def train_fold(
             n_output_experts   = mcfg.get("n_output_experts", 1),
             use_revin          = mcfg.get("use_revin", False),
             revin_target_idx   = mcfg.get("revin_target_idx", 0),
-            # IT: A9 — blocco MaxPool parallelo, lever inerte (default false).
-            # EN: A9 — parallel MaxPool block, inert lever (default false).
+            # A9 — parallel MaxPool block, inert lever (default false).
             use_max_pool_block = mcfg.get("nhits_max_pool_block", False),
             max_pool_kernel    = mcfg.get("nhits_max_pool_kernel", 8),
         ).to(device)
@@ -271,8 +253,7 @@ def train_fold(
             n_dynamic_features = n_dynamic,
         ).to(device)
 
-    # IT: clip bounds fittati su X_tr del fold (evita data leakage dal val)
-    # EN: clip bounds fit on fold X_tr only (avoids leakage from val)
+    # clip bounds fit on fold X_tr only (avoids leakage from val)
     if hasattr(model, "clip_lo"):
         _Xf = X_tr.reshape(-1, n_feat)
         with np.errstate(all="ignore"):
@@ -288,18 +269,15 @@ def train_fold(
     use_amp  = tcfg["use_amp"] and device.type == "cuda"
     scaler   = torch.amp.GradScaler(device=device.type, enabled=use_amp)
 
-    # IT: ckpt temporaneo per-fold redirezionabile via QUANTSYS_MODELS_ROOT (default
-    #     models/{arch} = identico) → in sandbox NON tocca il modello live di 04b.
-    # EN: per-fold temp ckpt redirectable via QUANTSYS_MODELS_ROOT (default
-    #     models/{arch} = identical) → in sandbox it does NOT touch 04b's live model.
+    # per-fold temp ckpt redirectable via QUANTSYS_MODELS_ROOT (default
+    # models/{arch} = identical) → in sandbox it does NOT touch 04b's live model.
     _ckpt_dir = models_root() / Path(cfg["training"]["output_dir"]).name
     _ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = str(_ckpt_dir / f"wf_fold{fold_id}_best.pt")
     es        = EarlyStopping(patience=patience, path=ckpt_path)
 
     for epoch in range(1, max_epochs + 1):
-        # IT: training step
-        # EN: training step
+        # training step
         model.train(); tr_loss = 0.0
         for batch_data in tr_dl:
             if has_macro:
@@ -309,8 +287,7 @@ def train_fold(
             opt.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 out  = model(Xb, Xmb) if has_macro else model(Xb)
-            # IT: loss SEMPRE in fp32 (quantile_loss non e' fp16-safe -> NaN)
-            # EN: loss ALWAYS in fp32 (quantile_loss is not fp16-safe -> NaN)
+            # loss ALWAYS in fp32 (quantile_loss is not fp16-safe -> NaN)
             with torch.amp.autocast(device_type=device.type, enabled=False):
                 if model.loss_type == "quantile":
                     loss = quantile_loss(yb.float(), out[0].float())
@@ -327,8 +304,7 @@ def train_fold(
             scaler.step(opt); scaler.update(); sched.step()
             tr_loss += float(loss.item())
 
-        # IT: validation step
-        # EN: validation step
+        # validation step
         model.eval(); vl_loss = 0.0; vl_n = 0
         with torch.no_grad():
             for batch_data in vl_dl:
@@ -347,8 +323,7 @@ def train_fold(
                     vl_loss += _l; vl_n += 1
 
         vl_nll = vl_loss / max(vl_n, 1)
-        # IT: log per OGNI epoca (era ogni 5) — visibilità live della convergenza per fold.
-        # EN: log EVERY epoch (was every 5) — live per-fold convergence visibility.
+        # log EVERY epoch (was every 5) — live per-fold convergence visibility.
         log.info(f"  Fold {fold_id} Ep {epoch:3d}  "
                  f"train={tr_loss/len(tr_dl):.4f}  val={vl_nll:.4f}")
         if es(vl_nll, model):
@@ -358,12 +333,11 @@ def train_fold(
     return model, es.best
 
 
-# IT: inferenza sul fold di test + calcolo metriche (gestisce quantile e t-Student)
-# EN: inference on the test fold + metric computation (handles quantile and t-Student)
+# inference on the test fold + metric computation (handles quantile and t-Student)
 
 def eval_model(model, X, y, X_macro=None, device=None,
                cfg=None, has_macro=False, target_type="ret", vol_cs=None) -> dict:
-    """Valuta il modello sul fold di test (mai visto in training)."""
+    """Evaluates the model on the test fold (never seen in training)."""
     batch = cfg["training"]["batch_size"]
     if has_macro:
         dl = DataLoader(TensorDataset(
@@ -389,9 +363,9 @@ def eval_model(model, X, y, X_macro=None, device=None,
                 Xb, yb = [x.to(device) for x in bd]
                 out = model(Xb)
             if loss_type == "quantile":
-                qp = out[0]                                       # IT: (B, 5) | EN: (B, 5)
-                mus.append(qp[:, 2].cpu().numpy())                # IT: q50 come stima puntuale | EN: q50 as point estimate
-                # IT: sigma da q95-q5 diviso 2.56 (gaussiana approx) | EN: sigma from q95-q5 / 2.56 (gaussian approx)
+                qp = out[0]                                       # (B, 5)
+                mus.append(qp[:, 2].cpu().numpy())                # q50 as point estimate
+                # sigma from q95-q5 / 2.56 (gaussian approx)
                 sigs.append(((qp[:, 4] - qp[:, 0]).clamp(min=1e-6) / 2.56).cpu().numpy())
                 nus.append(np.full(len(qp), 5.0, dtype=np.float32))
             else:
@@ -404,23 +378,18 @@ def eval_model(model, X, y, X_macro=None, device=None,
     sig_a = np.concatenate(sigs)
     nu_a  = np.concatenate(nus)
     y_a   = np.concatenate(ys)
-    # IT: linea VOLATILITÀ (log_rv) → QLIKE su RV in livelli (le metriche direzionali
-    #     DA/Spearman/WHR/CI90 sono il segno-della-varianza, non un segnale: vedi STATUS).
-    # EN: VOLATILITY line (log_rv) → QLIKE on RV levels (directional DA/Spearman/WHR/CI90
-    #     are the sign-of-variance, not a signal: see STATUS).
+    # VOLATILITY line (log_rv) → QLIKE on RV levels (directional DA/Spearman/WHR/CI90
+    # are the sign-of-variance, not a signal: see STATUS).
     if target_type == "log_rv" and vol_cs is not None:
         return qlike_from_z(y_a, mu_a, vol_cs[0], vol_cs[1])
     return fold_metrics(y_a, mu_a, sig_a, nu_a)
 
 
-# IT: main — CLI + caricamento dataset + loop sui fold + aggregato
-# EN: main — CLI + dataset load + per-fold loop + aggregate
+# main — CLI + dataset load + per-fold loop + aggregate
 
 def main():
-    # IT: console Windows default cp1252 — qualsiasi unicode nei banner/report crasha
-    #     il print con UnicodeEncodeError. Reconfigure UTF-8 come 01/02/04.
-    # EN: Windows console defaults to cp1252 — any unicode in banners/reports crashes
-    #     the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
+    # Windows console defaults to cp1252 — any unicode in banners/reports crashes
+    # the print with UnicodeEncodeError. Reconfigure UTF-8 like 01/02/04.
     import sys as _sys
     for _stream in (_sys.stdout, _sys.stderr):
         try:
@@ -441,12 +410,9 @@ def main():
     ensure_dirs("results", "models")
     Path(cfg["training"]["output_dir"]).mkdir(parents=True, exist_ok=True)
 
-    # IT: linea target — vol (log_rv) usa la fold-metric QLIKE (inversione z→raw via
-    #     scaler), il direzionale resta IDENTICO (DA/Spearman/WHR/CI90). Lo scaler
-    #     globale (center/scale di target_ret) è lo stesso con cui l'npz è z-scorato.
-    # EN: target line — vol (log_rv) uses the QLIKE fold-metric (z→raw inversion via
-    #     scaler), directional path stays IDENTICAL (DA/Spearman/WHR/CI90). The global
-    #     scaler (target_ret center/scale) is the same that z-scored the npz.
+    # target line — vol (log_rv) uses the QLIKE fold-metric (z→raw inversion via
+    # scaler), directional path stays IDENTICAL (DA/Spearman/WHR/CI90). The global
+    # scaler (target_ret center/scale) is the same that z-scored the npz.
     target_type = cfg["features"].get("target_type", "ret")
     is_vol = (target_type == "log_rv")
     vol_cs = None
@@ -461,15 +427,13 @@ def main():
         assert vol_cs[0] < -3, "center ≈ 0 → PipelineState non è del dataset log-RV (stale?)"
         log.info(f"VOL fold-metric QLIKE attiva · target_ret center={vol_cs[0]:.3f} scale={vol_cs[1]:.3f}")
 
-    # IT: ricompone il dataset completo (train+val+test) per ri-splittare in fold
-    # EN: rebuild full dataset (train+val+test) to re-split into temporal folds
+    # rebuild full dataset (train+val+test) to re-split into temporal folds
     data = np.load("data/lstm_dataset.npz", allow_pickle=True)
     X    = np.concatenate([data["X_train"], data["X_val"], data["X_test"]])
     y    = np.concatenate([data["y_train"], data["y_val"], data["y_test"]])
     t    = np.concatenate([data["t_train"], data["t_val"], data["t_test"]])
 
-    # IT: n_dynamic costante tra fold, letto una sola volta
-    # EN: n_dynamic constant across folds, read once
+    # n_dynamic constant across folds, read once
     n_dynamic = int(data["n_dynamic_features"][0]) if "n_dynamic_features" in data.files else None
 
     has_macro = ("X_macro_train" in data.files and
@@ -490,8 +454,7 @@ def main():
                                embargo_steps=embargo_steps,
                                val_frac=cfg["training"]["val_fraction"])
 
-    # IT: intestazione colonne — vol (QLIKE/MSElog) vs direzionale (DA/ρ/WHR/CI90).
-    # EN: column header — vol (QLIKE/MSElog) vs directional (DA/ρ/WHR/CI90).
+    # column header — vol (QLIKE/MSElog) vs directional (DA/ρ/WHR/CI90).
     _cols = (f"  {'Fold':<5} {'NLL':>8} {'QLIKE':>9} {'MSElog':>9} {'N':>6} {'Tempo':>7}"
              if is_vol else
              f"  {'Fold':<5} {'NLL':>8} {'DA':>7} {'ρ':>9} {'WHR':>7} {'CI90':>7} {'N':>6} {'Tempo':>7}")
@@ -517,16 +480,14 @@ def main():
         X_vi = fold["X_val_internal"]; y_vi = fold["y_val_internal"]
         X_vl = fold["X_val"];          y_vl = fold["y_val"]
 
-        # IT: allinea Xm agli stessi indici di X per il fold corrente
-        # EN: align Xm to the same indices of X for the current fold
+        # align Xm to the same indices of X for the current fold
         n_tr = len(y_tr)
         Xm_tr = Xm[:n_tr] if has_macro else None
         Xm_vi = Xm[n_tr : fold["train_end_idx"]] if has_macro else None
         Xm_vl = Xm[fold["val_start_idx"] : fold["val_end_idx"]] if has_macro else None
 
         if args.no_retrain:
-            # IT: modalita' veloce — valuta il modello globale gia' addestrato
-            # EN: fast path — evaluate the already-trained global model
+            # fast path — evaluate the already-trained global model
             try:
                 from quantsys.model import load_model
                 _best_pt = str(models_root() / Path(cfg["training"]["output_dir"]).name / "best_model.pt")
@@ -536,8 +497,7 @@ def main():
                 log.error(f"{_best_pt} non trovato. Esegui prima 02_train.py.")
                 return
         else:
-            # IT: walk-forward vero — riaddestra da zero sul fold
-            # EN: true walk-forward — retrain from scratch on this fold
+            # true walk-forward — retrain from scratch on this fold
             model, val_nll = train_fold(
                 X_tr, y_tr, X_vi, y_vi,
                 X_macro_tr=Xm_tr, X_macro_vl=Xm_vi,
@@ -546,8 +506,7 @@ def main():
                 n_dynamic=n_dynamic,
             )
 
-        # IT: valuta sul fold di test (out-of-sample puro)
-        # EN: evaluate on the held-out fold (pure out-of-sample)
+        # evaluate on the held-out fold (pure out-of-sample)
         m = eval_model(model, X_vl, y_vl, Xm_vl, device=device,
                        cfg=cfg, has_macro=has_macro,
                        target_type=target_type, vol_cs=vol_cs)
@@ -563,8 +522,7 @@ def main():
             print(f"  {k:<5} {val_nll:>8.4f} {m['da']:>7.3f} {m['spearman']:>+9.4f} "
                   f"{m['whr']:>7.3f} {m['ci90']:>7.3f} {len(y_vl):>6} {elapsed:>6.0f}s")
 
-    # IT: aggregato cross-fold (media, std, range)
-    # EN: cross-fold aggregate (mean, std, range)
+    # cross-fold aggregate (mean, std, range)
     total_elapsed = time.time() - t0_total
     keys = ["qlike", "mse_log"] if is_vol else ["da", "spearman", "whr", "ci90"]
     agg  = {}
@@ -577,10 +535,8 @@ def main():
         print(f"  {k:<22} {mean:>+8.4f} ± {std:.4f}  "
               f"[{agg[k]['min']:+.4f}, {agg[k]['max']:+.4f}]")
 
-    # IT: diagnosi automatica — vol: stabilità del QLIKE cross-fold; direzionale:
-    #     stabilità Spearman + calibrazione CI90 (path invariato).
-    # EN: auto-diagnosis — vol: cross-fold QLIKE stability; directional: Spearman
-    #     stability + CI90 calibration (unchanged path).
+    # auto-diagnosis — vol: cross-fold QLIKE stability; directional: Spearman
+    # stability + CI90 calibration (unchanged path).
     if is_vol:
         ql_mean = agg["qlike"]["mean"]; ql_std = agg["qlike"]["std"]
         _rel = (ql_std / ql_mean) if ql_mean > 0 else float("inf")
@@ -604,10 +560,8 @@ def main():
     if abs(ci_mean-0.90) > 0.08 else '✓ Calibrazione CI90 '+f'{ci_mean:.3f}'}
   Tempo totale: {total_elapsed:.0f}s""")
 
-    # IT: salva risultati per dashboard /api/walkforward — suffisso target per la
-    #     linea vol (non clobbera il file direzionale).
-    # EN: persist results for the dashboard /api/walkforward — target suffix for the
-    #     vol line (does not clobber the directional file).
+    # persist results for the dashboard /api/walkforward — target suffix for the
+    # vol line (does not clobber the directional file).
     _suffix = f"_{target_type}" if is_vol else ""
     out_path = Path(cfg["backtest"]["output_dir"]) / f"walkforward_metrics{_suffix}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,40 +1,21 @@
-# IT: A13a — CONDIZIONE (3) EX-ANTE SUL PIN-CLOSE: quante posizioni AVREBBERO
-#     attivato la chiusura anticipata, su una griglia di (max_hours, pin_band)?
-#     Perche' PRIMA e non dopo: un gate forward su A13 costa ~1 mese di campione
-#     (~1 posizione/giorno) e non e' avviabile prima di meta' agosto (due campioni
-#     forward aperti). Se il pin-close scatta su 3 posizioni su 30, quel mese
-#     produrrebbe "NESSUNA CONCLUSIONE" per difetto di conteggio - ed e' esattamente
-#     la trappola che il protocollo impone di evitare misurando la condizione di
-#     conteggio quando e' MODEL-INDEPENDENT (successo B2/B3 il 2026-07-19, e budget
-#     campionario L2 il 2026-07-31).
-#     ⚠ QUESTO NON E' UN GATE E NON CALCOLA NESSUNA PnL. Conta eventi, e basta:
-#     strike, expiry e prezzo del sottostante sono fatti registrati, indipendenti
-#     dal modello. Nessun controfattuale di rendimento viene prodotto qui, perche'
-#     il campione e' gia' stato guardato (gate leg chiuso FAIL 0/3 il 2026-07-30) e
-#     un numero di PnL calcolato ora non sarebbe evidenza, sarebbe post-hoc.
-#     ⚠ La cella (X, f) del gate eventuale NON va scelta massimizzando qualcosa su
-#     questa superficie: va fissata da una REGOLA A PRIORI dichiarata nella
-#     pre-registrazione (es. la X e la f piu' piccole che garantiscono n >= n_min).
-#     Il predicato e' importato da scripts/04b_vol_paper.py: si conta con la
-#     funzione di PRODUZIONE, non con una sua copia che potrebbe divergere.
-# EN: A13a — EX-ANTE CONDITION (3) ON PIN-CLOSE: how many positions WOULD have
-#     triggered the early close, over a grid of (max_hours, pin_band)?
-#     Why BEFORE and not after: a forward gate on A13 costs ~1 month of sample
-#     (~1 position/day) and cannot start before mid-August (two open forward
-#     samples). If pin-close fires on 3 positions out of 30, that month would yield
-#     "NO CONCLUSION" for lack of count - exactly the trap the protocol avoids by
-#     measuring the counting condition while it is MODEL-INDEPENDENT (B2/B3 success
-#     on 2026-07-19, L2 sample budget on 2026-07-31).
-#     ⚠ THIS IS NOT A GATE AND COMPUTES NO PnL. It counts events, nothing else:
-#     strike, expiry and underlying price are recorded facts, independent of the
-#     model. No return counterfactual is produced here, because the sample has
-#     already been looked at (leg gate closed FAIL 0/3 on 2026-07-30) and a PnL
-#     number computed now would not be evidence, it would be post-hoc.
-#     ⚠ The eventual gate's (X, f) cell must NOT be picked by maximizing anything
-#     on this surface: it must be fixed by an A PRIORI RULE declared in the
-#     pre-registration (e.g. the smallest X and f granting n >= n_min).
-#     The predicate is imported from scripts/04b_vol_paper.py: the count runs on the
-#     PRODUCTION function, not on a copy of it that could drift.
+# A13a — EX-ANTE CONDITION (3) ON PIN-CLOSE: how many positions WOULD have
+# triggered the early close, over a grid of (max_hours, pin_band)?
+# Why BEFORE and not after: a forward gate on A13 costs ~1 month of sample
+# (~1 position/day) and cannot start before mid-August (two open forward
+# samples). If pin-close fires on 3 positions out of 30, that month would yield
+# "NO CONCLUSION" for lack of count - exactly the trap the protocol avoids by
+# measuring the counting condition while it is MODEL-INDEPENDENT (B2/B3 success
+# on 2026-07-19, L2 sample budget on 2026-07-31).
+# ⚠ THIS IS NOT A GATE AND COMPUTES NO PnL. It counts events, nothing else:
+# strike, expiry and underlying price are recorded facts, independent of the
+# model. No return counterfactual is produced here, because the sample has
+# already been looked at (leg gate closed FAIL 0/3 on 2026-07-30) and a PnL
+# number computed now would not be evidence, it would be post-hoc.
+# ⚠ The eventual gate's (X, f) cell must NOT be picked by maximizing anything
+# on this surface: it must be fixed by an A PRIORI RULE declared in the
+# pre-registration (e.g. the smallest X and f granting n >= n_min).
+# The predicate is imported from scripts/04b_vol_paper.py: the count runs on the
+# PRODUCTION function, not on a copy of it that could drift.
 import glob
 import importlib.util
 import json
@@ -52,34 +33,25 @@ CHAIN_GLOB = str(ROOT / "data" / "iv" / "chain" / "btc_options_*.parquet")
 CANDLES_1M = ROOT / "data" / "raw_candles_1m_l2.parquet"
 OUT_JSON = ROOT / "results" / "vol_paper" / "pin_close_feasibility.json"
 
-# IT: cadenza reale del loop 04b: tick orario a hh:00 + 90s (AVVIO.md 5.3bis).
-#     La condizione va valutata SOLO quando il processo puo' agire: valutarla in
-#     continuo sovrastimerebbe gli inneschi.
-# EN: real 04b loop cadence: hourly tick at hh:00 + 90s. The condition must be
-#     evaluated ONLY when the process can act: evaluating it continuously would
-#     overstate the triggers.
+# real 04b loop cadence: hourly tick at hh:00 + 90s (START.md 5.3bis). The condition must be
+# evaluated ONLY when the process can act: evaluating it continuously would
+# overstate the triggers.
 TICK_OFFSET_S = 90
 SNAP_TOL = pd.Timedelta("10min")
 
-# IT: griglia esplorativa, NON una scelta di parametri.
-# EN: exploratory grid, NOT a parameter choice.
+# exploratory grid, NOT a parameter choice.
 GRID_HOURS = [1.0, 2.0, 3.0, 4.0, 6.0]
 GRID_BAND = [0.001, 0.002, 0.003, 0.005, 0.0075, 0.01]
 
-# IT: confine di epoca — il VPS ha preso i collector il 2026-07-14 (copertura
-#     100%); prima il poller di casa girava al 18.6% delle ore. Una posizione
-#     entrata nell'epoca "casa" puo' avere tick NON OSSERVABILI, e contarli come
-#     "nessun innesco" falserebbe il conteggio verso il basso.
-# EN: epoch boundary - the VPS took over the collectors on 2026-07-14 (100%
-#     coverage); before that the home poller ran at 18.6% of hours. A position
-#     entered in the "home" epoch may have UNOBSERVABLE ticks, and counting those
-#     as "no trigger" would bias the count downward.
+# epoch boundary - the VPS took over the collectors on 2026-07-14 (100%
+# coverage); before that the home poller ran at 18.6% of hours. A position
+# entered in the "home" epoch may have UNOBSERVABLE ticks, and counting those
+# as "no trigger" would bias the count downward.
 VPS_EPOCH = pd.Timestamp("2026-07-14", tz="UTC")
 
 
 def _import_from_path(name: str, path: Path):
-    # IT: import da path (nomi con cifre iniziali / fuori package).
-    # EN: path-based import (digit-leading names / outside packages).
+    # path-based import (digit-leading names / outside packages).
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -87,12 +59,9 @@ def _import_from_path(name: str, path: Path):
 
 
 def load_positions() -> pd.DataFrame:
-    # IT: campione = solo executed=True, la stessa definizione pre-dichiarata del
-    #     gate v1 (il trade #0 e' uno smoke pre-lancio designato non-campione da
-    #     note contemporanee PRE-settlement).
-    # EN: sample = executed=True only, the same pre-declared definition as gate v1
-    #     (trade #0 is a pre-launch smoke, designated non-sample by contemporary
-    #     PRE-settlement notes).
+    # sample = executed=True only, the same pre-declared definition as gate v1
+    # (trade #0 is a pre-launch smoke, designated non-sample by contemporary
+    # PRE-settlement notes).
     rows = [json.loads(l) for l in TRADES.read_text(encoding="utf-8").splitlines() if l.strip()]
     df = pd.DataFrame(rows)
     df["entry_ts"] = pd.to_datetime(df["entry_ts"], utc=True)
@@ -104,14 +73,10 @@ def load_positions() -> pd.DataFrame:
 
 
 def load_underlying() -> pd.DataFrame:
-    # IT: prezzo del sottostante per (snapshot, expiry) dal raw chain registrato.
-    #     `underlying_price` di Deribit e' il FORWARD di quella expiry: per tenor
-    #     <= 30h il basis vs indice spot e' di pochi bps, e la sensibilita' e'
-    #     quantificata sotto con due proxy alternativi.
-    # EN: underlying price per (snapshot, expiry) from the recorded raw chain.
-    #     Deribit's `underlying_price` is that expiry's FORWARD: for tenors <= 30h
-    #     the basis vs the spot index is a few bps, and sensitivity is quantified
-    #     below with two alternative proxies.
+    # underlying price per (snapshot, expiry) from the recorded raw chain.
+    # Deribit's `underlying_price` is that expiry's FORWARD: for tenors <= 30h
+    # the basis vs the spot index is a few bps, and sensitivity is quantified
+    # below with two alternative proxies.
     parts = []
     for f in sorted(glob.glob(CHAIN_GLOB)):
         d = pd.read_parquet(f, columns=["snapshot_ts", "expiry", "underlying_price"])
@@ -123,16 +88,11 @@ def load_underlying() -> pd.DataFrame:
 
 
 def load_front_and_spot(chain: pd.DataFrame):
-    # IT: due proxy alternativi dell'indice per la sensibilita':
-    #     P2 = forward della expiry PIU' VICINA a ogni snapshot (il piu' prossimo
-    #          allo spot fra i forward disponibili);
-    #     P3 = close 1m di Binance (indice costruito su un basket diverso).
-    #     Se il conteggio non cambia fra i tre, la conclusione non dipende dal proxy.
-    # EN: two alternative index proxies for sensitivity:
-    #     P2 = forward of the NEAREST expiry at each snapshot (closest to spot
-    #          among the available forwards);
-    #     P3 = Binance 1m close (an index built on a different basket).
-    #     If the count is stable across the three, the conclusion is proxy-independent.
+    # two alternative index proxies for sensitivity:
+    # P2 = forward of the NEAREST expiry at each snapshot (closest to spot
+    #      among the available forwards);
+    # P3 = Binance 1m close (an index built on a different basket).
+    # If the count is stable across the three, the conclusion is proxy-independent.
     front = (chain.sort_values(["snapshot_ts", "expiry"])
                   .groupby("snapshot_ts", as_index=False)
                   .first()[["snapshot_ts", "underlying_price"]]
@@ -148,8 +108,7 @@ def load_front_and_spot(chain: pd.DataFrame):
 
 
 def ticks_for(entry: pd.Timestamp, expiry: pd.Timestamp) -> pd.DatetimeIndex:
-    # IT: tick orari in cui la posizione e' aperta E il processo puo' agire.
-    # EN: hourly ticks at which the position is open AND the process can act.
+    # hourly ticks at which the position is open AND the process can act.
     first = (entry.ceil("h") + pd.Timedelta(seconds=TICK_OFFSET_S))
     if first <= entry:
         first = first + pd.Timedelta(hours=1)
@@ -157,18 +116,13 @@ def ticks_for(entry: pd.Timestamp, expiry: pd.Timestamp) -> pd.DatetimeIndex:
 
 
 def price_at(ticks: pd.DatetimeIndex, src: pd.DataFrame) -> np.ndarray:
-    # IT: prezzo osservato piu' vicino a ogni tick entro SNAP_TOL; NaN se il
-    #     collector non copriva quel tick (tick NON OSSERVABILE, non "nessun
-    #     innesco": la distinzione e' il punto del conteggio per epoche).
-    # EN: nearest observed price within SNAP_TOL of each tick; NaN when the
-    #     collector did not cover that tick (UNOBSERVABLE tick, not "no trigger":
-    #     the distinction is the whole point of the per-epoch count).
+    # nearest observed price within SNAP_TOL of each tick; NaN when the
+    # collector did not cover that tick (UNOBSERVABLE tick, not "no trigger":
+    # the distinction is the whole point of the per-epoch count).
     if src is None or len(src) == 0 or len(ticks) == 0:
         return np.full(len(ticks), np.nan)
-    # IT: i parquet del chain arrivano in us, i tick li costruiamo in ns:
-    #     merge_asof pretende la stessa risoluzione su entrambe le chiavi.
-    # EN: chain parquets come in us while ticks are built in ns: merge_asof
-    #     requires both keys at the same resolution.
+    # chain parquets come in us while ticks are built in ns: merge_asof
+    # requires both keys at the same resolution.
     left = pd.DataFrame({"snapshot_ts": pd.DatetimeIndex(ticks).as_unit("ns")})
     src = src.copy()
     src["snapshot_ts"] = pd.DatetimeIndex(src["snapshot_ts"]).as_unit("ns")
@@ -198,8 +152,7 @@ def main() -> int:
           f"-> {pos['entry_ts'].max():%Y-%m-%d}")
     print(f"snapshot chain / chain snapshots        : {chain['snapshot_ts'].nunique()}")
 
-    # IT: per ogni posizione e ogni proxy: serie (t_left, moneyness) sui tick.
-    # EN: per position and proxy: (t_left, moneyness) series over the ticks.
+    # per position and proxy: (t_left, moneyness) series over the ticks.
     proxies = {"P1_own_expiry_fwd": None, "P2_front_fwd": front, "P3_binance_1m": spot}
     per_pos = []
     for _, p in pos.iterrows():
@@ -216,10 +169,8 @@ def main() -> int:
             rec[f"{name}__t"] = ((p["expiry"] - tk).total_seconds() / 3600.0).to_numpy()
         per_pos.append(rec)
 
-    # IT: superficie di conteggio. Una posizione "innesca" se ESISTE un tick
-    #     osservabile che soddisfa il predicato di produzione.
-    # EN: count surface. A position "triggers" if THERE EXISTS an observable tick
-    #     satisfying the production predicate.
+    # count surface. A position "triggers" if THERE EXISTS an observable tick
+    # satisfying the production predicate.
     surface = {}
     for name in proxies:
         for X in GRID_HOURS:
@@ -229,8 +180,7 @@ def main() -> int:
                 for r in per_pos:
                     px, tl = r[f"{name}__px"], r[f"{name}__t"]
                     ok = np.isfinite(px)
-                    # IT: tick rilevanti = quelli dentro la finestra temporale X.
-                    # EN: relevant ticks = those inside the X time window.
+                    # relevant ticks = those inside the X time window.
                     rel = (tl > 0) & (tl <= X)
                     if rel.sum() > 0 and ok[rel].sum() == 0:
                         unobs += 1
@@ -246,10 +196,8 @@ def main() -> int:
                                               "unobservable": unobs,
                                               "n_vps": n_vps, "trig_vps": trig_vps}
 
-    # IT: stampa la superficie del proxy primario; gli altri due servono al
-    #     controllo di robustezza stampato sotto.
-    # EN: print the primary proxy's surface; the other two feed the robustness
-    #     check printed below.
+    # print the primary proxy's surface; the other two feed the robustness
+    # check printed below.
     prim = "P1_own_expiry_fwd"
     print(f"\nSUPERFICIE DI CONTEGGIO — proxy {prim} / count surface")
     print("righe = max_hours X, colonne = pin_band f / rows = X, cols = f")

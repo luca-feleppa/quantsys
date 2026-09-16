@@ -1,33 +1,18 @@
-# IT: PIN DEL MacroNormalizer — congela lo STRUMENTO di normalizzazione macro a un
-#     vintage DICHIARATO, separandolo dallo STATO del mondo che deve misurare.
-#     Il problema. `VolForecaster` ri-stima il MacroNormalizer whole-df a ogni
-#     bootstrap di 04b: allungare `macro_features.parquet` sposta mediana e IQR,
-#     quindi lo strumento cambia insieme al dato. Sul breakpoint del 2026-07-31 la
-#     decomposizione ha attribuito il 2.7% della variazione totale alla sola deriva
-#     dello strumento (L2 0.0891 su 3.2804) e il ~97% allo stato genuinamente piu'
-#     fresco. Il 2.7% e' piccolo ma NON e' misura: e' rumore che si presenta come
-#     segnale, e in un campione forward pre-registrato non deve esistere.
-#     ⚠ IL VINTAGE DI RIFERIMENTO VA DICHIARATO, non dedotto: il vintage sotto cui
-#     `models/itransformer` fu addestrato NON e' ricostruibile (il parquet di allora
-#     e' stato sovrascritto e non e' in git). Questo script quindi non "recupera" il
-#     vintage giusto: ne FISSA uno, esplicito e datato, e lo scrive nel pickle.
-#     ⚠ INERTE finche' nessuno passa `--macro-norm` a 04b o al replay: creare il pin
-#     non cambia il comportamento di nulla.
-# EN: MacroNormalizer PIN — freezes the macro normalization INSTRUMENT at a DECLARED
-#     vintage, separating it from the STATE of the world it must measure.
-#     The problem. `VolForecaster` refits the MacroNormalizer whole-df at every 04b
-#     bootstrap: extending `macro_features.parquet` moves median and IQR, so the
-#     instrument moves together with the data. On the 2026-07-31 breakpoint the
-#     decomposition attributed 2.7% of the total variation to instrument drift alone
-#     and ~97% to genuinely fresher state. 2.7% is small but it is NOT measurement:
-#     it is noise presenting as signal, and inside a pre-registered forward sample it
-#     must not exist.
-#     ⚠ THE REFERENCE VINTAGE MUST BE DECLARED, not inferred: the vintage
-#     `models/itransformer` was trained under is NOT reconstructible (that parquet was
-#     overwritten and is not in git). So this script does not "recover" the right
-#     vintage: it FIXES one, explicit and dated, and writes it into the pickle.
-#     ⚠ INERT until someone passes `--macro-norm` to 04b or the replay: creating the
-#     pin changes nothing's behavior.
+# MacroNormalizer PIN — freezes the macro normalization INSTRUMENT at a DECLARED
+# vintage, separating it from the STATE of the world it must measure.
+# The problem. `VolForecaster` refits the MacroNormalizer whole-df at every 04b
+# bootstrap: extending `macro_features.parquet` moves median and IQR, so the
+# instrument moves together with the data. On the 2026-07-31 breakpoint the
+# decomposition attributed 2.7% of the total variation to instrument drift alone
+# (L2 0.0891 out of 3.2804) and ~97% to genuinely fresher state. 2.7% is small but it is NOT measurement:
+# it is noise presenting as signal, and inside a pre-registered forward sample it
+# must not exist.
+# ⚠ THE REFERENCE VINTAGE MUST BE DECLARED, not inferred: the vintage
+# `models/itransformer` was trained under is NOT reconstructible (that parquet was
+# overwritten and is not in git). So this script does not "recover" the right
+# vintage: it FIXES one, explicit and dated, and writes it into the pickle.
+# ⚠ INERT until someone passes `--macro-norm` to 04b or the replay: creating the
+# pin changes nothing's behavior.
 import argparse
 import hashlib
 import sys
@@ -66,12 +51,9 @@ def main() -> int:
     if not src.exists():
         print(f"ERRORE: sorgente assente / missing source: {src}", file=sys.stderr)
         return 1
-    # IT: un pin esistente NON si sovrascrive per sbaglio: e' l'artefatto che tiene
-    #     fermo l'input del live, e sostituirlo in silenzio riaprirebbe esattamente
-    #     il problema che il pin esiste per chiudere.
-    # EN: an existing pin is NOT overwritten by accident: it is the artifact holding
-    #     the live input still, and silently replacing it would reopen precisely the
-    #     problem the pin exists to close.
+    # an existing pin is NOT overwritten by accident: it is the artifact holding
+    # the live input still, and silently replacing it would reopen precisely the
+    # problem the pin exists to close.
     if out.exists() and not args.force:
         prev = MacroNormalizer.load(str(out))
         print(f"ERRORE: pin gia' presente / pin already exists: {out}\n"

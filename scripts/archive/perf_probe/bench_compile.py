@@ -1,15 +1,11 @@
 """
-Probe temporanea (PERF AUDIT) — lever (a): torch.compile su iTransformer.
 Temporary probe (PERF AUDIT) — lever (a): torch.compile on the iTransformer.
 
-Misura: presenza di spectral_norm sul path production, graph breaks,
-tempo di compilazione, ms/step eager vs compiled, e scarto numerico
-del forward (eager vs compiled) sullo stesso input in eval/fp32.
 Measures: spectral_norm presence on the production path, graph breaks,
 compile time, eager vs compiled ms/step, and forward numeric delta
 (eager vs compiled) on identical input in eval/fp32.
 
-Uso / Usage: python scripts/archive/perf_probe/bench_compile.py [--mode default]
+Usage: python scripts/archive/perf_probe/bench_compile.py [--mode default]
 """
 import argparse
 import sys
@@ -71,7 +67,7 @@ def main():
 
     m_eager = mk()
 
-    # ── ① spectral_norm sul path production? ────────────────────────────────
+    # ── ① spectral_norm on the production path? ─────────────────────────────
     from torch.nn.utils.parametrize import is_parametrized
     parametrized = [n for n, mod in m_eager.named_modules() if is_parametrized(mod)]
     print(f"loss_type production = {mcfg.get('loss_type')!r}")
@@ -116,7 +112,7 @@ def main():
 
     ms_eager = bench(m_eager, "eager (produzione)")
 
-    # ── ② compile: conta i graph break ──────────────────────────────────────
+    # ── ② compile: count the graph breaks ───────────────────────────────────
     import torch._dynamo as dynamo
     dynamo.reset()
     expl = None
@@ -146,7 +142,7 @@ def main():
         print(f"\ntorch.compile FALLITO: {type(e).__name__}: {e}")
         return
 
-    # ── ④ scarto numerico forward eager vs compiled (eval, fp32) ────────────
+    # ── ④ forward numeric delta eager vs compiled (eval, fp32) ──────────────
     m_eager.eval(); m_comp.eval()
     with torch.no_grad():
         torch.manual_seed(1)

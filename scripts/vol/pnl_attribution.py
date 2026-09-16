@@ -1,41 +1,24 @@
 """
-A11 (ROADMAP_VOL_BOOK) — Attribution ex-post del PnL per trade del forward test vol.
+A11 (ROADMAP_VOL_BOOK) — Ex-post per-trade PnL attribution for the vol forward test.
 
-IT: Decompone il PnL di ogni trade CHIUSO di `results/vol_paper/trades.jsonl` nei
-    termini greek-driven, usando la serie diagnostica A6 (`exec_diag.jsonl`, tick
-    orari con greeks venue per leg). Per ogni coppia di tick consecutivi con
-    greeks completi, per leg (V_usd = mark_btc·S, convenzione inverse):
+Decomposes each SETTLED trade's PnL from `results/vol_paper/trades.jsonl`
+into greek-driven terms, using the A6 diagnostic series (`exec_diag.jsonl`,
+hourly ticks with per-leg venue greeks). For each consecutive tick pair with
+complete greeks, per leg (V_usd = mark_btc·S, inverse convention):
 
-        ΔV_usd ≈ Δ·ΔS + ½·Γ·(ΔS)² + ν·Δiv + Θ·Δt_giorni + residuo
+    ΔV_usd ≈ Δ·ΔS + ½·Γ·(ΔS)² + ν·Δiv + Θ·Δt_days + residual
 
-    e il residuo = ΔV_usd effettivo − spiegato (cross-greeks, salti, rumore mark
-    testnet). Aggregato su leg e intervalli, ×side×amount → per-trade. Il PnL di
-    gamma vs theta è LA verifica che i trade vincenti vincano per il motivo
-    giusto (RV realizzata vs IV pagata), non per direzione/vega — rafforza
-    l'interpretazione del gate n≥20 SENZA toccarlo (script read-only, offline).
-    Coverage dichiarata: frazione dell'holding coperta da coppie di tick valide
-    (i buchi = PC spento / greeks null su strike illiquidi — mai interpolati).
-    ⚠ Conversione BTC: componenti USD / S di fine intervallo (approssimazione
-    dichiarata, coerente al primo ordine con il PnL inverse).
+residual = realized ΔV_usd − explained (cross-greeks, jumps, testnet mark
+noise). Aggregated over legs and intervals, ×side×amount → per-trade. The
+gamma-vs-theta PnL is THE check that winning trades win for the right reason
+(realized RV vs paid IV), not direction/vega — sharpens the n≥20 gate's
+interpretation WITHOUT touching it (read-only, offline). Declared coverage:
+fraction of the holding covered by valid tick pairs (gaps = PC off / null
+greeks on illiquid strikes — never interpolated).
+⚠ BTC conversion: USD components / end-of-interval S (declared first-order
+approximation, consistent with inverse PnL).
 
-EN: Decomposes each SETTLED trade's PnL from `results/vol_paper/trades.jsonl`
-    into greek-driven terms, using the A6 diagnostic series (`exec_diag.jsonl`,
-    hourly ticks with per-leg venue greeks). For each consecutive tick pair with
-    complete greeks, per leg (V_usd = mark_btc·S, inverse convention):
-
-        ΔV_usd ≈ Δ·ΔS + ½·Γ·(ΔS)² + ν·Δiv + Θ·Δt_days + residual
-
-    residual = realized ΔV_usd − explained (cross-greeks, jumps, testnet mark
-    noise). Aggregated over legs and intervals, ×side×amount → per-trade. The
-    gamma-vs-theta PnL is THE check that winning trades win for the right reason
-    (realized RV vs paid IV), not direction/vega — sharpens the n≥20 gate's
-    interpretation WITHOUT touching it (read-only, offline). Declared coverage:
-    fraction of the holding covered by valid tick pairs (gaps = PC off / null
-    greeks on illiquid strikes — never interpolated).
-    ⚠ BTC conversion: USD components / end-of-interval S (declared first-order
-    approximation, consistent with inverse PnL).
-
-Uso / Usage (dalla root di progetto / from the project root):
+Usage (from the project root):
     python scripts/vol/pnl_attribution.py [--trades P] [--diag P] [--out P]
 """
 import argparse
@@ -54,22 +37,18 @@ from quantsys.utils import setup_logging                                      # 
 setup_logging()
 log = logging.getLogger("quantsys.script.pnl_attribution")
 
-# IT: campi per-leg richiesti per un intervallo di attribution valido.
-# EN: per-leg fields required for a valid attribution interval.
+# per-leg fields required for a valid attribution interval.
 _REQ = ("mark", "underlying", "delta", "gamma", "vega", "theta", "mark_iv")
 
 
 def _leg_ok(leg: dict) -> bool:
-    # IT: leg utilizzabile ⇔ tutti i campi presenti e finiti (mai interpolare).
-    # EN: usable leg ⇔ every field present and finite (never interpolate).
+    # usable leg ⇔ every field present and finite (never interpolate).
     return all(leg.get(k) is not None and np.isfinite(leg[k]) for k in _REQ)
 
 
 def interval_attribution(leg0: dict, leg1: dict, dt_days: float) -> dict:
-    # IT: attribution di UNA leg su UN intervallo (greeks di inizio intervallo,
-    #     convenzione Taylor forward): componenti in USD per contratto.
-    # EN: ONE leg over ONE interval (start-of-interval greeks, forward-Taylor
-    #     convention): components in USD per contract.
+    # ONE leg over ONE interval (start-of-interval greeks, forward-Taylor
+    # convention): components in USD per contract.
     dS = leg1["underlying"] - leg0["underlying"]
     d_iv = leg1["mark_iv"] - leg0["mark_iv"]
     dv_usd = leg1["mark"] * leg1["underlying"] - leg0["mark"] * leg0["underlying"]
@@ -86,8 +65,7 @@ def interval_attribution(leg0: dict, leg1: dict, dt_days: float) -> dict:
 
 
 def load_diag(path: Path) -> list:
-    # IT: exec_diag.jsonl → lista di record con ts parsato; righe corrotte scartate.
-    # EN: exec_diag.jsonl → record list with parsed ts; corrupt lines dropped.
+    # exec_diag.jsonl → record list with parsed ts; corrupt lines dropped.
     rows = []
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -101,14 +79,10 @@ def load_diag(path: Path) -> list:
 
 
 def attribute_trade(trade: dict, diag: list) -> dict:
-    # IT: attribution di un trade chiuso: filtra i tick A6 della SUA posizione
-    #     (source=position, stessa strike/expiry) dentro [entry, exit], somma
-    #     l'attribution per-intervallo sulle coppie valide, ×side×amount.
-    #     exit = settled_ts per pin_close, expiry per settlement (payoff congelato).
-    # EN: settled-trade attribution: filter the A6 ticks of ITS position
-    #     (source=position, same strike/expiry) inside [entry, exit], sum the
-    #     per-interval attribution over valid pairs, ×side×amount.
-    #     exit = settled_ts for pin_close, expiry for settlement (frozen payoff).
+    # settled-trade attribution: filter the A6 ticks of ITS position
+    # (source=position, same strike/expiry) inside [entry, exit], sum the
+    # per-interval attribution over valid pairs, ×side×amount.
+    # exit = settled_ts for pin_close, expiry for settlement (frozen payoff).
     side = int(trade["side"])
     amount = float(trade.get("amount", 1.0))
     entry = pd.Timestamp(trade["entry_ts"])
@@ -134,10 +108,8 @@ def attribute_trade(trade: dict, diag: list) -> dict:
                 _leg_ok(legs0[i]) and _leg_ok(legs1[i]) for i in legs0):
             continue
         dt_days = (r1["_ts"] - r0["_ts"]).total_seconds() / 86400.0
-        # IT: gap > 3h = tick mancanti (PC off): il Taylor per-intervallo non è
-        #     più locale — l'intervallo si scarta e finisce nella non-coverage.
-        # EN: gap > 3h = missing ticks (PC off): the per-interval Taylor is no
-        #     longer local — the interval is dropped into non-coverage.
+        # gap > 3h = missing ticks (PC off): the per-interval Taylor is no
+        # longer local — the interval is dropped into non-coverage.
         if dt_days > 3.0 / 24.0:
             continue
         for inst in legs0:
@@ -158,15 +130,14 @@ def attribute_trade(trade: dict, diag: list) -> dict:
         "pnl_btc_realized": float(trade.get("pnl_btc", np.nan)),
         "fee_btc": float(trade.get("fee_btc", np.nan)),
         "n_pairs": n_pairs, "coverage_frac": round(covered_h / holding_h, 3),
-        # IT: componenti firmate per la POSIZIONE (×side×amount).
-        # EN: components signed for the POSITION (×side×amount).
+        # components signed for the POSITION (×side×amount).
         **{k: w * v for k, v in tot.items()},
         **{k: w * v for k, v in tot_btc.items()},
     }
 
 
 def main():
-    # IT: boilerplate UTF-8 (checklist nuovo script) | EN: UTF-8 boilerplate (new-script checklist)
+    # UTF-8 boilerplate (new-script checklist)
     for _s in (sys.stdout, sys.stderr):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -197,8 +168,7 @@ def main():
         return
     df.to_parquet(args.out, index=False)
 
-    # IT: report console: per trade + totali (BTC, spazio del PnL realizzato).
-    # EN: console report: per trade + totals (BTC, realized-PnL space).
+    # console report: per trade + totals (BTC, realized-PnL space).
     cols = ["entry_ts", "exit_mode", "side", "amount", "coverage_frac",
             "pnl_btc_realized", "gamma_btc", "theta_btc", "vega_btc",
             "delta_btc", "residual_btc"]
