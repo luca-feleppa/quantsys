@@ -5,6 +5,89 @@
 
 ---
 
+## 🧭 Riparti da qui — fine sessione 2026-09-16 (doc per lingua, figure README) · Resume here — end of session 2026-09-16 (per-language docs, README figures)
+
+🇮🇹 **Stato.** Ciclo di sola documentazione/commenti, **zero modifiche a logica di training,
+inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine, due chiusi:
+- **Task 1 — FATTO (`330bd98`).** Doc in un file per lingua: nome canonico inglese + gemello
+  `.it.md` (`AVVIO.md` → `START.md`, `TEORIA.md` → `THEORY.md`; README, CHANGELOG,
+  `scripts/README`, `deploy/vps/README`, `docs/*.md`), switch lingua in prima riga, regola «ogni
+  modifica alla doc su entrambe le versioni nello stesso commit» in testa a `START.md`. Eccezioni:
+  **questo file resta bilingue** (i riferimenti ai nomi nuovi sono aggiornati) e
+  `docs/STATUS_ARCHIVE_2026H1.md` resta letterale.
+- **Task 2 — FATTO (`ae305ce`).** Commenti e docstring solo in inglese in `quantsys/` e `scripts/`
+  (95 file; AST identico a HEAD a docstring mascherate). Stringhe invariate per vincolo: due log
+  citano ancora `TEORIA.md` (`scripts/02_train.py`, `scripts/vol/sig_har_probe.py`), così come
+  alcune stringhe di test; i commenti JS dentro la stringa HTML di `06_dashboard.py` restano
+  bilingui. Il generatore locale del sito è stato ripuntato a `THEORY.md`. Suite **534 passed,
+  1 skipped** prima e dopo.
+- **Task 3 — APERTO.** Scritti e **non committati** `scripts/vol/export_vols_predictions.py`
+  (export per-barra in sola lettura del path NN del giudice, fail-fast se la sua QLIKE non
+  riproduce `metrics.nn.qlike` del report) e `scripts/vol/plot_readme_figures.py` (due PNG in
+  `docs/assets/`, numeri letti da `results/vols/qlike_report_1h_test_canonical_1h_vols.json` e dal
+  parquet di export, fail-fast se `provenance.matches` non è `true`).
+- **Task 4 — APERTO.** Conteggio pytest discordante nel README (tabella vs Riproducibilità).
+
+**Azione esatta da cui ripartire, in ordine:**
+1. **L'utente lancia** (GPU, dalla root): `python scripts/vol/export_vols_predictions.py --arch
+   canonical_1h_vols --split test`, poi `python scripts/vol/plot_readme_figures.py`. Guardare i
+   due PNG prima di committarli.
+2. Righe per i due script nuovi in `scripts/README.md` + `scripts/README.it.md`; commit Task 3a
+   (script + PNG).
+3. **3b** — apertura di `README.md`/`README.it.md`: titolo, un paragrafo in linguaggio piano senza
+   acronimi (⚠ l'orizzonte è la varianza delle **prossime 30 ore** aggiornata ogni ora, NON
+   «l'ora successiva»; la monetizzazione: le regole short-vol testate hanno fallito i gate
+   pre-registrati), poi le due figure con caption di una riga (più basso è meglio / fuori
+   campione), poi il blocco tecnico invariato. Il warning gate HAR-RV vs claim HAR-C non si
+   sposta né si ammorbidisce.
+4. **3c** — push autorizzato dall'utente il 16/09: push su `main`, GitHub Pages da `main` `/docs`
+   (oggi 404, non configurato), link nei README a
+   `https://luca-feleppa.github.io/quantsys/architetture.html`, verificare che l'URL risponda.
+5. **Task 4** — rilanciare `pytest tests/`, allineare i due conteggi in README EN+IT (oggi
+   534 passed + 1 skipped), proporre una formulazione che non vada aggiornata a ogni commit.
+6. Commit separati per task, poi riepilogo finale all'utente.
+
+**EN** **State.** Documentation/comments-only cycle, **no change to training, inference, judge or
+trading logic**; `04b` and the VPS untouched. Four tasks in order, two closed:
+- **Task 1 — DONE (`330bd98`).** One doc file per language: English canonical name + `.it.md`
+  twin (`AVVIO.md` → `START.md`, `TEORIA.md` → `THEORY.md`; README, CHANGELOG, `scripts/README`,
+  `deploy/vps/README`, `docs/*.md`), language switch on the first line, rule "every doc change on
+  both versions in the same commit" at the top of `START.md`. Exceptions: **this file stays
+  bilingual** (references to the new names updated) and `docs/STATUS_ARCHIVE_2026H1.md` stays
+  literal.
+- **Task 2 — DONE (`ae305ce`).** English-only comments and docstrings in `quantsys/` and
+  `scripts/` (95 files; AST identical to HEAD with docstrings masked). Strings unchanged by
+  constraint: two log messages still cite `TEORIA.md` (`scripts/02_train.py`,
+  `scripts/vol/sig_har_probe.py`), as do some test strings; the JS comments inside the HTML string
+  of `06_dashboard.py` stay bilingual. The local site generator now points at `THEORY.md`. Suite
+  **534 passed, 1 skipped** before and after.
+- **Task 3 — OPEN.** Written and **not committed**: `scripts/vol/export_vols_predictions.py`
+  (read-only per-bar export of the judge's NN path, fail-fast if its QLIKE does not reproduce the
+  report's `metrics.nn.qlike`) and `scripts/vol/plot_readme_figures.py` (two PNGs in
+  `docs/assets/`, numbers read from `results/vols/qlike_report_1h_test_canonical_1h_vols.json` and
+  the export parquet, fail-fast unless `provenance.matches` is `true`).
+- **Task 4 — OPEN.** Inconsistent pytest count in the README (table vs Reproducibility).
+
+**Exact action to resume from, in order:**
+1. **The user runs** (GPU, from the root): `python scripts/vol/export_vols_predictions.py --arch
+   canonical_1h_vols --split test`, then `python scripts/vol/plot_readme_figures.py`. Look at both
+   PNGs before committing them.
+2. Rows for the two new scripts in `scripts/README.md` + `scripts/README.it.md`; commit Task 3a
+   (scripts + PNGs).
+3. **3b** — opening of `README.md`/`README.it.md`: title, one plain-language paragraph with no
+   acronyms (⚠ the horizon is the variance over the **next 30 hours**, refreshed hourly, NOT "the
+   next hour"; monetization: the short-vol rules tested failed their pre-registered gates), then
+   both figures with a one-line caption (lower is better / out-of-sample), then the technical block
+   unchanged. The HAR-RV gate vs HAR-C claim warning stays where it is, not softened.
+4. **3c** — push authorized by the user on 09-16: push to `main`, GitHub Pages from `main` `/docs`
+   (currently 404, not configured), README links to
+   `https://luca-feleppa.github.io/quantsys/architetture.html`, check that the URL responds.
+5. **Task 4** — rerun `pytest tests/`, align both counts in README EN+IT (currently 534 passed +
+   1 skipped), propose a wording that does not need updating on every commit.
+6. Separate commits per task, then the final summary to the user.
+
+---
+
 ## 🧭 Riparti da qui — fine sessione 2026-09-15 · Resume here — end of session 2026-09-15
 
 🇮🇹 **Stato.** Commit di oggi tutti su GitHub: `5de0252` (esecutore adattivo di `04b`: identità
