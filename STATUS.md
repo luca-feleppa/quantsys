@@ -32,10 +32,15 @@ mid testnet della prima riga `exec_diag` sulla posizione nel tick d'entry (non g
 congelata dalla pre-reg). **Pull esteso:** `adaptive.jsonl` (merge per `ts`) e
 `adaptive_entry_journal.json` (presenza specchiata) — prima non venivano scaricati, e il giudice non
 avrebbe visto nulla. **Controllo positivo** di `c_roll` sui 9 venerdì 10/07 → 04/09 con la selezione di
-`pick_butterfly` ricostruita sulla chain mainnet: mediana **0.0663** contro lo **0.065** ex-ante (scarto
-0.0013, 0.5% di `c*`). ⚠ Discrepanza piccola e non spiegata: il legging a `τ = 120 s` arriva a
-**7.6·10⁻⁵** del premio netto (21/08), contro il «≤ 5·10⁻⁵» dell'audit; resta tre ordini di grandezza
-sotto il margine di ①, ma lo script dell'audit non è nel repo e la differenza non è stata riconciliata.
+`pick_butterfly` ricostruita sulla chain mainnet: mediana **0.0649-0.0663** contro lo **0.065**
+ex-ante, dove lo scarto dipende da quale underlying usa la selezione ricostruita (forward della
+expiry scelta o prima riga dello snapshot) — cioè l'accordo è dentro il rumore della ricostruzione.
+**Legging riconciliato il 17/09:** vale in mediana **4.3·10⁻⁵** del premio netto a `τ = 120 s`, con
+max **8.5·10⁻⁵** sui 9 venerdì e **1.5·10⁻⁴** su tutti i 605 snapshot delle 08 UTC. Il «≤ 5·10⁻⁵»
+dell'audit è quindi il valore **tipico**, non un massimo, e la differenza **non** viene dalla forma
+della formula: la variante con la derivata seconda in spazio BTC (`Γ/S − 2Δ/S² + 2V/S³`) dà 4.3·10⁻⁵
+e 8.5·10⁻⁵, indistinguibile entro il 2%. Conclusione invariata: il legging resta tre ordini di
+grandezza sotto il margine di ① e non può spostarne l'esito.
 **Test:** `tests/test_ft1_execution_judge.py` 18/18 (sentinelle sulle costanti e sul bound 31%, regole
 P3/P4, ③b ai bordi della tolleranza, ②b a 4/5 misurati e soglia inclusiva, `c_roll` calcolato a mano,
 snapshot ±10 min, PASS/FAIL su chain sintetica, record prodotti dall'esecutore vero di 04b); 6 mutazioni
@@ -62,6 +67,14 @@ canonico e il vintage datato qui; (3) contatore E1 **ritirato il 17/09** da `avv
 esplicita, dopo un settlement a ledger flat. Calendario invariato: ~30/09 S1 a `n = 83`;
 ~fine novembre B1/L2.
 
+**Coda per domani** (nessuna produce un numero di gate, tutte off-path): (a) **verifica live↔replay
+residua** — la voce «Replay C1» della roadmap lascia in sospeso il confronto sui tick sovrapposti dopo
+il refresh del funding, e finché non è fatto la copertura non va dichiarata completa; (b) **preparare
+la procedura di deploy di `04b` senza `--adaptive`** (`START.md` §5.3bis): l'esecuzione resta su
+istruzione esplicita e **dopo** un settlement a ledger flat; (c) **D4 della dashboard** — pannello
+infrastruttura/posizione (freschezza dei parquet canonici, età dell'ultimo pull, countdown alla
+scadenza, distanza dal pin |S−K|/S), oggi tutto solo da CLI e log.
+
 **EN** **Routine (~16:56 UTC).** 4 fresh heartbeats (IV poller 0.0 h, L2 0.0 h, trades 0.1 h, `04b`
 1.9 h); trades 73 → 75: 09-16 settlement (short K 77000, −0.00191 BTC) and 09-17 (short K 75500,
 +0.00533 BTC); open **long** straddle K 76500 since 09-17 08:01 UTC (edge +0.55, v1 rule), expiring
@@ -86,11 +99,15 @@ robustness reading is the signed fill − testnet mid distance from the first `e
 position in the entry tick (not gating, definition not frozen by the pre-reg). **Pull extended:**
 `adaptive.jsonl` (merged on `ts`) and `adaptive_entry_journal.json` (presence-mirrored) — they were not
 downloaded before, so the judge would have seen nothing. **Positive control** of `c_roll` on the 9
-Fridays 07-10 → 09-04 with `pick_butterfly`'s selection rebuilt on the mainnet chain: median **0.0663**
-against the ex-ante **0.065** (gap 0.0013, 0.5% of `c*`). ⚠ Small unexplained discrepancy: legging at
-`τ = 120 s` reaches **7.6·10⁻⁵** of the net premium (08-21), against the audit's "≤ 5·10⁻⁵"; still three
-orders of magnitude below ①'s margin, but the audit script is not in the repo and the gap was not
-reconciled. **Tests:** `tests/test_ft1_execution_judge.py` 18/18 (sentinels on the constants and the
+Fridays 07-10 → 09-04 with `pick_butterfly`'s selection rebuilt on the mainnet chain: median **0.0649-0.0663**
+against the ex-ante **0.065**, the spread depending on which underlying the rebuilt selection uses
+(the chosen expiry's forward, or the snapshot's first row) — i.e. the agreement sits inside the
+reconstruction's own noise. **Legging reconciled on 09-17:** it is a median **4.3·10⁻⁵** of the net
+premium at `τ = 120 s`, with a max of **8.5·10⁻⁵** over the 9 Fridays and **1.5·10⁻⁴** over all 605
+08 UTC snapshots. The audit's "≤ 5·10⁻⁵" is therefore the **typical** value, not a maximum, and the
+difference does **not** come from the formula's shape: the BTC-space second-derivative variant
+(`Γ/S − 2Δ/S² + 2V/S³`) gives 4.3·10⁻⁵ and 8.5·10⁻⁵, indistinguishable within 2%. Conclusion
+unchanged: legging stays three orders of magnitude below ①'s margin and cannot move its outcome. **Tests:** `tests/test_ft1_execution_judge.py` 18/18 (sentinels on the constants and the
 31% bound, P3/P4 rules, ③b at the tolerance edges, ②b at 4/5 measured and inclusive threshold, `c_roll`
 by hand, ±10 min snapshot, PASS/FAIL on a synthetic chain, records produced by 04b's real executor); 6 of
 6 mutations caught. Suite **561 passed, 1 skipped**. On real data: `NOT STARTED` (no `adaptive.jsonl`).
@@ -114,6 +131,14 @@ and the close-series freshness check, clean PS parse), `START` §5.3, `scripts/R
 `docs/ROADMAP_VOL_BOOK`, EN+IT; still to do — only at go-live — add `ft1_execution_judge.py --count-only` to the routine; (4) deploy `04b` to the VPS without
 `--adaptive` on explicit instruction; (5) FT1 go-live on explicit instruction, after a settlement with a
 flat ledger. Calendar unchanged: ~09-30 S1 at `n = 83`; ~end of November B1/L2.
+
+**Queue for tomorrow** (none produces a gate number, all off-path): (a) **remaining live↔replay
+verification** — the roadmap's «Replay C1» entry leaves the comparison on overlapping ticks after the
+funding refresh pending, and until it is done coverage must not be declared complete; (b) **prepare the
+deploy procedure for `04b` without `--adaptive`** (`START.md` §5.3bis): execution stays on explicit
+instruction and **after** a settlement with a flat ledger; (c) **dashboard D4** — infra/position panel
+(canonical parquet freshness, last-pull age, expiry countdown, pin distance |S−K|/S), today available
+only from the CLI and the logs.
 
 ---
 
