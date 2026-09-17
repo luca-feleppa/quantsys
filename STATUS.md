@@ -7,7 +7,7 @@
 
 ## 🧭 Riparti da qui — 2026-09-17 (terminale Deribit) · Resume here — 2026-09-17 (Deribit terminal)
 
-🇮🇹 **Fatto (`58e742c`, locale, non pushato).** Revisione delle dashboard: `scripts/06_dashboard.py`
+🇮🇹 **Fatto (`58e742c`, pushato).** Revisione delle dashboard: `scripts/06_dashboard.py`
 resta (è l'unica vista sul braccio short-vol) ed è stato corretto. Il tab Trades legge ora ogni
 forma di record di `04b` (straddle, iron butterfly con premio netto e payoff a 4 gambe, uscita
 pin-close, tentativi `incomplete` senza posizione né PnL); una posizione con expiry passata e
@@ -19,9 +19,15 @@ condiviso); testi UI e commenti JS solo in inglese. Nuovo `tests/test_dashboard_
 3 mutazioni su 4 intercettate, la quarta equivalente sui record reali). Suite 538 passed + 1
 skipped. `docs/DASHBOARD_IMPROVEMENTS` conservato (D1–D5 aperti), `docs/ROADMAP_VOL_BOOK` allineato.
 Nessuna eliminazione: i `results/{lstm,nhits,tcnmamba}/dashboard_results.json` restano (rifarli
-richiede un riaddestramento). **Da decidere con l'utente:** push di `58e742c`; pubblicazione.
+richiede un riaddestramento). **Pubblicazione (`cbf702e`):** sito di progetto su GitHub Pages — home
+`https://luca-feleppa.github.io/quantsys/` (inglese, `docs/index.html`) + `index.it.html`, generatore
+`scripts/site/build_site.py`, registro `docs/experiments.yaml` allineato a THEORY §12 (18 schede, tutte
+chiuse), 42 test; suite 543 passed + 1 skipped. Il terminale **non** è ospitato online: screenshot del
+tab Trades nei README (`32d7e5d`). **Azione da cui ripartire:** nessuna su questo filone; resta valida la
+lista del 15/09 (giudice FT1). Dopo ogni gate chiuso: aggiornare `docs/experiments.yaml`, rilanciare il
+generatore, committare le due pagine.
 
-**EN** **Done (`58e742c`, local, not pushed).** Dashboard review: `scripts/06_dashboard.py` stays
+**EN** **Done (`58e742c`, pushed).** Dashboard review: `scripts/06_dashboard.py` stays
 (the only view on the short-vol arm) and was fixed. The Trades tab now reads every `04b` record
 shape (straddle, iron butterfly with net premium and 4-leg payoff, pin-close exit, `incomplete`
 attempts with no position or PnL); a position past expiry with no settlement on disk shows as
@@ -32,7 +38,13 @@ gone; D6 done (shared parser); UI text and JS comments English-only. New
 `tests/test_dashboard_trades.py` (4 tests, 3 of 4 mutations caught, the fourth equivalent on real
 records). Suite 538 passed + 1 skipped. `docs/DASHBOARD_IMPROVEMENTS` kept (D1–D5 open),
 `docs/ROADMAP_VOL_BOOK` aligned. Nothing deleted: `results/{lstm,nhits,tcnmamba}/dashboard_results.json`
-stay (regenerating them needs retraining). **To decide with the user:** pushing `58e742c`; publication.
+stay (regenerating them needs retraining). **Publication (`cbf702e`):** project site on GitHub Pages — home
+`https://luca-feleppa.github.io/quantsys/` (English, `docs/index.html`) + `index.it.html`, generator
+`scripts/site/build_site.py`, registry `docs/experiments.yaml` aligned with THEORY §12 (18 cards, all
+closed), 42 tests; suite 543 passed + 1 skipped. The terminal is **not** hosted online: Trades-tab
+screenshot in the READMEs (`32d7e5d`). **Resume from:** nothing left on this thread; the 09-15 list (FT1
+judge) still applies. After every closed gate: update `docs/experiments.yaml`, rerun the generator,
+commit both pages.
 
 ---
 
