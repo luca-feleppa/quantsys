@@ -5,6 +5,94 @@
 
 ---
 
+## 🧭 Riparti da qui — 2026-09-17 sera (giudice FT1, P6) · Resume here — 2026-09-17 evening (FT1 judge, P6)
+
+🇮🇹 **Routine (~16:56 UTC).** 4 heartbeat freschi (IV poller 0.0 h, L2 0.0 h, trades 0.1 h, `04b` 1.9 h);
+trades 73 → 75: settlement del 16/09 (short K 77000, −0.00191 BTC) e del 17/09 (short K 75500,
++0.00533 BTC); posizione aperta **long** straddle K 76500 dal 17/09 08:01 UTC (edge +0.55, regola v1),
+scadenza 18/09; vintage macro `20260730` invariato; B7 fresco; L2 75.7%, `n_eff` 47.2, nessun buco in
+7 giorni; DVOL 33.9 (banda farfalla). `04b` invariato, nessun contatto oltre il pull.
+
+🇮🇹 **Fatto — punto 1 della lista del 15/09.** `scripts/vol/ft1_execution_judge.py`, sola lettura,
+implementa l'emendamento 1 alla lettera (P1-P6). Scelte di implementazione, nessuna delle quali tocca
+una soglia: (i) i tentativi si ricostruiscono dal **ledger** (record `trades.jsonl`, `position.json`,
+journal superstite), non da `adaptive.jsonl`, che 04b scrive *dopo* il ledger; un journal senza record
+(crash a metà esecuzione, o fra fill completo e `save_position`) conta come incompleto, e un record
+bloccato più il suo journal con lo stesso `attempt_id` contano una volta; (ii) l'«ultimo fill» per lo
+snapshot di `c_roll` è il **tempo di ricezione** dell'ultima gamba, perché 04b non persiste per gamba il
+timestamp di fill dell'exchange: lo scarto è un round-trip, contro una tolleranza di ±10 min;
+(iii) go-live = primo record di `adaptive.jsonl`, e la finestra di 16 settimane si dichiara chiusa solo
+quando l'orizzonte dei dati (ultimo record adattivo, non l'orologio) la supera — un pull vecchio non
+produce una falsa NESSUNA CONCLUSIONE; (iv) alla lettura, un FAIL misurato su ① o ②b chiude FAIL anche
+se l'altra condizione non ha abbastanza roll disponibili (i criteri di FAIL sono dichiarati condizione
+per condizione); (v) `INTEGRITY_ERROR` senza verdetto se una banda è incoerente con la soglia 0.561 (CLI
+sbagliata al go-live), se un tentativo farfalla cade fuori dallo slot del venerdì 08 UTC o se il journal
+è corrotto; (vi) il ½-spread testnet realizzato della lettura di robustezza è la distanza firmata fill −
+mid testnet della prima riga `exec_diag` sulla posizione nel tick d'entry (non gating, definizione non
+congelata dalla pre-reg). **Pull esteso:** `adaptive.jsonl` (merge per `ts`) e
+`adaptive_entry_journal.json` (presenza specchiata) — prima non venivano scaricati, e il giudice non
+avrebbe visto nulla. **Controllo positivo** di `c_roll` sui 9 venerdì 10/07 → 04/09 con la selezione di
+`pick_butterfly` ricostruita sulla chain mainnet: mediana **0.0663** contro lo **0.065** ex-ante (scarto
+0.0013, 0.5% di `c*`). ⚠ Discrepanza piccola e non spiegata: il legging a `τ = 120 s` arriva a
+**7.6·10⁻⁵** del premio netto (21/08), contro il «≤ 5·10⁻⁵» dell'audit; resta tre ordini di grandezza
+sotto il margine di ①, ma lo script dell'audit non è nel repo e la differenza non è stata riconciliata.
+**Test:** `tests/test_ft1_execution_judge.py` 18/18 (sentinelle sulle costanti e sul bound 31%, regole
+P3/P4, ③b ai bordi della tolleranza, ②b a 4/5 misurati e soglia inclusiva, `c_roll` calcolato a mano,
+snapshot ±10 min, PASS/FAIL su chain sintetica, record prodotti dall'esecutore vero di 04b); 6 mutazioni
+su 6 intercettate. Suite **561 passed, 1 skipped**. Sui dati reali: `NON AVVIATO` (nessun
+`adaptive.jsonl`). Doc: `scripts/README`, `START` §vol-paper e albero, `THEORY` addendum, EN+IT.
+
+**Azione esatta da cui ripartire, in ordine:** (1) push del commit del giudice, su istruzione
+(P6 chiede il commit, già fatto); (2) vintage macro: verificare quali campioni aperti leggono i
+forecast (S1 incluso) prima di decidere; (3) ritiro del contatore E1 da `avvio_sessione.ps1` e
+`START.md` §5.3, e — solo al go-live — aggiunta di `ft1_execution_judge.py --count-only` alla routine;
+(4) deploy di `04b` sul VPS senza `--adaptive` su istruzione esplicita; (5) go-live FT1 su istruzione
+esplicita, dopo un settlement a ledger flat. Calendario invariato: ~30/09 S1 a `n = 83`;
+~fine novembre B1/L2.
+
+**EN** **Routine (~16:56 UTC).** 4 fresh heartbeats (IV poller 0.0 h, L2 0.0 h, trades 0.1 h, `04b`
+1.9 h); trades 73 → 75: 09-16 settlement (short K 77000, −0.00191 BTC) and 09-17 (short K 75500,
++0.00533 BTC); open **long** straddle K 76500 since 09-17 08:01 UTC (edge +0.55, v1 rule), expiring
+09-18; macro vintage `20260730` unchanged; B7 fresh; L2 75.7%, `n_eff` 47.2, no gap in 7 days; DVOL 33.9
+(butterfly band). `04b` untouched, no contact beyond the pull.
+
+**EN** **Done — item 1 of the 09-15 list.** `scripts/vol/ft1_execution_judge.py`, read-only,
+implements amendment 1 literally (P1-P6). Implementation choices, none touching a threshold: (i)
+attempts are rebuilt from the **ledger** (`trades.jsonl` records, `position.json`, a surviving
+journal), not from `adaptive.jsonl`, which 04b writes *after* the ledger; a journal with no record
+(crash mid-execution, or between complete fill and `save_position`) counts as incomplete, and a blocked
+record plus its journal with the same `attempt_id` count once; (ii) the "last fill" for the `c_roll`
+snapshot is the last leg's **receipt time**, because 04b does not persist the per-leg exchange fill
+timestamp: the gap is one round-trip, against a ±10 min tolerance; (iii) go-live = first
+`adaptive.jsonl` record, and the 16-week window is declared over only when the data horizon (last
+adaptive record, not the wall clock) passes it — a stale pull cannot produce a false NO CONCLUSION; (iv)
+at reading, a measured FAIL on ① or ②b closes FAIL even if the other condition lacks enough available
+rolls (FAIL criteria are declared condition by condition); (v) `INTEGRITY_ERROR` with no verdict if a
+band is inconsistent with the 0.561 threshold (wrong CLI at go-live), a butterfly attempt falls outside
+the Friday 08 UTC slot, or the journal is corrupt; (vi) the testnet realised half-spread of the
+robustness reading is the signed fill − testnet mid distance from the first `exec_diag` row on the
+position in the entry tick (not gating, definition not frozen by the pre-reg). **Pull extended:**
+`adaptive.jsonl` (merged on `ts`) and `adaptive_entry_journal.json` (presence-mirrored) — they were not
+downloaded before, so the judge would have seen nothing. **Positive control** of `c_roll` on the 9
+Fridays 07-10 → 09-04 with `pick_butterfly`'s selection rebuilt on the mainnet chain: median **0.0663**
+against the ex-ante **0.065** (gap 0.0013, 0.5% of `c*`). ⚠ Small unexplained discrepancy: legging at
+`τ = 120 s` reaches **7.6·10⁻⁵** of the net premium (08-21), against the audit's "≤ 5·10⁻⁵"; still three
+orders of magnitude below ①'s margin, but the audit script is not in the repo and the gap was not
+reconciled. **Tests:** `tests/test_ft1_execution_judge.py` 18/18 (sentinels on the constants and the
+31% bound, P3/P4 rules, ③b at the tolerance edges, ②b at 4/5 measured and inclusive threshold, `c_roll`
+by hand, ±10 min snapshot, PASS/FAIL on a synthetic chain, records produced by 04b's real executor); 6 of
+6 mutations caught. Suite **561 passed, 1 skipped**. On real data: `NOT STARTED` (no `adaptive.jsonl`).
+Docs: `scripts/README`, `START` vol-paper section and tree, `THEORY` addendum, EN+IT.
+
+**Exact action to resume from, in order:** (1) push the judge commit, on instruction (P6 asks
+for the commit, already done); (2) macro vintage: check which open samples read the forecasts (S1 included)
+before deciding; (3) retire the E1 counter from `avvio_sessione.ps1` and `START.md` §5.3 and — only at
+go-live — add `ft1_execution_judge.py --count-only` to the routine; (4) deploy `04b` to the VPS without
+`--adaptive` on explicit instruction; (5) FT1 go-live on explicit instruction, after a settlement with a
+flat ledger. Calendar unchanged: ~09-30 S1 at `n = 83`; ~end of November B1/L2.
+
+---
+
 ## 🧭 Riparti da qui — 2026-09-17 (terminale Deribit) · Resume here — 2026-09-17 (Deribit terminal)
 
 🇮🇹 **Fatto (`58e742c`, pushato).** Revisione delle dashboard: `scripts/06_dashboard.py`

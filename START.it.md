@@ -399,6 +399,8 @@ Loop orario a hh:00+90s. Flag: `--once` (smoke), `--execute` (ordini REALI sul t
 
 **Baseline del gate** — `python scripts/04c_vol_paper_baselines.py` (read-only, GPU-free; `--no-fetch` = solo cache delivery, `--min-trades N` = soglia di valutabilità, default 30). Verifica il gate pre-registrato (2): il P&L NN deve battere **entrambe** le baseline always-long-vol e always-short-vol sullo **stesso** calendario di expiry (isola il timing dal variance risk premium medio). Metodo: replay del loop `04b` su `forecasts.parquet`, premio ricostruito dai chain snapshot, delivery price dall'endpoint pubblico Deribit (cache `delivery_cache.json`). I gate (1) P&L medio > 0 e (3) hit-rate > 0.5 si leggono dai trade REALI in `trades.jsonl`. Output `results/vol_paper/baseline_report.json` (+ warning "non valutabile" finché n < `--min-trades`).
 
+**Giudice FT1** — `python scripts/vol/ft1_execution_judge.py [--count-only]` (read-only, GPU-free). Implementa la pre-registrazione FT1 con l'emendamento 1 sul ledger di `--adaptive`; `NON AVVIATO` finché `adaptive.jsonl` non esiste. Il pull copia `adaptive.jsonl` (merge per chiave) e `adaptive_entry_journal.json` (presenza specchiata, come `position.json`). Output `results/vols/ft1_execution.json` (mai scritto da `--count-only`).
+
 ### 5.4 Dashboard — Deribit Options Risk Terminal
 
 ```bash
@@ -449,7 +451,7 @@ quantsys_project/
 ├── results/
 │   ├── {arch}/                  # dashboard_results.json, live_signals.jsonl
 │   ├── vols/                    # report giudici vol
-│   └── vol_paper/               # forecasts.parquet, trades.jsonl, position.json, baseline_report.json, exec_diag.jsonl (A6: bid/ask+greeks diagnostici / diagnostic), hedge_state.json + hedge_ledger.jsonl (v2, SOLO con --hedge / --hedge only) · record a N gambe: corpo = prime 2, campi `_all` solo oltre 2 / N-leg records: body = first 2, `_all` fields only beyond 2
+│   └── vol_paper/               # forecasts.parquet, trades.jsonl, position.json, baseline_report.json, exec_diag.jsonl (A6: bid/ask+greeks diagnostici / diagnostic), hedge_state.json + hedge_ledger.jsonl (v2, SOLO con --hedge / --hedge only), adaptive.jsonl + adaptive_entry_journal.json (SOLO con --adaptive / --adaptive only) · record a N gambe: corpo = prime 2, campi `_all` solo oltre 2 / N-leg records: body = first 2, `_all` fields only beyond 2
 ├── docs/                        # STATUS_ARCHIVE_2026H1.md (storico ante 07-08, read-only), MODEL_IMPROVEMENTS, ROADMAP_VOL_BOOK, paper/
 ├── tests/                       # pytest (test_recent_fixes, test_live_training_parity, test_regime_incremental)
 ├── deploy/vps/                  # kit deploy VPS (setup_vps.sh + README)

@@ -144,7 +144,9 @@ foreach ($p in $pairs) {
 # position/hedge/exec_diag = optional (may legitimately not exist: flat
 # book, hedge never enabled). The _pulled.ok marker authorizes the merge to
 # mirror the PRESENCE of position/hedge_state (absent on VPS = flat = must
-# be removed from the canonical copy too).
+# be removed from the canonical copy too). adaptive.jsonl and the adaptive
+# entry journal exist only under --adaptive: inputs of the FT1 judge, the
+# journal presence-mirrored like the position.
 $vpStaging = Join-Path $Staging "vol_paper"
 Remove-Item (Join-Path $vpStaging "*") -Force -ErrorAction SilentlyContinue
 $vpRemote = "$RemoteRoot/results/vol_paper"
@@ -154,7 +156,8 @@ foreach ($f in @("forecasts.parquet", "trades.jsonl")) {
 }
 # NO 2>$null redirect on native exes: under PS 5.1 with EAP=Stop the stderr
 # wrapped as an ErrorRecord would become terminating (known repo gotcha).
-foreach ($f in @("position.json", "hedge_state.json", "hedge_ledger.jsonl", "exec_diag.jsonl")) {
+foreach ($f in @("position.json", "hedge_state.json", "hedge_ledger.jsonl", "exec_diag.jsonl",
+                 "adaptive.jsonl", "adaptive_entry_journal.json")) {
     scp -q @SshOpts "${VpsHost}:$vpRemote/$f" $vpStaging
     if ($LASTEXITCODE -ne 0) { Write-Output "[pull] vol_paper/$f assente sul VPS (ok se flat/hedge off) / absent on VPS (ok when flat/hedge off)" }
 }

@@ -76,7 +76,7 @@ def merge_one(staged: Path, canon: Path, keys: list[str], ts_col: str) -> tuple[
 # The VPS is the AUTHORITATIVE forward-test source: on duplicates the
 # staging rows win (keep='last' with canonical first — unlike collectors,
 # whose rows are identical by construction so keep='first' is equivalent).
-# Jsonl files are key-merged; position/hedge_state are PRESENCE-mirrored
+# Jsonl files are key-merged; position/hedge_state/adaptive journal are PRESENCE-mirrored
 # (absent on VPS = flat) only under the _pulled.ok marker.
 VP_STAGING = STAGING / "vol_paper"
 VP_CANON = ROOT / "results" / "vol_paper"
@@ -84,8 +84,9 @@ VP_JSONL = [
     ("trades.jsonl", ("entry_ts", "settled_ts")),
     ("exec_diag.jsonl", ("ts",)),
     ("hedge_ledger.jsonl", ("ts",)),
+    ("adaptive.jsonl", ("ts",)),
 ]
-VP_MIRROR = ["position.json", "hedge_state.json"]
+VP_MIRROR = ["position.json", "hedge_state.json", "adaptive_entry_journal.json"]
 
 
 def merge_jsonl(staged: Path, canon: Path, keys: tuple) -> tuple[int, int]:
