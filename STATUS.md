@@ -5,6 +5,37 @@
 
 ---
 
+## 🧭 Riparti da qui — 2026-09-17 (terminale Deribit) · Resume here — 2026-09-17 (Deribit terminal)
+
+🇮🇹 **Fatto (`58e742c`, locale, non pushato).** Revisione delle dashboard: `scripts/06_dashboard.py`
+resta (è l'unica vista sul braccio short-vol) ed è stato corretto. Il tab Trades legge ora ogni
+forma di record di `04b` (straddle, iron butterfly con premio netto e payoff a 4 gambe, uscita
+pin-close, tentativi `incomplete` senza posizione né PnL); una posizione con expiry passata e
+nessun settlement su disco è *expired, awaiting settlement* e non più *open* (quella del 15/09
+risultava aperta il 17/09 perché la copia locale non era stata ancora aggiornata); il PnL somma la gamba perp ricostruita
+con `perp_leg` del giudice hedged-vs-unhedged (scarto 1.7e-18 sui 20 trade del giudice; 73 trade
+chiusi: opzioni −0.1427, perp −0.0147 BTC); tolta l'etichetta «gate 30»; D6 fatto (parser
+condiviso); testi UI e commenti JS solo in inglese. Nuovo `tests/test_dashboard_trades.py` (4 test,
+3 mutazioni su 4 intercettate, la quarta equivalente sui record reali). Suite 538 passed + 1
+skipped. `docs/DASHBOARD_IMPROVEMENTS` conservato (D1–D5 aperti), `docs/ROADMAP_VOL_BOOK` allineato.
+Nessuna eliminazione: i `results/{lstm,nhits,tcnmamba}/dashboard_results.json` restano (rifarli
+richiede un riaddestramento). **Da decidere con l'utente:** push di `58e742c`; pubblicazione.
+
+**EN** **Done (`58e742c`, local, not pushed).** Dashboard review: `scripts/06_dashboard.py` stays
+(the only view on the short-vol arm) and was fixed. The Trades tab now reads every `04b` record
+shape (straddle, iron butterfly with net premium and 4-leg payoff, pin-close exit, `incomplete`
+attempts with no position or PnL); a position past expiry with no settlement on disk shows as
+*expired, awaiting settlement* instead of *open* (the 09-15 one still showed open on 09-17 because the local copy had not been refreshed yet); PnL
+adds the perp leg rebuilt with the hedged-vs-unhedged judge's `perp_leg` (1.7e-18 gap on the
+judge's 20 trades; 73 closed trades: options −0.1427, perp −0.0147 BTC); the "gate 30" label is
+gone; D6 done (shared parser); UI text and JS comments English-only. New
+`tests/test_dashboard_trades.py` (4 tests, 3 of 4 mutations caught, the fourth equivalent on real
+records). Suite 538 passed + 1 skipped. `docs/DASHBOARD_IMPROVEMENTS` kept (D1–D5 open),
+`docs/ROADMAP_VOL_BOOK` aligned. Nothing deleted: `results/{lstm,nhits,tcnmamba}/dashboard_results.json`
+stay (regenerating them needs retraining). **To decide with the user:** pushing `58e742c`; publication.
+
+---
+
 ## 🧭 Riparti da qui — fine sessione 2026-09-16 (doc per lingua, figure README) · Resume here — end of session 2026-09-16 (per-language docs, README figures)
 
 🇮🇹 **Stato.** Ciclo di sola documentazione/commenti, **zero modifiche a logica di training,
