@@ -8,7 +8,7 @@
 ## 🧭 Riparti da qui — fine sessione 2026-09-16 (doc per lingua, figure README) · Resume here — end of session 2026-09-16 (per-language docs, README figures)
 
 🇮🇹 **Stato.** Ciclo di sola documentazione/commenti, **zero modifiche a logica di training,
-inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine, tre chiusi (aperti 3a/3b):
+inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine, tutti chiusi:
 - **Task 1 — FATTO (`330bd98`).** Doc in un file per lingua: nome canonico inglese + gemello
   `.it.md` (`AVVIO.md` → `START.md`, `TEORIA.md` → `THEORY.md`; README, CHANGELOG,
   `scripts/README`, `deploy/vps/README`, `docs/*.md`), switch lingua in prima riga, regola «ogni
@@ -21,11 +21,10 @@ inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine,
   alcune stringhe di test; i commenti JS dentro la stringa HTML di `06_dashboard.py` restano
   bilingui. Il generatore locale del sito è stato ripuntato a `THEORY.md`. Suite **534 passed,
   1 skipped** prima e dopo.
-- **Task 3 — APERTO.** Scritti e **non committati** `scripts/vol/export_vols_predictions.py`
-  (export per-barra in sola lettura del path NN del giudice, fail-fast se la sua QLIKE non
-  riproduce `metrics.nn.qlike` del report) e `scripts/vol/plot_readme_figures.py` (due PNG in
-  `docs/assets/`, numeri letti da `results/vols/qlike_report_1h_test_canonical_1h_vols.json` e dal
-  parquet di export, fail-fast se `provenance.matches` non è `true`).
+- **Task 3a/3b — FATTI (`39e34fc`, `70c8d53`, 17/09).** Export per-barra che riproduce il giudice
+  alla cifra (QLIKE 0.23636697 = report, n=6486), due PNG in `docs/assets/`, righe in
+  `scripts/README` EN+IT; apertura dei README in linguaggio piano con le figure, blocco tecnico e
+  warning HAR-RV/HAR-C invariati.
 - **Task 4 — FATTO (`6d4908e`, 17/09).** I due conteggi (462 e 535) sostituiti da una formulazione
   senza numero fisso, EN+IT. Il 535 includeva un file di test locale non tracciato: un clone pulito
   misura **497 passed, 1 skipped** (skip: fixture sintetica troppo corta per `momentum_30d`).
@@ -33,22 +32,11 @@ inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine,
   Jekyll); `architetture.html` risponde 200; link nei
   due README.
 
-**Azione esatta da cui ripartire, in ordine:**
-1. **L'utente lancia** (GPU, dalla root): `python scripts/vol/export_vols_predictions.py --arch
-   canonical_1h_vols --split test`, poi `python scripts/vol/plot_readme_figures.py`. Guardare i
-   due PNG prima di committarli.
-2. Righe per i due script nuovi in `scripts/README.md` + `scripts/README.it.md`; commit Task 3a
-   (script + PNG).
-3. **3b** — apertura di `README.md`/`README.it.md`: titolo, un paragrafo in linguaggio piano senza
-   acronimi (⚠ l'orizzonte è la varianza delle **prossime 30 ore** aggiornata ogni ora, NON
-   «l'ora successiva»; la monetizzazione: le regole short-vol testate hanno fallito i gate
-   pre-registrati), poi le due figure con caption di una riga (più basso è meglio / fuori
-   campione), poi il blocco tecnico invariato. Il warning gate HAR-RV vs claim HAR-C non si
-   sposta né si ammorbidisce.
-4. Commit separati per task, poi riepilogo finale all'utente.
+**Azione esatta da cui ripartire:** ciclo chiuso, nessuna azione residua; resta valida la lista del
+15/09 qui sotto (giudice FT1).
 
 **EN** **State.** Documentation/comments-only cycle, **no change to training, inference, judge or
-trading logic**; `04b` and the VPS untouched. Four tasks in order, three closed (3a/3b open):
+trading logic**; `04b` and the VPS untouched. Four tasks in order, all closed:
 - **Task 1 — DONE (`330bd98`).** One doc file per language: English canonical name + `.it.md`
   twin (`AVVIO.md` → `START.md`, `TEORIA.md` → `THEORY.md`; README, CHANGELOG, `scripts/README`,
   `deploy/vps/README`, `docs/*.md`), language switch on the first line, rule "every doc change on
@@ -61,11 +49,10 @@ trading logic**; `04b` and the VPS untouched. Four tasks in order, three closed 
   `scripts/vol/sig_har_probe.py`), as do some test strings; the JS comments inside the HTML string
   of `06_dashboard.py` stay bilingual. The local site generator now points at `THEORY.md`. Suite
   **534 passed, 1 skipped** before and after.
-- **Task 3 — OPEN.** Written and **not committed**: `scripts/vol/export_vols_predictions.py`
-  (read-only per-bar export of the judge's NN path, fail-fast if its QLIKE does not reproduce the
-  report's `metrics.nn.qlike`) and `scripts/vol/plot_readme_figures.py` (two PNGs in
-  `docs/assets/`, numbers read from `results/vols/qlike_report_1h_test_canonical_1h_vols.json` and
-  the export parquet, fail-fast unless `provenance.matches` is `true`).
+- **Task 3a/3b — DONE (`39e34fc`, `70c8d53`, 09-17).** Per-bar export that reproduces the judge to
+  the digit (QLIKE 0.23636697 = report, n=6486), two PNGs in `docs/assets/`, rows in
+  `scripts/README` EN+IT; plain-language README opening with the figures, technical block and
+  HAR-RV/HAR-C warning unchanged.
 - **Task 4 — DONE (`6d4908e`, 09-17).** Both counts (462 and 535) replaced by count-free wording,
   EN+IT. The 535 included an untracked local test file: a clean clone measures **497 passed,
   1 skipped** (skip: synthetic fixture too short for `momentum_30d`).
@@ -73,18 +60,8 @@ trading logic**; `04b` and the VPS untouched. Four tasks in order, three closed 
   build); `architetture.html` returns 200; linked from
   both READMEs.
 
-**Exact action to resume from, in order:**
-1. **The user runs** (GPU, from the root): `python scripts/vol/export_vols_predictions.py --arch
-   canonical_1h_vols --split test`, then `python scripts/vol/plot_readme_figures.py`. Look at both
-   PNGs before committing them.
-2. Rows for the two new scripts in `scripts/README.md` + `scripts/README.it.md`; commit Task 3a
-   (scripts + PNGs).
-3. **3b** — opening of `README.md`/`README.it.md`: title, one plain-language paragraph with no
-   acronyms (⚠ the horizon is the variance over the **next 30 hours**, refreshed hourly, NOT "the
-   next hour"; monetization: the short-vol rules tested failed their pre-registered gates), then
-   both figures with a one-line caption (lower is better / out-of-sample), then the technical block
-   unchanged. The HAR-RV gate vs HAR-C claim warning stays where it is, not softened.
-4. Separate commits per task, then the final summary to the user.
+**Exact action to resume from:** cycle closed, nothing left; the 09-15 list below (FT1 judge)
+still applies.
 
 ---
 
