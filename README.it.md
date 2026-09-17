@@ -194,6 +194,9 @@ Tre **collector forward** girano in parallelo sullo stesso VPS e producono l'uni
 
 `scripts/06_dashboard.py` è un terminale di analytics per opzioni crypto: server HTTP single-file + SPA Plotly, **GPU-free e indipendente dalla pipeline ML**, alimentato dai dati **pubblici Deribit** (REST, no-auth). Calcola le Greche in tempo reale sull'intera option chain (Black-Scholes forward-measure, r=0) ed espone quattro viste: Volatility Surface, Option Chain, Risk & Greeks, e **Trades** (storico e posizione aperta del forward test `04b` — straddle e iron butterfly, PnL delle gambe opzioni più la gamba perp di hedge dove è stata tradata, posizioni scadute ancora senza settlement segnalate come tali). Avvio: `python run_all.py --only-dashboard` → `http://localhost:8050`. Dettaglio delle viste, endpoint e configurazione: [START.it.md](START.it.md) §5.4.
 
+![Tab Trades del terminale opzioni Deribit](docs/assets/deribit_terminal_trades.png)
+*Tab Trades: il forward test short-vol di `04b` sulla testnet Deribit (paper trading, nessun capitale reale), con PnL delle gambe opzioni e della gamba perp di hedge e il profilo di rischio della posizione selezionata. Gira in locale, non è pubblicato online.*
+
 ---
 
 ## 7. Esiti sperimentali
