@@ -4,7 +4,9 @@
 
 > **Verifica 2026-09-10:** backlog conservato: il terminale e il parser locale non esauriscono D1–D6. Le indicazioni temporali di luglio sotto sono storiche, non autorizzazioni: l'hedge v2 è chiuso FAIL e il suo pre-hedge non è più una priorità. D4 resta un miglioramento operativo; D1–D3 devono rispettare i vincoli dei campioni forward e dei descrittivi. D5 è opzionale, D6 ancora opportunistico. Coda e gate correnti: [STATUS.md](../STATUS.md).
 
-> Creato 2026-07-16 (sessione pre-chiusura gate v1). Stato: **PROPOSTE, nessuna implementata**. Perimetro: `scripts/06_dashboard.py` (risk terminal Deribit, 4 tab: Surface / Chain / Risk & Greeks / Trades; single-file, GPU-free, per design SCOLLEGATO dai modelli ML). Il filo conduttore: i margini veri non sono estetici — sono i dati già su disco che nessuna tab mostra. Nessun item tocca path pre-registrati: è tutto strato di lettura.
+> **2026-09-17:** **D6 fatto** (il terminale importa `parse_instrument` da `quantsys/data/deribit.py`, sessione REST + retry propri mantenuti; il fit SVI/SABR per display non è stato fatto). Il tab Trades è stato inoltre allineato a ciò che 04b scrive oggi: record iron butterfly e `incomplete`, gamba perp di hedge nel PnL, posizioni scadute senza settlement segnalate. D1–D5 restano proposte; equity curve e scatter edge→PnL di D2 e pannello freshness di D4 **non** sono fatti.
+
+> Creato 2026-07-16 (sessione pre-chiusura gate v1). Stato alla creazione: **PROPOSTE, nessuna implementata**. Perimetro: `scripts/06_dashboard.py` (risk terminal Deribit, 4 tab: Surface / Chain / Risk & Greeks / Trades; single-file, GPU-free, per design SCOLLEGATO dai modelli ML). Il filo conduttore: i margini veri non sono estetici — sono i dati già su disco che nessuna tab mostra. Nessun item tocca path pre-registrati: è tutto strato di lettura.
 
 ## Item (ordinati per valore)
 

@@ -21,7 +21,7 @@ The **numbered spine** (`00→99`) is flat in `scripts/` and encodes the pipelin
 | `04_live_signals.py` | live / paper trading WS | **directional** |
 | `04b_vol_paper.py` · `04c_vol_paper_baselines.py` | vol forward test + baseline gate | **vol** |
 | `05_analyze_signals.py` · `07_verify_teacher.py` | signal analysis / teacher comparison | shared |
-| `06_dashboard.py` | Deribit Options Risk Terminal (HTTP+Plotly SPA: 3D vol surface, smile/term, OI by strike, Greeks, PCR, Trades tab + payoff) — public Deribit data, GPU-free, independent of the ML pipeline | standalone (market data) |
+| `06_dashboard.py` | Deribit Options Risk Terminal (HTTP+Plotly SPA: 3D vol surface, smile/term, OI by strike, Greeks, PCR, Trades tab: straddles/iron butterflies, option + perp hedge PnL, payoff) — public Deribit data, GPU-free, independent of the ML pipeline | standalone (market data) |
 | `99_replay_live_vs_training.py` | parity diagnostic (BLOCKER #1) | shared |
 
 ## Per-line subfolders

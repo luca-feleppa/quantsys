@@ -21,7 +21,7 @@ E1 stage 2 is **CLOSED, NO CONCLUSION** (09-10): no second readings or signal in
 | B1 / L2 | Stage 1 inconclusive because the positive control failed. No automatic h=3 reopening. At h=30 wait for n_eff=216; dates depend on continuity. No permanent 1m-kline producer. | STATUS 10/08 and current status |
 | CAFN | Parked, low prior; reopen only with a revised scope and gate. | [START](../START.md), STATUS 20/07 |
 | Replay C1 | The old checklist left the full comparison on future overlapping live/replay ticks pending after funding refresh. Do not confuse it with C2 refactor parity; retain it for reconciliation before claiming complete coverage. | STATUS 18/07 |
-| Dashboard | D1–D6 retained: useful proposals, not preregistrations. Result views must not anticipate restricted gates or descriptives. | [DASHBOARD_IMPROVEMENTS](DASHBOARD_IMPROVEMENTS.md) |
+| Dashboard | D1–D5 retained (D6 done 2026-09-17): useful proposals, not preregistrations. Result views must not anticipate restricted gates or descriptives. | [DASHBOARD_IMPROVEMENTS](DASHBOARD_IMPROVEMENTS.md) |
 
 ## Exhausted items removed from the queue
 

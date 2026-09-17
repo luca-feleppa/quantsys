@@ -21,7 +21,7 @@ Lo **spine numerato** (`00→99`) è piatto in `scripts/` e codifica la **fase**
 | `04_live_signals.py` | live / paper trading WS | **direzionale** |
 | `04b_vol_paper.py` · `04c_vol_paper_baselines.py` | forward test vol + gate baselines | **vol** |
 | `05_analyze_signals.py` · `07_verify_teacher.py` | analisi segnali / confronto teacher | shared |
-| `06_dashboard.py` | Deribit Options Risk Terminal (SPA HTTP+Plotly: vol surface 3D, smile/term, OI by strike, Greche, PCR, tab Trades + payoff) — dati Deribit pubblici, GPU-free, indipendente dalla pipeline ML | standalone (market data) |
+| `06_dashboard.py` | Deribit Options Risk Terminal (SPA HTTP+Plotly: vol surface 3D, smile/term, OI by strike, Greche, PCR, tab Trades: straddle/iron butterfly, PnL opzioni + hedge perp, payoff) — dati Deribit pubblici, GPU-free, indipendente dalla pipeline ML | standalone (market data) |
 | `99_replay_live_vs_training.py` | diagnostica parity (BLOCKER #1) | shared |
 
 ## Sottocartelle per linea

@@ -4,7 +4,9 @@
 
 > **2026-09-10 review:** backlog retained: the terminal and local parser do not exhaust D1–D6. The July timing notes below are historical, not authorizations: hedge v2 is closed FAIL and its pre-hedge phase is no longer a priority. D4 remains an operational improvement; D1–D3 must respect forward-sample and descriptive-analysis restrictions. D5 is optional, D6 remains opportunistic. Current queue and gates: [STATUS.md](../STATUS.md).
 
-> Created 2026-07-16 (pre-v1-gate-close session). Status: **PROPOSALS, none implemented**. Scope: `scripts/06_dashboard.py` (Deribit risk terminal, 4 tabs: Surface / Chain / Risk & Greeks / Trades; single-file, GPU-free, by design DECOUPLED from the ML models). Common thread: the real gains are not cosmetic — they are on-disk data no tab currently shows. No item touches pre-registered paths: it is all read-only layer.
+> **2026-09-17:** **D6 done** (the terminal imports `parse_instrument` from `quantsys/data/deribit.py`, its own REST session + retry kept; the SVI/SABR display fit was not done). The Trades tab was also brought in line with what 04b writes today: iron butterfly and `incomplete` records, perp hedge leg in the PnL, expired positions without settlement flagged. D1–D5 remain proposals; the D2 equity curve, edge→PnL scatter and D4 freshness panel are **not** done.
+
+> Created 2026-07-16 (pre-v1-gate-close session). Status at creation: **PROPOSALS, none implemented**. Scope: `scripts/06_dashboard.py` (Deribit risk terminal, 4 tabs: Surface / Chain / Risk & Greeks / Trades; single-file, GPU-free, by design DECOUPLED from the ML models). Common thread: the real gains are not cosmetic — they are on-disk data no tab currently shows. No item touches pre-registered paths: it is all read-only layer.
 
 ## Items (value-ordered)
 

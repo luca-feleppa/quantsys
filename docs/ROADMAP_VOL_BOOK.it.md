@@ -21,7 +21,7 @@ E1 stadio 2 è **CHIUSO, NESSUNA CONCLUSIONE** (10/09): niente seconde letture n
 | B1 / L2 | Stadio 1 non conclusivo per controllo positivo fallito. Non riaprire automaticamente a h=3. A h=30 attendere n_eff=216; date subordinate alla continuità. Nessun produttore permanente delle kline 1m. | STATUS 10/08 e stato corrente |
 | CAFN | Parcheggiato, prior basso; riapertura solo con nuova definizione del perimetro e gate. | [START](../START.it.md), STATUS 20/07 |
 | Replay C1 | La vecchia checklist lasciava pendente il confronto completo su tick live/replay futuri sovrapposti dopo il funding-refresh. Non confonderlo con la parità del solo refactor C2; conservarlo come verifica da riconciliare prima di dichiarare copertura completa. | STATUS 18/07 |
-| Dashboard | D1–D6 conservati: proposte ancora utili, non preregistrazioni. Le viste di risultati non possono anticipare gate o descrittivi vincolati. | [DASHBOARD_IMPROVEMENTS](DASHBOARD_IMPROVEMENTS.it.md) |
+| Dashboard | D1–D5 conservati (D6 fatto 2026-09-17): proposte ancora utili, non preregistrazioni. Le viste di risultati non possono anticipare gate o descrittivi vincolati. | [DASHBOARD_IMPROVEMENTS](DASHBOARD_IMPROVEMENTS.it.md) |
 
 ## Voci esaurite rimosse dalla coda
 
