@@ -42,8 +42,12 @@ snapshot ±10 min, PASS/FAIL su chain sintetica, record prodotti dall'esecutore 
 su 6 intercettate. Suite **561 passed, 1 skipped**. Sui dati reali: `NON AVVIATO` (nessun
 `adaptive.jsonl`). Doc: `scripts/README`, `START` §vol-paper e albero, `THEORY` addendum, EN+IT.
 
-**Azione esatta da cui ripartire, in ordine:** (1) push del commit del giudice, su istruzione
-(P6 chiede il commit, già fatto); (2) vintage macro — **vincolo verificato il 17/09, DECISO: nessuna
+**Anche fatto oggi:** push dei tre commit (`514147c` giudice, `a3a7c7c` vintage, `3536dfb` ritiro E1).
+⚠ La voce del vintage è stata **ridotta al vincolo e alla decisione** dopo il primo push: la versione
+più estesa resta nella storia pubblica di `a3a7c7c`, **nessun rewrite** (decisione esplicita, stesso
+criterio delle occorrenze storiche del 02/08).
+
+**Azione esatta da cui ripartire, in ordine:** (1) —; (2) vintage macro — **vincolo verificato il 17/09, DECISO: nessuna
 promozione; si rivaluta a S1 chiuso, e senza un consumatore il refresh resta non fatto**: (a) la regola adattiva di FT1 non legge i forecast (banda dal solo DVOL, `edge`/`rv_pred`
 nei soli metadati d'entry, nessuna condizione del giudice li usa) ⇒ FT1 **non** blocca una promozione,
 contrariamente alla nota del 10/09; (b) nessuna promozione e nessun go-live FT1 prima di S1 a
@@ -92,8 +96,12 @@ by hand, ±10 min snapshot, PASS/FAIL on a synthetic chain, records produced by 
 6 mutations caught. Suite **561 passed, 1 skipped**. On real data: `NOT STARTED` (no `adaptive.jsonl`).
 Docs: `scripts/README`, `START` vol-paper section and tree, `THEORY` addendum, EN+IT.
 
-**Exact action to resume from, in order:** (1) push the judge commit, on instruction (P6 asks
-for the commit, already done); (2) macro vintage — **constraint verified on 09-17, DECIDED: no
+**Also done today:** the three commits were pushed (`514147c` judge, `a3a7c7c` vintage, `3536dfb` E1
+retirement). ⚠ The vintage entry was **reduced to the constraint and the decision** after that first
+push: the longer version stays in `a3a7c7c`'s public history, **no rewrite** (explicit decision, same
+criterion as the 08-02 historical occurrences).
+
+**Exact action to resume from, in order:** (1) —; (2) macro vintage — **constraint verified on 09-17, DECIDED: no
 promotion; reassessed once S1 closes, and without a consumer the refresh stays undone**: (a) FT1's adaptive rule does not read the forecasts (band from DVOL only, `edge`/`rv_pred` in
 the entry metadata only, no judge condition uses them) ⇒ FT1 does **not** block a promotion, contrary
 to the 09-10 note; (b) no promotion and no FT1 go-live before S1 reaches
