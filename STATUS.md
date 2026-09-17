@@ -43,8 +43,16 @@ su 6 intercettate. Suite **561 passed, 1 skipped**. Sui dati reali: `NON AVVIATO
 `adaptive.jsonl`). Doc: `scripts/README`, `START` §vol-paper e albero, `THEORY` addendum, EN+IT.
 
 **Azione esatta da cui ripartire, in ordine:** (1) push del commit del giudice, su istruzione
-(P6 chiede il commit, già fatto); (2) vintage macro: verificare quali campioni aperti leggono i
-forecast (S1 incluso) prima di decidere; (3) ritiro del contatore E1 da `avvio_sessione.ps1` e
+(P6 chiede il commit, già fatto); (2) vintage macro — **vincolo verificato il 17/09, DECISO: nessuna
+promozione; si rivaluta a S1 chiuso, e senza un consumatore il refresh resta non fatto**: (a) la regola adattiva di FT1 non legge i forecast (banda dal solo DVOL, `edge`/`rv_pred`
+nei soli metadati d'entry, nessuna condizione del giudice li usa) ⇒ FT1 **non** blocca una promozione,
+contrariamente alla nota del 10/09; (b) S1 legge i settlement v1, il cui lato dipende dall'`edge` del
+NN e quindi dal vintage ⇒ nessuna promozione prima di S1 a `n = 83` (75 settlement oggi); (c) il go-live
+FT1 sostituisce la regola v1 e quindi **chiude la raccolta di S1**: va dopo `n = 83`; (d) produrre un
+vintage con `01b_download_macro.py`, anche `--skip-regime`, riscrive `X_macro_*` in
+`data/lstm_dataset.npz`, `macro_normalizer.pkl` e `models/$QUANTSYS_ARCH/pipeline_state.pkl` ⇒ cambia
+l'impronta M1 dell'npz canonico: se si decide di promuovere, il file va costruito fuori dal path
+canonico e il vintage datato qui; (3) ritiro del contatore E1 da `avvio_sessione.ps1` e
 `START.md` §5.3, e — solo al go-live — aggiunta di `ft1_execution_judge.py --count-only` alla routine;
 (4) deploy di `04b` sul VPS senza `--adaptive` su istruzione esplicita; (5) go-live FT1 su istruzione
 esplicita, dopo un settlement a ledger flat. Calendario invariato: ~30/09 S1 a `n = 83`;
@@ -85,8 +93,16 @@ by hand, ±10 min snapshot, PASS/FAIL on a synthetic chain, records produced by 
 Docs: `scripts/README`, `START` vol-paper section and tree, `THEORY` addendum, EN+IT.
 
 **Exact action to resume from, in order:** (1) push the judge commit, on instruction (P6 asks
-for the commit, already done); (2) macro vintage: check which open samples read the forecasts (S1 included)
-before deciding; (3) retire the E1 counter from `avvio_sessione.ps1` and `START.md` §5.3 and — only at
+for the commit, already done); (2) macro vintage — **constraint verified on 09-17, DECIDED: no
+promotion; reassessed once S1 closes, and without a consumer the refresh stays undone**: (a) FT1's adaptive rule does not read the forecasts (band from DVOL only, `edge`/`rv_pred` in
+the entry metadata only, no judge condition uses them) ⇒ FT1 does **not** block a promotion, contrary
+to the 09-10 note; (b) S1 reads v1 settlements, whose side depends on the NN `edge` and hence on the
+vintage ⇒ no promotion before S1 reaches `n = 83` (75 settlements today); (c) FT1 go-live replaces the
+v1 rule and therefore **ends S1's collection**: it goes after `n = 83`; (d) producing a vintage with
+`01b_download_macro.py`, even `--skip-regime`, rewrites `X_macro_*` in `data/lstm_dataset.npz`,
+`macro_normalizer.pkl` and `models/$QUANTSYS_ARCH/pipeline_state.pkl` ⇒ it changes the canonical npz's
+M1 fingerprint: if promotion is decided, the file must be built off the canonical path and the vintage
+dated here; (3) retire the E1 counter from `avvio_sessione.ps1` and `START.md` §5.3 and — only at
 go-live — add `ft1_execution_judge.py --count-only` to the routine; (4) deploy `04b` to the VPS without
 `--adaptive` on explicit instruction; (5) FT1 go-live on explicit instruction, after a settlement with a
 flat ledger. Calendar unchanged: ~09-30 S1 at `n = 83`; ~end of November B1/L2.
