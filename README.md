@@ -46,6 +46,7 @@ Documentation in **two languages, one file per language** (English `NAME.md`, It
 - **[STATUS.md](STATUS.md)** — **canonical source of truth** for state: current period + every open pre-registered gate. History predating 2026-07-08 in **[docs/STATUS_ARCHIVE_2026H1.md](docs/STATUS_ARCHIVE_2026H1.md)** (read-only).
 - **[THEORY.md](THEORY.md) §12** — experimental protocol + negative-results (KILL) corpus with gate thresholds.
 - **[docs/MODEL_IMPROVEMENTS.md](docs/MODEL_IMPROVEMENTS.md)** · **[docs/ROADMAP_VOL_BOOK.md](docs/ROADMAP_VOL_BOOK.md)** — backlog and open items.
+- **[Project site](https://luca-feleppa.github.io/quantsys/)** — one page for readers who do not open the code: how the engine works, the method, and every pre-registered experiment with its prior, threshold and outcome, numbers read from the judges' reports at build time (generator: `scripts/site/build_site.py`).
 - **[Architecture diagrams, live page](https://luca-feleppa.github.io/quantsys/architetture.html)** (source: [docs/architetture.html](docs/architetture.html)) — **interactive diagrams** of the architectures, derived from the `forward` passes rather than from the docs: data pipeline, iTransformer, TCN+Mamba, N-HiTS, CAFN, MoE/MoU, output head, plus the internal wiring of attention, convolution, state and decomposition. Tensor shapes update as the parameters change; IT/EN toggle inside the page.
 
 ---

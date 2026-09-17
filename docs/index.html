@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QUANTSYS — a forecasting engine on BTC/USDT</title>
+<meta name="description" content="How a BTC/USDT forecasting engine works, and the full record of what was tried and how it went.">
+<style>
+:root{--bg:#fbfaf7;--fg:#1b1a17;--mut:#6b6862;--line:#e2ded5;--accent:#8a5a2b;
+--card:#fff;--warn-bg:#fdf6e8;--warn-line:#d9b56a;--ok:#2f6f4f;--no:#8c3b3b;--mid:#7a6a2f}
+@media (prefers-color-scheme:dark){:root{--bg:#14130f;--fg:#eae7df;--mut:#9a958a;
+--line:#2e2b25;--accent:#d0975a;--card:#1c1a16;--warn-bg:#241f14;--warn-line:#6b5322;
+--ok:#6fbf95;--no:#e08b8b;--mid:#cbb46a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.65 Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
+-webkit-font-smoothing:antialiased}
+.wrap{max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+header{border-bottom:1px solid var(--line);padding-bottom:1.5rem;margin-bottom:2rem}
+h1{font-size:1.9rem;line-height:1.2;margin:0 0 .4rem;letter-spacing:-.01em}
+h2{font-size:1.3rem;margin:3rem 0 .75rem;letter-spacing:-.005em}
+.sub{color:var(--mut);margin:0;font-size:1.02rem}
+.stamp{color:var(--mut);font-size:.82rem;margin-top:1rem;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-line);
+border-radius:.5rem;padding:.9rem 1.1rem;margin:1.5rem 0;font-size:.95rem}
+.warn b{color:var(--accent)}
+.grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));margin:1.5rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.5rem;padding:1rem 1.1rem}
+.card h3{margin:0 0 .35rem;font-size:.78rem;text-transform:uppercase;
+letter-spacing:.09em;color:var(--mut);font-weight:600}
+.big{font-size:1.55rem;font-weight:600;letter-spacing:-.01em}
+.big.ok{color:var(--ok)}.big.no{color:var(--no)}.big.mid{color:var(--mid)}
+.card p{margin:.35rem 0 0;font-size:.9rem;color:var(--mut);line-height:1.5}
+.exp{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line);
+border-radius:.4rem;padding:1.1rem 1.2rem;margin:1.1rem 0}
+.exp.ok{border-left-color:var(--ok)}.exp.no{border-left-color:var(--no)}
+.exp.mid{border-left-color:var(--mid)}.exp.open{border-left-color:var(--accent)}
+.exp h3{margin:0 0 .5rem;font-size:1.03rem;line-height:1.35}
+.meta{font-size:.75rem;color:var(--mut);margin:0 0 .8rem;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.verdict{font-weight:600;letter-spacing:.02em}
+.verdict.ok{color:var(--ok)}.verdict.no{color:var(--no)}.verdict.mid{color:var(--mid)}
+.verdict.open{color:var(--accent)}
+dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.3rem .9rem;font-size:.91rem}
+dt{color:var(--mut);font-size:.74rem;text-transform:uppercase;letter-spacing:.07em;
+padding-top:.22rem;white-space:nowrap}
+dd{margin:0}
+.nums{margin:.8rem 0 0;font-size:.88rem;border-top:1px solid var(--line);padding-top:.7rem}
+.nums span{display:inline-block;margin-right:1.2rem;max-width:100%;overflow-wrap:anywhere}
+.nums b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+.prov{font-size:.72rem;color:var(--mut);margin-top:.45rem}
+.none{color:var(--mut);font-style:italic;font-size:.9rem;margin:.8rem 0 0;
+border-top:1px solid var(--line);padding-top:.7rem}
+footer{margin-top:4rem;padding-top:1.25rem;border-top:1px solid var(--line);
+color:var(--mut);font-size:.85rem}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
+background:var(--bg);border:1px solid var(--line);border-radius:.25rem;padding:.05em .3em}
+.steps{margin:1.2rem 0;padding-left:1.3rem}
+.steps>li{margin:.85rem 0;padding-left:.25rem}
+.steps>li>b{display:block;margin-bottom:.15rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>QUANTSYS</h1>
+  <p class="sub">A forecasting engine on BTC/USDT — and the full record,
+  positive and negative, of what was tried.</p>
+  <p class="stamp">build 2026-09-17 14:45 UTC · commit d4ac0d1
+  · branch main · <a href="index.it.html">Italiano</a> · <a href="architetture.html">architecture diagrams</a> · <a href="https://github.com/luca-feleppa/quantsys">source code</a></p>
+</header>
+
+<h2>At a glance</h2>
+<div class="warn">
+<b>The honest status, up top and not in a footnote.</b> This project's operational arm is
+<b>paper trading on a testnet</b>: no real capital, no real slippage, no market impact. What
+is measured is <i>forecast accuracy</i>; monetization is a separate question, and so far one
+without a positive answer.
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Volatility line · 1h</h3>
+    <div class="big ok">PASS</div>
+    <p>Forecasting the realized variance of the next 30 hours. The pre-registered gate named
+    HAR-RV as its baseline, and the model beat it by <b>30%</b> in QLIKE on
+    the test split (n = 6,392), with coherent val→test.</p>
+  </div>
+  <div class="card">
+    <h3>Current claim, against HAR-C</h3>
+    <div class="big">−31.65%</div>
+    <p>QLIKE against the <b>stronger</b> jump-robust baseline adopted later: −22.42%
+    on val, −31.65% on test. Test split: model <b>0.236</b>, HAR-C
+    <b>0.346</b>, naive persistence <b>0.793</b>. Lower is better.
+    Read from a reproducible model/dataset pair.</p>
+  </div>
+  <div class="card">
+    <h3>Directional line</h3>
+    <div class="big no">no OOS alpha</div>
+    <p>No out-of-sample directional skill at any timeframe tested. The code stays
+    alive as a <b>negative control</b>: it shows the measuring apparatus works even
+    when there is no signal to find.</p>
+  </div>
+</div>
+
+<p>This project's thesis is not the positive result: it is the <b>method</b>. A single PASS
+on a variance target, surrounded by an extensive corpus of failures <i>pre-registered before
+running</i>, says far more than an isolated PASS — because the threshold existed before the
+number, and the negative results are written up with the same care as the positive one.</p>
+
+<h2>The input data</h2>
+<p>The starting point is a single series: hourly BTC/USDT candles from 2019 to today, plus
+the perpetual funding rate. There is nothing exotic here — deliberately: the question this
+project answers is <i>how far price and volume alone can take you</i>, and answering it
+requires not cheating by adding sources that would explain the result in the model's place.</p>
+
+<p>Two things are added to that base. A <b>macro</b> block of 90 daily series
+(rates, indices, the dollar, equity volatility), carried onto the hourly grid with a
+<i>causal</i> fill: every bar sees only the latest already-published figure at that moment,
+never the next one. And three options data streams collected <b>forward</b> — implied
+volatility surface, order book, trades — which no API retains retroactively: if you do not
+record them as they happen, they are gone. That is why a collector has been running around
+the clock for months.</p>
+
+<h2>The features</h2>
+<p>Nothing works on absolute prices: everything is expressed in <b>log returns</b>, which are
+stationary and symmetric — a +1% and a −1% have the same magnitude, which is not true of
+prices. From there, <b>104 features</b> are built, split into two streams the
+model treats separately: <b>86 dynamic</b> (changing every bar) and
+<b>18 structural</b> (position in range, distance from levels, volume
+profile, funding).</p>
+
+<div class="warn">
+<b>15 features were removed, and the reason matters more than the number.</b>
+They were not dropped for being useless: they were dropped for being <b>impossible to compute
+in real time</b>. They look at 90- or 365-day windows, or require a fractional
+differentiation that needs the whole history. A model using them would get a backtest result
+it could not reproduce in production — the most common form of self-deception in this field.
+They are: <code>dist_ath_365d</code>, <code>dist_ath_90d</code>, <code>dist_atl_365d</code>, <code>dist_atl_90d</code>, <code>frac_diff_close</code>, <code>frac_diff_volume</code>, <code>momentum_7d</code>, <code>momentum_90d</code>, <code>price_pos_365d</code>, <code>price_pos_90d</code>, <code>vp_concentration_long</code>, <code>vp_poc_convergence</code>, <code>vp_poc_dist_long</code>, <code>vp_vah_dist_long</code>, <code>vp_val_dist_long</code>.
+</div>
+
+<h2>What is predicted</h2>
+<p>The production line's target is the <b>realized variance</b> of the next 30
+hours, on a log scale. Not direction: the <i>magnitude</i> of the move, regardless of sign.</p>
+
+<p>That choice is not cosmetic, and it is probably the most useful result of the whole
+project. On this asset, what can be forecast out of sample are the <b>even moments</b> —
+variance, dispersion, magnitude. The <b>odd moments</b> — the sign of the return, the
+asymmetry between rises and falls, the jump component — turn out to be unpredictable not only
+for the neural network but for the classical econometric baselines too. In the signed
+semivariance test the reference econometric model did <i>worse than a constant</i>: when even
+the traditional method loses to "do nothing", the problem is not the model, it is that the
+information is not there.</p>
+
+<p>The model works on windows of <b>120 bars</b> and predicts in a
+<b>normalized</b> space, not in price units. Converting back is a mandatory and delicate
+step: omitting it was the costliest error in the project's history — it produced stop-losses
+and take-profits wrong by two orders of magnitude, and a spectacularly false backtest. It is
+now protected by a check that fails the program rather than letting implausible values
+through.</p>
+
+<h2>How it is decided whether something worked</h2>
+<p>This is the part the project regards as its main content. A forecasting engine is judged
+by its results; a method is judged by <i>what would have happened had the result been
+different</i>. The rules below exist to make that question verifiable rather than rhetorical,
+and nearly all of them were written after getting something wrong.</p>
+
+<ol class="steps">
+<li><b>The threshold is written before the number.</b> Every experiment is pre-registered and
+<i>committed</i> before it runs: the question, the expected prior with its direction, the
+metrics, the thresholds and the minimum number of observations. The commit is dated, so the
+ordering between criterion and result is not a claim, it is something you can check. Moving
+the goalposts once the result is in becomes a visible operation.</li>
+
+<li><b>There are three outcomes, not two.</b> Besides <i>passed</i> and <i>missed</i> there
+is <i>no conclusion</i>: the case where the measuring apparatus cannot answer the question on
+that sample. Keeping it separate from failure is what prevents publishing as a negative
+result something that is merely a defect of measurement.</li>
+
+<li><b>The positive control, mandatory.</b> Before believing "there is no signal" you must
+show that on that same window the apparatus detects an effect we <i>know</i> is there —
+typically beating naive persistence, the zero-parameter forecast. If it does not, the outcome
+is not a failure of the signal: it is a statement about the window. On its first application
+this control turned an apparently publishable negative result into a "no conclusion", which
+was the correct reading.</li>
+
+<li><b>Count before measuring.</b> Many of an experiment's conditions do not depend on the
+model — how many observations exist, how often a rule triggers, how many are actually
+observable. They can be computed <i>before</i> spending compute or months of sample, and they
+should be: two experiments were redesigned because that count showed in advance they would
+have returned "no conclusion" for want of sample.</li>
+
+<li><b>Missing data is never "no effect".</b> A hole in the recording stays a hole and is
+counted separately. It is a boring rule that has already saved two conclusions: a collector
+blind at certain hours of the day would have made a rule look "never triggered" when it
+triggered precisely in those hours.</li>
+
+<li><b>Validate on validation; the test split is touched once.</b> The test split is not a
+bench to iterate on: it is consumed once, after the criterion has been met on validation, and
+with the same definitions.</li>
+
+<li><b>Every experimental lever is born switched off.</b> A change under test must not be
+able to alter production behaviour until someone switches it on explicitly, and the absence
+of effect while off is verified on real data, not assumed.</li>
+
+<li><b>The negative result gets written up anyway</b>, with the same numbers and the same
+care as the positive one. A documented failure is what stops you from trying the same road
+again in six months having forgotten why it was abandoned.</li>
+</ol>
+
+<p>Across 18 registered experiments — 18 closed and 0
+still open, spread over 4 research lines — the outcomes distribute like this:</p>
+
+<div class="grid">
+  <div class="card">
+    <h3>threshold passed</h3>
+    <div class="big ok">5</div>
+    <p>of 18 closed experiments · outcome «PASS»</p>
+  </div>
+  <div class="card">
+    <h3>threshold missed</h3>
+    <div class="big no">11</div>
+    <p>of 18 closed experiments · outcome «FAIL»</p>
+  </div>
+  <div class="card">
+    <h3>measurement inconclusive</h3>
+    <div class="big mid">2</div>
+    <p>of 18 closed experiments · outcome «NO CONCLUSION»</p>
+  </div>
+</div>
+
+<p><b>These numbers are not a score.</b> A single PASS answers the question «is there a signal»: the other 4 concern the yardstick itself. Passing a method or reproducibility gate does not add a result: it changes or certifies the comparison instrument. Where the instrument changed it got <i>stricter</i> — the reference econometric baseline was replaced by a stronger one, and the claimed edge shrank accordingly.</p>
+
+<div class="warn">
+<b>The discipline is enforced by this page, not merely declared.</b> The generator that
+produces it refuses to build if a card belonging to a <i>still-open</i> gate contains any
+decisional quantity — verdict included. This is not a reminder: it is an error that stops the
+build. A number seen early cannot be unseen, and every empty box further down is the shape
+that rule takes when it is respected.
+</div>
+
+<p>The same holds for numbers already out: where a judge's report exists on disk, the page
+<b>re-reads it at every build</b> rather than hosting a copy. This is not a consistency check
+between two copies — it is the absence of the second copy, which makes divergence impossible
+rather than detectable. The measure comes from a real case: two numerical claims in this
+project had gone false without anyone noticing, because they had been copied by hand.</p>
+
+
+<h2>What was tried, and how it went</h2>
+<p>Every card gives the question, the <b>prior declared before running</b>, the lever, the
+numeric threshold written in advance and the outcome — whatever it is. The field that gives
+this page its value is the prior: it shows the criterion existed before the result. Where the
+prior was falsified <i>in its direction</i>, that is said explicitly.</p>
+
+<div class="exp ok">
+  <h3>VOL-S — does the model beat an econometric baseline on variance?</h3>
+  <p class="meta">1h volatility line · is there a signal? · pre-reg 2026-06-10 → closed 2026-06-10 · split test
+  · <span class="verdict ok">PASS</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>With a log-RV target, does the 30-hour forecast beat HAR in out-of-sample QLIKE?</dd><dt>Declared prior</dt><dd>Uncertain. The directional line had failed at every timeframe; the target change was the last structurally different hypothesis left.</dd><dt>Lever</dt><dd><code>features.target_type: ret → log_rv</code></dd><dt>Threshold</dt><dd>QLIKE_NN ≤ 0.95·QLIKE_HAR <b>and</b> &lt; QLIKE_naive</dd><dt>Consequence</dt><dd>The project&#x27;s only OOS PASS. Becomes the production line. These are the June gate&#x27;s numbers, against the baseline the pre-registered criterion named (HAR-RV); the current claim is against the stronger HAR-C — see the C2, C3 and R1 cards. ⚠ No trading backtest: meaningless on a variance target.</dd></dl>
+  <div class="nums"><span>model QLIKE <b>0.2572</b></span><span>HAR-RV baseline QLIKE <b>0.3681</b></span><span>naive persistence QLIKE <b>0.8067</b></span><span>NN/HAR-RV ratio <b>0.6986</b></span><span>observations <b>6,392</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp no">
+  <h3>Cross-resolution — does the result hold on one-minute bars?</h3>
+  <p class="meta">1h volatility line · is there a signal? · pre-reg 2026-06-10 → closed 2026-06-11 · split val
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>Same method, same hyperparameters, same judge, only the bar changes: is 30-minute realized variance forecast better than HAR-RV?</dd><dt>Declared prior</dt><dd>Declared as a robustness test of VOL-S, not tuning: PASS ⇒ the signal holds across resolutions; FAIL ⇒ the hourly result is treated as resolution-specific, with no iterations.</dd><dt>Lever</dt><dd><code>data.interval: 1h → 1m</code>, everything else unchanged</dd><dt>Threshold</dt><dd>same criterion as VOL-S, val-first</dd><dt>Consequence</dt><dd>The edge <b>does not transfer</b> across scales: at 30 minutes HAR-RV is already an adequate compressor. The result is specific to the hourly resolution and is declared as such — there is no general law, there is a result at one precise scale.</dd></dl>
+  <div class="nums"><span>NN/HAR-RV ratio on val <b>1.0127</b></span><span>test <b>not touched (val-first)</b></span><div class="prov">hand-written, true as of 2026-06-11</div></div>
+</div>
+<div class="exp ok">
+  <h3>C2 — was the comparison baseline a strong one?</h3>
+  <p class="meta">1h volatility line · which comparison is the right one? · pre-reg 2026-07-30 → closed 2026-07-30 · split val+test
+  · <span class="verdict ok">PASS</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>Does HAR-CJ, splitting continuous and jump components, beat HAR-RV out of sample? If so, how much of the published edge was baseline weakness?</dd><dt>Declared prior</dt><dd>Unfavourable: at hourly sampling bipower variation is noisy; the decomposition works best at 5 minutes.</dd><dt>Lever</dt><dd>the judge&#x27;s baseline, not the model</dd><dt>Threshold</dt><dd>4 AND conditions, with a materiality threshold</dd><dt>Consequence</dt><dd>The prior is falsified: the baseline was weak. The published band was rewritten from −27%/−36% to −23%/−32%, and on 2026-08-05 re-expressed at the canonical artifact&#x27;s precision as −22.42%/−31.65% (same numbers, nothing re-measured). The claim comes out <b>more defensible</b>: a competent reader&#x27;s first objection is closed with a number.</dd></dl>
+  <div class="nums"><span>remaining edge on val <b>22.6%</b></span><span>remaining edge on test <b>31.6%</b></span><span>share due to the weak baseline <b>15.5% on val, 12.4% on test</b></span><div class="prov">hand-written, true as of 2026-07-30</div></div>
+</div>
+<div class="exp ok">
+  <h3>C3 — does HAR-CJ&#x27;s gain come from jumps or from regressor substitution?</h3>
+  <p class="meta">1h volatility line · which comparison is the right one? · pre-reg 2026-07-31 → closed 2026-07-31 · split val+test
+  · <span class="verdict ok">PASS</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>Three-way comparison — HAR-RV vs HAR-C vs HAR-CJ — to separate the <code>RV→C</code> substitution from the jumps&#x27; information content.</dd><dt>Declared prior</dt><dd>Expected: HAR-C ≈ HAR-CJ, i.e. the gain is substitution. ⚠ Peeking declared ex-ante: two of the three numbers were already known, so both decision statistics were anchored to the only unknown quantity.</dd><dt>Lever</dt><dd>one new specification only, HAR with continuous components alone</dd><dt>Threshold</dt><dd>two paired DM tests, α=0.01 with familywise Bonferroni</dd><dt>Consequence</dt><dd>C2&#x27;s interpretation is <b>falsified</b>: bipower variation does the work as a robust estimator, jumps are noise to remove. HAR-C becomes the reference baseline — same accuracy, 450× better conditioned. The published band is unchanged. Consistent with the even/odd moments dichotomy.</dd></dl>
+  <div class="nums"><span>Test A DM(C,RV) <b>significant on both splits</b></span><span>Test B DM(CJ,C) <b>not significant on either</b></span><span>substitution share φ <b>≈ 1.00 (100%)</b></span><div class="prov">hand-written, true as of 2026-07-31</div></div>
+</div>
+<div class="exp no">
+  <h3>C1 — the optimized estimand is not the judged one: does the correction fix it?</h3>
+  <p class="meta">1h volatility line · which comparison is the right one? · pre-reg 2026-07-28 → closed 2026-07-30 · split val
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>QLIKE is minimized by the conditional mean, the model optimizes a median. Does a smearing correction, applied symmetrically to both sides, improve the specification?</dd><dt>Declared prior</dt><dd>Expected direction declared beforehand: the baseline should gain more than the model, so the measured edge should <b>shrink</b>.</dd><dt>Lever</dt><dd>Duan (1983) correction on train residuals only</dd><dt>Threshold</dt><dd>the correction must improve QLIKE on <b>both</b> sides</dd><dt>Consequence</dt><dd>Not adopted; the judge is unchanged and the published band untouched. The note stays <b>tested and not adopted</b>, not «resolved»: the outcome does not show the edge is immune to the mismatch, it shows <i>this</i> correction does not fix it.</dd></dl>
+  <div class="nums"><span>outcome <b>① failed, one side gets worse</b></span><span>expected direction <b>FALSIFIED</b></span><div class="prov">hand-written, true as of 2026-07-30</div></div>
+</div>
+<div class="exp no">
+  <h3>SignatureHAR — do path signatures add predictive power to HAR-C?</h3>
+  <p class="meta">1h volatility line · is there a signal? · pre-reg 2026-08-25 → closed 2026-08-25 · split val
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>Do log-signature terms of the return path — the family the rough-path literature presents as a complete representation of a trajectory — add predictive power to the HAR-C baseline on the same frame and with the same judge?</dd><dt>Declared prior</dt><dd>FAIL ~85%: the even order-2 term expected redundant with variance, the ordering terms expected null by the even/odd dichotomy.</dd><dt>Lever</dt><dd>6 closed-form columns on top of HAR-C&#x27;s 3 regressors, causal 24-bar window frozen before running</dd><dt>Threshold</dt><dd>a <b>materiality</b> threshold derived from the published band (moving it by at least 1 point) <b>and</b> a significant DM, with a <b>positive control</b> calibrated on that threshold</dd><dt>Consequence</dt><dd>Significant but <b>below the materiality threshold</b> (94.8%): the band would move by 0.947 points against the 1 required. The positive control firing makes the FAIL interpretable. The prior got the verdict right and <b>both mechanisms wrong</b>: the even/odd dichotomy is about odd moments as <i>targets</i>, it does not forbid odd inputs on an even target. The thread closes at this scale.</dd></dl>
+  <div class="nums"><span>HAR-C QLIKE <b>0.337</b></span><span>candidate QLIKE <b>0.3329</b></span><span>Δ QLIKE <b>-0.0041</b></span><span>DM p-value <b>0.0015</b></span><span>positive control fires <b>yes</b></span><span>material <b>no</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp no">
+  <h3>A10 — does concentrating attention improve variance forecasting?</h3>
+  <p class="meta">1h volatility line · does this change improve the model? · pre-reg 2026-07-28 → closed 2026-07-30 · split val
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.4</p>
+  <dl><dt>Question</dt><dd>With 104 variates as tokens and only ~1.7k independent windows, attention can spread over spurious correlations. Does penalizing its entropy help?</dd><dt>Declared prior</dt><dd>Low: no training lever had ever passed on this line.</dd><dt>Lever</dt><dd>entropy penalty on the attention maps, λ fixed by a rule rather than a sweep</dd><dt>Threshold</dt><dd>−3% in QLIKE, plus a <b>manipulation check</b>: if the penalty does not lower entropy, the run measured the implementation rather than the hypothesis</dd><dt>Consequence</dt><dd>The most instructive card in the corpus: the manipulation check <b>passed</b>, so the penalty did exactly what it should and QLIKE did not move → <b>the hypothesis is falsified, not the implementation</b>. With it the whole «training levers on the vol line» class closes by pre-declared decision.</dd></dl>
+  <div class="nums"><span>QLIKE <b>+0.18% (marginally worse)</b></span><span>manipulation check <b>passed, entropy −24.4%</b></span><div class="prov">hand-written, true as of 2026-07-30</div></div>
+</div>
+<div class="exp no">
+  <h3>B4-bis — does implied volatility as an input feature help?</h3>
+  <p class="meta">1h volatility line · does this change improve the model? · pre-reg 2026-07-17 → closed 2026-07-23 · split val
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.4</p>
+  <dl><dt>Question</dt><dd>Does adding the implied volatility index as a feature improve realized variance forecasting?</dd><dt>Declared prior</dt><dd>Moderate: it is forward-looking information the model does not have.</dd><dt>Lever</dt><dd>3 columns added to the macro stream, causal asof</dd><dt>Threshold</dt><dd>−3% in QLIKE against a retrained baseline</dd><dt>Consequence</dt><dd>A diagnostic signature that recurs with A10: the signal moves the log-variance <b>mean</b> without improving <b>calibration</b>, which is what QLIKE charges for. Plus a tenor mismatch. Not to be re-tested without changing tenor or metric.</dd></dl>
+  <div class="nums"><span>QLIKE <b>−1.02% against a −3% threshold</b></span><span>log MSE <b>−6%, but not QLIKE</b></span><div class="prov">hand-written, true as of 2026-07-23</div></div>
+</div>
+<div class="exp no">
+  <h3>A8-bis — does mixup augmentation help on a variance target?</h3>
+  <p class="meta">1h volatility line · does this change improve the model? · pre-reg 2026-07-19 → closed 2026-07-20 · split val
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.4</p>
+  <dl><dt>Question</dt><dd>With ~1.7k effectively independent windows, does an interpolating augmentation compensate for scarcity?</dd><dt>Declared prior</dt><dd>Moderate, with a caveat: an earlier descriptive measure gave −4.94%, suspect because measured against the incumbent model.</dd><dt>Lever</dt><dd><code>mixup_alpha</code> 0 → 0.2</dd><dt>Threshold</dt><dd>−3% in QLIKE against a baseline <b>retrained on the same scaler</b></dd><dt>Consequence</dt><dd>The −4.94% was a <b>distribution-shift artifact</b>: a comparison across two different scalers. A permanent project rule follows — <b>never judge a lever against a model trained on a different scaler</b>, always against a retrained baseline.</dd></dl>
+  <div class="nums"><span>QLIKE <b>−0.79% against a −3% threshold</b></span><span>earlier descriptive measure <b>−4.94%, an artifact</b></span><div class="prov">hand-written, true as of 2026-07-20</div></div>
+</div>
+<div class="exp mid">
+  <h3>B1 stage 1 — does the order book carry information about short-horizon variance?</h3>
+  <p class="meta">1h volatility line · is there a signal? · pre-reg 2026-07-31 → closed 2026-07-31 · split forward
+  · <span class="verdict mid">NO CONCLUSION</span> · detail in THEORY.md §12.3-bis</p>
+  <dl><dt>Question</dt><dd>Do three microstructure features, chosen by <b>target-free</b> diagnostics, add predictive power on 3-hour variance beyond variance&#x27;s own lags?</dd><dt>Declared prior</dt><dd>Base case expected: no detectable effect — the sample is tiny and only a large effect would show.</dd><dt>Lever</dt><dd>three unsigned L2 features added to a HAR-C baseline</dd><dt>Threshold</dt><dd>significance + materiality + minimum n, <b>and a positive control</b>: the baseline must beat persistence, else the comparison is uninterpretable</dd><dt>Consequence</dt><dd><b>The positive control failed</b> and did its job: the baseline does not beat persistence at this horizon, so the main comparison is uninterpretable. Without that condition the reportable outcome would have been «the order book carries no information» — a <b>publishable false negative</b>. The defect is in the design, not the implementation. No variant was run once the numbers were seen.</dd><dt>On the data</dt><dd>The order book is collected forward: the API keeps no history of it.</dd></dl>
+  <div class="nums"><span>baseline QLIKE <b>0.4639</b></span><span>candidate QLIKE <b>0.4861</b></span><span>naive persistence QLIKE <b>0.4019</b></span><span>forecasts evaluated <b>289</b></span><span>effective sample <b>96.3333</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp no">
+  <h3>Signed semivariance — is volatility asymmetry predictable?</h3>
+  <p class="meta">1h volatility line · is there a signal? · pre-reg 2026-06-11 → closed 2026-06-11 · split test
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.3</p>
+  <dl><dt>Question</dt><dd>Is the ratio of upside to downside semivariance as predictable as total variance?</dd><dt>Declared prior</dt><dd>Moderate: variance predicts well, so a decomposition of it seemed natural.</dd><dt>Lever</dt><dd><code>target_type: log_rs_ratio</code></dd><dt>Threshold</dt><dd>MSE ≤ 0.95 of the baseline</dd><dt>Consequence</dt><dd>Stronger than a plain FAIL: the econometric baseline does <b>worse than a constant</b>, so the asymmetry is unpredictable <i>for everyone</i>, not just for the model. It is the observation behind the project&#x27;s cross-cutting reading — <b>even</b> moments generalize, <b>odd</b> ones do not.</dd></dl>
+  <div class="nums"><span>outcome <b>above threshold</b></span><span>sign accuracy <b>≈ 0.46, i.e. below chance</b></span><span>econometric baseline <b>worse than a constant</b></span><div class="prov">hand-written, true as of 2026-06-11</div></div>
+</div>
+<div class="exp no">
+  <h3>1m→1h pivot — was the cost wall the binding constraint?</h3>
+  <p class="meta">Directional line (negative control) · is there a signal? · pre-reg 2026-06-10 → closed 2026-06-10 · split test
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.3</p>
+  <dl><dt>Question</dt><dd>At one minute the predicted effect was ~1.5 bps against ~26 bps of cost. At one hour the expected return grows an order of magnitude: does skill emerge?</dd><dt>Declared prior</dt><dd>Favourable: if costs were the constraint, removing them should suffice.</dd><dt>Lever</dt><dd>bar resolution, 1m → 1h</dd><dt>Threshold</dt><dd>pre-registered gate at two cost levels</dd><dt>Consequence</dt><dd>The cost wall <b>does fall</b>, and directional skill <b>still fails to emerge</b>: costs were not the constraint. Closes the «same method, different timeframe» line. The directional line survives as a negative control — it shows the measuring apparatus works even when there is no signal.</dd></dl>
+  <div class="nums"><span>gate <b>failed 4/4 at both cost levels</b></span><span>cost wall <b>actually broken through</b></span><div class="prov">hand-written, true as of 2026-06-10</div></div>
+</div>
+<div class="exp no">
+  <h3>Gate v1 — does the entry rule monetize the risk premium?</h3>
+  <p class="meta">Short-vol arm · does the rule monetize the signal? · pre-reg 2026-06-12 → closed 2026-07-30 · split forward
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>Comparing forecast and implied variance, does a threshold rule produce positive PnL in forward testing?</dd><dt>Declared prior</dt><dd>Favourable: the variance risk premium is structurally positive and confirmed by the historical backtest.</dd><dt>Lever</dt><dd>threshold rule on <code>log(forecast variance / implied variance)</code></dd><dt>Threshold</dt><dd>3 pre-registered criteria, n ≥ 30</dd><dt>Consequence</dt><dd>FAIL 0/3, with both samples agreeing. Yet the always-sell-volatility baseline is <b>positive</b>: the risk premium exists, the rule does not monetize it. A permanent project distinction — <i>measured predictive skill</i> ≠ <i>monetization</i>.</dd><dt>On the data</dt><dd>Forward test on testnet: the trades cannot be reconstructed from the API afterwards.</dd></dl>
+  <div class="nums"><span>executed positions <b>30</b></span><span>criterion 1 — mean PnL &gt; 0 <b>no</b></span><span>criterion 2 — beats the baselines <b>no</b></span><span>criterion 3 — hit rate &gt; 0.5 <b>no</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp no">
+  <h3>V2 — does delta-hedging improve the short-vol arm?</h3>
+  <p class="meta">Short-vol arm · does the rule monetize the signal? · pre-reg 2026-07-12 → closed 2026-08-11 · split forward
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>Does neutralizing directional exposure with the perpetual purify the variance premium, or does rebalancing cost eat it?</dd><dt>Declared prior</dt><dd>Uncertain: it is precisely a trade-off between variance reduction and realization cost, with funding as the big never-measured unknown.</dd><dt>Lever</dt><dd>fixed rebalancing band, frozen by the pre-registration</dd><dt>Threshold</dt><dd>① variance ≤ 0.6× the unhedged one; ② mean cost within 0.25 standard errors; ③ n ≥ 20 hedge-active positions</dd><dt>Consequence</dt><dd>FAIL 2/3. Variance drops by 55% — the hedge does exactly what theory promised — but the cost is 2.6× the budget, and <b>76% of it is perpetual fees</b>: funding, the declared unknown, weighs under 1%. The hypothesis dies on <b>realization cost, not on theory</b>. ⚠ Criterion ② is a budget, not a significance test: the drag is not shown to be negative in population. The unhedged version remains the production design.</dd><dt>On the data</dt><dd>Forward test on testnet: fills and rebalances cannot be reconstructed afterwards.</dd></dl>
+  <div class="nums"><span>positions <b>20</b></span><span>variance ratio <b>0.4472</b></span><span>mean PnL unhedged (BTC) <b>-0.0032</b></span><span>mean PnL hedged (BTC) <b>-0.0045</b></span><span>total perp fees (BTC) <b>0.0199</b></span><span>total funding (BTC) <b>0.0002</b></span><span>① variance <b>yes</b></span><span>② cost <b>no</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp no">
+  <h3>MFIV v2 — does the model-free comparator rank better than ATM?</h3>
+  <p class="meta">Short-vol arm · which comparison is the right one? · pre-reg 2026-07-20 → closed 2026-08-18 · split forward
+  · <span class="verdict no">FAIL</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>At-the-money implied volatility understates the var-swap rate through smile convexity. Does a model-free comparator rank opportunities better?</dd><dt>Declared prior</dt><dd>Favourable in theory — the convexity wedge is measured and positive — but it is a hypothesis about <b>ranking</b>, not level: were the wedge constant, the two rankings would be identical by construction.</dd><dt>Lever</dt><dd>comparator substitution, the model is unchanged</dd><dt>Threshold</dt><dd>① rank-correlation difference ≥ +0.05; ② consistent sign across the two halves; ③ n ≥ 40 paired expiries</dd><dt>Consequence</dt><dd>FAIL, predicted by the pre-registration itself: the wedge is <b>large but nearly constant</b>, and rank invariance makes it invisible to a rank correlation. The live comparator stays ATM; MFIV remains a diagnostic column. The permanent value is descriptive: MFIV prices variance about 22% above ATM, so the short-vol arm&#x27;s cushion is wider than ATM suggested — <b>not</b> extra PnL, since the position sells the ATM straddle.</dd><dt>On the data</dt><dd>Option chain collected forward: not reconstructible afterwards.</dd></dl>
+  <div class="nums"><span>expiries <b>41</b></span><span>ρ ATM <b>-0.1439</b></span><span>ρ MFIV <b>-0.1096</b></span><span>Δρ <b>0.0343</b></span><span>Δρ first half <b>-0.0015</b></span><span>Δρ second half <b>0.061</b></span><span>log-variance wedge, median <b>0.2005</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp mid">
+  <h3>E1 — does the edge beat the market&#x27;s own forecast?</h3>
+  <p class="meta">Short-vol arm · is there a signal? · pre-reg 2026-07-31 → closed 2026-09-10 · split forward
+  · <span class="verdict mid">NO CONCLUSION</span> · detail in THEORY.md §12.3-bis</p>
+  <dl><dt>Question</dt><dd>The vol line beats an <b>econometric</b> baseline. Does it also beat the <b>market&#x27;s</b> forecast, i.e. the variance implied by option prices?</dd><dt>Declared prior</dt><dd>Unfavourable. The rule derived from this signal bought volatility in 26 of 31 cases, while the risk premium says the opposite. Implied variance embeds a premium, so a good variance forecaster is not automatically a good forecaster of its <b>sign</b> against implied.</dd><dt>Lever</dt><dd>none: an already-recorded signal is judged, nothing in the model changes</dd><dt>Threshold</dt><dd>sign agreement &gt; 0.5 (p &lt; 0.05) <b>and</b> rank correlation &gt; 0 with a CI excluding zero, <b>and</b> a positive control against persistence, n ≥ 40</dd><dt>Consequence</dt><dd>The positive control fails <b>on power, not on design</b>: the model beats persistence by 39% in QLIKE, but at an effective sample of 20 the difference is not significant — so the two primary statistics stay <b>uninterpretable</b>. It is B1&#x27;s mirror case: there the baseline lost, here it wins without being able to show it. The defect is in the pre-registration, which sized the power of the primary statistics and never that of the control. ⚠ The negative sign does not license inverting the rule.</dd><dt>On the data</dt><dd>Forecasts and implied variance recorded forward: not reconstructible afterwards.</dd></dl>
+  <div class="nums"><span>expiries <b>40</b></span><span>sign agreement <b>0.35</b></span><span>rank correlation <b>-0.2644</b></span><span>model QLIKE (control) <b>0.5925</b></span><span>naive QLIKE (control) <b>0.9762</b></span><span>control DM p-value <b>0.251</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp ok">
+  <h3>R1 — is the published band reproducible from an artifact?</h3>
+  <p class="meta">Infrastructure and reproducibility · can the published number be verified? · pre-reg 2026-08-03 → closed 2026-08-04 · split val+test
+  · <span class="verdict ok">PASS</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>The band&#x27;s numerator came from a model/dataset pair later deleted. Retraining at unchanged production config on the frozen dataset, is the same number recovered — and can it be kept as a verifiable artifact?</dd><dt>Declared prior</dt><dd>The explanation written before the run: about two tenths of seed-draw uncertainty, inferred from the gap between two replicas.</dd><dt>Lever</dt><dd>none: retraining at unchanged config, plus a diagnostic arm on a purely computational parameter</dd><dt>Threshold</dt><dd>baselines reproduced digit for digit, scaler identity verified with no escape hatch, historical gate and materiality thresholds met</dd><dt>Consequence</dt><dd>The published band does not change by a digit: the numerator matches <b>exactly</b> (val 0.26143, test 0.23637), and the prior is wrong in a useful way — at fixed seeds the protocol is <b>deterministic</b>, the gap between replicas was a data difference, not noise. What changes is the claim&#x27;s <b>status</b>: from a statement about a protocol to a re-judgeable artifact. ⚠ The PASS does not authorize swapping the live model while forward samples are open.</dd></dl>
+  <div class="nums"><span>model QLIKE (test) <b>0.2364</b></span><span>HAR-C QLIKE (test) <b>0.3458</b></span><span>HAR-RV QLIKE (test) <b>0.37</b></span><span>naive QLIKE (test) <b>0.7932</b></span><span>observations <b>6,486</b></span><span>scaler identity <b>yes</b></span><div class="prov">read from the judges' report at this build</div></div>
+</div>
+<div class="exp ok">
+  <h3>M1 — does the identity check also see the macro data vintage?</h3>
+  <p class="meta">Infrastructure and reproducibility · can the published number be verified? · pre-reg 2026-08-05 → closed 2026-08-05 · split val+test
+  · <span class="verdict ok">PASS</span> · detail in THEORY.md §12.2</p>
+  <dl><dt>Question</dt><dd>The model↔dataset check covered the price scaler but not the macro normalization, which is a model input and enters no HAR baseline. Can it be extended without moving the published number by a bit?</dd><dt>Declared prior</dt><dd>Limit declared before running: the positive control can only be synthetic, since the historical macro vintage no longer exists on disk and rebuilding it would rewrite the frozen dataset.</dd><dt>Lever</dt><dd>fingerprint of the macro block recorded at training and checked by the judges, with an escape hatch separate from the scaler&#x27;s</dd><dt>Threshold</dt><dd>inertia on the archived reports + a two-level positive control + no backfill of older models&#x27; fingerprints</dd><dt>Consequence</dt><dd>The published number does not move. Older models stay «macro provenance not verifiable» — <b>deliberately</b>: a fingerprint recomputed today would match by construction and turn an honest «unknown» into a reassuring «identical». Declared limit: the positive control is synthetic; it shows the guard tells two vintages apart, not that it would have caught the historical one.</dd></dl>
+  <div class="nums"><span>keys compared on the archived reports <b>118, zero numeric differences</b></span><span>positive-control tests <b>21</b></span><div class="prov">hand-written, true as of 2026-08-05</div></div>
+</div>
+
+<h2>Open gates — pre-registered, not yet judged</h2>
+<p>These experiments have their threshold and minimum sample written and committed
+<b>before</b> running. Until the sample is full no decisional quantity appears: a number seen
+early cannot be unseen.</p>
+<p class="none">No pre-registered gate is open at this build.</p>
+
+<h2>Assumptions and limits, declared</h2>
+<ul>
+<li><b>The result is specific to the hourly resolution.</b> Repeated at half-hourly bars the
+same method fails its own criterion. Not a detail: it means there is no general law, there is
+a result at one precise scale.</li>
+
+<li><b>On direction there is no out-of-sample edge at all</b>, at any timeframe tried. The
+directional line stays in the code as a negative control, not as a strategy.</li>
+
+<li><b>The operational arm is paper trading on a testnet.</b> No real capital, no real
+slippage, no market impact, and transaction costs are <i>assumed</i> from public fee
+schedules rather than measured on fills.</li>
+
+<li><b>Measured accuracy ≠ profitability.</b> This is the distinction the project holds more
+firmly than any other: the entry rule built on top of the signal failed its own
+pre-registered criterion, while the passive comparison strategy stays positive. The risk
+premium exists; this rule does not monetize it.</li>
+
+<li><b>The evaluation criterion rewards the conditional mean, the model optimizes a
+median.</b> The mismatch is known, was tested with a standard correction, and the correction
+<i>did not</i> work — so it is documented as open, not as solved. It applies to both sides of
+the comparison, so it does not favour the model.</li>
+
+<li><b>The effective sample is far smaller than it looks.</b> Forecast windows overlap, so
+observations are not independent: where the raw data counts thousands of points, the
+statistically useful sample is worth a few hundred. Every significance reported here is
+corrected for this.</li>
+</ul>
+
+<footer>
+<p>The cards come from <code>docs/experiments.yaml</code>; numbers marked «read from the
+report» are derived at every build rather than transcribed, so they cannot diverge from
+the source. The stamp above says which repository state they come from. The authoritative
+technical source remains <code>THEORY.md</code>, which this page points to rather than
+replaces: where the two diverge, THEORY.md is right.</p>
+</footer>
+</div>
+</body>
+</html>

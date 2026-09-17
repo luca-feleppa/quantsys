@@ -1,0 +1,563 @@
+# EXPERIMENT REGISTRY
+#
+# Structured index of the pre-registered gates, used to generate the project site's
+# history section without re-typing numbers that already exist elsewhere.
+#
+# AUTHORITY RULE: this file is NOT the authoritative source. Prose, methodological
+# rationale and full numbers live in `THEORY.md` §12 (public copy, Italian twin
+# `THEORY.it.md`) and in `STATUS.md` (continuity log). If this registry and
+# `THEORY.md` diverge, `THEORY.md` is right and this file is corrected, never the
+# reverse. Every card therefore carries a mandatory `teoria:` pointer to a THEORY.md
+# section, checked by the tests (the key name is historical and kept for the schema).
+#
+# HOW NUMBERS ARE NOT DUPLICATED. Two ways only:
+#   - `numbers.source` + `numbers.keys` -> the value is READ from the JSON report at
+#     every build. It is not copied here, so it cannot diverge.
+#   - `numbers.literal` -> only for gates whose numbers exist in no report on disk.
+#     `as_of:` (the date they were true) is mandatory, and the `teoria:` section must
+#     contain them. It is the worst case, not the default.
+# A `numbers` block with both, or a `literal` without `as_of`, is a schema error and
+# fails the tests. Every label is bilingual ({it, en}); literal values may be a plain
+# string (language-neutral, e.g. a number) or {it, en}.
+#
+# ONE-SHOT DISCIPLINE. A gate with `status: aperto` must have `verdict: null` and no
+# `numbers`. This is not a recommendation: the site generator raises
+# `OneShotViolation` and the build stops.
+#
+# Field values (`status`, `verdict`, `scope`, `data_state`) are schema keys, not
+# display text: the generator translates them per language.
+
+schema: 2
+# research lines
+lines:
+  vol-1h:      {it: "Linea volatilità 1h", en: "1h volatility line"}
+  direzionale: {it: "Linea direzionale (controllo negativo)", en: "Directional line (negative control)"}
+  short-vol:   {it: "Braccio short-vol", en: "Short-vol arm"}
+  infra:       {it: "Infrastruttura e riproducibilità", en: "Infrastructure and reproducibility"}
+
+# KIND OF QUESTION. A bare PASS/FAIL tally misleads, because the cards do not all answer
+# the same question: "does a signal exist" and "which comparison is right" are both
+# passable, but only the first is a predictive result. Without this field the page
+# would claim several thresholds passed two screens below a header saying "a single
+# PASS", contradicting itself.
+scopes:
+  segnale:       {it: "esiste un segnale?", en: "is there a signal?"}
+  leva:          {it: "questa modifica migliora il modello?", en: "does this change improve the model?"}
+  metodo:        {it: "qual è il confronto corretto?", en: "which comparison is the right one?"}
+  realizzazione: {it: "la regola monetizza il segnale?", en: "does the rule monetize the signal?"}
+  riproducibilita: {it: "il numero pubblicato è verificabile?", en: "can the published number be verified?"}
+
+experiments:
+
+  # ─────────────────────────── 1h volatility line ───────────────────────────
+  - id: vol-s
+    name: {it: "VOL-S — il modello batte una baseline econometrica sulla varianza?",
+           en: "VOL-S — does the model beat an econometric baseline on variance?"}
+    line: vol-1h
+    scope: segnale
+    status: chiuso
+    dates: {prereg: 2026-06-10, closed: 2026-06-10}
+    question: {it: "Con target log-RV, la previsione a 30 ore batte HAR in QLIKE fuori campione?",
+               en: "With a log-RV target, does the 30-hour forecast beat HAR in out-of-sample QLIKE?"}
+    prior: {it: "Incerto. La linea direzionale aveva fallito a ogni timeframe; il cambio di target era l'ultima ipotesi strutturalmente diversa rimasta.",
+            en: "Uncertain. The directional line had failed at every timeframe; the target change was the last structurally different hypothesis left."}
+    lever: {it: "`features.target_type: ret → log_rv`", en: "`features.target_type: ret → log_rv`"}
+    threshold: {it: "QLIKE_NN ≤ 0.95·QLIKE_HAR **e** < QLIKE_naive", en: "QLIKE_NN ≤ 0.95·QLIKE_HAR **and** < QLIKE_naive"}
+    split: test
+    verdict: PASS
+    numbers:
+      source: results/vols/qlike_report_1h_test.json
+      keys:
+        - {label: {it: "QLIKE modello", en: "model QLIKE"}, path: metrics.nn.qlike}
+        - {label: {it: "QLIKE baseline HAR-RV", en: "HAR-RV baseline QLIKE"}, path: metrics.har.qlike}
+        - {label: {it: "QLIKE persistenza", en: "naive persistence QLIKE"}, path: metrics.naive.qlike}
+        - {label: {it: "rapporto NN/HAR-RV", en: "NN/HAR-RV ratio"}, path: gate.nn_vs_har_ratio}
+        - {label: {it: "osservazioni", en: "observations"}, path: gate.n_obs}
+    consequence: {it: "Unico PASS OOS del progetto. Diventa la linea di produzione. Questi sono i numeri del gate di giugno, contro la baseline che il criterio pre-registrato nominava (HAR-RV); il claim attuale è contro HAR-C, più forte — schede C2, C3 e R1. ⚠ Nessun backtest di trading: su un target di varianza non ha senso.",
+                  en: "The project's only OOS PASS. Becomes the production line. These are the June gate's numbers, against the baseline the pre-registered criterion named (HAR-RV); the current claim is against the stronger HAR-C — see the C2, C3 and R1 cards. ⚠ No trading backtest: meaningless on a variance target."}
+    teoria: "12.2"
+    data_state: riproducibile
+
+  - id: cross-res-30m
+    name: {it: "Cross-risoluzione — il risultato regge a barre da un minuto?",
+           en: "Cross-resolution — does the result hold on one-minute bars?"}
+    line: vol-1h
+    scope: segnale
+    status: chiuso
+    dates: {prereg: 2026-06-10, closed: 2026-06-11}
+    question: {it: "Stesso metodo, stessi iperparametri, stesso giudice, cambia solo la barra: la varianza realizzata a 30 minuti si prevede meglio di HAR-RV?",
+               en: "Same method, same hyperparameters, same judge, only the bar changes: is 30-minute realized variance forecast better than HAR-RV?"}
+    prior: {it: "Dichiarato come test di solidità di VOL-S, non come tuning: PASS ⇒ il segnale regge fra risoluzioni; FAIL ⇒ il risultato orario va trattato come specifico della risoluzione, senza iterazioni.",
+            en: "Declared as a robustness test of VOL-S, not tuning: PASS ⇒ the signal holds across resolutions; FAIL ⇒ the hourly result is treated as resolution-specific, with no iterations."}
+    lever: {it: "`data.interval: 1h → 1m`, tutto il resto invariato", en: "`data.interval: 1h → 1m`, everything else unchanged"}
+    threshold: {it: "stesso criterio di VOL-S, val-first", en: "same criterion as VOL-S, val-first"}
+    split: val
+    verdict: FAIL
+    numbers:
+      literal:
+        - {label: {it: "rapporto NN/HAR-RV su val", en: "NN/HAR-RV ratio on val"}, value: "1.0127"}
+        - {label: {it: "test", en: "test"}, value: {it: "non toccato (val-first)", en: "not touched (val-first)"}}
+      as_of: 2026-06-11
+    consequence: {it: "Il vantaggio **non si trasferisce** cambiando scala: a 30 minuti HAR-RV è già un compressore adeguato. Il risultato è specifico della risoluzione oraria, e va dichiarato come tale — non c'è una legge generale, c'è un risultato su una scala precisa.",
+                  en: "The edge **does not transfer** across scales: at 30 minutes HAR-RV is already an adequate compressor. The result is specific to the hourly resolution and is declared as such — there is no general law, there is a result at one precise scale."}
+    teoria: "12.2"
+    data_state: riproducibile
+
+  - id: c2-har-cj
+    name: {it: "C2 — la baseline del confronto era una baseline forte?",
+           en: "C2 — was the comparison baseline a strong one?"}
+    line: vol-1h
+    scope: metodo
+    status: chiuso
+    dates: {prereg: 2026-07-30, closed: 2026-07-30}
+    question: {it: "HAR-CJ, che separa componente continua e salti, batte HAR-RV fuori campione? Se sì, quanto del vantaggio pubblicato era debolezza della baseline?",
+               en: "Does HAR-CJ, splitting continuous and jump components, beat HAR-RV out of sample? If so, how much of the published edge was baseline weakness?"}
+    prior: {it: "Sfavorevole: a campionamento orario la bipower variation è rumorosa, la decomposizione dà il meglio a 5 minuti.",
+            en: "Unfavourable: at hourly sampling bipower variation is noisy; the decomposition works best at 5 minutes."}
+    lever: {it: "baseline del giudice, non il modello", en: "the judge's baseline, not the model"}
+    threshold: {it: "4 condizioni AND, con soglia di materialità", en: "4 AND conditions, with a materiality threshold"}
+    split: val+test
+    verdict: PASS
+    numbers:
+      literal:
+        - {label: {it: "vantaggio residuo su val", en: "remaining edge on val"}, value: "22.6%"}
+        - {label: {it: "vantaggio residuo su test", en: "remaining edge on test"}, value: "31.6%"}
+        - {label: {it: "quota dovuta alla baseline debole", en: "share due to the weak baseline"},
+           value: {it: "15.5% su val, 12.4% su test", en: "15.5% on val, 12.4% on test"}}
+      as_of: 2026-07-30
+    consequence: {it: "Il prior è smentito: la baseline era debole. La banda pubblicata fu riscritta da −27%÷−36% a −23%÷−32%, e il 2026-08-05 ri-espressa alla precisione dell'artefatto canonico come −22.42%÷−31.65% (stessi numeri, nessuna nuova misura). Il claim ne esce **più difendibile**, perché la prima obiezione di un lettore competente è chiusa con un numero.",
+                  en: "The prior is falsified: the baseline was weak. The published band was rewritten from −27%/−36% to −23%/−32%, and on 2026-08-05 re-expressed at the canonical artifact's precision as −22.42%/−31.65% (same numbers, nothing re-measured). The claim comes out **more defensible**: a competent reader's first objection is closed with a number."}
+    teoria: "12.2"
+    data_state: riproducibile
+
+  - id: c3-attribuzione
+    name: {it: "C3 — il guadagno di HAR-CJ viene dai salti o dalla sostituzione del regressore?",
+           en: "C3 — does HAR-CJ's gain come from jumps or from regressor substitution?"}
+    line: vol-1h
+    scope: metodo
+    status: chiuso
+    dates: {prereg: 2026-07-31, closed: 2026-07-31}
+    question: {it: "Confronto a tre — HAR-RV vs HAR-C vs HAR-CJ — per separare la sostituzione `RV→C` dal contenuto informativo dei salti.",
+               en: "Three-way comparison — HAR-RV vs HAR-C vs HAR-CJ — to separate the `RV→C` substitution from the jumps' information content."}
+    prior: {it: "Atteso: HAR-C ≈ HAR-CJ, cioè il guadagno è la sostituzione. ⚠ Peeking dichiarato ex-ante: due dei tre numeri erano già noti, quindi entrambe le statistiche di decisione sono state ancorate all'unica quantità ignota.",
+            en: "Expected: HAR-C ≈ HAR-CJ, i.e. the gain is substitution. ⚠ Peeking declared ex-ante: two of the three numbers were already known, so both decision statistics were anchored to the only unknown quantity."}
+    lever: {it: "una sola specificazione nuova, HAR con le sole componenti continue",
+            en: "one new specification only, HAR with continuous components alone"}
+    threshold: {it: "due DM appaiati, α=0.01 con Bonferroni familywise", en: "two paired DM tests, α=0.01 with familywise Bonferroni"}
+    split: val+test
+    verdict: PASS
+    numbers:
+      literal:
+        - {label: {it: "Test A DM(C,RV)", en: "Test A DM(C,RV)"}, value: {it: "significativo su entrambi gli split", en: "significant on both splits"}}
+        - {label: {it: "Test B DM(CJ,C)", en: "Test B DM(CJ,C)"}, value: {it: "non significativo su entrambi", en: "not significant on either"}}
+        - {label: {it: "quota da sostituzione φ", en: "substitution share φ"}, value: {it: "≈ 1.00 (il 100%)", en: "≈ 1.00 (100%)"}}
+      as_of: 2026-07-31
+    consequence: {it: "L'interpretazione di C2 è **falsificata**: è la bipower variation a lavorare come stimatore robusto, i salti sono rumore da togliere. HAR-C diventa la baseline di riferimento — stessa accuratezza, 450× meglio condizionata. La banda pubblicata non cambia. Coerente con la dicotomia momenti pari/dispari.",
+                  en: "C2's interpretation is **falsified**: bipower variation does the work as a robust estimator, jumps are noise to remove. HAR-C becomes the reference baseline — same accuracy, 450× better conditioned. The published band is unchanged. Consistent with the even/odd moments dichotomy."}
+    teoria: "12.2"
+    data_state: riproducibile
+
+  - id: c1-smearing
+    name: {it: "C1 — l'estimando ottimizzato non è quello giudicato: la correzione lo risolve?",
+           en: "C1 — the optimized estimand is not the judged one: does the correction fix it?"}
+    line: vol-1h
+    scope: metodo
+    status: chiuso
+    dates: {prereg: 2026-07-28, closed: 2026-07-30}
+    question: {it: "QLIKE è minimizzata dalla media condizionale, il modello ottimizza una mediana. La correzione di smearing, applicata simmetricamente a entrambi i lati, migliora la specificazione?",
+               en: "QLIKE is minimized by the conditional mean, the model optimizes a median. Does a smearing correction, applied symmetrically to both sides, improve the specification?"}
+    prior: {it: "Direzione attesa dichiarata prima: la baseline dovrebbe guadagnare più del modello, quindi il vantaggio misurato dovrebbe **ridursi**.",
+            en: "Expected direction declared beforehand: the baseline should gain more than the model, so the measured edge should **shrink**."}
+    lever: {it: "correzione di Duan (1983) sui soli residui di train", en: "Duan (1983) correction on train residuals only"}
+    threshold: {it: "la correzione deve migliorare QLIKE su **entrambi** i lati", en: "the correction must improve QLIKE on **both** sides"}
+    split: val
+    verdict: FAIL
+    numbers:
+      literal:
+        - {label: {it: "esito", en: "outcome"}, value: {it: "① fallita, un lato peggiora", en: "① failed, one side gets worse"}}
+        - {label: {it: "direzione attesa", en: "expected direction"}, value: {it: "FALSIFICATA", en: "FALSIFIED"}}
+      as_of: 2026-07-30
+    consequence: {it: "Non adottata; il giudice resta invariato e la banda pubblicata non si tocca. La nota resta **testata e non adottata**, non «risolta»: l'esito non dimostra che il vantaggio sia immune dal disallineamento, dimostra che *questa* correzione non lo risolve.",
+                  en: "Not adopted; the judge is unchanged and the published band untouched. The note stays **tested and not adopted**, not «resolved»: the outcome does not show the edge is immune to the mismatch, it shows *this* correction does not fix it."}
+    teoria: "12.2"
+    data_state: report-su-disco
+
+  - id: signature-har
+    name: {it: "SignatureHAR — le path signature aggiungono potere predittivo a HAR-C?",
+           en: "SignatureHAR — do path signatures add predictive power to HAR-C?"}
+    line: vol-1h
+    scope: segnale
+    status: chiuso
+    dates: {prereg: 2026-08-25, closed: 2026-08-25}
+    question: {it: "I termini di log-signature del percorso dei rendimenti — la famiglia che la letteratura sui rough path presenta come rappresentazione completa di una traiettoria — aggiungono potere predittivo alla baseline HAR-C sullo stesso frame e con lo stesso giudice?",
+               en: "Do log-signature terms of the return path — the family the rough-path literature presents as a complete representation of a trajectory — add predictive power to the HAR-C baseline on the same frame and with the same judge?"}
+    prior: {it: "FAIL ~85%: il termine pari di ordine 2 atteso ridondante con la varianza, i termini di ordinamento attesi nulli per la dicotomia pari/dispari.",
+            en: "FAIL ~85%: the even order-2 term expected redundant with variance, the ordering terms expected null by the even/odd dichotomy."}
+    lever: {it: "6 colonne in forma chiusa sopra i 3 regressori di HAR-C, finestra causale di 24 barre congelata prima di girare",
+            en: "6 closed-form columns on top of HAR-C's 3 regressors, causal 24-bar window frozen before running"}
+    threshold: {it: "soglia di **materialità** derivata dalla banda pubblicata (spostarla di almeno 1 punto) **e** DM significativo, con un **controllo positivo** calibrato su quella soglia",
+                en: "a **materiality** threshold derived from the published band (moving it by at least 1 point) **and** a significant DM, with a **positive control** calibrated on that threshold"}
+    split: val
+    verdict: FAIL
+    numbers:
+      source: results/vols/sig_har_probe_1h_val.json
+      keys:
+        - {label: {it: "QLIKE HAR-C", en: "HAR-C QLIKE"}, path: baseline_har_c.qlike_production_fn}
+        - {label: {it: "QLIKE candidato", en: "candidate QLIKE"}, path: candidate.qlike}
+        - {label: {it: "Δ QLIKE", en: "Δ QLIKE"}, path: candidate.delta}
+        - {label: {it: "p DM", en: "DM p-value"}, path: candidate.p_value}
+        - {label: {it: "controllo positivo acceso", en: "positive control fires"}, path: positive_control.fires}
+        - {label: {it: "materiale", en: "material"}, path: conditions.cond1_material}
+    consequence: {it: "Significativo ma **sotto la soglia di materialità** (94.8%): la banda si sposterebbe di 0.947 punti contro 1 richiesto. Il controllo positivo acceso rende il FAIL interpretabile. Il prior ha indovinato il verdetto e **sbagliato entrambi i meccanismi**: la dicotomia pari/dispari vale per i momenti dispari come *target*, non vieta input dispari su un target pari. Il filone si chiude a questa scala.",
+                  en: "Significant but **below the materiality threshold** (94.8%): the band would move by 0.947 points against the 1 required. The positive control firing makes the FAIL interpretable. The prior got the verdict right and **both mechanisms wrong**: the even/odd dichotomy is about odd moments as *targets*, it does not forbid odd inputs on an even target. The thread closes at this scale."}
+    teoria: "12.2"
+    data_state: riproducibile
+
+  - id: a10-sparsity
+    name: {it: "A10 — concentrare l'attention migliora la previsione di varianza?",
+           en: "A10 — does concentrating attention improve variance forecasting?"}
+    line: vol-1h
+    scope: leva
+    status: chiuso
+    dates: {prereg: 2026-07-28, closed: 2026-07-30}
+    question: {it: "Con 104 variate come token e solo ~1.7k finestre indipendenti, l'attention può disperdersi su correlazioni spurie. Penalizzarne l'entropia aiuta?",
+               en: "With 104 variates as tokens and only ~1.7k independent windows, attention can spread over spurious correlations. Does penalizing its entropy help?"}
+    prior: {it: "Basso: nessun lever di training era mai passato su questa linea.",
+            en: "Low: no training lever had ever passed on this line."}
+    lever: {it: "penalità entropica sulle mappe di attention, λ fissato da una regola e non da uno sweep",
+            en: "entropy penalty on the attention maps, λ fixed by a rule rather than a sweep"}
+    threshold: {it: "−3% in QLIKE, + un **manipulation check**: se la penalità non abbassa l'entropia, il run ha misurato l'implementazione e non l'ipotesi",
+                en: "−3% in QLIKE, plus a **manipulation check**: if the penalty does not lower entropy, the run measured the implementation rather than the hypothesis"}
+    split: val
+    verdict: FAIL
+    numbers:
+      literal:
+        - {label: {it: "QLIKE", en: "QLIKE"}, value: {it: "+0.18% (marginalmente peggiore)", en: "+0.18% (marginally worse)"}}
+        - {label: {it: "manipulation check", en: "manipulation check"}, value: {it: "superato, entropia −24.4%", en: "passed, entropy −24.4%"}}
+      as_of: 2026-07-30
+    consequence: {it: "La scheda più istruttiva del corpus: il manipulation check è **passato**, quindi la penalità ha fatto esattamente ciò che doveva e il QLIKE non si è mosso → **l'ipotesi è falsificata, non l'implementazione**. Con essa si chiude per decisione pre-dichiarata l'intera classe «lever di training sulla linea vol».",
+                  en: "The most instructive card in the corpus: the manipulation check **passed**, so the penalty did exactly what it should and QLIKE did not move → **the hypothesis is falsified, not the implementation**. With it the whole «training levers on the vol line» class closes by pre-declared decision."}
+    teoria: "12.4"
+    data_state: report-su-disco
+
+  - id: b4bis-dvol
+    name: {it: "B4-bis — l'implied volatility come feature di input aiuta?",
+           en: "B4-bis — does implied volatility as an input feature help?"}
+    line: vol-1h
+    scope: leva
+    status: chiuso
+    dates: {prereg: 2026-07-17, closed: 2026-07-23}
+    question: {it: "Aggiungere l'indice di volatilità implicita come feature migliora la previsione di varianza realizzata?",
+               en: "Does adding the implied volatility index as a feature improve realized variance forecasting?"}
+    prior: {it: "Moderato: è informazione forward-looking che il modello non ha.",
+            en: "Moderate: it is forward-looking information the model does not have."}
+    lever: {it: "3 colonne aggiunte allo stream macro, asof causale", en: "3 columns added to the macro stream, causal asof"}
+    threshold: {it: "−3% in QLIKE contro baseline riaddestrata", en: "−3% in QLIKE against a retrained baseline"}
+    split: val
+    verdict: FAIL
+    numbers:
+      literal:
+        - {label: {it: "QLIKE", en: "QLIKE"}, value: {it: "−1.02% contro una soglia di −3%", en: "−1.02% against a −3% threshold"}}
+        - {label: {it: "MSE in log", en: "log MSE"}, value: {it: "−6%, ma QLIKE no", en: "−6%, but not QLIKE"}}
+      as_of: 2026-07-23
+    consequence: {it: "Firma diagnostica che si ripeterà con A10: il segnale sposta la **media** della log-varianza senza migliorare la **calibrazione**, che è ciò che QLIKE penalizza. Più mismatch di tenor. Non ri-testare senza cambiare tenor o metrica.",
+                  en: "A diagnostic signature that recurs with A10: the signal moves the log-variance **mean** without improving **calibration**, which is what QLIKE charges for. Plus a tenor mismatch. Not to be re-tested without changing tenor or metric."}
+    teoria: "12.4"
+    data_state: riproducibile
+
+  - id: a8bis-mixup
+    name: {it: "A8-bis — l'augmentation mixup aiuta su un target di varianza?",
+           en: "A8-bis — does mixup augmentation help on a variance target?"}
+    line: vol-1h
+    scope: leva
+    status: chiuso
+    dates: {prereg: 2026-07-19, closed: 2026-07-20}
+    question: {it: "Con ~1.7k finestre effettivamente indipendenti, un'augmentation che interpola fra campioni compensa la scarsità?",
+               en: "With ~1.7k effectively independent windows, does an interpolating augmentation compensate for scarcity?"}
+    prior: {it: "Moderato, ma con un caveat: una misura descrittiva precedente dava −4.94%, sospetta perché ottenuta contro il modello in carica.",
+            en: "Moderate, with a caveat: an earlier descriptive measure gave −4.94%, suspect because measured against the incumbent model."}
+    lever: {it: "`mixup_alpha` 0 → 0.2", en: "`mixup_alpha` 0 → 0.2"}
+    threshold: {it: "−3% in QLIKE contro baseline **riaddestrata sullo stesso scaler**", en: "−3% in QLIKE against a baseline **retrained on the same scaler**"}
+    split: val
+    verdict: FAIL
+    numbers:
+      literal:
+        - {label: {it: "QLIKE", en: "QLIKE"}, value: {it: "−0.79% contro una soglia di −3%", en: "−0.79% against a −3% threshold"}}
+        - {label: {it: "misura descrittiva precedente", en: "earlier descriptive measure"}, value: {it: "−4.94%, artefatto", en: "−4.94%, an artifact"}}
+      as_of: 2026-07-20
+    consequence: {it: "Il −4.94% era **artefatto di distribution shift**: un confronto attraverso due scaler diversi. Ne nasce una regola permanente del progetto — **mai giudicare un lever contro un modello addestrato su un altro scaler**, sempre contro una baseline riaddestrata.",
+                  en: "The −4.94% was a **distribution-shift artifact**: a comparison across two different scalers. A permanent project rule follows — **never judge a lever against a model trained on a different scaler**, always against a retrained baseline."}
+    teoria: "12.4"
+    data_state: riproducibile
+
+  - id: b1-l2-stadio1
+    name: {it: "B1 stadio 1 — l'order-book porta informazione sulla varianza a breve?",
+           en: "B1 stage 1 — does the order book carry information about short-horizon variance?"}
+    line: vol-1h
+    scope: segnale
+    status: chiuso
+    dates: {prereg: 2026-07-31, closed: 2026-07-31}
+    question: {it: "Tre feature di microstruttura, scelte da diagnostiche **target-free**, aggiungono potere predittivo sulla varianza a 3 ore oltre i lag della varianza stessa?",
+               en: "Do three microstructure features, chosen by **target-free** diagnostics, add predictive power on 3-hour variance beyond variance's own lags?"}
+    prior: {it: "Scenario base atteso: nessun effetto rilevabile — il campione è minuscolo e serve un effetto grosso per essere visto.",
+            en: "Base case expected: no detectable effect — the sample is tiny and only a large effect would show."}
+    lever: {it: "tre feature L2 non firmate, aggiunte a una baseline HAR-C", en: "three unsigned L2 features added to a HAR-C baseline"}
+    threshold: {it: "significatività + materialità + n minimo, **e un controllo positivo**: la baseline deve battere la persistenza, altrimenti il confronto è ininterpretabile",
+                en: "significance + materiality + minimum n, **and a positive control**: the baseline must beat persistence, else the comparison is uninterpretable"}
+    split: forward
+    verdict: NESSUNA CONCLUSIONE
+    numbers:
+      source: results/vols/l2_incremental_stage1.json
+      keys:
+        - {label: {it: "QLIKE baseline", en: "baseline QLIKE"}, path: qlike_baseline}
+        - {label: {it: "QLIKE candidato", en: "candidate QLIKE"}, path: qlike_candidate}
+        - {label: {it: "QLIKE persistenza", en: "naive persistence QLIKE"}, path: qlike_naive}
+        - {label: {it: "previsioni valutate", en: "forecasts evaluated"}, path: n_eval}
+        - {label: {it: "campione effettivo", en: "effective sample"}, path: n_eff}
+    consequence: {it: "**Il controllo positivo ha fallito** e ha fatto il suo lavoro: la baseline non batte la persistenza a questo orizzonte, quindi il confronto principale non è interpretabile. Senza quella condizione l'esito riportabile sarebbe stato «l'order-book non porta informazione» — un **falso negativo pubblicabile**. Il difetto è nel disegno, non nell'implementazione. Nessuna variante è stata girata a numeri visti.",
+                  en: "**The positive control failed** and did its job: the baseline does not beat persistence at this horizon, so the main comparison is uninterpretable. Without that condition the reportable outcome would have been «the order book carries no information» — a **publishable false negative**. The defect is in the design, not the implementation. No variant was run once the numbers were seen."}
+    teoria: "12.3-bis"
+    data_state: non-rigenerabile
+    data_note: {it: "L'order-book è raccolto in avanti: l'API non ne conserva lo storico.",
+                en: "The order book is collected forward: the API keeps no history of it."}
+
+  - id: semivarianza
+    name: {it: "Semivarianza firmata — l'asimmetria della volatilità è predicibile?",
+           en: "Signed semivariance — is volatility asymmetry predictable?"}
+    line: vol-1h
+    scope: segnale
+    status: chiuso
+    dates: {prereg: 2026-06-11, closed: 2026-06-11}
+    question: {it: "Il rapporto fra semivarianza positiva e negativa è predicibile come lo è la varianza totale?",
+               en: "Is the ratio of upside to downside semivariance as predictable as total variance?"}
+    prior: {it: "Moderato: la varianza si predice bene, sembrava naturale che una sua decomposizione lo fosse.",
+            en: "Moderate: variance predicts well, so a decomposition of it seemed natural."}
+    lever: {it: "`target_type: log_rs_ratio`", en: "`target_type: log_rs_ratio`"}
+    threshold: {it: "MSE ≤ 0.95 della baseline", en: "MSE ≤ 0.95 of the baseline"}
+    split: test
+    verdict: FAIL
+    numbers:
+      literal:
+        - {label: {it: "esito", en: "outcome"}, value: {it: "sopra soglia", en: "above threshold"}}
+        - {label: {it: "accuratezza di segno", en: "sign accuracy"}, value: {it: "≈ 0.46, cioè sotto il caso", en: "≈ 0.46, i.e. below chance"}}
+        - {label: {it: "baseline econometrica", en: "econometric baseline"}, value: {it: "peggio della costante", en: "worse than a constant"}}
+      as_of: 2026-06-11
+    consequence: {it: "Risultato più forte del semplice FAIL: la baseline econometrica fa **peggio di una costante**, quindi l'asimmetria è impredicibile *per tutti*, non solo per il modello. È l'osservazione da cui nasce la sintesi trasversale del progetto — i momenti **pari** generalizzano, i **dispari** no.",
+                  en: "Stronger than a plain FAIL: the econometric baseline does **worse than a constant**, so the asymmetry is unpredictable *for everyone*, not just for the model. It is the observation behind the project's cross-cutting reading — **even** moments generalize, **odd** ones do not."}
+    teoria: "12.3"
+    data_state: riproducibile
+
+  # ─────────────────────── directional line ───────────────────────
+  - id: pivot-1h
+    name: {it: "Pivot 1m→1h — il muro dei costi era il vincolo?",
+           en: "1m→1h pivot — was the cost wall the binding constraint?"}
+    line: direzionale
+    scope: segnale
+    status: chiuso
+    dates: {prereg: 2026-06-10, closed: 2026-06-10}
+    question: {it: "A un minuto l'effetto previsto era ~1.5 bps contro ~26 bps di costo. Salendo a un'ora il rendimento atteso cresce di un ordine di grandezza: emerge la skill?",
+               en: "At one minute the predicted effect was ~1.5 bps against ~26 bps of cost. At one hour the expected return grows an order of magnitude: does skill emerge?"}
+    prior: {it: "Favorevole: se il vincolo erano i costi, rimuoverli doveva bastare.",
+            en: "Favourable: if costs were the constraint, removing them should suffice."}
+    lever: {it: "risoluzione della barra, 1m → 1h", en: "bar resolution, 1m → 1h"}
+    threshold: {it: "gate pre-registrato a due livelli di costo", en: "pre-registered gate at two cost levels"}
+    split: test
+    verdict: FAIL
+    numbers:
+      literal:
+        - {label: {it: "gate", en: "gate"}, value: {it: "fallito 4/4 a entrambi i livelli di costo", en: "failed 4/4 at both cost levels"}}
+        - {label: {it: "muro dei costi", en: "cost wall"}, value: {it: "effettivamente sfondato", en: "actually broken through"}}
+      as_of: 2026-06-10
+    consequence: {it: "Il muro dei costi **cade davvero**, e la skill direzionale **non emerge lo stesso**: il vincolo non erano i costi. Chiude il filone «stesso metodo, altro timeframe». La linea direzionale sopravvive come controllo negativo — serve a dimostrare che l'apparato di misura funziona anche quando il segnale non c'è.",
+                  en: "The cost wall **does fall**, and directional skill **still fails to emerge**: costs were not the constraint. Closes the «same method, different timeframe» line. The directional line survives as a negative control — it shows the measuring apparatus works even when there is no signal."}
+    teoria: "12.3"
+    data_state: riproducibile
+
+  # ─────────────────────── short-vol arm ───────────────────────
+  - id: gate-v1-shortvol
+    name: {it: "Gate v1 — la regola di ingresso monetizza il premio di rischio?",
+           en: "Gate v1 — does the entry rule monetize the risk premium?"}
+    line: short-vol
+    scope: realizzazione
+    status: chiuso
+    dates: {prereg: 2026-06-12, closed: 2026-07-30}
+    question: {it: "Confrontando varianza prevista e varianza implicita, una regola a soglia produce PnL positiva in forward test?",
+               en: "Comparing forecast and implied variance, does a threshold rule produce positive PnL in forward testing?"}
+    prior: {it: "Favorevole: il premio di rischio di varianza è strutturalmente positivo e confermato dal backtest storico.",
+            en: "Favourable: the variance risk premium is structurally positive and confirmed by the historical backtest."}
+    lever: {it: "regola a soglia su `log(varianza prevista / varianza implicita)`",
+            en: "threshold rule on `log(forecast variance / implied variance)`"}
+    threshold: {it: "3 criteri pre-registrati, n ≥ 30", en: "3 pre-registered criteria, n ≥ 30"}
+    split: forward
+    verdict: FAIL
+    numbers:
+      source: results/vol_paper/baseline_report.json
+      keys:
+        - {label: {it: "posizioni eseguite", en: "executed positions"}, path: real_trades.n_executed}
+        - {label: {it: "criterio 1 — PnL media > 0", en: "criterion 1 — mean PnL > 0"}, path: gates.g1_real_mean_pnl_gt_0}
+        - {label: {it: "criterio 2 — batte le baseline", en: "criterion 2 — beats the baselines"}, path: gates.g2_nn_beats_both_baselines}
+        # list form: the key itself contains a dot
+        - {label: {it: "criterio 3 — hit rate > 0.5", en: "criterion 3 — hit rate > 0.5"}, path: [gates, "g3_real_hit_rate_gt_0.5"]}
+    consequence: {it: "FAIL 0/3, e i due campioni concordano. Ma la baseline che vende sempre volatilità è **positiva**: il premio di rischio c'è, la regola non lo monetizza. Distinzione permanente del progetto — *skill predittiva misurata* ≠ *monetizzazione*.",
+                  en: "FAIL 0/3, with both samples agreeing. Yet the always-sell-volatility baseline is **positive**: the risk premium exists, the rule does not monetize it. A permanent project distinction — *measured predictive skill* ≠ *monetization*."}
+    teoria: "12.2"
+    data_state: non-rigenerabile
+    data_note: {it: "Forward test su testnet: i trade non sono ricostruibili a posteriori dall'API.",
+                en: "Forward test on testnet: the trades cannot be reconstructed from the API afterwards."}
+
+  - id: hedged-vs-unhedged
+    name: {it: "V2 — il delta-hedge migliora il braccio short-vol?", en: "V2 — does delta-hedging improve the short-vol arm?"}
+    line: short-vol
+    scope: realizzazione
+    status: chiuso
+    dates: {prereg: 2026-07-12, closed: 2026-08-11}
+    question: {it: "Neutralizzare l'esposizione direzionale con il perpetuo purifica il premio di varianza, o il costo di ribilanciamento se lo mangia?",
+               en: "Does neutralizing directional exposure with the perpetual purify the variance premium, or does rebalancing cost eat it?"}
+    prior: {it: "Incerto: è precisamente un compromesso fra riduzione di varianza e costo di realizzazione, con il funding come grande incognita mai misurata.",
+            en: "Uncertain: it is precisely a trade-off between variance reduction and realization cost, with funding as the big never-measured unknown."}
+    lever: {it: "banda di ribilanciamento fissa, congelata dalla pre-registrazione", en: "fixed rebalancing band, frozen by the pre-registration"}
+    threshold: {it: "① varianza ≤ 0.6× quella senza hedge; ② costo medio entro 0.25 errori standard; ③ n ≥ 20 posizioni con hedge attivo",
+                en: "① variance ≤ 0.6× the unhedged one; ② mean cost within 0.25 standard errors; ③ n ≥ 20 hedge-active positions"}
+    split: forward
+    verdict: FAIL
+    numbers:
+      source: results/vols/hedged_vs_unhedged.json
+      keys:
+        - {label: {it: "posizioni", en: "positions"}, path: n_hedged_settlements}
+        - {label: {it: "rapporto di varianza", en: "variance ratio"}, path: aggregates.var_ratio}
+        - {label: {it: "PnL media senza hedge (BTC)", en: "mean PnL unhedged (BTC)"}, path: aggregates.mean_unhedged}
+        - {label: {it: "PnL media con hedge (BTC)", en: "mean PnL hedged (BTC)"}, path: aggregates.mean_hedged}
+        - {label: {it: "fee perp totali (BTC)", en: "total perp fees (BTC)"}, path: aggregates.fees_perp_total}
+        - {label: {it: "funding totale (BTC)", en: "total funding (BTC)"}, path: aggregates.funding_paid_total}
+        - {label: {it: "① varianza", en: "① variance"}, path: ["conditions", "1_var_ratio_le_0.6"]}
+        - {label: {it: "② costo", en: "② cost"}, path: conditions.2_mean_drag_le_quarter_se}
+    consequence: {it: "FAIL 2/3. La varianza scende del 55% — l'hedge fa esattamente ciò che la teoria prometteva — ma il costo è 2.6× il budget, e **per il 76% sono fee del perpetuo**: il funding, l'incognita dichiarata, pesa meno dell'1%. L'ipotesi muore sul **costo di realizzazione, non sulla teoria**. ⚠ Il criterio ② è un budget, non un test di significatività: il drag non è dimostrato negativo in popolazione. La versione senza hedge resta il design di produzione.",
+                  en: "FAIL 2/3. Variance drops by 55% — the hedge does exactly what theory promised — but the cost is 2.6× the budget, and **76% of it is perpetual fees**: funding, the declared unknown, weighs under 1%. The hypothesis dies on **realization cost, not on theory**. ⚠ Criterion ② is a budget, not a significance test: the drag is not shown to be negative in population. The unhedged version remains the production design."}
+    teoria: "12.2"
+    data_state: non-rigenerabile
+    data_note: {it: "Forward test su testnet: fill e ribilanciamenti non sono ricostruibili a posteriori.",
+                en: "Forward test on testnet: fills and rebalances cannot be reconstructed afterwards."}
+
+  - id: mfiv-v2
+    name: {it: "MFIV v2 — il comparatore model-free ordina meglio dell'ATM?", en: "MFIV v2 — does the model-free comparator rank better than ATM?"}
+    line: short-vol
+    scope: metodo
+    status: chiuso
+    dates: {prereg: 2026-07-20, closed: 2026-08-18}
+    question: {it: "La volatilità implicita at-the-money sottostima il tasso di var-swap per convessità dello smile. Un comparatore model-free ordina meglio le occasioni?",
+               en: "At-the-money implied volatility understates the var-swap rate through smile convexity. Does a model-free comparator rank opportunities better?"}
+    prior: {it: "Favorevole in teoria — il cuneo di convessità è misurato e positivo — ma è un'ipotesi sull'**ordinamento**, non sul livello: se il cuneo fosse costante, i due ranghi sarebbero identici per costruzione.",
+            en: "Favourable in theory — the convexity wedge is measured and positive — but it is a hypothesis about **ranking**, not level: were the wedge constant, the two rankings would be identical by construction."}
+    lever: {it: "sostituzione del comparatore, il modello non cambia", en: "comparator substitution, the model is unchanged"}
+    threshold: {it: "① differenza di correlazione di rango ≥ +0.05; ② segno coerente fra le due metà; ③ n ≥ 40 scadenze appaiate",
+                en: "① rank-correlation difference ≥ +0.05; ② consistent sign across the two halves; ③ n ≥ 40 paired expiries"}
+    split: forward
+    verdict: FAIL
+    numbers:
+      source: results/vols/mfiv_comparator_report.json
+      keys:
+        - {label: {it: "scadenze", en: "expiries"}, path: n}
+        - {label: {it: "ρ ATM", en: "ρ ATM"}, path: rho_atm}
+        - {label: {it: "ρ MFIV", en: "ρ MFIV"}, path: rho_mfiv}
+        - {label: {it: "Δρ", en: "Δρ"}, path: delta_rho}
+        - {label: {it: "Δρ prima metà", en: "Δρ first half"}, path: delta_rho_half1}
+        - {label: {it: "Δρ seconda metà", en: "Δρ second half"}, path: delta_rho_half2}
+        - {label: {it: "cuneo log-varianza, mediana", en: "log-variance wedge, median"}, path: descr_log_wedge_median}
+    consequence: {it: "FAIL, previsto dalla pre-registrazione stessa: il cuneo è **grande ma quasi costante**, e l'invarianza di rango lo rende invisibile a una correlazione di rango. Il comparatore live resta l'ATM; la MFIV resta colonna diagnostica. Il valore permanente è descrittivo: la MFIV prezza la varianza circa il 22% sopra l'ATM, quindi il margine di sicurezza del braccio short-vol è più largo di quanto l'ATM suggerisse — **non** è PnL in più, perché la posizione vende lo straddle ATM.",
+                  en: "FAIL, predicted by the pre-registration itself: the wedge is **large but nearly constant**, and rank invariance makes it invisible to a rank correlation. The live comparator stays ATM; MFIV remains a diagnostic column. The permanent value is descriptive: MFIV prices variance about 22% above ATM, so the short-vol arm's cushion is wider than ATM suggested — **not** extra PnL, since the position sells the ATM straddle."}
+    teoria: "12.2"
+    data_state: non-rigenerabile
+    data_note: {it: "Catena di opzioni raccolta in avanti: non ricostruibile a posteriori.",
+                en: "Option chain collected forward: not reconstructible afterwards."}
+
+  - id: e1
+    name: {it: "E1 — l'edge batte la previsione del mercato?",
+           en: "E1 — does the edge beat the market's own forecast?"}
+    line: short-vol
+    scope: segnale
+    status: chiuso
+    dates: {prereg: 2026-07-31, closed: 2026-09-10}
+    question: {it: "La linea vol batte una baseline **econometrica**. Batte anche la previsione **del mercato**, cioè la varianza implicita nei prezzi delle opzioni?",
+               en: "The vol line beats an **econometric** baseline. Does it also beat the **market's** forecast, i.e. the variance implied by option prices?"}
+    prior: {it: "Sfavorevole. La regola derivata da questo segnale ha comprato volatilità in 26 casi su 31, mentre il premio di rischio dice il contrario. La varianza implicita incorpora un premio, quindi un buon previsore della varianza non è automaticamente un buon previsore del suo **segno** rispetto all'implicita.",
+            en: "Unfavourable. The rule derived from this signal bought volatility in 26 of 31 cases, while the risk premium says the opposite. Implied variance embeds a premium, so a good variance forecaster is not automatically a good forecaster of its **sign** against implied."}
+    lever: {it: "nessuna: si giudica un segnale già registrato, non si cambia nulla nel modello",
+            en: "none: an already-recorded signal is judged, nothing in the model changes"}
+    threshold: {it: "accordo di segno > 0.5 (p < 0.05) **e** correlazione di rango > 0 con intervallo di confidenza che esclude lo zero, **e** un controllo positivo contro la persistenza, n ≥ 40",
+                en: "sign agreement > 0.5 (p < 0.05) **and** rank correlation > 0 with a CI excluding zero, **and** a positive control against persistence, n ≥ 40"}
+    split: forward
+    verdict: NESSUNA CONCLUSIONE
+    numbers:
+      source: results/vol_paper/edge_information_stage2.json
+      keys:
+        - {label: {it: "scadenze", en: "expiries"}, path: n}
+        - {label: {it: "accordo di segno", en: "sign agreement"}, path: sign_agreement.mean}
+        - {label: {it: "correlazione di rango", en: "rank correlation"}, path: spearman.rho}
+        - {label: {it: "QLIKE modello (controllo)", en: "model QLIKE (control)"}, path: positive_control.qlike_nn}
+        - {label: {it: "QLIKE persistenza (controllo)", en: "naive QLIKE (control)"}, path: positive_control.qlike_naive}
+        - {label: {it: "p DM del controllo", en: "control DM p-value"}, path: positive_control.dm.p_value}
+    consequence: {it: "Il controllo positivo fallisce **per potenza, non per disegno**: il modello batte la persistenza del 39% in QLIKE, ma a campione effettivo 20 la differenza non è significativa — quindi le due statistiche principali restano **ininterpretabili**. È il caso speculare di B1: lì la baseline perdeva, qui vince senza poterlo dimostrare. Il difetto è nella pre-registrazione, che dimensionò la potenza delle statistiche principali e mai quella del controllo. ⚠ Il segno negativo non autorizza a invertire la regola.",
+                  en: "The positive control fails **on power, not on design**: the model beats persistence by 39% in QLIKE, but at an effective sample of 20 the difference is not significant — so the two primary statistics stay **uninterpretable**. It is B1's mirror case: there the baseline lost, here it wins without being able to show it. The defect is in the pre-registration, which sized the power of the primary statistics and never that of the control. ⚠ The negative sign does not license inverting the rule."}
+    teoria: "12.3-bis"
+    data_state: non-rigenerabile
+    data_note: {it: "Previsioni e varianza implicita registrate in avanti: non ricostruibili a posteriori.",
+                en: "Forecasts and implied variance recorded forward: not reconstructible afterwards."}
+
+  # ─────────────────────── infrastructure and reproducibility ───────────────────────
+  - id: r1-canonical-pair
+    name: {it: "R1 — la banda pubblicata è riproducibile da un artefatto?",
+           en: "R1 — is the published band reproducible from an artifact?"}
+    line: infra
+    scope: riproducibilita
+    status: chiuso
+    dates: {prereg: 2026-08-03, closed: 2026-08-04}
+    question: {it: "Il numeratore della banda veniva da una coppia modello/dataset poi cancellata. Riaddestrando a configurazione di produzione invariata sul dataset congelato, si riottiene lo stesso numero — e si può conservarlo come artefatto verificabile?",
+               en: "The band's numerator came from a model/dataset pair later deleted. Retraining at unchanged production config on the frozen dataset, is the same number recovered — and can it be kept as a verifiable artifact?"}
+    prior: {it: "La spiegazione scritta prima del run: circa due decimi di incertezza da sorteggio del seed, dedotti dallo scarto fra due repliche.",
+            en: "The explanation written before the run: about two tenths of seed-draw uncertainty, inferred from the gap between two replicas."}
+    lever: {it: "nessuna: riaddestramento a configurazione invariata, più un braccio diagnostico su un parametro puramente computazionale",
+            en: "none: retraining at unchanged config, plus a diagnostic arm on a purely computational parameter"}
+    threshold: {it: "baseline riprodotte cifra per cifra, identità dello scaler verificata senza vie di fuga, gate storico e soglie di materialità rispettati",
+                en: "baselines reproduced digit for digit, scaler identity verified with no escape hatch, historical gate and materiality thresholds met"}
+    split: val+test
+    verdict: PASS
+    numbers:
+      source: results/vols/qlike_report_1h_test_canonical_1h_vols.json
+      keys:
+        - {label: {it: "QLIKE modello (test)", en: "model QLIKE (test)"}, path: metrics.nn.qlike}
+        - {label: {it: "QLIKE HAR-C (test)", en: "HAR-C QLIKE (test)"}, path: har_cj.har_c.qlike_har_c}
+        - {label: {it: "QLIKE HAR-RV (test)", en: "HAR-RV QLIKE (test)"}, path: metrics.har.qlike}
+        - {label: {it: "QLIKE persistenza (test)", en: "naive QLIKE (test)"}, path: metrics.naive.qlike}
+        - {label: {it: "osservazioni", en: "observations"}, path: gate.n_obs}
+        - {label: {it: "identità dello scaler", en: "scaler identity"}, path: provenance.matches}
+    consequence: {it: "La banda pubblicata non cambia di una cifra: il numeratore coincide **esattamente** (val 0.26143, test 0.23637), e il prior è sbagliato in modo utile — a seed fissi il protocollo è **deterministico**, lo scarto fra repliche era una differenza di dati, non rumore. Cambia lo **statuto** del claim: da affermazione su un protocollo ad artefatto ri-giudicabile. ⚠ Il PASS non autorizza a sostituire il modello live mentre ci sono campioni forward aperti.",
+                  en: "The published band does not change by a digit: the numerator matches **exactly** (val 0.26143, test 0.23637), and the prior is wrong in a useful way — at fixed seeds the protocol is **deterministic**, the gap between replicas was a data difference, not noise. What changes is the claim's **status**: from a statement about a protocol to a re-judgeable artifact. ⚠ The PASS does not authorize swapping the live model while forward samples are open."}
+    teoria: "12.2"
+    data_state: riproducibile
+
+  - id: m1-macro-vintage
+    name: {it: "M1 — il controllo di identità vede anche il vintage dei dati macro?",
+           en: "M1 — does the identity check also see the macro data vintage?"}
+    line: infra
+    scope: riproducibilita
+    status: chiuso
+    dates: {prereg: 2026-08-05, closed: 2026-08-05}
+    question: {it: "Il controllo modello↔dataset copriva lo scaler dei prezzi ma non la normalizzazione macro, che è input del modello e non entra in nessuna baseline HAR. Si può estendere senza spostare di un bit il numero pubblicato?",
+               en: "The model↔dataset check covered the price scaler but not the macro normalization, which is a model input and enters no HAR baseline. Can it be extended without moving the published number by a bit?"}
+    prior: {it: "Limite dichiarato prima di girare: il controllo positivo può essere solo sintetico, perché il vintage macro storico non esiste più su disco e ricostruirlo riscriverebbe il dataset congelato.",
+            en: "Limit declared before running: the positive control can only be synthetic, since the historical macro vintage no longer exists on disk and rebuilding it would rewrite the frozen dataset."}
+    lever: {it: "impronta del blocco macro registrata all'addestramento e verificata dai giudici, con via di fuga separata da quella dello scaler",
+            en: "fingerprint of the macro block recorded at training and checked by the judges, with an escape hatch separate from the scaler's"}
+    threshold: {it: "inerzia sui report archiviati + controllo positivo a due livelli + nessun backfill delle impronte dei modelli precedenti",
+                en: "inertia on the archived reports + a two-level positive control + no backfill of older models' fingerprints"}
+    split: val+test
+    verdict: PASS
+    numbers:
+      literal:
+        - {label: {it: "chiavi confrontate sui report archiviati", en: "keys compared on the archived reports"}, value: {it: "118, zero differenze numeriche", en: "118, zero numeric differences"}}
+        - {label: {it: "test del controllo positivo", en: "positive-control tests"}, value: "21"}
+      as_of: 2026-08-05
+    consequence: {it: "Il numero pubblicato non si muove. I modelli anteriori restano «provenienza macro non verificabile» — **deliberatamente**: un'impronta ricalcolata oggi combacerebbe per costruzione e trasformerebbe un onesto «ignoto» in un rassicurante «identico». Limite dichiarato: il controllo positivo è sintetico, dimostra che il guard distingue due vintage, non che avrebbe intercettato quello storico.",
+                  en: "The published number does not move. Older models stay «macro provenance not verifiable» — **deliberately**: a fingerprint recomputed today would match by construction and turn an honest «unknown» into a reassuring «identical». Declared limit: the positive control is synthetic; it shows the guard tells two vintages apart, not that it would have caught the historical one."}
+    teoria: "12.2"
+    data_state: riproducibile

@@ -1,0 +1,1138 @@
+# PROJECT SITE GENERATOR — static HTML for GitHub Pages.
+# Why a generator rather than hand-written HTML: a 2026-07-28 review found two
+# STALE claims in the README, which survived because they were hand-copied
+# numbers nobody re-checked. The rule that followed: a machine-derivable
+# number must be DERIVED.
+# ⚠ NO THIRD COPY OF THE FACTS. Experiment cards live in
+# `docs/experiments.yaml`, not here: an earlier version of this file had the
+# gates hardcoded, creating a third copy after `STATUS.md` and `THEORY.md`
+# §12. And the NUMBERS, where a report exists on disk, are not even in the
+# registry: the registry declares file and key, the value is read at build
+# time. Divergence is therefore impossible rather than «detected».
+# ⚠ ONE-SHOT DISCIPLINE GUARD — an OPEN pre-registered gate must show no
+# decisional quantity, verdict included. It raises `OneShotViolation`.
+import argparse
+import html
+import json
+import logging
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from quantsys.utils import setup_logging  # noqa: E402
+
+setup_logging()
+log = logging.getLogger("quantsys.script.build_site")
+
+OUT_DIR = ROOT / "docs"
+# English is the canonical page, as for every doc in the repo (`X.md` + `X.it.md`).
+PAGE_FILES = {"en": "index.html", "it": "index.it.html"}
+REGISTRY = OUT_DIR / "experiments.yaml"
+
+# LANGUAGE. `LANG` stays the module DEFAULT at "it": every signature using it
+# as a default (`tr`, `md`) is unchanged and the Italian output is
+# byte-identical to before the toggle — inertia verified, not assumed. English
+# is ADDITIVE: `--lang en` writes `docs/index.en.html` and never touches
+# `index.html`.
+# default language of the render functions (tests exercise it); the published
+# default page is decided by PAGE_FILES, not by this constant.
+LANG = "it"
+LANGS = ("it", "en")
+SCHEMA_VERSION = 2
+# verdict keys are Italian schema values; their display text is per language.
+VERDICT_LABEL = {"it": {"PASS": "PASS", "FAIL": "FAIL", "NESSUNA CONCLUSIONE": "NESSUNA CONCLUSIONE"},
+                 "en": {"PASS": "PASS", "FAIL": "FAIL", "NESSUNA CONCLUSIONE": "NO CONCLUSION"}}
+# reports the fixed page sections read directly (the cards' reports come from the registry).
+HERO_GATE_REPORT = "results/vols/qlike_report_1h_test.json"
+HERO_CLAIM_REPORTS = {"val": "results/vols/qlike_report_1h_val_canonical_1h_vols.json",
+                      "test": "results/vols/qlike_report_1h_test_canonical_1h_vols.json"}
+OPEN_STATES = {"aperto", "in-attesa-campione"}
+VERDICT_CLASS = {"PASS": "ok", "FAIL": "no", "NESSUNA CONCLUSIONE": "mid"}
+
+
+class OneShotViolation(RuntimeError):
+    """Build stopped on a one-shot discipline violation."""
+
+
+class RegistrySchemaError(RuntimeError):
+    """The experiment registry violates the schema."""
+
+
+# ────────────────────────────────── registry ──────────────────────────────────
+def load_registry() -> dict:
+    if not REGISTRY.exists():
+        raise FileNotFoundError(f"registro assente: {_rel(REGISTRY)}")
+    reg = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
+    validate_registry(reg)
+    log.info(f"registro letto: {_rel(REGISTRY)} "
+             f"({len(reg['experiments'])} schede, {len(reg['lines'])} linee)")
+    return reg
+
+
+def validate_registry(reg: dict) -> None:
+    # minimal schema + the two rules that prevent duplication: every card
+    # points at a THEORY.md section (the authority), and numbers are EITHER
+    # derived from a report OR literal with a date, never both.
+    if reg.get("schema") != SCHEMA_VERSION:
+        raise RegistrySchemaError(f"schema atteso {SCHEMA_VERSION}, trovato {reg.get('schema')!r}")
+    seen = set()
+    for e in reg["experiments"]:
+        eid = e.get("id")
+        if not eid:
+            raise RegistrySchemaError("scheda senza `id`")
+        if eid in seen:
+            raise RegistrySchemaError(f"id duplicato: {eid!r}")
+        seen.add(eid)
+        for field in ("name", "line", "status", "question", "teoria", "scope"):
+            if not e.get(field):
+                raise RegistrySchemaError(f"[{eid}] campo obbligatorio mancante: {field}")
+        if e["line"] not in reg["lines"]:
+            raise RegistrySchemaError(f"[{eid}] linea sconosciuta: {e['line']!r}")
+        # `scope` is mandatory and closed over a vocabulary: it is what stops
+        # PASSes answering different questions from being summed together.
+        if e["scope"] not in reg["scopes"]:
+            raise RegistrySchemaError(
+                f"[{eid}] scope sconosciuto: {e['scope']!r} — "
+                f"ammessi: {', '.join(sorted(reg['scopes']))}")
+        n = e.get("numbers")
+        if n:
+            has_src, has_lit = "source" in n, "literal" in n
+            if has_src and has_lit:
+                raise RegistrySchemaError(
+                    f"[{eid}] `numbers` ha sia `source` sia `literal`: scegline uno — "
+                    f"due origini per lo stesso numero sono una duplicazione")
+            if not has_src and not has_lit:
+                raise RegistrySchemaError(f"[{eid}] `numbers` senza `source` ne' `literal`")
+            if has_lit and not n.get("as_of"):
+                raise RegistrySchemaError(
+                    f"[{eid}] `numbers.literal` senza `as_of`: un numero scritto a mano "
+                    f"senza la data in cui era vero non e' verificabile")
+            # every number label is bilingual, otherwise one page shows the other
+            # language's labels (the v1 schema had Italian-only labels on the EN page).
+            items = n["keys"] if has_src else n["literal"]
+            if not isinstance(items, list) or not items:
+                raise RegistrySchemaError(f"[{eid}] `numbers` deve essere una lista non vuota")
+            for it in items:
+                lab = it.get("label") if isinstance(it, dict) else None
+                if not (isinstance(lab, dict) and lab.get("it") and lab.get("en")):
+                    raise RegistrySchemaError(f"[{eid}] etichetta di un numero senza it/en: {it!r}")
+                if has_src and "path" not in it:
+                    raise RegistrySchemaError(f"[{eid}] numero derivato senza `path`: {it!r}")
+                if has_lit and "value" not in it:
+                    raise RegistrySchemaError(f"[{eid}] numero letterale senza `value`: {it!r}")
+
+
+def assert_one_shot_discipline(experiments: list) -> None:
+    # THE check that justifies the generator. It covers `verdict` too: a
+    # verdict IS a decisional quantity.
+    n_open = 0
+    for e in experiments:
+        if e["status"] not in OPEN_STATES:
+            continue
+        n_open += 1
+        if e.get("numbers"):
+            raise OneShotViolation(
+                f"gate '{e['id']}' e' APERTO ma dichiara numeri: emetterli "
+                f"brucerebbe la pre-registrazione. Build fermata.")
+        if e.get("verdict"):
+            raise OneShotViolation(
+                f"gate '{e['id']}' e' APERTO ma dichiara verdict={e['verdict']!r}: "
+                f"un verdetto e' una quantita' decisionale. Build fermata.")
+    log.info(f"guard one-shot OK: {n_open} gate aperti, nessuna quantita' decisionale")
+
+
+def assert_teoria_pointers(experiments: list) -> None:
+    # every card must point at an EXISTING THEORY.md section. It is what
+    # stops the registry from becoming a parallel source of truth.
+    teoria = (ROOT / "THEORY.md").read_text(encoding="utf-8")
+    for e in experiments:
+        ref = str(e["teoria"])
+        if f"### {ref} " not in teoria and f"## {ref}." not in teoria and f"### {ref}." not in teoria:
+            raise RegistrySchemaError(
+                f"[{e['id']}] punta a THEORY.md §{ref}, che non esiste — il registro "
+                f"non e' la fonte autorevole e non puo' contenere fatti senza di essa")
+    log.info(f"puntatori a THEORY.md: {len(experiments)}/{len(experiments)} risolvono")
+
+
+# ────────────────────────────── numbers and derivation ──────────────────────────────
+def _rel(path: Path) -> str:
+    # readable path. `relative_to` RAISES outside the root, so using it inside
+    # an error message would mask the real error.
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def dig(obj, path):
+    # resolves a path inside a report JSON. TWO forms, and the second is not
+    # a flourish: some report keys contain a dot in their name, so dotted
+    # notation cannot express them. A string is split on dots; a LIST is
+    # taken as an explicit sequence of segments.
+    parts = list(path) if isinstance(path, (list, tuple)) else str(path).split(".")
+    cur = obj
+    for i, part in enumerate(parts):
+        if not isinstance(cur, dict) or part not in cur:
+            here = ".".join(str(p) for p in parts[:i]) or "(radice)"
+            avail = ", ".join(sorted(cur)[:8]) if isinstance(cur, dict) else type(cur).__name__
+            raise KeyError(
+                f"percorso non risolto: {parts!r} — fermo a {here!r}, "
+                f"segmento {part!r} assente. Disponibili: {avail}. "
+                f"Se il nome della chiave contiene un punto, usa la forma a lista.")
+        cur = cur[part]
+    return cur
+
+
+def required_reports(experiments: list) -> dict:
+    # required reports are DERIVED from the registry rather than listed
+    # separately: adding a card with a new source makes that report required
+    # without touching this file.
+    return {e["numbers"]["source"] for e in experiments
+            if e.get("numbers", {}).get("source")}
+
+
+def load_reports(paths: set) -> dict:
+    # fail-fast — better no page than a page with a silent hole.
+    out = {}
+    for rel in sorted(paths):
+        p = ROOT / rel
+        if not p.exists():
+            raise FileNotFoundError(
+                f"report atteso assente: {rel} — la pagina non viene emessa con "
+                f"un buco al suo posto")
+        out[rel] = json.loads(p.read_text(encoding="utf-8"))
+        log.info(f"report letto: {rel}")
+    return out
+
+
+MODEL_CONFIG = ROOT / "models" / "itransformer" / "config.json"
+
+
+def load_model_facts() -> dict:
+    # Section 1's numbers come from artifacts, not from the author's memory.
+    # The production model's `config.json` yields the counts and window; the
+    # list of features dropped for live use is a CODE CONSTANT, so it cannot
+    # diverge from actual behaviour.
+    # ⚠ `models/` is not in the repository (gitignored): the site is built on
+    # the machine that holds the models. Fail-fast says so rather than
+    # emitting a page with wrong counts.
+    if not MODEL_CONFIG.exists():
+        raise FileNotFoundError(
+            f"config del modello assente: {_rel(MODEL_CONFIG)} — i conteggi della "
+            f"Sezione 1 sono derivati da qui e non vengono inventati. La cartella "
+            f"`models/` non e' versionata: costruisci il sito dalla macchina che la ha.")
+    cfg = json.loads(MODEL_CONFIG.read_text(encoding="utf-8"))
+    from quantsys.features import LIVE_DROP_FEATURES
+    from quantsys.utils import PipelineState
+    ps = PipelineState.load(str(ROOT / "models" / "pipeline_state.pkl"))
+    n_feat = int(cfg["n_features"])
+    n_dyn = int(cfg["n_dynamic_features"])
+    facts = {
+        "n_features": n_feat,
+        "n_dynamic": n_dyn,
+        "n_structural": n_feat - n_dyn,
+        "n_macro": int(cfg["n_macro"]),
+        "window": int(cfg["window_size"]),
+        "loss_type": str(cfg["loss_type"]),
+        "dropped_live": sorted(LIVE_DROP_FEATURES),
+        "interval": str(ps.interval),
+        "horizon": int(ps.forecast_horizon),
+    }
+    # internal consistency: better to stop than publish a sum a competent
+    # reader checks in three seconds.
+    if facts["n_structural"] <= 0 or facts["n_dynamic"] >= n_feat:
+        raise ValueError(f"split dual-stream incoerente: {n_dyn} dinamiche su {n_feat}")
+    log.info(f"fatti del modello: {n_feat} feature ({n_dyn}+{facts['n_structural']}), "
+             f"{facts['n_macro']} macro, finestra {facts['window']}, "
+             f"{len(facts['dropped_live'])} scartate per il live")
+    return facts
+
+
+def fmt(v, lang: str = LANG) -> str:
+    if isinstance(v, bool):
+        return ("sì" if v else "no") if lang == "it" else ("yes" if v else "no")
+    if isinstance(v, float):
+        return f"{v:.4f}".rstrip("0").rstrip(".") if abs(v) < 1000 else f"{v:,.0f}"
+    if isinstance(v, int):
+        # thousands separator per language: thin grouping space in Italian, comma in English.
+        return f"{v:,}".replace(",", " ") if lang == "it" else f"{v:,}"
+    return str(v)
+
+
+def resolve_numbers(exp: dict, reports: dict, lang: str = LANG) -> list:
+    # returns [(label, value, provenance)].
+    n = exp.get("numbers")
+    if not n:
+        return []
+    if "source" in n:
+        rep = reports[n["source"]]
+        return [(it["label"][lang], fmt(dig(rep, it["path"]), lang), "derivato") for it in n["keys"]]
+    return [(it["label"][lang], tr(it["value"], lang), str(n["as_of"])) for it in n["literal"]]
+
+
+# ──────────────────────────────────── render ────────────────────────────────────
+CSS = """
+:root{--bg:#fbfaf7;--fg:#1b1a17;--mut:#6b6862;--line:#e2ded5;--accent:#8a5a2b;
+--card:#fff;--warn-bg:#fdf6e8;--warn-line:#d9b56a;--ok:#2f6f4f;--no:#8c3b3b;--mid:#7a6a2f}
+@media (prefers-color-scheme:dark){:root{--bg:#14130f;--fg:#eae7df;--mut:#9a958a;
+--line:#2e2b25;--accent:#d0975a;--card:#1c1a16;--warn-bg:#241f14;--warn-line:#6b5322;
+--ok:#6fbf95;--no:#e08b8b;--mid:#cbb46a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.65 Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
+-webkit-font-smoothing:antialiased}
+.wrap{max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+header{border-bottom:1px solid var(--line);padding-bottom:1.5rem;margin-bottom:2rem}
+h1{font-size:1.9rem;line-height:1.2;margin:0 0 .4rem;letter-spacing:-.01em}
+h2{font-size:1.3rem;margin:3rem 0 .75rem;letter-spacing:-.005em}
+.sub{color:var(--mut);margin:0;font-size:1.02rem}
+.stamp{color:var(--mut);font-size:.82rem;margin-top:1rem;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-line);
+border-radius:.5rem;padding:.9rem 1.1rem;margin:1.5rem 0;font-size:.95rem}
+.warn b{color:var(--accent)}
+.grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));margin:1.5rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.5rem;padding:1rem 1.1rem}
+.card h3{margin:0 0 .35rem;font-size:.78rem;text-transform:uppercase;
+letter-spacing:.09em;color:var(--mut);font-weight:600}
+.big{font-size:1.55rem;font-weight:600;letter-spacing:-.01em}
+.big.ok{color:var(--ok)}.big.no{color:var(--no)}.big.mid{color:var(--mid)}
+.card p{margin:.35rem 0 0;font-size:.9rem;color:var(--mut);line-height:1.5}
+.exp{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line);
+border-radius:.4rem;padding:1.1rem 1.2rem;margin:1.1rem 0}
+.exp.ok{border-left-color:var(--ok)}.exp.no{border-left-color:var(--no)}
+.exp.mid{border-left-color:var(--mid)}.exp.open{border-left-color:var(--accent)}
+.exp h3{margin:0 0 .5rem;font-size:1.03rem;line-height:1.35}
+.meta{font-size:.75rem;color:var(--mut);margin:0 0 .8rem;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.verdict{font-weight:600;letter-spacing:.02em}
+.verdict.ok{color:var(--ok)}.verdict.no{color:var(--no)}.verdict.mid{color:var(--mid)}
+.verdict.open{color:var(--accent)}
+dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.3rem .9rem;font-size:.91rem}
+dt{color:var(--mut);font-size:.74rem;text-transform:uppercase;letter-spacing:.07em;
+padding-top:.22rem;white-space:nowrap}
+dd{margin:0}
+.nums{margin:.8rem 0 0;font-size:.88rem;border-top:1px solid var(--line);padding-top:.7rem}
+.nums span{display:inline-block;margin-right:1.2rem;max-width:100%;overflow-wrap:anywhere}
+.nums b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+.prov{font-size:.72rem;color:var(--mut);margin-top:.45rem}
+.none{color:var(--mut);font-style:italic;font-size:.9rem;margin:.8rem 0 0;
+border-top:1px solid var(--line);padding-top:.7rem}
+footer{margin-top:4rem;padding-top:1.25rem;border-top:1px solid var(--line);
+color:var(--mut);font-size:.85rem}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
+background:var(--bg);border:1px solid var(--line);border-radius:.25rem;padding:.05em .3em}
+.steps{margin:1.2rem 0;padding-left:1.3rem}
+.steps>li{margin:.85rem 0;padding-left:.25rem}
+.steps>li>b{display:block;margin-bottom:.15rem}
+"""
+
+
+def esc(s) -> str:
+    return html.escape(str(s), quote=True)
+
+
+def tr(field, lang=LANG) -> str:
+    # bilingual fields are {it, en} dicts; plain fields pass through.
+    return field.get(lang, field.get("it", "")) if isinstance(field, dict) else str(field)
+
+
+def md(s: str) -> str:
+    # minimal markdown (bold, italic, code) — avoids a dependency.
+    import re
+    s = esc(s)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    s = re.sub(r"`(.+?)`", r"<code>\1</code>", s)
+    s = re.sub(r"(?<![\w*])\*([^*]+?)\*(?![\w*])", r"<i>\1</i>", s)
+    return s
+
+
+def hero_facts(reports: dict) -> dict:
+    # headline numbers, all read from the judges' reports: the June gate record (against
+    # HAR-RV, the pre-registered denominator) and the current claim (against HAR-C, from
+    # the canonical model/dataset pair on both splits). The claim band is 1 − NN/HAR-C.
+    g = reports[HERO_GATE_REPORT]["gate"]
+    out = {"gate_verdict": g["verdict"], "gate_edge_pct": (1.0 - g["nn_vs_har_ratio"]) * 100.0,
+           "gate_n": g["n_obs"]}
+    for split, rel in HERO_CLAIM_REPORTS.items():
+        r = reports[rel]
+        if r.get("provenance", {}).get("matches") is not True:
+            raise RegistrySchemaError(f"{rel}: provenance.matches non e' true, il claim non e' verificabile")
+        nn, harc = r["metrics"]["nn"]["qlike"], r["har_cj"]["har_c"]["qlike_har_c"]
+        out[f"{split}_edge_pct"] = (1.0 - nn / harc) * 100.0
+        out[f"{split}_nn"], out[f"{split}_harc"] = nn, harc
+        out[f"{split}_naive"] = r["metrics"]["naive"]["qlike"]
+        out[f"{split}_n"] = r["gate"]["n_obs"]
+    return out
+
+
+def render_hero(reports: dict, lang: str = LANG) -> str:
+    h = hero_facts(reports)
+    if lang == "en":
+        return f"""
+<div class="warn">
+<b>The honest status, up top and not in a footnote.</b> This project's operational arm is
+<b>paper trading on a testnet</b>: no real capital, no real slippage, no market impact. What
+is measured is <i>forecast accuracy</i>; monetization is a separate question, and so far one
+without a positive answer.
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Volatility line · 1h</h3>
+    <div class="big ok">{esc(h["gate_verdict"])}</div>
+    <p>Forecasting the realized variance of the next 30 hours. The pre-registered gate named
+    HAR-RV as its baseline, and the model beat it by <b>{h["gate_edge_pct"]:.0f}%</b> in QLIKE on
+    the test split (n = {h["gate_n"]:,}), with coherent val→test.</p>
+  </div>
+  <div class="card">
+    <h3>Current claim, against HAR-C</h3>
+    <div class="big">−{h["test_edge_pct"]:.2f}%</div>
+    <p>QLIKE against the <b>stronger</b> jump-robust baseline adopted later: −{h["val_edge_pct"]:.2f}%
+    on val, −{h["test_edge_pct"]:.2f}% on test. Test split: model <b>{h["test_nn"]:.3f}</b>, HAR-C
+    <b>{h["test_harc"]:.3f}</b>, naive persistence <b>{h["test_naive"]:.3f}</b>. Lower is better.
+    Read from a reproducible model/dataset pair.</p>
+  </div>
+  <div class="card">
+    <h3>Directional line</h3>
+    <div class="big no">no OOS alpha</div>
+    <p>No out-of-sample directional skill at any timeframe tested. The code stays
+    alive as a <b>negative control</b>: it shows the measuring apparatus works even
+    when there is no signal to find.</p>
+  </div>
+</div>
+
+<p>This project's thesis is not the positive result: it is the <b>method</b>. A single PASS
+on a variance target, surrounded by an extensive corpus of failures <i>pre-registered before
+running</i>, says far more than an isolated PASS — because the threshold existed before the
+number, and the negative results are written up with the same care as the positive one.</p>
+""".strip()
+    return f"""
+<div class="warn">
+<b>Stato onesto, in alto e non in nota.</b> Il braccio operativo di questo progetto è
+<b>paper trading su testnet</b>: nessuna esecuzione con capitale reale, nessuno slippage
+reale, nessun impatto di mercato. Ciò che è misurato è <i>accuratezza previsiva</i>; la
+monetizzazione è una domanda separata, e finora senza risposta positiva.
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Linea volatilità · 1h</h3>
+    <div class="big ok">{esc(h["gate_verdict"])}</div>
+    <p>Previsione della varianza realizzata delle 30 ore successive. Il gate pre-registrato
+    nominava HAR-RV come baseline, e il modello l'ha battuta del <b>{h["gate_edge_pct"]:.0f}%</b>
+    in QLIKE sullo split di test (n = {h["gate_n"]:,}), con val→test coerenti.</p>
+  </div>
+  <div class="card">
+    <h3>Claim attuale, contro HAR-C</h3>
+    <div class="big">−{h["test_edge_pct"]:.2f}%</div>
+    <p>QLIKE contro la baseline jump-robust <b>più forte</b> adottata dopo: −{h["val_edge_pct"]:.2f}%
+    su val, −{h["test_edge_pct"]:.2f}% su test. Split di test: modello <b>{h["test_nn"]:.3f}</b>,
+    HAR-C <b>{h["test_harc"]:.3f}</b>, persistenza ingenua <b>{h["test_naive"]:.3f}</b>. Più basso è
+    meglio. Letto da una coppia modello/dataset riproducibile.</p>
+  </div>
+  <div class="card">
+    <h3>Linea direzionale</h3>
+    <div class="big no">nessun alpha OOS</div>
+    <p>Nessuna skill direzionale fuori campione a nessun timeframe testato.
+    Il codice resta vivo come <b>controllo negativo</b>: dimostra che l'apparato
+    di misura funziona anche quando il segnale non c'è.</p>
+  </div>
+</div>
+
+<p>La tesi di questo progetto non è il risultato positivo: è il <b>metodo</b>. Un singolo
+PASS su un target di varianza, circondato da un corpus esteso di fallimenti
+<i>pre-registrati prima di girare</i>, dice molto di più di un PASS isolato — perché
+la soglia esisteva prima del numero, e i risultati negativi sono scritti con la stessa
+cura di quello positivo.</p>
+""".strip()
+
+
+def render_section1(f: dict, lang: str = LANG) -> str:
+    # Section 1 — "how it works", in data-flow order. The prose is written by
+    # hand; every number in it is interpolated from the derived facts above.
+    drop = ", ".join(f"<code>{esc(d)}</code>" for d in f["dropped_live"])
+    if lang == "en":
+        return f"""
+<h2>The input data</h2>
+<p>The starting point is a single series: hourly BTC/USDT candles from 2019 to today, plus
+the perpetual funding rate. There is nothing exotic here — deliberately: the question this
+project answers is <i>how far price and volume alone can take you</i>, and answering it
+requires not cheating by adding sources that would explain the result in the model's place.</p>
+
+<p>Two things are added to that base. A <b>macro</b> block of {f["n_macro"]} daily series
+(rates, indices, the dollar, equity volatility), carried onto the hourly grid with a
+<i>causal</i> fill: every bar sees only the latest already-published figure at that moment,
+never the next one. And three options data streams collected <b>forward</b> — implied
+volatility surface, order book, trades — which no API retains retroactively: if you do not
+record them as they happen, they are gone. That is why a collector has been running around
+the clock for months.</p>
+
+<h2>The features</h2>
+<p>Nothing works on absolute prices: everything is expressed in <b>log returns</b>, which are
+stationary and symmetric — a +1% and a −1% have the same magnitude, which is not true of
+prices. From there, <b>{f["n_features"]} features</b> are built, split into two streams the
+model treats separately: <b>{f["n_dynamic"]} dynamic</b> (changing every bar) and
+<b>{f["n_structural"]} structural</b> (position in range, distance from levels, volume
+profile, funding).</p>
+
+<div class="warn">
+<b>{len(f["dropped_live"])} features were removed, and the reason matters more than the number.</b>
+They were not dropped for being useless: they were dropped for being <b>impossible to compute
+in real time</b>. They look at 90- or 365-day windows, or require a fractional
+differentiation that needs the whole history. A model using them would get a backtest result
+it could not reproduce in production — the most common form of self-deception in this field.
+They are: {drop}.
+</div>
+
+<h2>What is predicted</h2>
+<p>The production line's target is the <b>realized variance</b> of the next {f["horizon"]}
+hours, on a log scale. Not direction: the <i>magnitude</i> of the move, regardless of sign.</p>
+
+<p>That choice is not cosmetic, and it is probably the most useful result of the whole
+project. On this asset, what can be forecast out of sample are the <b>even moments</b> —
+variance, dispersion, magnitude. The <b>odd moments</b> — the sign of the return, the
+asymmetry between rises and falls, the jump component — turn out to be unpredictable not only
+for the neural network but for the classical econometric baselines too. In the signed
+semivariance test the reference econometric model did <i>worse than a constant</i>: when even
+the traditional method loses to "do nothing", the problem is not the model, it is that the
+information is not there.</p>
+
+<p>The model works on windows of <b>{f["window"]} bars</b> and predicts in a
+<b>normalized</b> space, not in price units. Converting back is a mandatory and delicate
+step: omitting it was the costliest error in the project's history — it produced stop-losses
+and take-profits wrong by two orders of magnitude, and a spectacularly false backtest. It is
+now protected by a check that fails the program rather than letting implausible values
+through.</p>
+""".strip()
+    return f"""
+<h2>I dati in ingresso</h2>
+<p>Il punto di partenza è una sola serie: candele orarie di BTC/USDT dal 2019 a oggi, più
+il tasso di funding dei perpetui. Non c'è nulla di esotico — è deliberato: la domanda a cui
+il progetto risponde è <i>quanto lontano si arriva con prezzo e volume</i>, e per rispondere
+serve non barare aggiungendo fonti che spiegherebbero il risultato al posto del modello.</p>
+
+<p>A questa base si aggiungono due cose. Un blocco <b>macro</b> di {f["n_macro"]} serie
+giornaliere (tassi, indici, dollaro, volatilità azionaria), riportate sull'orario con un
+riempimento <i>causale</i>: ogni barra vede solo l'ultimo dato già pubblicato a quel momento,
+mai il successivo. E tre flussi di dati sulle opzioni raccolti <b>in avanti</b> —
+superficie di volatilità implicita, order book, scambi — che nessuna API conserva
+retroattivamente: se non li si registra mentre accadono, non esistono più. È la ragione per
+cui un raccoglitore gira 24 ore su 24 da mesi.</p>
+
+<h2>Le feature</h2>
+<p>Nulla lavora su prezzi assoluti: tutto è espresso in <b>rendimenti logaritmici</b>, che
+sono stazionari e simmetrici — un +1% e un −1% hanno la stessa magnitudine, cosa che sui
+prezzi non è vera. Da lì si costruiscono <b>{f["n_features"]} feature</b>, divise in due
+flussi che il modello tratta separatamente: <b>{f["n_dynamic"]} dinamiche</b> (che cambiano
+a ogni barra) e <b>{f["n_structural"]} strutturali</b> (posizione nel range, distanza dai
+livelli, profilo dei volumi, funding).</p>
+
+<div class="warn">
+<b>{len(f["dropped_live"])} feature sono state rimosse, e il motivo conta più del numero.</b>
+Non sono state tolte perché inutili: sono state tolte perché <b>non calcolabili in tempo
+reale</b>. Guardano finestre di 90 o 365 giorni, oppure richiedono una differenziazione
+frazionaria che ha bisogno dell'intera serie storica. Un modello che le usasse otterrebbe
+in backtest un risultato che in produzione non potrebbe replicare — la forma di
+auto-inganno più comune in questo campo. Sono: {drop}.
+</div>
+
+<h2>Cosa si predice</h2>
+<p>Il bersaglio della linea di produzione è la <b>varianza realizzata</b> delle
+{f["horizon"]} ore successive, in scala logaritmica. Non la direzione: la
+<i>ampiezza</i> del movimento, indipendentemente dal segno.</p>
+
+<p>Questa scelta non è estetica, ed è probabilmente il risultato più utile dell'intero
+progetto. Su questo asset, ciò che si riesce a prevedere fuori campione sono i
+<b>momenti pari</b> — varianza, dispersione, ampiezza. I <b>momenti dispari</b> — il segno
+del rendimento, l'asimmetria fra rialzi e ribassi, la componente di salto — risultano
+impredicibili non solo per la rete neurale, ma anche per le baseline econometriche
+classiche. Nella prova sulla semivarianza firmata il modello econometrico di riferimento
+ha fatto <i>peggio di una costante</i>: quando anche il metodo tradizionale perde contro
+«non fare niente», il problema non è il modello, è che l'informazione non c'è.</p>
+
+<p>Il modello lavora su finestre di <b>{f["window"]} barre</b> e predice in uno spazio
+<b>normalizzato</b>, non in unità di prezzo. La conversione all'indietro è un passaggio
+obbligatorio e delicato: ometterla è stato l'errore più costoso della storia del progetto —
+produceva stop-loss e take-profit sbagliati di due ordini di grandezza, e un backtest
+spettacolarmente falso. Oggi è protetta da un controllo che fa fallire il programma
+piuttosto che lasciar passare valori implausibili.</p>
+""".strip()
+
+
+def render_limits(lang: str = LANG) -> str:
+    if lang == "en":
+        return """
+<h2>Assumptions and limits, declared</h2>
+<ul>
+<li><b>The result is specific to the hourly resolution.</b> Repeated at half-hourly bars the
+same method fails its own criterion. Not a detail: it means there is no general law, there is
+a result at one precise scale.</li>
+
+<li><b>On direction there is no out-of-sample edge at all</b>, at any timeframe tried. The
+directional line stays in the code as a negative control, not as a strategy.</li>
+
+<li><b>The operational arm is paper trading on a testnet.</b> No real capital, no real
+slippage, no market impact, and transaction costs are <i>assumed</i> from public fee
+schedules rather than measured on fills.</li>
+
+<li><b>Measured accuracy ≠ profitability.</b> This is the distinction the project holds more
+firmly than any other: the entry rule built on top of the signal failed its own
+pre-registered criterion, while the passive comparison strategy stays positive. The risk
+premium exists; this rule does not monetize it.</li>
+
+<li><b>The evaluation criterion rewards the conditional mean, the model optimizes a
+median.</b> The mismatch is known, was tested with a standard correction, and the correction
+<i>did not</i> work — so it is documented as open, not as solved. It applies to both sides of
+the comparison, so it does not favour the model.</li>
+
+<li><b>The effective sample is far smaller than it looks.</b> Forecast windows overlap, so
+observations are not independent: where the raw data counts thousands of points, the
+statistically useful sample is worth a few hundred. Every significance reported here is
+corrected for this.</li>
+</ul>
+""".strip()
+    # block 1.9 — limits in their own visible section, not in a footnote. It
+    # is what a competent reader looks for first.
+    return """
+<h2>Assunzioni e limiti, dichiarati</h2>
+<ul>
+<li><b>Il risultato è specifico della risoluzione oraria.</b> Ripetuto a mezz'ora, lo stesso
+metodo fallisce il proprio criterio. Non è un dettaglio: significa che non c'è una legge
+generale, c'è un risultato su una scala precisa.</li>
+
+<li><b>Sulla direzione non c'è alcun vantaggio fuori campione</b>, a nessuno dei timeframe
+provati. La linea direzionale resta nel codice come controllo negativo, non come strategia.</li>
+
+<li><b>Il braccio operativo è paper trading su testnet.</b> Nessun capitale reale, nessuno
+slippage reale, nessun impatto di mercato, e i costi di transazione sono <i>assunti</i> a
+partire dai listini pubblici, non misurati sull'eseguito.</li>
+
+<li><b>Accuratezza misurata ≠ redditività.</b> È la distinzione che il progetto tiene più
+ferma di ogni altra: la regola di ingresso costruita sopra il segnale ha fallito il proprio
+criterio pre-registrato, mentre la strategia passiva di confronto resta positiva. Il premio
+di rischio esiste; questa regola non lo monetizza.</li>
+
+<li><b>Il criterio di valutazione premia la media condizionale, il modello ottimizza una
+mediana.</b> Il disallineamento è noto, è stato testato con una correzione standard, e la
+correzione <i>non</i> ha funzionato — quindi è documentato come aperto, non come risolto.
+Vale su entrambi i lati del confronto, quindi non favorisce il modello.</li>
+
+<li><b>Il campione effettivo è molto più piccolo di quanto sembri.</b> Le finestre di
+previsione si sovrappongono, quindi le osservazioni non sono indipendenti: dove i dati
+grezzi contano migliaia di punti, il campione statisticamente utile ne vale poche centinaia.
+Tutte le significatività riportate sono corrette per questo.</li>
+</ul>
+""".strip()
+
+
+def method_facts(reg: dict) -> dict:
+    # the method tallies are DERIVED from the registry, like the card
+    # numbers. Add an experiment tomorrow and the prose below moves by
+    # itself: a hand-typed «11 closed» would go false at the first insertion,
+    # which is exactly the stale-claim defect this generator exists to stop.
+    exps = reg["experiments"]
+    closed = [e for e in exps if e["status"] not in OPEN_STATES]
+    tally: dict = {}
+    for e in closed:
+        tally[str(e.get("verdict", "—"))] = tally.get(str(e.get("verdict", "—")), 0) + 1
+    # PASSes broken down by KIND OF QUESTION. Without it the page would
+    # announce more thresholds passed than there are predictive results,
+    # contradicting its own header: passing "which comparison is right" and
+    # passing "is there a signal" are different things and do not add up.
+    pass_by_scope: dict = {}
+    for e in closed:
+        if str(e.get("verdict")) == "PASS":
+            pass_by_scope[e["scope"]] = pass_by_scope.get(e["scope"], 0) + 1
+    return {
+        "n_tot":         len(exps),
+        "n_closed":      len(closed),
+        "n_open":        len(exps) - len(closed),
+        "n_lines":       len({e["line"] for e in exps}),
+        "tally":         tally,
+        "pass_by_scope": pass_by_scope,
+        "n_pass_signal": pass_by_scope.get("segnale", 0),
+        "n_pass_other":  sum(v for k, v in pass_by_scope.items() if k != "segnale"),
+    }
+
+
+def _pass_breakdown(f: dict, lang: str = LANG) -> str:
+    # the sentence that keeps the page from contradicting itself. The tiles
+    # above sum PASSes answering different questions, while the page header
+    # claims a single predictive result. Both are true and must be reconciled
+    # HERE. The wording agrees with the number because the tallies are
+    # derived and may be 0, 1 or 5 tomorrow.
+    ns, no = f["n_pass_signal"], f["n_pass_other"]
+    if lang == "en":
+        e_sig = ("No PASS answers" if ns == 0 else
+                 "A single PASS answers" if ns == 1 else
+                 f"{ns} PASSes answer")
+        e_oth = ("and there are no others" if no == 0 else
+                 "the other concerns the yardstick itself" if no == 1 else
+                 f"the other {no} concern the yardstick itself")
+        e_tail = ("" if no == 0 else
+                  " Passing a method or reproducibility gate does not add a result: it changes"
+                  " or certifies the comparison instrument. Where the instrument changed it got"
+                  " <i>stricter</i> — the reference econometric baseline was replaced by a"
+                  " stronger one, and the claimed edge shrank accordingly.")
+        return (f"<b>These numbers are not a score.</b> {e_sig} the question «is there a "
+                f"signal»: {e_oth}." + e_tail)
+    sig = ("Nessuno dei PASS riguarda" if ns == 0 else
+           "Un solo PASS riguarda" if ns == 1 else
+           f"{ns} PASS riguardano")
+    oth = ("e non ce ne sono altri" if no == 0 else
+           "l'altro riguarda il metro con cui si misura" if no == 1 else
+           f"gli altri {no} riguardano il metro con cui si misura")
+    tail = ("" if no == 0 else
+            " Un gate di metodo o di riproducibilità superato non aggiunge un risultato:"
+            " cambia o certifica lo strumento di confronto. Dove lo strumento è cambiato,"
+            " è diventato più severo — la baseline econometrica di riferimento è stata"
+            " sostituita con una più forte, e il vantaggio dichiarato si è ridotto di"
+            " conseguenza.")
+    return (f"<b>Questi numeri non sono un punteggio.</b> {sig} la domanda «esiste un "
+            f"segnale»: {oth}." + tail)
+
+
+def render_method(reg: dict, lang: str = LANG) -> str:
+    # Section 3 — the METHOD. It sits between "how it works" and "what was
+    # tried" because it is the lens for reading the outcomes: without the
+    # protocol a PASS surrounded by FAILs looks like cherry-picking; with it
+    # the opposite holds, because the FAILs were registered before their
+    # outcome was known.
+    f = method_facts(reg)
+    order = ["PASS", "FAIL", "NESSUNA CONCLUSIONE"]
+    # labels deliberately VERBLESS: a derived tally can be 1, and «1
+    # experiments that have...» is the kind of grammar break that shows up only
+    # once the data moves. The body carries the denominator instead, which is
+    # also more informative.
+    labels = {"it": {"PASS": "soglia superata",
+                     "FAIL": "soglia mancata",
+                     "NESSUNA CONCLUSIONE": "misura non conclusiva"},
+              "en": {"PASS": "threshold passed",
+                     "FAIL": "threshold missed",
+                     "NESSUNA CONCLUSIONE": "measurement inconclusive"}}[lang]
+    _of = "su {n} esperimenti chiusi" if lang == "it" else "of {n} closed experiments"
+    _out = "esito" if lang == "it" else "outcome"
+    cards = "".join(f"""
+  <div class="card">
+    <h3>{esc(labels.get(v, v.lower()))}</h3>
+    <div class="big {VERDICT_CLASS.get(v, '')}">{f["tally"][v]}</div>
+    <p>{_of.format(n=f["n_closed"])} · {_out} «{esc(VERDICT_LABEL[lang].get(v, v))}»</p>
+  </div>""" for v in order if v in f["tally"])
+
+    if lang == "en":
+        return f"""
+<h2>How it is decided whether something worked</h2>
+<p>This is the part the project regards as its main content. A forecasting engine is judged
+by its results; a method is judged by <i>what would have happened had the result been
+different</i>. The rules below exist to make that question verifiable rather than rhetorical,
+and nearly all of them were written after getting something wrong.</p>
+
+<ol class="steps">
+<li><b>The threshold is written before the number.</b> Every experiment is pre-registered and
+<i>committed</i> before it runs: the question, the expected prior with its direction, the
+metrics, the thresholds and the minimum number of observations. The commit is dated, so the
+ordering between criterion and result is not a claim, it is something you can check. Moving
+the goalposts once the result is in becomes a visible operation.</li>
+
+<li><b>There are three outcomes, not two.</b> Besides <i>passed</i> and <i>missed</i> there
+is <i>no conclusion</i>: the case where the measuring apparatus cannot answer the question on
+that sample. Keeping it separate from failure is what prevents publishing as a negative
+result something that is merely a defect of measurement.</li>
+
+<li><b>The positive control, mandatory.</b> Before believing "there is no signal" you must
+show that on that same window the apparatus detects an effect we <i>know</i> is there —
+typically beating naive persistence, the zero-parameter forecast. If it does not, the outcome
+is not a failure of the signal: it is a statement about the window. On its first application
+this control turned an apparently publishable negative result into a "no conclusion", which
+was the correct reading.</li>
+
+<li><b>Count before measuring.</b> Many of an experiment's conditions do not depend on the
+model — how many observations exist, how often a rule triggers, how many are actually
+observable. They can be computed <i>before</i> spending compute or months of sample, and they
+should be: two experiments were redesigned because that count showed in advance they would
+have returned "no conclusion" for want of sample.</li>
+
+<li><b>Missing data is never "no effect".</b> A hole in the recording stays a hole and is
+counted separately. It is a boring rule that has already saved two conclusions: a collector
+blind at certain hours of the day would have made a rule look "never triggered" when it
+triggered precisely in those hours.</li>
+
+<li><b>Validate on validation; the test split is touched once.</b> The test split is not a
+bench to iterate on: it is consumed once, after the criterion has been met on validation, and
+with the same definitions.</li>
+
+<li><b>Every experimental lever is born switched off.</b> A change under test must not be
+able to alter production behaviour until someone switches it on explicitly, and the absence
+of effect while off is verified on real data, not assumed.</li>
+
+<li><b>The negative result gets written up anyway</b>, with the same numbers and the same
+care as the positive one. A documented failure is what stops you from trying the same road
+again in six months having forgotten why it was abandoned.</li>
+</ol>
+
+<p>Across {f["n_tot"]} registered experiments — {f["n_closed"]} closed and {f["n_open"]}
+still open, spread over {f["n_lines"]} research lines — the outcomes distribute like this:</p>
+
+<div class="grid">{cards}
+</div>
+
+<p>{_pass_breakdown(f, lang)}</p>
+
+<div class="warn">
+<b>The discipline is enforced by this page, not merely declared.</b> The generator that
+produces it refuses to build if a card belonging to a <i>still-open</i> gate contains any
+decisional quantity — verdict included. This is not a reminder: it is an error that stops the
+build. A number seen early cannot be unseen, and every empty box further down is the shape
+that rule takes when it is respected.
+</div>
+
+<p>The same holds for numbers already out: where a judge's report exists on disk, the page
+<b>re-reads it at every build</b> rather than hosting a copy. This is not a consistency check
+between two copies — it is the absence of the second copy, which makes divergence impossible
+rather than detectable. The measure comes from a real case: two numerical claims in this
+project had gone false without anyone noticing, because they had been copied by hand.</p>
+""".strip()
+
+    return f"""
+<h2>Come si decide se una cosa ha funzionato</h2>
+<p>Questa è la parte che il progetto considera il proprio contenuto principale. Un motore
+predittivo si valuta dai risultati; un metodo si valuta da <i>cosa sarebbe successo se il
+risultato fosse stato diverso</i>. Le regole qui sotto esistono per rendere quella domanda
+verificabile invece che retorica, e sono state scritte quasi tutte dopo aver sbagliato.</p>
+
+<ol class="steps">
+<li><b>La soglia si scrive prima del numero.</b> Ogni esperimento viene pre-registrato e
+<i>committato</i> prima di girare: la domanda, il prior atteso con la sua direzione, le
+metriche, le soglie e il numero minimo di osservazioni. Il commit ha una data, quindi
+l'ordine fra criterio e risultato non è un'affermazione, è una cosa che si verifica.
+Spostare i pali a risultato visto diventa un'operazione visibile.</li>
+
+<li><b>Gli esiti sono tre, non due.</b> Oltre a <i>superata</i> e <i>mancata</i> esiste
+<i>nessuna conclusione</i>: il caso in cui l'apparato di misura non è in grado di
+rispondere alla domanda su quel campione. Tenerlo separato dal fallimento è ciò che
+impedisce di pubblicare come risultato negativo qualcosa che è soltanto un difetto di
+misura.</li>
+
+<li><b>Il controllo positivo, obbligatorio.</b> Prima di credere a «il segnale non c'è»
+bisogna dimostrare che su quella stessa finestra l'apparato rileva un effetto che
+<i>sappiamo</i> esserci — tipicamente battere la persistenza ingenua, la previsione a zero
+parametri. Se non lo rileva, l'esito non è un fallimento del segnale: è una frase sulla
+finestra. Alla sua prima applicazione questo controllo ha convertito un risultato negativo
+apparentemente pubblicabile in un «nessuna conclusione», che era la lettura corretta.</li>
+
+<li><b>Contare prima di misurare.</b> Molte condizioni di un esperimento non dipendono dal
+modello — quante osservazioni esistono, quante volte una regola si attiva, quante sono
+davvero osservabili. Sono calcolabili <i>prima</i> di spendere calcolo o mesi di campione,
+e vanno calcolate: due esperimenti sono stati riprogettati perché quel conteggio ha
+mostrato in anticipo che avrebbero restituito «nessuna conclusione» per esaurimento di
+campione.</li>
+
+<li><b>Il dato mancante non è mai «nessun effetto».</b> Un buco nella registrazione resta
+un buco e viene contato a parte. È una regola noiosa che ha già salvato due conclusioni:
+un raccoglitore cieco in certe ore del giorno avrebbe fatto sembrare «mai attivata» una
+regola che si attivava proprio in quelle ore.</li>
+
+<li><b>Si valida sulla validazione; il test si tocca una volta sola.</b> Lo split di test
+non è un banco di prova su cui iterare: viene consumato una volta, a criterio già superato
+sulla validazione, e con le stesse definizioni.</li>
+
+<li><b>Ogni leva sperimentale nasce spenta.</b> Una modifica in prova non deve poter
+cambiare il comportamento del sistema in produzione finché qualcuno non la accende
+esplicitamente, e l'assenza di effetto a leva spenta viene verificata sui dati veri, non
+assunta.</li>
+
+<li><b>Il risultato negativo si scrive comunque</b>, con gli stessi numeri e la stessa cura
+di quello positivo. Un fallimento documentato è ciò che impedisce di ri-tentare la stessa
+strada fra sei mesi avendo dimenticato perché era stata abbandonata.</li>
+</ol>
+
+<p>Su {f["n_tot"]} esperimenti registrati — {f["n_closed"]} chiusi e {f["n_open"]} ancora
+aperti, distribuiti su {f["n_lines"]} linee di ricerca — la distribuzione degli esiti è
+questa:</p>
+
+<div class="grid">{cards}
+</div>
+
+<p>{_pass_breakdown(f, lang)}</p>
+
+<div class="warn">
+<b>La disciplina è applicata da questa pagina, non solo dichiarata.</b> Il generatore che
+la produce si rifiuta di costruirla se una scheda di un gate <i>ancora aperto</i> contiene
+una qualsiasi quantità decisionale — verdetto compreso. Non è un promemoria: è un errore
+che ferma la build. Un numero visto in anticipo non si può non-vedere, e ogni riquadro
+vuoto più in basso è la forma che quella regola prende quando viene rispettata.
+</div>
+
+<p>Vale anche per i numeri già usciti: dove esiste un report dei giudici su disco, la
+pagina lo <b>rilegge a ogni build</b> invece di ospitarne una copia. Non è un controllo di
+coerenza fra due copie — è l'assenza della seconda copia, che rende la divergenza
+impossibile anziché rilevabile. La misura nasce da un caso reale: due affermazioni
+numeriche di questo progetto erano diventate false senza che nessuno se ne accorgesse,
+perché erano state trascritte a mano.</p>
+""".strip()
+
+
+# card labels, per language. They stay HERE rather than in the registry: they
+# are presentation chrome, not facts — putting them in the registry would make
+# it a source of truth about something that is not a truth.
+CARD_LABELS = {
+    "it": {"open": "APERTO", "prereg": "pre-reg", "closed": "→ chiuso", "split": "split",
+           "detail": "dettaglio in THEORY.it.md §",
+           "q": "Domanda", "prior": "Prior dichiarato", "lever": "Leva", "thr": "Soglia",
+           "counter": "Campione richiesto", "cons": "Conseguenza", "note": "Nota",
+           "data": "Sui dati",
+           "none": ("Nessun numero: il gate è aperto. Mostrarne uno prima che il campione "
+                    "sia pieno brucerebbe la pre-registrazione — l'assenza qui è il punto, "
+                    "non una mancanza."),
+           "derived": "letti dal report dei giudici a questa build",
+           "literal": "scritti a mano, veri al {d}"},
+    "en": {"open": "OPEN", "prereg": "pre-reg", "closed": "→ closed", "split": "split",
+           "detail": "detail in THEORY.md §",
+           "q": "Question", "prior": "Declared prior", "lever": "Lever", "thr": "Threshold",
+           "counter": "Sample required", "cons": "Consequence", "note": "Note",
+           "data": "On the data",
+           "none": ("No numbers: the gate is open. Showing one before the sample is full "
+                    "would burn the pre-registration — the absence here is the point, not "
+                    "an omission."),
+           "derived": "read from the judges' report at this build",
+           "literal": "hand-written, true as of {d}"},
+}
+
+
+def render_card(e: dict, reports: dict, lines: dict, lang: str = LANG, scopes: dict | None = None) -> str:
+    L = CARD_LABELS[lang]
+    is_open = e["status"] in OPEN_STATES
+    vkey = str(e.get("verdict", "—"))
+    verdict = L["open"] if is_open else VERDICT_LABEL[lang].get(vkey, vkey)
+    cls = "open" if is_open else VERDICT_CLASS.get(vkey, "")
+    scope = tr(scopes[e["scope"]], lang) if scopes and e["scope"] in scopes else e["scope"]
+    d = e.get("dates", {})
+    when = (f"{L['prereg']} {d.get('prereg', '—')}"
+            + (f" {L['closed']} {d['closed']}" if d.get("closed") else ""))
+
+    rows = [(L["q"], tr(e["question"], lang)), (L["prior"], tr(e["prior"], lang))]
+    if e.get("lever"):
+        rows.append((L["lever"], tr(e["lever"], lang)))
+    rows.append((L["thr"], tr(e["threshold"], lang)))
+    if is_open and e.get("counter"):
+        rows.append((L["counter"], tr(e["counter"], lang)))
+    if e.get("consequence"):
+        rows.append((L["cons"], tr(e["consequence"], lang)))
+    if e.get("note"):
+        rows.append((L["note"], tr(e["note"], lang)))
+    if e.get("data_note"):
+        rows.append((L["data"], tr(e["data_note"], lang)))
+    dl = "".join(f"<dt>{esc(k)}</dt><dd>{md(v)}</dd>" for k, v in rows)
+
+    if is_open:
+        # do NOT run it through `esc`: it is our own trusted literal, and
+        # escaping would turn the apostrophe into `&#x27;` — which contains
+        # DIGITS and would break the "no digit in an open card" test, i.e. a
+        # one-shot discipline guard killed by a typographic detail.
+        nums = f'<p class="none">{L["none"]}</p>'
+    else:
+        got = resolve_numbers(e, reports, lang)
+        if got:
+            prov = got[0][2]
+            cells = "".join(f'<span>{esc(k)} <b>{esc(v)}</b></span>' for k, v, _ in got)
+            src = L["derived"] if prov == "derivato" else L["literal"].format(d=prov)
+            nums = f'<div class="nums">{cells}<div class="prov">{src}</div></div>'
+        else:
+            nums = ""
+
+    return f"""
+<div class="exp {cls}">
+  <h3>{md(tr(e["name"], lang))}</h3>
+  <p class="meta">{esc(tr(lines[e["line"]], lang))} · {esc(scope)} · {esc(when)} · {L["split"]} {esc(e.get("split", "—"))}
+  · <span class="verdict {cls}">{esc(verdict)}</span> · {L["detail"]}{esc(e["teoria"])}</p>
+  <dl>{dl}</dl>
+  {nums}
+</div>""".rstrip()
+
+
+def render_experiments(reg: dict, reports: dict, lang: str = LANG) -> str:
+    lines = {k: v for k, v in reg["lines"].items()}
+    exps = reg["experiments"]
+    closed = [e for e in exps if e["status"] not in OPEN_STATES]
+    opened = [e for e in exps if e["status"] in OPEN_STATES]
+    scopes = reg.get("scopes")
+    body = "".join(render_card(e, reports, lines, lang, scopes) for e in closed)
+    # with no open gate the section says so instead of rendering an empty list.
+    body_open = ("".join(render_card(e, reports, lines, lang, scopes) for e in opened) if opened else
+                 ('<p class="none">No pre-registered gate is open at this build.</p>' if lang == "en" else
+                  '<p class="none">Nessun gate pre-registrato è aperto a questa build.</p>'))
+    if lang == "en":
+        return f"""
+<h2>What was tried, and how it went</h2>
+<p>Every card gives the question, the <b>prior declared before running</b>, the lever, the
+numeric threshold written in advance and the outcome — whatever it is. The field that gives
+this page its value is the prior: it shows the criterion existed before the result. Where the
+prior was falsified <i>in its direction</i>, that is said explicitly.</p>
+{body}
+
+<h2>Open gates — pre-registered, not yet judged</h2>
+<p>These experiments have their threshold and minimum sample written and committed
+<b>before</b> running. Until the sample is full no decisional quantity appears: a number seen
+early cannot be unseen.</p>
+{body_open}""".rstrip()
+    return f"""
+<h2>Cosa è stato provato, e com'è andata</h2>
+<p>Ogni scheda riporta la domanda, il <b>prior dichiarato prima di girare</b>, la leva,
+la soglia numerica scritta in anticipo e l'esito — qualunque esso sia. Il campo che dà
+valore alla pagina è il prior: mostra che il criterio esisteva prima del risultato.
+Dove il prior è stato falsificato <i>nella direzione</i>, è detto esplicitamente.</p>
+{body}
+
+<h2>Gate aperti — pre-registrati, non ancora giudicati</h2>
+<p>Questi esperimenti hanno soglia e campione minimo scritti e committati <b>prima</b> di
+girare. Finché il campione non è pieno non compare nessuna quantità decisionale: un numero
+visto in anticipo non si può non-vedere.</p>
+{body_open}""".rstrip()
+
+
+def build_stamp() -> dict:
+    def git(*a):
+        try:
+            return subprocess.run(["git", *a], cwd=ROOT, capture_output=True,
+                                  text=True, check=True).stdout.strip()
+        except Exception:
+            return "n/d"
+    return {"utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "commit": git("rev-parse", "--short", "HEAD"),
+            "branch": git("rev-parse", "--abbrev-ref", "HEAD")}
+
+
+PAGE_CHROME = {
+    "it": {"title": "QUANTSYS — motore predittivo su BTC/USDT",
+           "desc": "Come funziona un motore predittivo su BTC/USDT, e la storia completa di cosa e' stato provato e com'e' andata.",
+           "sub": ("Un motore predittivo su BTC/USDT — e la storia completa,\n"
+                   "  positiva e negativa, di cosa è stato provato."),
+           "at_a_glance": "In una schermata",
+           "other": ('<a href="index.html">English</a> · <a href="architetture.html">diagrammi delle architetture</a>'
+                     ' · <a href="https://github.com/luca-feleppa/quantsys">codice</a>'),
+           "footer": ("Le schede vengono da <code>docs/experiments.yaml</code>; i numeri marcati «letti dal\n"
+                      "report» sono derivati a ogni build e non trascritti, quindi non possono divergere dalla\n"
+                      "fonte. Il timbro in alto dice da quale stato del repository provengono. La fonte tecnica\n"
+                      "autorevole resta <code>THEORY.it.md</code>, che questa pagina richiama e non sostituisce:\n"
+                      "dove le due divergessero, ha ragione THEORY.it.md.")},
+    "en": {"title": "QUANTSYS — a forecasting engine on BTC/USDT",
+           "desc": "How a BTC/USDT forecasting engine works, and the full record of what was tried and how it went.",
+           "sub": ("A forecasting engine on BTC/USDT — and the full record,\n"
+                   "  positive and negative, of what was tried."),
+           "at_a_glance": "At a glance",
+           "other": ('<a href="index.it.html">Italiano</a> · <a href="architetture.html">architecture diagrams</a>'
+                     ' · <a href="https://github.com/luca-feleppa/quantsys">source code</a>'),
+           "footer": ("The cards come from <code>docs/experiments.yaml</code>; numbers marked «read from the\n"
+                      "report» are derived at every build rather than transcribed, so they cannot diverge from\n"
+                      "the source. The stamp above says which repository state they come from. The authoritative\n"
+                      "technical source remains <code>THEORY.md</code>, which this page points to rather than\n"
+                      "replaces: where the two diverge, THEORY.md is right.")},
+}
+
+
+def render_page(reg: dict, reports: dict, stamp: dict, facts: dict, lang: str = LANG) -> str:
+    C = PAGE_CHROME[lang]
+    return f"""<!doctype html>
+<html lang="{lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{C["title"]}</title>
+<meta name="description" content="{C["desc"]}">
+<style>{CSS}</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>QUANTSYS</h1>
+  <p class="sub">{C["sub"]}</p>
+  <p class="stamp">build {esc(stamp["utc"])} · commit {esc(stamp["commit"])}
+  · branch {esc(stamp["branch"])} · {C["other"]}</p>
+</header>
+
+<h2>{C["at_a_glance"]}</h2>
+{render_hero(reports, lang)}
+
+{render_section1(facts, lang)}
+
+{render_method(reg, lang)}
+
+{render_experiments(reg, reports, lang)}
+
+{render_limits(lang)}
+
+<footer>
+<p>{C["footer"]}</p>
+</footer>
+</div>
+</body>
+</html>
+"""
+
+
+def main() -> int:
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    ap = argparse.ArgumentParser(description="Genera il sito statico di progetto in docs/")
+    ap.add_argument("--check", action="store_true",
+                    help="guard + validazione senza scrivere nulla / guards and validation only")
+    # `all` by default: both languages are generated TOGETHER, so they cannot
+    # drift apart between builds. Were English a separate command it would
+    # eventually lag by a few commits and show stale numbers — precisely the
+    # stale-claim defect this generator exists to prevent, reintroduced
+    # through the back door.
+    ap.add_argument("--lang", default="all", choices=[*LANGS, "all"],
+                    help="lingua della pagina (default: entrambe) / page language (default: both)")
+    args = ap.parse_args()
+
+    reg = load_registry()
+    exps = reg["experiments"]
+    # guards BEFORE loading reports: a discipline failure must not be
+    # confusable with a data problem.
+    assert_one_shot_discipline(exps)
+    assert_teoria_pointers(exps)
+    reports = load_reports(required_reports(exps) | {HERO_GATE_REPORT, *HERO_CLAIM_REPORTS.values()})
+    hero_facts(reports)
+    facts = load_model_facts()
+    stamp = build_stamp()
+
+    if args.check:
+        log.info("--check: guard superati, registro valido, report leggibili; nulla scritto")
+        return 0
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / ".nojekyll").write_text("", encoding="utf-8")
+    langs = LANGS if args.lang == "all" else (args.lang,)
+    written = []
+    for lg in langs:
+        path = OUT_DIR / PAGE_FILES[lg]
+        path.write_text(render_page(reg, reports, stamp, facts, lg), encoding="utf-8")
+        written.append(path)
+        log.info(f"sito scritto [{lg}]: {_rel(path)} ({path.stat().st_size} B)")
+
+    n_open = sum(1 for e in exps if e["status"] in OPEN_STATES)
+    derived = sum(1 for e in exps if e.get("numbers", {}).get("source"))
+    literal = sum(1 for e in exps if e.get("numbers", {}).get("literal"))
+    print()
+    for path in written:
+        print(f"  {_rel(path)}  {path.stat().st_size:,} B")
+    print(f"  build {stamp['utc']} · commit {stamp['commit']}")
+    print(f"  schede: {len(exps)} ({len(exps)-n_open} chiuse, {n_open} aperte senza numeri)")
+    print(f"  numeri: {derived} schede derivate dai report · {literal} scritte a mano con data")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
