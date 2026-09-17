@@ -157,10 +157,6 @@ if ($barsNew -match '^-?\d+$') {
 #     l'invariante "candele/npz/regime_probs non si toccano fino a chiusura gate"
 #     passerebbe da "non fare nulla" a "ricordarsi -SkipMonitor", ed e' la forma
 #     esatta della promozione macro avvenuta per automazione il 2026-07-31.
-#     Quando serve: prima di annotare il contatore E1 se il blocco 4 stampa il
-#     warning di ritardo, e prima del run one-shot di E1 stadio 2 (prerequisito 5
-#     della sua pre-registrazione). Fra i gate aperti solo E1 legge le barre
-#     (hedged e comparatore MFIV sono entrambi CHIUSI).
 #     ATTENZIONE - effetto a distanza di una sessione, voluto: estendere le
 #     candele fa avanzare il contatore di staleness B7, quindi il refresh
 #     incrementale del regime puo' partire al PROSSIMO avvio (blocco 3, che qui
@@ -176,10 +172,9 @@ if ($barsNew -match '^-?\d+$') {
 #     gate closes" invariant would go from "do nothing" to "remember -SkipMonitor",
 #     which is exactly the shape of the macro promotion that happened by automation
 #     on 2026-07-31.
-#     When it is needed: before recording the E1 counter if block 4 prints the lag
-#     warning, and before the one-shot run of E1 stage 2 (prerequisite 5 of its
-#     pre-registration). Among the open gates only E1 reads the bars
-#     (hedged and MFIV comparator are both CLOSED).
+#     When it is needed: since E1 stage 2 closed (2026-09-10) no open gate reads
+#     the hourly bars through this routine; the flag stays as an explicit act for
+#     whichever analysis needs fresh bars, decided at that moment.
 #     WARNING - deliberate one-session delayed effect: extending the candles moves
 #     the B7 staleness counter forward, so the incremental regime refresh may start
 #     at the NEXT startup (block 3, which has already run above). The two writes
@@ -188,7 +183,7 @@ if ($RefreshCandles) {
     Write-Output "[sessione] -RefreshCandles: estensione di data\raw_candles.parquet (solo candele) / candle-only extension..."
     & $Py (Join-Path $ProjRoot "scripts\01_update_data.py") --candles-only
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "01_update_data --candles-only FALLITO/FAILED (exit $LASTEXITCODE) - la serie close resta dov'era, il contatore E1 sotto sara' SOTTOSTIMATO / the close series is unchanged, the E1 count below will be UNDERSTATED"
+        Write-Warning "01_update_data --candles-only FALLITO/FAILED (exit $LASTEXITCODE) - raw_candles.parquet invariato / raw_candles.parquet unchanged"
     }
 }
 
@@ -216,6 +211,12 @@ if ($RefreshCandles) {
 #     MFIV-ATM wedge).
 #     Binding order: derive_mfiv AFTER the merge (it reads the freshly pulled
 #     chain). Fail-soft: an error does not stop the routine.
+# E1 COUNTER RETIRED ON 2026-09-17: the E1 stage-2 gate was run one-shot and CLOSED
+#     on 2026-09-10 (NO CONCLUSION at n=40), so its --count-only and the close-series
+#     freshness check had no reader left. Same criterion as the hedged (08-13) and
+#     MFIV (08-18) retirements. Do not restore it "for information": a second
+#     reading of E1 needs a new pre-registration, and that would bring its own
+#     counter.
 if (-not $SkipMonitor) {
     # IT: nota PS 5.1 - un exe nativo che esce !=0 NON solleva eccezione (il
     #     try/catch non basta): si controlla $LASTEXITCODE esplicitamente.
@@ -353,63 +354,6 @@ print(f'[gate] leg opzioni / option legs: n={n_exec} executed ({n_rows} righe/ro
 '@
     & $Py -c $pyGateCounters
     if ($LASTEXITCODE -ne 0) { Write-Warning "contatori gate FALLITI/FAILED (exit $LASTEXITCODE)" }
-
-    # IT: contatore del campione E1 stadio 2 (confermativo, expiry liquidate dopo il
-    #     2026-08-01). Aggiunto il 2026-08-06 dopo aver scoperto che il numero in
-    #     continuita' era fermo a 0 da cinque giorni: non era nella routine, quindi
-    #     nessuno lo rileggeva, e sotto c'era un secondo difetto che lo avrebbe fatto
-    #     leggere basso comunque (vedi il check di freschezza qui sotto).
-    #     ATTENZIONE - DUE PRECAUZIONI, entrambe necessarie:
-    #     (1) si lancia --count-only, MAI `--stage 2` nudo: il guard n<40 -> NO_RUN
-    #         protegge solo SOTTO soglia, quindi a n>=40 il comando nudo calcolerebbe
-    #         le tre condizioni e scriverebbe il verdetto PER AUTOMAZIONE - cioe'
-    #         esattamente il run one-shot che il protocollo impone manuale;
-    #     (2) il conteggio dipende dalla serie dei close (una expiry e' osservabile
-    #         solo se la sua RV e' calcolabile), quindi si stampa PRIMA fin dove
-    #         arriva quella serie: un raw_candles.parquet stale fa scendere n senza
-    #         che nulla lo dica. Il rimedio (01_update_data.py --candles-only) NON e'
-    #         automatizzato di proposito: e' una scrittura su un file di dati, e
-    #         questo blocco resta a scrittura zero.
-    # EN: E1 stage-2 sample counter (confirmatory, expiries settling after 2026-08-01).
-    #     Added 2026-08-06 after finding the continuity-log number had been stuck at 0
-    #     for five days: it was not in the routine, so nobody re-read it, and beneath
-    #     it sat a second defect that would have made it read low anyway (see the
-    #     freshness check below).
-    #     WARNING - TWO PRECAUTIONS, both required:
-    #     (1) run --count-only, NEVER a bare `--stage 2`: the n<40 -> NO_RUN guard only
-    #         protects BELOW threshold, so at n>=40 the bare command would compute the
-    #         three conditions and write the verdict BY AUTOMATION - exactly the
-    #         one-shot run the protocol requires to be manual;
-    #     (2) the count depends on the close series (an expiry is observable only if
-    #         its RV is computable), so how far that series reaches is printed FIRST: a
-    #         stale raw_candles.parquet lowers n with nothing saying so. The remedy
-    #         (01_update_data.py --candles-only) is deliberately NOT automated: it
-    #         writes to a data file, and this block stays write-free.
-    $pyCloseFreshness = @'
-import importlib.util
-from pathlib import Path
-import pandas as pd
-# IT: la serie e' letta con la funzione del giudice stesso - una copia qui sarebbe
-#     una seconda sorgente di verita' sulla stessa domanda.
-# EN: the series is read with the judge's own function - a copy here would be a
-#     second source of truth on the same question.
-spec = importlib.util.spec_from_file_location(
-    'e1_judge', Path('scripts/vol/edge_information_judge.py'))
-m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
-c = m.hourly_close()
-last = c.index.max()
-lag = (pd.Timestamp.now(tz='UTC').floor('h') - last) / pd.Timedelta('1h')
-print(f'[e1] serie close fino a/through {last:%Y-%m-%d %H:%M} UTC - ritardo/lag {lag:.0f}h')
-if lag >= 6:
-    print(f'[e1] ATTENZIONE/WARNING: serie close STALE - il conteggio sotto e SOTTOSTIMATO / the count below is UNDERSTATED')
-    print(f'[e1] rimedio/remedy: python scripts\\01_update_data.py --candles-only  (estende SOLO raw_candles.parquet / extends raw_candles.parquet ONLY)')
-'@
-    Write-Output "[sessione] monitoraggio vol: campione E1 stadio 2 (solo conteggio) / E1 stage-2 sample (count only)..."
-    & $Py -c $pyCloseFreshness
-    if ($LASTEXITCODE -ne 0) { Write-Warning "check freschezza serie close FALLITO/FAILED (exit $LASTEXITCODE) - il conteggio E1 sotto non e' interpretabile / the E1 count below is not interpretable" }
-    & $Py (Join-Path $ProjRoot "scripts\vol\edge_information_judge.py") --stage 2 --count-only
-    if ($LASTEXITCODE -ne 0) { Write-Warning "edge_information_judge --stage 2 --count-only FALLITO/FAILED (exit $LASTEXITCODE)" }
 } else {
     Write-Output "[sessione] monitoraggio vol saltato (-SkipMonitor)"
 }

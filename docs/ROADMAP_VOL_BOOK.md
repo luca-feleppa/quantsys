@@ -6,7 +6,7 @@
 
 ## Current priorities
 
-E1 stage 2 is **CLOSED, NO CONCLUSION** (09-10): no second readings or signal inversion without a new preregistration. FT1 is implemented-inert and **not started**: power audit done on 09-15, with amendment 1 adopted (① downgraded to a pre-computed control, ②a's claim with its bound, executor-outcome counting, reading time, measurable ②b/③b) — go-live stays blocked until the FT1 judge exists in code with sentinel tests; decide the macro vintage before the first fill; go live only on explicit instruction and with a flat ledger after settlement. The routine's E1 counter should be retired because it has no remaining decision consumer. None of these tasks was executed during the documentation cleanup.
+E1 stage 2 is **CLOSED, NO CONCLUSION** (09-10): no second readings or signal inversion without a new preregistration. FT1 is implemented-inert and **not started**: power audit done on 09-15, with amendment 1 adopted (① downgraded to a pre-computed control, ②a's claim with its bound, executor-outcome counting, reading time, measurable ②b/③b) — the FT1 judge is in code with sentinel tests since 09-17 (`scripts/vol/ft1_execution_judge.py`); macro vintage decided on 09-17: no promotion (FT1 does not read the forecasts); go live only on explicit instruction and with a flat ledger after settlement. The routine's E1 counter was retired on 09-17.
 
 ## Retained work
 

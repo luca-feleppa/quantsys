@@ -6,7 +6,7 @@
 
 ## Priorità correnti
 
-E1 stadio 2 è **CHIUSO, NESSUNA CONCLUSIONE** (10/09): niente seconde letture né inversione del segnale senza nuova preregistrazione. FT1 è implementato-inerte e **non avviato**: audit di potenza fatto il 15/09, con emendamento 1 adottato (① declassata a controllo pre-calcolato, claim di ②a col suo limite, conteggio degli esiti dell'esecutore, momento di lettura, ②b/③b misurabili) — il go-live resta bloccato fino al giudice FT1 in codice con test sentinella; decisione sul vintage macro prima del primo fill; go-live solo su istruzione esplicita e con ledger flat dopo settlement. Il contatore E1 della routine va ritirato, essendo privo di consumatore decisionale. Nessuna di queste attività è stata eseguita nella pulizia documentale.
+E1 stadio 2 è **CHIUSO, NESSUNA CONCLUSIONE** (10/09): niente seconde letture né inversione del segnale senza nuova preregistrazione. FT1 è implementato-inerte e **non avviato**: audit di potenza fatto il 15/09, con emendamento 1 adottato (① declassata a controllo pre-calcolato, claim di ②a col suo limite, conteggio degli esiti dell'esecutore, momento di lettura, ②b/③b misurabili) — il giudice FT1 è in codice con test sentinella dal 17/09 (`scripts/vol/ft1_execution_judge.py`); vintage macro deciso il 17/09: nessuna promozione (FT1 non legge i forecast); go-live solo su istruzione esplicita e con ledger flat dopo settlement. Il contatore E1 della routine è stato ritirato il 17/09.
 
 ## Residui conservati
 
