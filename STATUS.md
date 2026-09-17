@@ -8,7 +8,7 @@
 ## 🧭 Riparti da qui — fine sessione 2026-09-16 (doc per lingua, figure README) · Resume here — end of session 2026-09-16 (per-language docs, README figures)
 
 🇮🇹 **Stato.** Ciclo di sola documentazione/commenti, **zero modifiche a logica di training,
-inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine, due chiusi:
+inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine, tre chiusi (aperti 3a/3b):
 - **Task 1 — FATTO (`330bd98`).** Doc in un file per lingua: nome canonico inglese + gemello
   `.it.md` (`AVVIO.md` → `START.md`, `TEORIA.md` → `THEORY.md`; README, CHANGELOG,
   `scripts/README`, `deploy/vps/README`, `docs/*.md`), switch lingua in prima riga, regola «ogni
@@ -26,7 +26,12 @@ inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine,
   riproduce `metrics.nn.qlike` del report) e `scripts/vol/plot_readme_figures.py` (due PNG in
   `docs/assets/`, numeri letti da `results/vols/qlike_report_1h_test_canonical_1h_vols.json` e dal
   parquet di export, fail-fast se `provenance.matches` non è `true`).
-- **Task 4 — APERTO.** Conteggio pytest discordante nel README (tabella vs Riproducibilità).
+- **Task 4 — FATTO (`6d4908e`, 17/09).** I due conteggi (462 e 535) sostituiti da una formulazione
+  senza numero fisso, EN+IT. Il 535 includeva un file di test locale non tracciato: un clone pulito
+  misura **497 passed, 1 skipped** (skip: fixture sintetica troppo corta per `momentum_30d`).
+- **Task 3c — FATTO (`43610f8`, 17/09, pushato).** GitHub Pages attivo da `main` `/docs` (build
+  Jekyll); `architetture.html` risponde 200; link nei
+  due README.
 
 **Azione esatta da cui ripartire, in ordine:**
 1. **L'utente lancia** (GPU, dalla root): `python scripts/vol/export_vols_predictions.py --arch
@@ -40,15 +45,10 @@ inferenza, giudici o trading**; `04b` e VPS non toccati. Quattro task in ordine,
    pre-registrati), poi le due figure con caption di una riga (più basso è meglio / fuori
    campione), poi il blocco tecnico invariato. Il warning gate HAR-RV vs claim HAR-C non si
    sposta né si ammorbidisce.
-4. **3c** — push autorizzato dall'utente il 16/09: push su `main`, GitHub Pages da `main` `/docs`
-   (oggi 404, non configurato), link nei README a
-   `https://luca-feleppa.github.io/quantsys/architetture.html`, verificare che l'URL risponda.
-5. **Task 4** — rilanciare `pytest tests/`, allineare i due conteggi in README EN+IT (oggi
-   534 passed + 1 skipped), proporre una formulazione che non vada aggiornata a ogni commit.
-6. Commit separati per task, poi riepilogo finale all'utente.
+4. Commit separati per task, poi riepilogo finale all'utente.
 
 **EN** **State.** Documentation/comments-only cycle, **no change to training, inference, judge or
-trading logic**; `04b` and the VPS untouched. Four tasks in order, two closed:
+trading logic**; `04b` and the VPS untouched. Four tasks in order, three closed (3a/3b open):
 - **Task 1 — DONE (`330bd98`).** One doc file per language: English canonical name + `.it.md`
   twin (`AVVIO.md` → `START.md`, `TEORIA.md` → `THEORY.md`; README, CHANGELOG, `scripts/README`,
   `deploy/vps/README`, `docs/*.md`), language switch on the first line, rule "every doc change on
@@ -66,7 +66,12 @@ trading logic**; `04b` and the VPS untouched. Four tasks in order, two closed:
   report's `metrics.nn.qlike`) and `scripts/vol/plot_readme_figures.py` (two PNGs in
   `docs/assets/`, numbers read from `results/vols/qlike_report_1h_test_canonical_1h_vols.json` and
   the export parquet, fail-fast unless `provenance.matches` is `true`).
-- **Task 4 — OPEN.** Inconsistent pytest count in the README (table vs Reproducibility).
+- **Task 4 — DONE (`6d4908e`, 09-17).** Both counts (462 and 535) replaced by count-free wording,
+  EN+IT. The 535 included an untracked local test file: a clean clone measures **497 passed,
+  1 skipped** (skip: synthetic fixture too short for `momentum_30d`).
+- **Task 3c — DONE (`43610f8`, 09-17, pushed).** GitHub Pages live from `main` `/docs` (Jekyll
+  build); `architetture.html` returns 200; linked from
+  both READMEs.
 
 **Exact action to resume from, in order:**
 1. **The user runs** (GPU, from the root): `python scripts/vol/export_vols_predictions.py --arch
@@ -79,12 +84,7 @@ trading logic**; `04b` and the VPS untouched. Four tasks in order, two closed:
    next hour"; monetization: the short-vol rules tested failed their pre-registered gates), then
    both figures with a one-line caption (lower is better / out-of-sample), then the technical block
    unchanged. The HAR-RV gate vs HAR-C claim warning stays where it is, not softened.
-4. **3c** — push authorized by the user on 09-16: push to `main`, GitHub Pages from `main` `/docs`
-   (currently 404, not configured), README links to
-   `https://luca-feleppa.github.io/quantsys/architetture.html`, check that the URL responds.
-5. **Task 4** — rerun `pytest tests/`, align both counts in README EN+IT (currently 534 passed +
-   1 skipped), propose a wording that does not need updating on every commit.
-6. Separate commits per task, then the final summary to the user.
+4. Separate commits per task, then the final summary to the user.
 
 ---
 
