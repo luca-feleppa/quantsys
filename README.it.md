@@ -2,6 +2,14 @@
 
 # QUANTSYS — Motore neurale di forecasting per BTC/USDT
 
+Questo progetto pone due domande su Bitcoin. La prima: una rete neurale può prevedere quanto si muoverà il prezzo — non in che direzione, ma quanto saranno ampie le oscillazioni nelle prossime 30 ore, con la previsione aggiornata ogni ora? Su dati che il modello non ha mai visto in addestramento, le sue previsioni hanno un errore più basso dei modelli econometrici standard usati come riferimento. La seconda: quella previsione si può trasformare in profitto vendendo volatilità, cioè incassando i premi delle opzioni quando le oscillazioni attese sembrano prezzate troppo care? Finora no: le regole di vendita provate qui non hanno superato i criteri di successo e fallimento fissati prima di eseguirle.
+
+![Errore di previsione della rete neurale e dei modelli di riferimento](docs/assets/qlike_comparison.png)
+*Errore di previsione sullo split di test fuori campione, una barra per modello: più basso è meglio.*
+
+![Varianza prevista contro varianza realizzata nelle prossime 30 ore](docs/assets/rv_pred_vs_actual.png)
+*Varianza prevista contro realizzata delle prossime 30 ore sull'ultimo tratto dello split di test fuori campione, con l'intervallo 10–90% della rete.*
+
 Motore neurale di forecasting probabilistico su BTC/USDT + analytics opzioni crypto. **Linea di produzione: volatilità @ 1 ora** (`config/default.yaml → features.target_type: log_rv`, `data.interval: 1h`; design interval-agnostic, 1m = identità, perimetro 1m in backup). Il target `log_rv` è l'**unico segnale validato OOS** del progetto: batte **HAR-C** — la variante HAR sulla sola componente continua jump-robust (`C = min(RV, BV)`), cioè la baseline econometrica più forte fra quelle testate — del **32% in QLIKE su test** (0.236 vs 0.346; naive 0.793), con val→test coerenti. Modello di produzione: **iTransformer 5 membri**. Secondo braccio attivo: **short-vol** in forward test su Deribit testnet (`scripts/04b_vol_paper.py`, servizio systemd 24/7 su VPS). Il filone **direzionale** non ha alpha OOS a nessun timeframe testato (1m e 1h): il codice resta vivo e bit-invariato come negative-control documentato.
 
 **Stack:** Python 3.12 | PyTorch (CUDA) | NumPy/Pandas | Binance REST+WebSocket | FRED API · Deribit public REST (dashboard/IV/forward test vol).

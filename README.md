@@ -2,6 +2,14 @@
 
 # QUANTSYS — Neural Forecasting Engine for BTC/USDT
 
+This project asks two questions about Bitcoin. First: can a neural network forecast how much the price will move — not in which direction, but how large the swings will be over the next 30 hours, with the forecast refreshed every hour? On data the model never saw during training, its forecasts have a lower error than the standard econometric models used as benchmarks. Second: can that forecast be turned into profit by selling volatility, that is, by collecting option premiums when the expected swings look overpriced? Not so far: the selling rules tested here failed the pass/fail criteria written down before running them.
+
+![Forecast loss of the neural network and of the benchmark models](docs/assets/qlike_comparison.png)
+*Forecast loss on the out-of-sample test split, one bar per model: lower is better.*
+
+![Predicted versus realized variance over the next 30 hours](docs/assets/rv_pred_vs_actual.png)
+*Predicted versus realized variance of the next 30 hours on the last stretch of the out-of-sample test split, with the network's 10–90% range.*
+
 Probabilistic neural forecasting engine for BTC/USDT + crypto-options analytics. **Production line: volatility @ 1 hour** (`config/default.yaml → features.target_type: log_rv`, `data.interval: 1h`; interval-agnostic design, 1m = identity, the 1m perimeter is backed up). The `log_rv` target is the project's **only OOS-validated signal**: it beats **HAR-C** — the HAR variant on the jump-robust continuous component alone (`C = min(RV, BV)`), i.e. the strongest econometric baseline among those tested — by **32% in test QLIKE** (0.236 vs 0.346; naive 0.793), with coherent val→test. Production model: **5-member iTransformer**. Second active arm: **short-vol** forward test on Deribit testnet (`scripts/04b_vol_paper.py`, 24/7 systemd service on a VPS). The **directional** line has no OOS alpha at any tested timeframe (1m and 1h): the code stays alive and bit-invariant as a documented negative control.
 
 **Stack:** Python 3.12 | PyTorch (CUDA) | NumPy/Pandas | Binance REST+WebSocket | FRED API · Deribit public REST (dashboard/IV/vol forward test).
