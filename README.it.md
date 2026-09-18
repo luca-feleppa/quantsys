@@ -2,6 +2,12 @@
 
 # QUANTSYS — Motore neurale di forecasting per BTC/USDT
 
+[![Licenza: MIT](https://img.shields.io/badge/licenza-MIT-3d3d3d.svg)](LICENSE)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB.svg)
+![PyTorch CUDA](https://img.shields.io/badge/pytorch-CUDA-EE4C2C.svg)
+[![Sito di progetto](https://img.shields.io/badge/sito%20di%20progetto-online-8a5a2b.svg)](https://luca-feleppa.github.io/quantsys/index.it.html)
+![Solo paper](https://img.shields.io/badge/trading-solo%20paper%20%2F%20testnet-6b6862.svg)
+
 Questo progetto pone due domande su Bitcoin. La prima: una rete neurale può prevedere quanto si muoverà il prezzo — non in che direzione, ma quanto saranno ampie le oscillazioni nelle prossime 30 ore, con la previsione aggiornata ogni ora? Su dati che il modello non ha mai visto in addestramento, le sue previsioni hanno un errore più basso dei modelli econometrici standard usati come riferimento. La seconda: quella previsione si può trasformare in profitto vendendo volatilità, cioè incassando i premi delle opzioni quando le oscillazioni attese sembrano prezzate troppo care? Finora no: le regole di vendita provate qui non hanno superato i criteri di successo e fallimento fissati prima di eseguirle.
 
 ![Errore di previsione della rete neurale e dei modelli di riferimento](docs/assets/qlike_comparison.png)
@@ -9,6 +15,18 @@ Questo progetto pone due domande su Bitcoin. La prima: una rete neurale può pre
 
 ![Varianza prevista contro varianza realizzata nelle prossime 30 ore](docs/assets/rv_pred_vs_actual.png)
 *Varianza prevista contro realizzata delle prossime 30 ore sull'ultimo tratto dello split di test fuori campione, con l'intervallo 10–90% della rete.*
+
+### In 30 secondi
+
+| | |
+|---|---|
+| ✅ **Funziona** | Prevedere **quanto ampie** saranno le oscillazioni di BTC nelle prossime 30 ore. La rete batte **HAR-C** — la baseline econometrica più forte fra quelle testate — del **31.65%** in QLIKE sullo split di test fuori campione (n = 6.486), con val e test coerenti. |
+| ❌ **Non funziona** | Trasformare quella previsione in profitto **vendendo volatilità**. Due gate pre-registrati su un forward test in Deribit testnet: v1 **FAIL 0/3**, v2 delta-hedged **FAIL 2/3** — il premio di varianza esiste, le regole provate non lo monetizzano. |
+| ⬜ **Non ha mai funzionato** | Prevedere la **direzione**. Nessun alpha fuori campione a nessun timeframe testato; il codice resta vivo come **controllo negativo** documentato. |
+
+Ogni gate — metrica, soglia, n minimo — è stato scritto e committato **prima** di eseguirlo, e i fallimenti sono pubblicati con gli stessi numeri del successo. È questo metodo, non il singolo risultato positivo, l'oggetto di questo repository.
+
+**→ [Sintesi in cinque minuti, senza codice](https://luca-feleppa.github.io/quantsys/index.it.html)** · [cosa ha fallito, con i numeri](THEORY.it.md#12-protocollo-sperimentale-e-corpus-dei-risultati-negativi) · [il giudice che produce il numero](scripts/vol/dev_vols_qlike.py)
 
 Motore neurale di forecasting probabilistico su BTC/USDT + analytics opzioni crypto. **Linea di produzione: volatilità @ 1 ora** (`config/default.yaml → features.target_type: log_rv`, `data.interval: 1h`; design interval-agnostic, 1m = identità, perimetro 1m in backup). Il target `log_rv` è l'**unico segnale validato OOS** del progetto: batte **HAR-C** — la variante HAR sulla sola componente continua jump-robust (`C = min(RV, BV)`), cioè la baseline econometrica più forte fra quelle testate — del **32% in QLIKE su test** (0.236 vs 0.346; naive 0.793), con val→test coerenti. Modello di produzione: **iTransformer 5 membri**. Secondo braccio attivo: **short-vol** in forward test su Deribit testnet (`scripts/04b_vol_paper.py`, servizio systemd 24/7 su VPS). Il filone **direzionale** non ha alpha OOS a nessun timeframe testato (1m e 1h): il codice resta vivo e bit-invariato come negative-control documentato.
 

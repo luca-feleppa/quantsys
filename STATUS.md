@@ -5,6 +5,72 @@
 
 ---
 
+## 🧭 Riparti da qui — 2026-09-18 (strato d'ingresso: anteprime, card, primo schermo) · Resume here — 2026-09-18 (entry layer: previews, cards, first screen)
+
+🇮🇹 **Stato.** Ciclo di sola pubblicazione: **nessuna modifica** a training, inferenza, giudici o
+`04b`, nessun numero nuovo misurato. Suite **561 passed, 1 skipped** (invariata). `04b` non toccato,
+nessun contatto con il VPS in questo ciclo.
+
+🇮🇹 **Fatto — lo strato che un lettore vede prima di decidere se aprire il repo.** (1) **Anteprime
+dei link:** le tre pagine pubblicate (`docs/index.html`, `index.it.html`, `architetture.html`) avevano
+il solo `<title>` → su LinkedIn/Reddit/X rendevano come URL nudo. Ora dichiarano Open Graph +
+twitter-card, **generati** in `build_site.py` (canonico, titolo/descrizione per lingua, locale +
+alternate, `summary_large_image`); il canonico della pagina inglese è l'URL di directory, così
+`…/quantsys/` e `…/index.html` non contano come due pagine. (2) **`scripts/site/make_social_cards.py`**
+→ `docs/assets/og_card.png` (1200x630 EN), `og_card.it.png` (IT), `social_preview.png` (1280x640, per
+l'impostazione del repo). La card dichiara il claim, quindi segue la regola del generatore: QLIKE,
+percentuale e `n` **letti dal report** `results/vols/qlike_report_1h_test_canonical_1h_vols.json`, con
+fail-fast se `provenance.matches` non è `true`; anche il testo social del sito è un **template**
+riempito dagli stessi report (prima conteneva il `31.65%` trascritto a mano — sarebbe stata la quarta
+copia di un numero derivabile). (3) **README EN+IT:** riga di badge + tabella «In 30 secondi»
+(funziona / non funziona / non ha mai funzionato) **prima** del paragrafo che apriva con un path di
+config, con il rimando al sito per chi non aprirà il codice. (4) **`homepageUrl` del repo** impostato
+sul sito di progetto: era vuoto, quindi la box «About» non linkava la pagina fatta apposta per i
+lettori esterni. Doc: `scripts/README` EN+IT (riga del nuovo script), `CHANGELOG` EN+IT.
+
+🇮🇹 **Non fatto, deliberatamente.** (a) L'immagine di **social preview del repo** va caricata a mano
+da Settings → Social preview (non esiste endpoint API): il file 1280x640 è generato e pronto in
+`docs/assets/social_preview.png`. (b) **Descrizione del repo invariata**: dichiara il gate contro
+HAR-RV, che è corretto — riscriverla non direbbe nulla di nuovo e introdurrebbe una quinta formulazione
+del claim. (c) Nessun testo di post scritto per le piattaforme.
+
+**EN** **State.** Publication-only cycle: **no change** to training, inference, judges or `04b`, and
+no new number measured. Suite **561 passed, 1 skipped** (unchanged). `04b` untouched, no VPS contact
+in this cycle.
+
+**EN** **Done — the layer a reader sees before deciding to open the repo.** (1) **Link previews:**
+the three published pages (`docs/index.html`, `index.it.html`, `architetture.html`) carried only a
+`<title>` → on LinkedIn/Reddit/X they rendered as a bare URL. They now declare Open Graph +
+twitter-card tags, **generated** in `build_site.py` (canonical, per-language title/description, locale
++ alternate, `summary_large_image`); the English page's canonical is the directory URL, so
+`…/quantsys/` and `…/index.html` do not count as two pages. (2) **`scripts/site/make_social_cards.py`**
+→ `docs/assets/og_card.png` (1200x630 EN), `og_card.it.png` (IT), `social_preview.png` (1280x640, for
+the repo setting). The card states the claim, so it follows the generator's rule: QLIKE values, the
+percentage and `n` are **read from** `results/vols/qlike_report_1h_test_canonical_1h_vols.json`, with
+fail-fast if `provenance.matches` is not `true`; the site's social copy is likewise a **template**
+filled from the same reports (it first held a hand-typed `31.65%` — that would have been the fourth
+copy of a derivable number). (3) **README EN+IT:** a badge row and an "In 30 seconds" table
+(works / does not work / never worked) **before** the paragraph that used to open with a config path,
+pointing to the site for readers who will not open the code. (4) **Repo `homepageUrl`** set to the
+project site: it was empty, so the "About" box did not link the page built for outside readers.
+Docs: `scripts/README` EN+IT (row for the new script), `CHANGELOG` EN+IT.
+
+**EN** **Left undone, deliberately.** (a) The repo's **social preview image** must be uploaded by hand
+in Settings → Social preview (no API endpoint exists): the 1280x640 file is generated and ready at
+`docs/assets/social_preview.png`. (b) **Repo description unchanged**: it states the gate against
+HAR-RV, which is correct — rewording it would say nothing new and would add a fifth phrasing of the
+claim. (c) No platform post copy was written.
+
+**Azione esatta da cui ripartire · Exact action to resume from:** invariata rispetto al 17/09 (vedi
+la sezione sotto): (1) —; (2) vintage macro, nessuna promozione prima di S1 a `n = 83`; (3) al go-live
+FT1, aggiungere `ft1_execution_judge.py --count-only` alla routine; (4) deploy `04b` senza `--adaptive`
+su istruzione esplicita; (5) go-live FT1 su istruzione esplicita. Nuovo item di pubblicazione: caricare
+`docs/assets/social_preview.png` in Settings → Social preview, e ri-lanciare
+`python scripts/site/make_social_cards.py` + `python scripts/site/build_site.py` ogni volta che il
+claim pubblicato cambia.
+
+---
+
 ## 🧭 Riparti da qui — 2026-09-17 sera (giudice FT1, P6) · Resume here — 2026-09-17 evening (FT1 judge, P6)
 
 🇮🇹 **Routine (~16:56 UTC).** 4 heartbeat freschi (IV poller 0.0 h, L2 0.0 h, trades 0.1 h, `04b` 1.9 h);

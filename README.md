@@ -2,6 +2,12 @@
 
 # QUANTSYS — Neural Forecasting Engine for BTC/USDT
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-3d3d3d.svg)](LICENSE)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB.svg)
+![PyTorch CUDA](https://img.shields.io/badge/pytorch-CUDA-EE4C2C.svg)
+[![Project site](https://img.shields.io/badge/project%20site-live-8a5a2b.svg)](https://luca-feleppa.github.io/quantsys/)
+![Paper only](https://img.shields.io/badge/trading-paper%20%2F%20testnet%20only-6b6862.svg)
+
 This project asks two questions about Bitcoin. First: can a neural network forecast how much the price will move — not in which direction, but how large the swings will be over the next 30 hours, with the forecast refreshed every hour? On data the model never saw during training, its forecasts have a lower error than the standard econometric models used as benchmarks. Second: can that forecast be turned into profit by selling volatility, that is, by collecting option premiums when the expected swings look overpriced? Not so far: the selling rules tested here failed the pass/fail criteria written down before running them.
 
 ![Forecast loss of the neural network and of the benchmark models](docs/assets/qlike_comparison.png)
@@ -9,6 +15,18 @@ This project asks two questions about Bitcoin. First: can a neural network forec
 
 ![Predicted versus realized variance over the next 30 hours](docs/assets/rv_pred_vs_actual.png)
 *Predicted versus realized variance of the next 30 hours on the last stretch of the out-of-sample test split, with the network's 10–90% range.*
+
+### In 30 seconds
+
+| | |
+|---|---|
+| ✅ **Works** | Forecasting **how large** the next 30 hours of BTC moves will be. The network beats **HAR-C** — the strongest econometric baseline tested — by **31.65%** in QLIKE on the out-of-sample test split (n = 6,486), with val and test coherent. |
+| ❌ **Does not work** | Turning that forecast into money by **selling volatility**. Two pre-registered gates on a Deribit-testnet forward test: v1 **FAIL 0/3**, v2 delta-hedged **FAIL 2/3** — the variance premium is real, the rules tested do not monetize it. |
+| ⬜ **Never worked** | Predicting **direction**. No out-of-sample alpha at any timeframe tested; the code stays alive as a documented **negative control**. |
+
+Every gate — metric, threshold, minimum n — was written down and committed **before** running it, and the failures are published with the same numbers as the success. That method, not the single positive result, is what this repository is about.
+
+**→ [Five-minute writeup, no code needed](https://luca-feleppa.github.io/quantsys/)** · [what failed, with numbers](THEORY.md#12-experimental-protocol-and-negative-results-corpus) · [the judge that produces the number](scripts/vol/dev_vols_qlike.py)
 
 Probabilistic neural forecasting engine for BTC/USDT + crypto-options analytics. **Production line: volatility @ 1 hour** (`config/default.yaml → features.target_type: log_rv`, `data.interval: 1h`; interval-agnostic design, 1m = identity, the 1m perimeter is backed up). The `log_rv` target is the project's **only OOS-validated signal**: it beats **HAR-C** — the HAR variant on the jump-robust continuous component alone (`C = min(RV, BV)`), i.e. the strongest econometric baseline among those tested — by **32% in test QLIKE** (0.236 vs 0.346; naive 0.793), with coherent val→test. Production model: **5-member iTransformer**. Second active arm: **short-vol** forward test on Deribit testnet (`scripts/04b_vol_paper.py`, 24/7 systemd service on a VPS). The **directional** line has no OOS alpha at any tested timeframe (1m and 1h): the code stays alive and bit-invariant as a documented negative control.
 

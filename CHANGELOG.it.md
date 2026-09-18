@@ -6,6 +6,18 @@ Ordine cronologico inverso (la voce più recente in alto). Le "Iterazioni" 1-10 
 
 ---
 
+## 2026-09-18 — Lo strato d'ingresso: cosa vede un lettore prima di decidere se aprire il repo
+
+**Anteprime dei link.** `docs/index.html`, `docs/index.it.html` e `docs/architetture.html` avevano solo un `<title>`: condivise su LinkedIn, Reddit o X rendevano come URL nudo, quindi il primo schermo era vuoto proprio dove il lavoro è più denso. Le tre pagine dichiarano ora i tag Open Graph e Twitter-card (URL canonico, titolo/descrizione per lingua, locale più alternate, `summary_large_image`), generati in `build_site.py` e non scritti a mano. Il canonico della pagina inglese è l'URL di directory, così `…/quantsys/` e `…/index.html` non contano come due pagine.
+
+**`scripts/site/make_social_cards.py`** — le immagini di anteprima: `docs/assets/og_card.png` (1200x630, inglese), `og_card.it.png` (italiano), `social_preview.png` (1280x640, per l'impostazione del repo GitHub). La card dichiara il claim, quindi segue la stessa regola del sito: valori QLIKE, percentuale e `n` sono **letti dal report del giudice** (`results/vols/qlike_report_1h_test_canonical_1h_vols.json`) e lo script fa fail-fast se la provenienza dello scaler di quel report non è verificata. Il testo social in `build_site.py` è un template riempito dagli stessi report, così pagina, card e testo dell'anteprima non possono dichiarare numeri diversi.
+
+**README, primo schermo (entrambe le lingue).** Una riga di badge e una tabella **«In 30 secondi»** a tre righe — cosa funziona, cosa no, cosa non ha mai funzionato — prima del paragrafo tecnico che apriva con un path di config. Il blocco dichiara il metodo (gate pre-registrati, fallimenti pubblicati con gli stessi numeri del successo) e rimanda al sito di progetto per chi non aprirà il codice.
+
+**Metadati del repo:** la box «About» di GitHub linka ora il sito di progetto (`homepageUrl`), che era vuoto.
+
+⚠ **Non fatto, deliberatamente:** l'immagine di social preview del repo va caricata a mano da Settings (non esiste API) — il file 1280x640 generato è pronto. La descrizione del repo resta invariata: dichiara il gate contro HAR-RV, che è corretto, e riscriverla non direbbe nulla di nuovo.
+
 ## 2026-09-02 — `exec_diag` a N gambe senza toccare il record a due
 
 Gli aggregati di `exec_diag.jsonl` in `scripts/04b_vol_paper.py` escono da una funzione pura (`exec_diag_aggregate`) calcolata sul corpo (prime due gambe); i campi dell'intera struttura compaiono solo oltre le due gambe. `hedge_dry_run.py` isola il corpo via `body_idx`. Test di replay sulle 1236 righe storiche con uguaglianza esatta (`tests/test_exec_diag_multileg.py`). Non deployato: `04b` invariato sul VPS.

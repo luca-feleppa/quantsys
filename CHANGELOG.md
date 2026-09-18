@@ -6,6 +6,18 @@ Reverse chronological order (newest on top). "Iterations" 1-10 are the historica
 
 ---
 
+## 2026-09-18 — The entry layer: what a reader sees before deciding to open the repo
+
+**Link previews.** `docs/index.html`, `docs/index.it.html` and `docs/architetture.html` carried only a `<title>`: shared on LinkedIn, Reddit or X they rendered as a bare URL, so the first screen was empty where the work is densest. The three pages now declare Open Graph and Twitter-card tags (canonical URL, per-language title/description, locale plus alternate, `summary_large_image`), generated in `build_site.py` rather than hand-written. The English page's canonical is the directory URL, so `…/quantsys/` and `…/index.html` are not counted as two pages.
+
+**`scripts/site/make_social_cards.py`** — the preview images themselves: `docs/assets/og_card.png` (1200x630, English), `og_card.it.png` (Italian), `social_preview.png` (1280x640, for the GitHub repo setting). The card states the claim, so it obeys the same rule as the site: QLIKE values, the percentage and `n` are **read from the judge's report** (`results/vols/qlike_report_1h_test_canonical_1h_vols.json`) and the script fails fast if that report's scaler provenance is not verified. The social copy in `build_site.py` is a template filled from the same reports, so page, card and preview text cannot state different figures.
+
+**README, first screen (both languages).** A badge row and a three-row **"In 30 seconds"** table — what works, what does not, what never did — placed before the technical paragraph that used to open with a config path. The block states the method (pre-registered gates, failures published with the same numbers as the success) and points to the project site for readers who will not open the code.
+
+**Repo metadata:** the GitHub "About" box now links the project site (`homepageUrl`), which was empty.
+
+⚠ **Left undone, deliberately:** the repo's social preview image must be uploaded by hand in Settings (no API exists for it) — the generated 1280x640 file is ready. The repo description is unchanged: it states the gate against HAR-RV, which is correct, and rewording it would say nothing new.
+
 ## 2026-09-02 — N-leg `exec_diag` without touching the two-leg record
 
 The `exec_diag.jsonl` aggregates in `scripts/04b_vol_paper.py` now come from a pure function (`exec_diag_aggregate`) computed on the body (first two legs); whole-structure fields appear only beyond two legs. `hedge_dry_run.py` isolates the body via `body_idx`. Replay test over the 1236 historical rows with exact equality (`tests/test_exec_diag_multileg.py`). Not deployed: `04b` unchanged on the VPS.
