@@ -27,14 +27,16 @@ dichiarano `author`, `article:published_time` (17/09, prima pubblicazione su Pag
 `article:modified_time` (timestamp di build in ISO 8601, chiave `iso` aggiunta a `build_stamp()`),
 generati in `build_site.py` per le due index e scritti a mano in `architetture.html`, che non è
 generata. Diff delle pagine = i soli 3 tag nuovi + la riga di stamp, che cambia a ogni rebuild by
-design. Doc: `CHANGELOG` EN+IT.
+design. Doc: `CHANGELOG` EN+IT. (4) **Puntatori ai nomi dei file allineati dopo il rename del
+16/09**: 13 occorrenze di `TEORIA.md`/`TEORIA §` in `scripts/02_train.py`, `scripts/vol/sig_har_probe.py`
+e 4 file di `tests/` erano link a file che non esistono più. Sostituito il solo token del nome,
+nessuna riscrittura di commenti; verificato **prima** che nessun test facesse match sulle due
+stringhe di log toccate. Suite invariata.
 
 🇮🇹 **Non fatto, deliberatamente.** (a) **Nessun post pubblicato** su nessuna piattaforma.
-(b) Descrizione del repo invariata: dichiara il gate contro **HAR-RV**, che è corretto. (c) **Non
-toccati i riferimenti morti a `TEORIA.md`/`AVVIO.md`** — rinominati `THEORY.md`/`START.md` il
-16/09 — presenti in `scripts/02_train.py` e in 4 file di `tests/` (commenti e messaggi di assert):
-fuori dalla richiesta di questo ciclo, ma da allineare prima che il codice finisca sotto gli occhi
-di lettori esterni.
+(b) Descrizione del repo invariata: dichiara il gate contro **HAR-RV**, che è corretto. (c) Le
+occorrenze di `TEORIA.md`/`AVVIO.md` in `STATUS.md` e nei due `CHANGELOG` **restano**: lì i vecchi
+nomi sono storia, non puntatori.
 
 **EN** **State.** Publication-only cycle: **no change** to training, inference, judges or `04b`, and
 no new number measured. Suite **561 passed, 1 skipped** (unchanged). No VPS contact in this cycle.
@@ -55,12 +57,15 @@ cards, where `2026-07-30` appears 8 times and `2026-07-31` 6. The pages now decl
 timestamp in ISO 8601, `iso` key added to `build_stamp()`), generated in `build_site.py` for the two
 index pages and hand-written in `architetture.html`, which is not generated. Page diff = the 3 new
 tags plus the stamp line, which changes on every rebuild by design. Docs: `CHANGELOG` EN+IT.
+(4) **File-name pointers realigned after the 16/09 rename**: 13 occurrences of `TEORIA.md`/`TEORIA §`
+in `scripts/02_train.py`, `scripts/vol/sig_har_probe.py` and 4 files under `tests/` pointed at files
+that no longer exist. Only the name token was replaced, no comment was rewritten, and it was verified
+**beforehand** that no test matches the two log strings touched. Suite unchanged.
 
 **EN** **Left undone, deliberately.** (a) **No post published** on any platform. (b) Repo
-description unchanged: it states the gate against **HAR-RV**, which is correct. (c) **Dead references
-to `TEORIA.md`/`AVVIO.md`** — renamed `THEORY.md`/`START.md` on 16/09 — left in place in
-`scripts/02_train.py` and 4 files under `tests/` (comments and assert messages): outside this
-cycle's request, but worth aligning before outside readers open the code.
+description unchanged: it states the gate against **HAR-RV**, which is correct. (c) Occurrences of
+`TEORIA.md`/`AVVIO.md` in `STATUS.md` and the two `CHANGELOG` files **stay**: there the old names are
+history, not pointers.
 
 **Azione esatta da cui ripartire · Exact action to resume from:** (0) **nuovo**: dopo il push,
 ri-lanciare il Post Inspector su `https://luca-feleppa.github.io/quantsys/` e
