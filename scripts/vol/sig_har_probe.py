@@ -262,7 +262,7 @@ def run_gate(raw, lr, har_cj, d, h):
     base = fit_eval(tr, ev, HAR_C_COLS)
     log.info(f"HAR-C (funzione di produzione)  QLIKE = {ref['qlike_har_c']:.6f}  n={ref['n_har_c']}")
     log.info(f"HAR-C (catena della sonda)      QLIKE = {base['qlike']:.6f}  cond={base['cond']:.1f}  rango={base['rank']}/{base['ncol']}")
-    log.info(f"HAR-C pubblicato (TEORIA §12.2) QLIKE = {QLIKE_HAR_C_PUBLISHED}")
+    log.info(f"HAR-C pubblicato (THEORY §12.2) QLIKE = {QLIKE_HAR_C_PUBLISHED}")
     delta_chain = abs(base["qlike"] - ref["qlike_har_c"])
     assert delta_chain < 1e-12, f"la sonda non riproduce har_c_fold_qlike: scarto {delta_chain:.3e}"
 

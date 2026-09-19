@@ -743,7 +743,7 @@ def main():
         if _inert:
             log.warning(
                 "loss_type=quantile: %s NON hanno effetto su questo ramo "
-                "(termini del ramo t_student) - vedi TEORIA.md 7.0",
+                "(termini del ramo t_student) - vedi THEORY.md 7.0",
                 ", ".join(f"{k}={v}" for k, v in _inert))
 
     _nw = hwcfg["num_workers"]

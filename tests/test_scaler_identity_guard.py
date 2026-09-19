@@ -170,7 +170,7 @@ def test_the_real_production_pair_is_detected_as_mismatched():
     out = check_model_dataset_scaler(st, ROOT / "models" / "pipeline_state.pkl")
     assert out["matches"] is False, \
         ("il modello di produzione ora combacia con l'npz canonico: il disallineamento "
-         "storico è stato risolto — aggiorna questo test e la qualificazione in TEORIA.md §12.2")
+         "storico è stato risolto — aggiorna questo test e la qualificazione in THEORY.md §12.2")
 
 
 @pytest.mark.skipif(not (ROOT / "models" / "canonical_1h_vols" / "pipeline_state.pkl").exists()

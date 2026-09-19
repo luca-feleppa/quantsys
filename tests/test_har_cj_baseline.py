@@ -215,12 +215,12 @@ def test_coefficienti_sui_salti_non_sono_identificati():
     #     l'OLS compensa con coefficienti enormi e instabili. Il test FISSA il fatto
     #     osservato (scala minuscola) cosi' che una futura ri-specificazione che lo
     #     corregga faccia fallire questo test e obblighi a rileggere la nota in
-    #     TEORIA.md §12.2 invece di cambiare i numeri in silenzio.
+    #     THEORY.md §12.2 invece di cambiare i numeri in silenzio.
     # EN: DIAGNOSTIC documented by the 2026-07-30 audit, not a requirement: the jump
     #     regressors are ~1000x smaller in scale than the continuous components, so OLS
     #     compensates with huge, unstable coefficients. The test PINS the observed fact
     #     (tiny scale) so that a future respecification fixing it makes this test fail
-    #     and forces a re-read of the TEORIA.md §12.2 note instead of silently changing
+    #     and forces a re-read of the THEORY.md §12.2 note instead of silently changing
     #     the numbers.
     rng = np.random.default_rng(10)
     r = rng.normal(0, 0.01, N)
@@ -231,6 +231,6 @@ def test_coefficienti_sui_salti_non_sono_identificati():
     assert std_j < std_c / 10, (
         f"scala dei salti non piu' trascurabile (std_j={std_j:.2e} vs std_c={std_c:.2e}): "
         f"se e' una ri-specificazione voluta, aggiorna la nota di multicollinearita' in "
-        f"TEORIA.md 12.2 / if this is an intended respecification, update the "
-        f"multicollinearity note in TEORIA.md 12.2"
+        f"THEORY.md 12.2 / if this is an intended respecification, update the "
+        f"multicollinearity note in THEORY.md 12.2"
     )

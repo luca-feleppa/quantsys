@@ -4,7 +4,7 @@
 #     come cartella-arch dentro `models/` — la coppia canonica di R1,
 #     `models/canonical_1h_vols` — scriveva quindi sul nome NUDO
 #     `qlike_report_1h_val.json`, cioè **sopra il report storico di produzione**,
-#     quello che `TEORIA.md` §12.2 cita come QLIKE del checkpoint di giugno (0.27470).
+#     quello che `THEORY.md` §12.2 cita come QLIKE del checkpoint di giugno (0.27470).
 #     ⚠ Fallimento SILENZIOSO per costruzione: il giudice esce 0, stampa un PASS
 #     corretto, e l'unica traccia della distruzione è un file sovrascritto con numeri
 #     plausibili. È la stessa famiglia dei numeri orfani che il blocco `provenance`
@@ -16,7 +16,7 @@
 #     arch-directory inside `models/` — R1's canonical pair,
 #     `models/canonical_1h_vols` — therefore wrote to the BARE name
 #     `qlike_report_1h_val.json`, i.e. **over the historical production report**, the
-#     one `TEORIA.md` §12.2 cites as the June checkpoint's QLIKE (0.27470).
+#     one `THEORY.md` §12.2 cites as the June checkpoint's QLIKE (0.27470).
 #     ⚠ SILENT failure by construction: the judge exits 0, prints a correct PASS, and
 #     the only trace of the destruction is a file overwritten with plausible numbers.
 #     Same family as the orphan numbers the `provenance` block exists to prevent —

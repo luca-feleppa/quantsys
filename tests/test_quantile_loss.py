@@ -1,8 +1,8 @@
 """
-IT: Golden test del ramo di loss di PRODUZIONE (loss_type=quantile, TEORIA.md 7.0).
+IT: Golden test del ramo di loss di PRODUZIONE (loss_type=quantile, THEORY.md 7.0).
     Copre: proprieta' del minimizzatore della pinball loss, equivalenza MAE a tau=0.5,
     e il contratto posizionale QUANTILES <-> predict() (mu = q(0.5), sigma = IDR).
-EN: Golden tests for the PRODUCTION loss branch (loss_type=quantile, TEORIA.md 7.0).
+EN: Golden tests for the PRODUCTION loss branch (loss_type=quantile, THEORY.md 7.0).
     Covers: pinball-loss minimizer property, MAE equivalence at tau=0.5, and the
     positional contract QUANTILES <-> predict() (mu = q(0.5), sigma = IDR).
 """
@@ -102,10 +102,10 @@ class TestQuantileLayoutContract:
 
     # IT: sigma del ramo quantile e' un'ampiezza INTERDECILE, non una deviazione
     #     standard: su una gaussiana vale ~2.563 sigma. Il test blinda il fattore,
-    #     che e' la trappola di lettura piu' probabile (TEORIA.md 7.0).
+    #     che e' la trappola di lettura piu' probabile (THEORY.md 7.0).
     # EN: the quantile-branch sigma is an INTERDECILE range, not a standard
     #     deviation: on a Gaussian it equals ~2.563 sigma. This pins the factor,
-    #     which is the most likely misreading (TEORIA.md 7.0).
+    #     which is the most likely misreading (THEORY.md 7.0).
     def test_interdecile_gaussian_factor(self):
         from scipy.stats import norm
         idr = norm.ppf(QUANTILES[4]) - norm.ppf(QUANTILES[0])
