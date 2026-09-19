@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 import os
 import pickle
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -96,6 +97,54 @@ def load_config(path: str = "config/default.yaml", arch: str = None,
             )
 
     return cfg
+
+
+# Credential sections that exist ONLY because load_config merges config/secrets.yaml
+# over default.yaml; no consumer ever reads them back from a persisted config.
+_SECRET_SECTIONS = ("vps", "alpaca", "deribit_testnet", "binance", "binance_testnet")
+
+# Key names that carry a credential value wherever they happen to be nested.
+_SECRET_KEY_RE = re.compile(
+    r"(api_key|api_secret|secret|password|token|passphrase|credential)", re.IGNORECASE
+)
+
+
+# Returns a redacted DEEP COPY of cfg, safe to persist inside a pickle.
+def redact_config(cfg: dict) -> dict:
+    """
+    Strips credentials out of a config before it gets serialized.
+
+    load_config merges config/secrets.yaml over default.yaml, so the live cfg
+    carries FRED/Alpaca/Deribit credentials and the VPS host. Persisting it
+    verbatim writes those values into every models/**/pipeline_state.pkl.
+
+    Two rules:
+      · whole credential sections (`_SECRET_SECTIONS`) are dropped: they exist
+        only because of the secrets merge and nothing reads them;
+      · any key whose NAME matches `_SECRET_KEY_RE`, at any nesting depth, gets
+        its value replaced by "<redacted>".
+
+    The copy is DEEP on purpose: dicts and lists are rebuilt, never mutated, so
+    the caller's live cfg still has its credentials after the call (the old
+    `dict(cfg)` was shallow — redacting in place would have blanked the config
+    of the running script). Non-credential keys (`dashboard.host`, the whole
+    `data`/`features`/`model` sections) are left untouched.
+    """
+    def _walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {
+                k: ("<redacted>" if isinstance(k, str) and _SECRET_KEY_RE.search(k)
+                    else _walk(v))
+                for k, v in node.items()
+            }
+        if isinstance(node, list):
+            return [_walk(v) for v in node]
+        return node
+
+    if not isinstance(cfg, dict):
+        return _walk(cfg)
+    # Drop the credential sections first, then rebuild every surviving level.
+    return _walk({k: v for k, v in cfg.items() if k not in _SECRET_SECTIONS})
 
 
 # Maps Binance candle interval → minutes. Single source of truth for the
@@ -237,7 +286,7 @@ class PipelineState:
         · feature_cols        — ordered list of price features
         · macro_feature_cols  — ordered list of macro features
         · model_config        — dict with n_features, n_macro, etc.
-        · training_config     — copy of the config used in training
+        · training_config     — copy of the config used in training (credentials redacted)
 
     At inference (04_live_signals.py, backtest) it is enough to:
         state = PipelineState.load("models/pipeline_state.pkl")
@@ -300,9 +349,11 @@ class PipelineState:
         self.model_config = dict(cfg)
         return self
 
-    # Stores a copy of the config used during training.
+    # Stores a redacted copy of the config used during training.
     def set_training_config(self, cfg: dict) -> "PipelineState":
-        self.training_config = dict(cfg)
+        # redact_config: deep copy without credentials — the pkl is a build
+        # artifact, cfg here is default.yaml already merged with secrets.yaml.
+        self.training_config = redact_config(cfg)
         return self
 
     # Saves dataset metadata (time span, n_train, frequency).
