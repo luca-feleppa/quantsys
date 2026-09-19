@@ -171,11 +171,13 @@ description unchanged: it states the gate against **HAR-RV**, which is correct. 
 `TEORIA.md`/`AVVIO.md` in `STATUS.md` and the two `CHANGELOG` files **stay**: there the old names are
 history, not pointers.
 
-**Azione esatta da cui ripartire · Exact action to resume from:** (0) **nuovo**: dopo il push,
-ri-lanciare il Post Inspector su `https://luca-feleppa.github.io/quantsys/` e
-`https://github.com/luca-feleppa/quantsys` — le pagine con i tag nuovi vanno ri-scrapate, altrimenti
-LinkedIn continua a servire la versione in cache senza autore e con la data indovinata. Il resto è
-invariato rispetto al 17/09: (1) —; (2) vintage macro, nessuna promozione prima di S1 a `n = 83`;
+**Azione esatta da cui ripartire · Exact action to resume from:** (0) **nuovo, lunedì 21/09**:
+pubblicare il post e aprire al pubblico il repo modello su Hugging Face
+(`luca-feleppa/quantsys-btc-vol-1h`, oggi **privato**), che contiene la coppia canonica e la serie
+previsto-vs-realizzato del test split. ⚠ La cache dei metadati del sito è già stata rinfrescata e le
+pagine servite sono quelle con `author` e date: **se il claim o le pagine cambiano prima di lunedì,
+va rinfrescata di nuovo**, altrimenti il post esce con l'anteprima vecchia e non è correggibile per
+~7 giorni. Il resto è invariato rispetto al 17/09: (1) —; (2) vintage macro, nessuna promozione prima di S1 a `n = 83`;
 (3) al go-live FT1, aggiungere `ft1_execution_judge.py --count-only` alla routine; (4) deploy `04b`
 senza `--adaptive` su istruzione esplicita; (5) go-live FT1 su istruzione esplicita. Resta valido:
 ri-lanciare `make_social_cards.py` + `build_site.py` ogni volta che il claim pubblicato cambia.
