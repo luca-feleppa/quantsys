@@ -6,6 +6,10 @@ Ordine cronologico inverso (la voce più recente in alto). Le "Iterazioni" 1-10 
 
 ---
 
+## 2026-09-19 — Le pagine dichiarano chi le ha scritte, e smettono di far indovinare la data a uno scraper
+
+Passato sul sito prima del primo post, il Post Inspector di LinkedIn riportava `Author: no author found` e una data di pubblicazione **31/07/2026** per pagine costruite il 18/09. Quella data non era letta dai metadati — non ce n'erano — ma indovinata dal corpo del testo: le etichette `as of` delle schede degli esperimenti, dove `2026-07-30` compare 8 volte e `2026-07-31` 6. Le tre pagine pubblicate ora dichiarano `author`, `article:published_time` (17/09, prima pubblicazione del sito su Pages) e `article:modified_time` (il timestamp di build, ISO 8601 accanto allo stamp leggibile del footer), generati in `build_site.py` per le due pagine index e scritti a mano in `architetture.html`, che non è generata. ⚠ L'anteprima in sé era già corretta e non richiedeva alcun intervento: l'inspector restituiva il titolo, la descrizione **col suo denominatore**, e l'immagine della card già scaricata sulla CDN di LinkedIn — quel fetch è il motivo per cui l'inspector si lancia, ed è riuscito. Suite invariata (561 passed, 1 skipped); nessuna modifica a training, inferenza, giudici o `04b`.
+
 ## 2026-09-18 — Lo strato d'ingresso: cosa vede un lettore prima di decidere se aprire il repo
 
 **Anteprime dei link.** `docs/index.html`, `docs/index.it.html` e `docs/architetture.html` avevano solo un `<title>`: condivise su LinkedIn, Reddit o X rendevano come URL nudo, quindi il primo schermo era vuoto proprio dove il lavoro è più denso. Le tre pagine dichiarano ora i tag Open Graph e Twitter-card (URL canonico, titolo/descrizione per lingua, locale più alternate, `summary_large_image`), generati in `build_site.py` e non scritti a mano. Il canonico della pagina inglese è l'URL di directory, così `…/quantsys/` e `…/index.html` non contano come due pagine.

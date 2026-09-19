@@ -5,6 +5,74 @@
 
 ---
 
+## 🧭 Riparti da qui — 2026-09-19 (autore e date nei metadati, social preview caricata) · Resume here — 2026-09-19 (author and date metadata, social preview uploaded)
+
+🇮🇹 **Stato.** Ciclo di sola pubblicazione: **nessuna modifica** a training, inferenza, giudici o
+`04b`, nessun numero nuovo misurato. Suite **561 passed, 1 skipped** (invariata). Nessun contatto
+con il VPS in questo ciclo.
+
+🇮🇹 **Fatto.** (1) **Social preview del repo caricata** — chiude la voce (a) lasciata aperta il
+18/09. Verificata dall'esterno e non dalla UI: `github.com/luca-feleppa/quantsys` dichiara ora
+`og:image` su `repository-images.githubusercontent.com`, URL che esiste **solo** quando una preview
+è stata caricata a mano (altrimenti sarebbe quella generata su `opengraph.githubassets.com`), e
+serve 200 `image/png` di **76.928 byte** = esattamente `docs/assets/social_preview.png`: è il file,
+non una ricompressione. (2) **Cache OG di LinkedIn popolata** prima del primo post: titolo corretto,
+descrizione **col denominatore `HAR-C`**, e immagine della card già scaricata sulla CDN di LinkedIn
+(`media.licdn.com/dms/image/sync/…`). Il rischio dell'anteprima nuda, non correggibile per ~7 giorni
+di cache, è chiuso. (3) **Autore e date dichiarate nelle tre pagine.** L'inspector riportava
+`no author found` e data di pubblicazione **31/07/2026** su pagine costruite il 18/09: non esisteva
+nessun metadato di data, e lo scraper l'aveva **dedotta dal corpo del testo** — le etichette `as of`
+delle schede degli esperimenti, dove `2026-07-30` compare 8 volte e `2026-07-31` 6. Le pagine ora
+dichiarano `author`, `article:published_time` (17/09, prima pubblicazione su Pages) e
+`article:modified_time` (timestamp di build in ISO 8601, chiave `iso` aggiunta a `build_stamp()`),
+generati in `build_site.py` per le due index e scritti a mano in `architetture.html`, che non è
+generata. Diff delle pagine = i soli 3 tag nuovi + la riga di stamp, che cambia a ogni rebuild by
+design. Doc: `CHANGELOG` EN+IT.
+
+🇮🇹 **Non fatto, deliberatamente.** (a) **Nessun post pubblicato** su nessuna piattaforma.
+(b) Descrizione del repo invariata: dichiara il gate contro **HAR-RV**, che è corretto. (c) **Non
+toccati i riferimenti morti a `TEORIA.md`/`AVVIO.md`** — rinominati `THEORY.md`/`START.md` il
+16/09 — presenti in `scripts/02_train.py` e in 4 file di `tests/` (commenti e messaggi di assert):
+fuori dalla richiesta di questo ciclo, ma da allineare prima che il codice finisca sotto gli occhi
+di lettori esterni.
+
+**EN** **State.** Publication-only cycle: **no change** to training, inference, judges or `04b`, and
+no new number measured. Suite **561 passed, 1 skipped** (unchanged). No VPS contact in this cycle.
+
+**EN** **Done.** (1) **Repo social preview uploaded** — closes item (a) left open on 18/09. Verified
+from outside rather than from the UI: `github.com/luca-feleppa/quantsys` now declares `og:image` on
+`repository-images.githubusercontent.com`, a URL that exists **only** when a preview has been
+uploaded by hand (otherwise it is the generated one on `opengraph.githubassets.com`), and it serves
+200 `image/png` of **76,928 bytes** = exactly `docs/assets/social_preview.png`: the file itself, not
+a recompression. (2) **LinkedIn's OG cache populated** before the first post: correct title,
+description **carrying the `HAR-C` denominator**, and the card image already fetched onto LinkedIn's
+CDN (`media.licdn.com/dms/image/sync/…`). The bare-preview risk, uncorrectable for ~7 days of cache,
+is closed. (3) **Author and dates declared on the three pages.** The inspector reported
+`no author found` and a publish date of **31/07/2026** for pages built on 18/09: no date metadata
+existed, so the scraper **inferred it from the body text** — the `as of` labels on the experiment
+cards, where `2026-07-30` appears 8 times and `2026-07-31` 6. The pages now declare `author`,
+`article:published_time` (17/09, first publication on Pages) and `article:modified_time` (build
+timestamp in ISO 8601, `iso` key added to `build_stamp()`), generated in `build_site.py` for the two
+index pages and hand-written in `architetture.html`, which is not generated. Page diff = the 3 new
+tags plus the stamp line, which changes on every rebuild by design. Docs: `CHANGELOG` EN+IT.
+
+**EN** **Left undone, deliberately.** (a) **No post published** on any platform. (b) Repo
+description unchanged: it states the gate against **HAR-RV**, which is correct. (c) **Dead references
+to `TEORIA.md`/`AVVIO.md`** — renamed `THEORY.md`/`START.md` on 16/09 — left in place in
+`scripts/02_train.py` and 4 files under `tests/` (comments and assert messages): outside this
+cycle's request, but worth aligning before outside readers open the code.
+
+**Azione esatta da cui ripartire · Exact action to resume from:** (0) **nuovo**: dopo il push,
+ri-lanciare il Post Inspector su `https://luca-feleppa.github.io/quantsys/` e
+`https://github.com/luca-feleppa/quantsys` — le pagine con i tag nuovi vanno ri-scrapate, altrimenti
+LinkedIn continua a servire la versione in cache senza autore e con la data indovinata. Il resto è
+invariato rispetto al 17/09: (1) —; (2) vintage macro, nessuna promozione prima di S1 a `n = 83`;
+(3) al go-live FT1, aggiungere `ft1_execution_judge.py --count-only` alla routine; (4) deploy `04b`
+senza `--adaptive` su istruzione esplicita; (5) go-live FT1 su istruzione esplicita. Resta valido:
+ri-lanciare `make_social_cards.py` + `build_site.py` ogni volta che il claim pubblicato cambia.
+
+---
+
 ## 🧭 Riparti da qui — 2026-09-18 (strato d'ingresso: anteprime, card, primo schermo) · Resume here — 2026-09-18 (entry layer: previews, cards, first screen)
 
 🇮🇹 **Stato.** Ciclo di sola pubblicazione: **nessuna modifica** a training, inferenza, giudici o

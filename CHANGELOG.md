@@ -6,6 +6,10 @@ Reverse chronological order (newest on top). "Iterations" 1-10 are the historica
 
 ---
 
+## 2026-09-19 — The pages say who wrote them, and stop letting a scraper guess the date
+
+Run on the site before the first post, LinkedIn's Post Inspector reported `Author: no author found` and a publish date of **31/07/2026** for pages built on 18/09. That date was not read from metadata — there was none — but guessed from the body text: the `as of` labels on the experiment cards, where `2026-07-30` appears 8 times and `2026-07-31` 6. The three published pages now declare `author`, `article:published_time` (17/09, the site's first publication on Pages) and `article:modified_time` (the build timestamp, ISO 8601 next to the human-readable footer stamp), generated in `build_site.py` for the two index pages and written by hand in `architetture.html`, which is not generated. ⚠ The preview itself was already correct and needed no fix: the inspector returned the title, the description **with its denominator**, and the card image already fetched onto LinkedIn's own CDN — that fetch is what the inspector run was for, and it succeeded. Suite unchanged (561 passed, 1 skipped); no change to training, inference, judges or `04b`.
+
 ## 2026-09-18 — The entry layer: what a reader sees before deciding to open the repo
 
 **Link previews.** `docs/index.html`, `docs/index.it.html` and `docs/architetture.html` carried only a `<title>`: shared on LinkedIn, Reddit or X they rendered as a bare URL, so the first screen was empty where the work is densest. The three pages now declare Open Graph and Twitter-card tags (canonical URL, per-language title/description, locale plus alternate, `summary_large_image`), generated in `build_site.py` rather than hand-written. The English page's canonical is the directory URL, so `…/quantsys/` and `…/index.html` are not counted as two pages.

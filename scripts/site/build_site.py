@@ -42,6 +42,11 @@ SITE_BASE = "https://luca-feleppa.github.io/quantsys"
 # judge's report; the page and the card therefore cannot state different figures.
 OG_IMAGE = {"en": "assets/og_card.png", "it": "assets/og_card.it.png"}
 OG_LOCALE = {"en": "en_US", "it": "it_IT"}
+# AUTHOR AND DATES. Without these tags a scraper has nothing to read and guesses: LinkedIn's
+# inspector reported 31/07/2026 for a page built on 18/09, having picked one of the `as of`
+# labels out of the experiment cards. Declaring them replaces the guess with the real dates.
+SITE_AUTHOR = "Luca Feleppa"
+SITE_PUBLISHED = "2026-09-17T00:00:00Z"  # first publication of the site on GitHub Pages
 
 # LANGUAGE. `LANG` stays the module DEFAULT at "it": every signature using it
 # as a default (`tr`, `md`) is unchanged and the Italian output is
@@ -1013,7 +1018,10 @@ def build_stamp() -> dict:
                                   text=True, check=True).stdout.strip()
         except Exception:
             return "n/d"
-    return {"utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    now = datetime.now(timezone.utc)
+    return {"utc": now.strftime("%Y-%m-%d %H:%M UTC"),
+            # ISO 8601 for `article:modified_time`: scrapers parse this form, not the footer stamp.
+            "iso": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "commit": git("rev-parse", "--short", "HEAD"),
             "branch": git("rev-parse", "--abbrev-ref", "HEAD")}
 
@@ -1080,6 +1088,7 @@ def render_page(reg: dict, reports: dict, stamp: dict, facts: dict, lang: str = 
 <title>{C["title"]}</title>
 <meta name="description" content="{C["desc"]}">
 <link rel="canonical" href="{page_url}">
+<meta name="author" content="{SITE_AUTHOR}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="QUANTSYS">
 <meta property="og:locale" content="{OG_LOCALE[lang]}">
@@ -1091,6 +1100,8 @@ def render_page(reg: dict, reports: dict, stamp: dict, facts: dict, lang: str = 
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="{og_alt}">
+<meta property="article:published_time" content="{SITE_PUBLISHED}">
+<meta property="article:modified_time" content="{stamp["iso"]}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{C["og_title"]}">
 <meta name="twitter:description" content="{og_desc}">
