@@ -38,8 +38,51 @@ credenziali.** `PipelineState.set_training_config` salva l'output di `load_confi
 storica** — nessun `.pkl` né `.npz` è mai stato aggiunto al repo, verificato su tutta la storia — ma
 l'esclusione di `models/` protegge **git e nient'altro**. Regola scritta nel manifesto operativo:
 nessun checkpoint si condivide senza bonifica, si pubblica una **copia**, e la verifica finale si fa
-sul file ri-scaricato dalla destinazione. **Correzione strutturale non applicata**, richiede
-istruzione esplicita: tocca il path di produzione.
+sul file ri-scaricato dalla destinazione. **Correzione applicata** (`abb396d`): `redact_config()` in `quantsys/utils` restituisce una copia
+**profonda** senza credenziali — droppa per intero le sezioni che esistono solo per il merge dei
+segreti (`vps`, `alpaca`, `deribit_testnet`, `binance*`) e sostituisce con `<redacted>` il valore di
+ogni chiave il cui nome matcha `api_key|api_secret|secret|password|token|passphrase|credential`, a
+qualsiasi profondità; `set_training_config` la usa. ⚠ **La copia profonda non è un dettaglio**:
+`dict(cfg)` era shallow e i sotto-dizionari erano gli **stessi oggetti** del cfg vivo, quindi una
+redazione in place avrebbe azzerato le credenziali al processo chiamante mentre girava — è la
+regressione che il test coglie. Perimetro invariato: le uniche letture di `training_config` sono
+`data.interval`, `features.forecast_horizon` e `model.use_revin`, tutte conservate (verificato con
+grep su `quantsys/`, `scripts/`, `tests/`); `dashboard.host` (127.0.0.1) non è toccato; sulle 12
+sezioni di `default.yaml` la regex matcha solo i due bersagli. `tests/test_pipeline_state_secrets.py`:
+10 test su tre lati — i valori finti non compaiono nei byte del pickle, il cfg del chiamante resta
+intatto, le tre letture sopravvivono. Verifica end-to-end con la **config reale** (merge di
+`secrets.yaml` incluso): 0 segreti valorizzati nello state. Suite **571 passed, 1 skipped**.
+⚠ **Forward-only**: i `pipeline_state.pkl` già su disco restano come sono e vanno bonificati **in
+copia** prima di qualunque condivisione — regola nel manifesto operativo. (6) **Stampa della
+lunghezza dei segreti rimossa** (`18853ea`): `scripts/00_test_binance_testnet.py` emetteva
+`len(api_key)` e `len(api_secret)` nel banner. La lunghezza è un attributo derivato da un segreto; il
+file è tracciato e pubblico, e mostrava una pratica che la policy del progetto vieta. Verificato prima
+che nessun test facesse match sulla stringa, e dopo che non restino altre stampe simili nel repo.
+
+🇮🇹 **Audit di superficie e di storia — nessuna credenziale è mai entrata in git.** Copertura
+dichiarata, non assunta: **415 commit** = `main` (278) + `origin/main` + i **144 pre-rewrite** di
+`refs/original`, più 11 blob irraggiungibili locali, su 289 path unici. Esiti: nessun file sensibile
+mai aggiunto (solo i due template `.example`); **zero artefatti binari** in tutta la storia — nessun
+`.pkl`, `.npz`, `.pt`, `meta.json`, niente sotto `models/` tranne `.gitkeep`; i ~50 `results/**/*.json`
+tracciati per whitelist sono puliti (nessuna chiave figlia credenziale, zero IPv4); un solo hit
+«chiave con valore» in tutta la storia, la riga `fred_api_key` di `config/secrets.yaml.example`,
+accertata **segnaposto per forma senza leggerne il valore** (86 caratteri, non 32 hex, contiene `_<>`
+e spazi); zero blocchi `-----BEGIN PRIVATE KEY`; **zero IP fuori allowlist** su HEAD e su tutti i 415
+commit; i path esclusi dal repo **mai entrati**, nemmeno prima del rewrite. Lato
+GitHub: 0 release, 0 tag, 0 issue, 0 PR, 0 gist, un solo branch, wiki abilitata ma vuota; le tre
+pagine Pages servite sono byte-identiche ai file tracciati. **Nessun rewrite necessario, nessuna
+rotazione di chiavi.** ⚠ **Limite dichiarato:** l'audit copre la sola storia git — un artefatto finito
+in un backup, in un allegato o su un altro servizio è fuori perimetro, ed è la ragione per cui la
+regola della bonifica sta nel manifesto e non solo nel materiale di pubblicazione.
+
+🇮🇹 **`refs/original/refs/heads/main` cancellato.** Backup automatico di un rewrite passato, 144
+commit, **mai pushato** (il remoto ha solo `refs/heads/main`) e con **0 trailer di attribuzione**,
+come `main`. Aveva esaurito la funzione e teneva in vita oggetti che `git gc` non poteva reclamare.
+`main` verificato **bit-invariato** prima e dopo (`18853ea`); storia raggiungibile da 415 a 280
+commit. 🟡 Osservazione senza azione: `docs/paper/OUTLINE.md` e `RESULTS_MAP.md` sono stati tracciati
+in passato e restano nella storia pubblica pur essendo oggi in `.git/info/exclude` — scansionati da
+entrambi gli audit, **zero indicatori credenziali**. Toglierli richiederebbe un secondo rewrite di un
+repo pubblico, che è sproporzionato al contenuto.
 
 🇮🇹 **Non fatto, deliberatamente.** (a) **Nessun post pubblicato** su nessuna piattaforma.
 (b) Descrizione del repo invariata: dichiara il gate contro **HAR-RV**, che è corretto. (c) Le
@@ -76,8 +119,52 @@ pickles on disk carry 4 populated secrets **plus `vps.host`**, and
 or `.npz` was ever added to the repo, verified over the whole history — but excluding `models/`
 protects **git and nothing else**. Rule recorded in the operating manifesto: no checkpoint is shared
 without sanitizing, a **copy** is published, and the final check is run on the file re-downloaded
-from the destination. **Structural fix not applied**: it touches the production path and needs an
-explicit instruction.
+from the destination. **Fix applied** (`abb396d`): `redact_config()` in `quantsys/utils` returns a **deep** copy without
+credentials — it drops outright the sections that exist only because of the secrets merge (`vps`,
+`alpaca`, `deribit_testnet`, `binance*`) and replaces with `<redacted>` the value of every key whose
+name matches `api_key|api_secret|secret|password|token|passphrase|credential`, at any depth;
+`set_training_config` uses it. ⚠ **The deep copy is not an implementation detail**: `dict(cfg)` was
+shallow and the sub-dicts were the **same objects** as the live cfg, so redacting in place would have
+blanked the calling process's credentials while it was still running — that is the regression the
+test catches. Perimeter unchanged: the only reads of `training_config` are `data.interval`,
+`features.forecast_horizon` and `model.use_revin`, all preserved (verified by grep over `quantsys/`,
+`scripts/`, `tests/`); `dashboard.host` (127.0.0.1) is untouched; across the 12 sections of
+`default.yaml` the regex matches only the two intended keys. `tests/test_pipeline_state_secrets.py`:
+10 tests on three sides — the fake values do not appear in the pickle bytes, the caller's cfg stays
+intact, and the three readers survive. End-to-end check with the **real config** (secrets merge
+included): 0 populated secrets in the state. Suite **571 passed, 1 skipped**. ⚠ **Forward-only**: the
+`pipeline_state.pkl` files already on disk stay as they are and must be sanitized **in a copy** before
+any sharing — rule recorded in the operating manifesto. (6) **Secret-length print removed**
+(`18853ea`): `scripts/00_test_binance_testnet.py` emitted `len(api_key)` and `len(api_secret)` in its
+banner. A length is an attribute derived from a secret; the file is tracked and public, and it
+displayed a practice the project's own policy forbids. Verified beforehand that no test matched the
+string, and afterwards that no similar print remains in the repo.
+
+**EN** **Surface and history audit — no credential has ever entered git.** Coverage declared, not
+assumed: **415 commits** = `main` (278) + `origin/main` + the **144 pre-rewrite** ones on
+`refs/original`, plus 11 locally unreachable blobs, over 289 unique paths. Findings: no sensitive file
+ever added (only the two `.example` templates); **zero binary artifacts** in the whole history — no
+`.pkl`, `.npz`, `.pt`, `meta.json`, nothing under `models/` except `.gitkeep`; the ~50
+whitelist-tracked `results/**/*.json` are clean (no credential child keys, zero IPv4); a single
+"key with a value" hit in the entire history, the `fred_api_key` line of
+`config/secrets.yaml.example`, established as a **placeholder by form without reading its value** (86
+characters, not 32 hex, contains `_<>` and spaces); zero `-----BEGIN PRIVATE KEY` blocks; **zero IPs
+outside the allowlist** on HEAD and across all 415 commits; the paths excluded from the repo
+**never entered**, not even before the rewrite. GitHub side: 0 releases, 0 tags, 0 issues,
+0 PRs, 0 gists, a single branch, wiki enabled but empty; the three Pages documents served are
+byte-identical to the tracked files. **No rewrite needed, no key rotation.** ⚠ **Declared limit:** the
+audit covers git history only — an artifact that ended up in a backup, an attachment or another
+service is out of scope, which is why the sanitizing rule lives in the manifesto and not only in the
+publication material.
+
+**EN** **`refs/original/refs/heads/main` deleted.** Automatic backup of a past rewrite, 144 commits,
+**never pushed** (the remote holds only `refs/heads/main`) and carrying **0 attribution trailers**,
+like `main`. It had served its purpose and kept alive objects `git gc` could not reclaim. `main`
+verified **bit-unchanged** before and after (`18853ea`); reachable history from 415 down to 280
+commits. 🟡 Observation, no action: `docs/paper/OUTLINE.md` and `RESULTS_MAP.md` were tracked in the
+past and remain in public history although they now sit in `.git/info/exclude` — scanned by both
+audits, **zero credential indicators**. Removing them would require a second rewrite of a public repo,
+disproportionate to the content.
 
 **EN** **Left undone, deliberately.** (a) **No post published** on any platform. (b) Repo
 description unchanged: it states the gate against **HAR-RV**, which is correct. (c) Occurrences of
