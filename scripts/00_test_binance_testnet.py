@@ -74,7 +74,8 @@ def main() -> int:
         _info("Tab 'API Key' (alto destra) → Create API Key → permessi Reading + Futures")
         _info("Poi compila il file .env nella root del progetto")
         return 1
-    _ok(f"API key caricata (len={len(api_key)}, secret len={len(api_secret)})")
+    # Presence only: the length of a secret is a derived attribute and must not be printed.
+    _ok("API key e secret caricate da .env")
 
     # step 2 - connect to testnet (REST + auth check)
     print(f"\n{CYN}[2/5]{RST} Connessione a Binance Futures Testnet ...")
