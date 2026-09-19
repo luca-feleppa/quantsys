@@ -31,7 +31,15 @@ design. Doc: `CHANGELOG` EN+IT. (4) **Puntatori ai nomi dei file allineati dopo 
 16/09**: 13 occorrenze di `TEORIA.md`/`TEORIA §` in `scripts/02_train.py`, `scripts/vol/sig_har_probe.py`
 e 4 file di `tests/` erano link a file che non esistono più. Sostituito il solo token del nome,
 nessuna riscrittura di commenti; verificato **prima** che nessun test facesse match sulle due
-stringhe di log toccate. Suite invariata.
+stringhe di log toccate. Suite invariata. (5) ⚠ **Trovato: ogni `pipeline_state.pkl` contiene
+credenziali.** `PipelineState.set_training_config` salva l'output di `load_config()`, cioè la config
+**già fusa** con `config/secrets.yaml`: 3 dei 7 pkl su disco portano 4 segreti valorizzati **più
+`vps.host`**, e `models/{arch}/experiment/meta.json` ne porta uno snapshot. **Nessuna esposizione
+storica** — nessun `.pkl` né `.npz` è mai stato aggiunto al repo, verificato su tutta la storia — ma
+l'esclusione di `models/` protegge **git e nient'altro**. Regola scritta nel manifesto operativo:
+nessun checkpoint si condivide senza bonifica, si pubblica una **copia**, e la verifica finale si fa
+sul file ri-scaricato dalla destinazione. **Correzione strutturale non applicata**, richiede
+istruzione esplicita: tocca il path di produzione.
 
 🇮🇹 **Non fatto, deliberatamente.** (a) **Nessun post pubblicato** su nessuna piattaforma.
 (b) Descrizione del repo invariata: dichiara il gate contro **HAR-RV**, che è corretto. (c) Le
@@ -60,7 +68,16 @@ tags plus the stamp line, which changes on every rebuild by design. Docs: `CHANG
 (4) **File-name pointers realigned after the 16/09 rename**: 13 occurrences of `TEORIA.md`/`TEORIA §`
 in `scripts/02_train.py`, `scripts/vol/sig_har_probe.py` and 4 files under `tests/` pointed at files
 that no longer exist. Only the name token was replaced, no comment was rewritten, and it was verified
-**beforehand** that no test matches the two log strings touched. Suite unchanged.
+**beforehand** that no test matches the two log strings touched. Suite unchanged. (5) ⚠ **Found:
+every `pipeline_state.pkl` carries credentials.** `PipelineState.set_training_config` stores the
+output of `load_config()`, i.e. the config **already merged** with `config/secrets.yaml`: 3 of the 7
+pickles on disk carry 4 populated secrets **plus `vps.host`**, and
+`models/{arch}/experiment/meta.json` holds the same snapshot. **No historical exposure** — no `.pkl`
+or `.npz` was ever added to the repo, verified over the whole history — but excluding `models/`
+protects **git and nothing else**. Rule recorded in the operating manifesto: no checkpoint is shared
+without sanitizing, a **copy** is published, and the final check is run on the file re-downloaded
+from the destination. **Structural fix not applied**: it touches the production path and needs an
+explicit instruction.
 
 **EN** **Left undone, deliberately.** (a) **No post published** on any platform. (b) Repo
 description unchanged: it states the gate against **HAR-RV**, which is correct. (c) Occurrences of
